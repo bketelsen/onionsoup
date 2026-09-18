@@ -54,7 +54,7 @@ evidence; implementation completion alone does not establish task accuracy.
   [packet contract](../specs/investigation-packet.md).
 - **Done when:** packets preserve original assessment/location records, parent
   identities, uncertainties, and partial failures and can render without a model.
-  Implemented. External orchestration integrations remain future work.
+  Implemented; the external consumer proof is recorded in Phase 7.
 
 ## Phase 5 — Explicit test relevance
 
@@ -77,12 +77,20 @@ implementation, the initial 4/7 expected-label match, focused follow-up, and lim
   for the existing agents, following [composition design](../design/composable-agents.md).
 - **Done when:** credential-free consumers can discover current schemas, callable
   entry points, effects and limits, and export correlated events from old/new
-  artifacts with explicit reuse and unknown outcomes. Implemented; external
-  orchestrator integration remains the next candidate.
+  artifacts with explicit reuse and unknown outcomes. Implemented; Phase 7 demonstrates an external orchestrator.
+
+## Phase 7 — External consumer proof
+
+- Implemented: Codex through the [local MCP adapter](../specs/mcp-adapter.md),
+  following [composition design](../design/composable-agents.md) and
+  [ADR-0006](../adr/0006-prove-composition-through-local-mcp.md).
+- **Done when:** an actual external consumer discovers an existing agent, invokes
+  it, and inspects a traceable result without broadening the agent's contract or
+  authority. Demonstrated in the [proof report](records/external-composition-2026-09-18.md).
 
 ## Later / ideas
 
-- Demonstrate an actual external consumer before adding a universal coordinator.
+- Choose a concrete multi-issue recipe before adding aggregate workflow budgets.
 - Revisit provider/model comparison as a structured study. Local inference remains
   a reasonable exploration route, currently deferred.
 - Add focused agents only when evidence identifies a separate useful job and its
@@ -90,7 +98,7 @@ implementation, the initial 4/7 expected-label match, focused follow-up, and lim
 
 ## Open questions
 
-- Select an actual external consumer for the next integration proof. The
+- Select the next consumer recipe and its bounded workload. The
   [backlog](backlog.md) retains the remaining twelve- and twenty-factor recommendations.
 - Independent maintainer acceptance remains unmeasured for some historical trials;
   assistant reviews cannot supply that measurement.

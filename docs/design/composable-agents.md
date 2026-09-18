@@ -52,7 +52,12 @@ These recipes illustrate reuse; they are not a commitment to build a universal
 orchestrator. The current inbox and CLI are consumers/adapters, and the existing
 `triage` and `locateCode` functions are the starting points for direct invocation.
 The inbox-specific dispatcher is one workflow, not the definition of code-location.
-External orchestration integrations have not yet been demonstrated.
+The first external integration uses Codex through a
+[local MCP adapter](../specs/mcp-adapter.md), following
+[ADR-0006](../adr/0006-prove-composition-through-local-mcp.md). It invokes readiness
+and inspects the same assessment and common events. The
+[proof report](../plans/records/external-composition-2026-09-18.md) records a successful
+live handoff and the preceding approval-configuration failure.
 
 ### Second-consumer proof of concept
 
@@ -87,7 +92,10 @@ infrastructure and broader agent authority require separate evidence of need.
 
 ## Operational notes
 
-The inbox and packet are the two implemented consumers. External orchestration integrations remain unproven. Preserve provenance and explicit failures across every handoff.
+The inbox, packet, and Codex MCP adapter consume the same bounded agents. The
+MCP adapter exposes readiness only, with operator-selected provider/model and
+per-process admission limits. Preserve provenance and explicit failures across
+every handoff. Delivery is tracked in [backlog Phase 3](../plans/backlog.md#phase-3--prove-external-composition-implemented).
 
 ## References
 

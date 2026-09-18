@@ -21,13 +21,16 @@
     "check:docs": "node scripts/check-docs.mjs",
     "agents": "node --import tsx src/agents-cli.ts",
     "capabilities:generate": "node --import tsx scripts/generate-capabilities.ts",
-    "check:capabilities": "node --import tsx scripts/generate-capabilities.ts --check"
+    "check:capabilities": "node --import tsx scripts/generate-capabilities.ts --check",
+    "mcp": "node --import tsx src/mcp-cli.ts",
+    "prove:codex": "node --import tsx scripts/prove-codex-mcp.ts"
   },
   "dependencies": {
     "@humanlayer/agentlayer-core": "0.0.36",
     "@humanlayer/agentlayer-provider-auth": "0.0.36",
     "@humanlayer/agentlayer-provider-github-copilot": "0.0.36",
     "@humanlayer/agentlayer-provider-openai-codex": "0.0.36",
+    "@modelcontextprotocol/sdk": "1.30.0",
     "ai": "6.0.191",
     "zod": "4.3.6"
   },

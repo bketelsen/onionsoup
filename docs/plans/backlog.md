@@ -30,13 +30,15 @@ Phases 1–2 implementation and the trial limitations are recorded in the
 skills make the twenty-factor recommendations reusable; see
 [skill routing](../../AGENTS.md#skills-follow-these-for-common-tasks).
 
-## Phase 3 — Prove external composition (next candidate)
+## Phase 3 — Prove external composition (implemented)
 
-- Connect one actual external orchestrator through a thin adapter to
+- Implemented: Codex calls bug-readiness through the [local MCP adapter](../specs/mcp-adapter.md), following
   [composition design](../design/composable-agents.md) and
   [discovery contracts](../specs/agent-discovery.md).
 - **Done when:** the same focused agent produces a traceable result through that
-  consumer with existing contracts and authority unchanged.
+  consumer with existing contracts and authority unchanged. Demonstrated in the
+  [external-consumer proof](records/external-composition-2026-09-18.md), including
+  the first approval-configuration failure and the successful follow-up.
 
 ## Later / ideas
 
@@ -59,7 +61,7 @@ remain deferred; new development evaluations use Terra only.
 
 ## Open questions
 
-- Which external consumer supplies a concrete requirement for Phase 3?
+- Which concrete multi-issue recipe justifies a shared workflow admission budget?
 - When does useful repeated work justify prefetch or context reconstruction?
 - Which workflow first requires durable approval or write-effect reconciliation?
 

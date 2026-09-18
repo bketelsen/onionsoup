@@ -41,7 +41,8 @@ The checked-in [catalog](../../capabilities/catalog.json) links the
 shape; the named runtime validators also enforce semantic invariants.
 
 Manifests specify existing TypeScript function entry points and required options.
-They do not expose a generic remote invocation service. A caller supplies the AI
+The [local MCP adapter](mcp-adapter.md) exposes readiness to Codex separately;
+these manifests do not expose a generic remote invocation service. A caller supplies the AI
 SDK model/provider identity, persistence callback, and (for location) a matching
 validated ready parent and pinned local checkout. Reading a manifest does not
 initialize a provider or authorize invocation.

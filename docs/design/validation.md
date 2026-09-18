@@ -169,6 +169,10 @@ calls and streaming. This avoids an observed failure in AgentLayer's strict cata
 schema on unrelated newer entries; it does not guarantee every listed model works
 with the adapter. An actual live run is the compatibility check.
 
+The [Codex integration proof](../plans/records/external-composition-2026-09-18.md)
+validates an actual external consumer against the [MCP adapter](../specs/mcp-adapter.md).
+It proves a traceable handoff for one snapshot, not assessment quality.
+
 ## Operational notes
 
 Run `npm run verify` and `npm run demo` without credentials. Live trials require a configured subscription and currently use Terra only. Dated findings above qualify their recorded versions, not every later revision.

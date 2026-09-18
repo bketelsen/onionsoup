@@ -98,7 +98,7 @@ transport, durable per-step journal, queue, or resume mechanism. Capability mani
 describe the existing TypeScript functions and dependencies; they are not remote
 invocation endpoints or authorization grants.
 
-The next proposed PoC is [backlog Phase 3](../backlog.md#phase-3--prove-external-composition-next-candidate):
+The next proposed PoC is [backlog Phase 3](../backlog.md#phase-3--prove-external-composition-implemented):
 choose one external orchestrator and prove it can consume the same contracts through
 a thin adapter. Remaining recommendations are retained in the backlog, including
 context reconstruction, prefetch, no-progress detection, aggregate budgets,

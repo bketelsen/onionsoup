@@ -218,3 +218,11 @@ explain whether the bounded test search was **completed** or **unfinished**.
 These are model judgments, not measured coverage. Historical briefs retain their
 original fields. The [status report](docs/plans/records/relevance-and-discovery-2026-09-18.md)
 records the live trial and its limitations.
+
+## External consumer: Codex through MCP
+
+The [local MCP adapter](docs/specs/mcp-adapter.md) lets Codex discover the agents,
+invoke the existing bug-readiness agent, and inspect its result and workflow
+events. Launch configuration fixes the provider, model, private artifacts, and
+invocation allowance (default one). See the spec for configuration and the
+repeatable `npm run prove:codex -- SNAPSHOT.json` integration proof.

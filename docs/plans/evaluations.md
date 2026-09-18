@@ -62,10 +62,19 @@ records 13 completed live development runs, three preserved label disagreements,
 and two focused follow-ups. Contract implementation is complete; broad quality
 qualification is not claimed.
 
+## Phase 5 — External consumer integration
+
+- Connect Codex through the [MCP adapter](../specs/mcp-adapter.md), following
+  [composition design](../design/composable-agents.md).
+- **Done when:** recorded consumer tool calls and final output match the persisted
+  agent result and trace, with failures retained. Demonstrated in the
+  [external composition report](records/external-composition-2026-09-18.md).
+- This is integration evidence, not a new task-accuracy evaluation.
+
 ## Later / ideas
 
 Model-comparison infrastructure, new local-provider batches, broader source
-corpora, and external orchestrator qualification are deferred until the current
+corpora, and broader orchestrator qualification are deferred until the current
 boundary is useful enough to justify them.
 
 ## Open questions

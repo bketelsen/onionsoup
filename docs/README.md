@@ -37,7 +37,7 @@ Behavioral contract changes accompany implementation.
 - [Specs template](specs/TEMPLATE.md)
 - [Frozen batch evaluation](specs/batch-evaluation.md)
 - [Bug-report readiness contract, version 2](specs/bug-readiness.md)
-- [Code-location contract, version 2](specs/code-location.md)
+- [Code-location contract, version 3](specs/code-location.md)
 - [Read-only maintenance inbox](specs/inbox.md)
 - [Portable investigation packet, version 1](specs/investigation-packet.md)
 - [Spec: Repository layout and documentation checks](specs/repository-layout.md)
@@ -68,6 +68,7 @@ Raw run links are optional local evidence; those files are intentionally not pub
 - [Terra comparison, 2026-09-18](plans/records/terra-comparison-2026-09-18.md)
 - [Following fixtures to assertions — 2026-09-18](plans/records/test-selection-2026-09-18.md)
 
+- [Codex external composition proof](plans/records/external-composition-2026-09-18.md)
 - [Status: relevance, discovery, events, and skills](plans/records/relevance-and-discovery-2026-09-18.md)
 
 ## Current follow-through
@@ -75,6 +76,8 @@ Raw run links are optional local evidence; those files are intentionally not pub
 - [Backlog: twelve- and twenty-factor recommendations](plans/backlog.md)
 - [ADR-0005: relevance and portable discovery](adr/0005-test-relevance-and-portable-agent-discovery.md)
 - [Capability and workflow-event contract](specs/agent-discovery.md)
+- [ADR-0006: external composition through local MCP](adr/0006-prove-composition-through-local-mcp.md)
+- [Local MCP adapter contract](specs/mcp-adapter.md)
 
 ## Related repository material
 
