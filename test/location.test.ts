@@ -25,7 +25,7 @@ const assessment = { schemaVersion: 2, kind: 'bug_report', bug_readiness: 'ready
   evidence: fields.map((field, i) => ({ field, source: 'body', quote: ['Run build.', 'Expected success.', 'Saw ENOENT.', 'Linux v1.'][i] })), questions: [] };
 const code = ['export function buildArtifact() {', '  return run("npm");', '}', 'const text = "</script><img src=x onerror=alert(1)>";'];
 const tests = ['import { buildArtifact } from "./artifact";', 'test("artifact", () => buildArtifact());'];
-const draft: BriefDraft = { status: 'located', summary: 'Start at the artifact builder.',
+const draft: BriefDraft = { status: 'located',
   codePointers: [{ excerptId: 'E1', startLine: 1, endLine: 4, symbol: 'buildArtifact', reason: 'Calls the reported program.' }],
   testPointers: [{ excerptId: 'E2', startLine: 1, endLine: 2, symbol: 'buildArtifact', reason: 'Exercises the builder.' }],
   uncertainties: ['The pinned source may differ from the reported release.'] };
@@ -212,23 +212,72 @@ test('invalid outputs exhaust bounded execution; failed admission and cancelled 
   assert.equal(never.doStreamCalls.length, 0);
 });
 
-test('host reserves submission and correction steps, retaining excerpts and summing phase usage', async t => {
+test('host reserves test reads then submission/correction, retaining excerpts and summing phase usage', async t => {
   const f = await fixture(t);
   const bad = { ...draft, codePointers: [{ ...draft.codePointers[0], excerptId: 'E99' }] };
-  const model = modelFor([...calls.slice(0, 4), ...Array(6).fill({ name: 'search_repository',
-    input: { query: 'absent', scope: 'tests', pathPrefix: '' } }), { name: 'submit_brief', input: bad }, calls[4]]);
+  const model = modelFor([...calls.slice(0, 4), ...Array(4).fill({ name: 'search_repository',
+    input: { query: 'absent', scope: 'tests', pathPrefix: '' } }), calls[3], calls[3],
+    { name: 'submit_brief', input: bad }, calls[4]]);
   const run = await locateCode(f.input, { checkout: f.checkout, model, provider: 'fixture', modelId: 'scripted' });
   assert.equal(run.status, 'completed');
   assert.equal(run.source.calls, 10);
+  assert.deepEqual(model.doStreamCalls[8].tools?.map(t => t.name), ['read_repository', 'submit_brief']);
+  assert.deepEqual(model.doStreamCalls[9].tools?.map(t => t.name), ['read_repository', 'submit_brief']);
   assert.deepEqual(model.doStreamCalls[10].tools?.map(t => t.name), ['submit_brief']);
   assert.deepEqual(model.doStreamCalls[11].tools?.map(t => t.name), ['submit_brief']);
   assert.deepEqual(run.events.filter(e => e.type === 'stepStart').map(e => e.step), Array.from({ length: 12 }, (_, i) => i));
   assert.equal(run.events.filter(e => e.type === 'finalizationStarted').length, 1);
+  assert.equal(run.events.filter(e => e.type === 'testInspectionStarted').length, 1);
   assert.equal(run.tokenUsage?.totals.inputTokens, 60);
   assert.equal(run.tokenUsage?.totals.outputTokens, 24);
   assert.equal(Object.values(run.tokenUsage!.byModel)[0].inputTokens, 60);
   assert.equal(run.brief?.codePointers[0].quote, code.join('\n'));
   assert.match(JSON.stringify(run.state), /UNREAD_CITATION/);
+});
+
+test('test-only phase denies a code read and can finish on a valid submission without extra phases', async t => {
+  const f = await fixture(t);
+  const model = modelFor([...calls.slice(0, 4), ...Array(4).fill({ name: 'search_repository',
+    input: { query: 'absent', scope: 'tests', pathPrefix: '' } }), calls[1], calls[4]]);
+  const run = await locateCode(f.input, { checkout: f.checkout, model, provider: 'fixture', modelId: 'scripted' });
+  assert.equal(run.status, 'completed'); assert.equal(run.source.calls, 8);
+  assert.equal(model.doStreamCalls.length, 10);
+  assert.match(JSON.stringify(run.state), /TEST_READ_REQUIRED/);
+  assert.equal(run.events.filter(e => e.type === 'finalizationStarted').length, 0);
+});
+
+test('v2 overviews are deterministic, reject invented narratives, and retain v1 history without relabeling', async t => {
+  const f = await fixture(t);
+  const run = await locateCode(f.input, { checkout: f.checkout, model: modelFor(calls), provider: 'fixture', modelId: 'scripted' });
+  assert.equal(run.schemaVersion, 2); assert.equal(run.brief?.schemaVersion, 2);
+  assert.match(run.brief!.summary, /^Start reading at src\/artifact.ts:1\./);
+  assert.throws(() => resolveBrief({ ...draft, summary: 'The navigation listener exists.' }, run.source.excerpts, true));
+  const altered = structuredClone(run); altered.brief!.summary = 'The navigation listener exists.';
+  assert.throws(() => validateLocationRun(altered), /SUMMARY_MISMATCH/);
+  altered.schemaVersion = 1; altered.brief!.schemaVersion = 1;
+  assert.equal(validateLocationRun(altered).brief?.summary, 'The navigation listener exists.');
+  assert.equal(validateLocationRun(altered).schemaVersion, 1);
+  altered.schemaVersion = 2;
+  assert.throws(() => validateLocationRun(altered), /version mismatch/);
+});
+
+test('citation feedback reports all failing pointer fields together without accepting a partial draft', () => {
+  const excerpts = [
+    { id: 'E1', path: 'src/artifact.ts', startLine: 1, endLine: 40, lines: Array(40).fill('buildArtifact();') },
+    { id: 'E2', path: 'src/artifact.test.ts', startLine: 1, endLine: 40, lines: Array(40).fill('expect(buildArtifact()).toBe(true);') },
+  ];
+  const bad = { ...draft, codePointers: [{ ...draft.codePointers[0], endLine: 33 }, { ...draft.codePointers[0], symbol: 'notInSource' }],
+    testPointers: [{ ...draft.testPointers[0], endLine: 36 }] };
+  assert.throws(() => resolveBrief(bad, excerpts, true), (error: Error) => {
+    assert.match(error.message, /codePointers\[0\]: UNREAD_CITATION/);
+    assert.match(error.message, /codePointers\[1\]\.symbol: SYMBOL_NOT_IN_CITATION/);
+    assert.match(error.message, /testPointers\[0\]: UNREAD_CITATION/);
+    assert.ok(error.message.length < 1000);
+    return true;
+  });
+  const corrected = { ...bad, codePointers: [{ ...bad.codePointers[0], endLine: 20 }, { ...bad.codePointers[1], symbol: null }],
+    testPointers: [{ ...bad.testPointers[0], endLine: 20 }] };
+  assert.equal(resolveBrief(corrected, excerpts, true).schemaVersion, 2);
 });
 
 test('workflow retains failures, retries explicitly, caches success, and renders only matching grounded briefs', async t => {

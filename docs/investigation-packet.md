@@ -57,6 +57,10 @@ the output directory, checkout, commit, provider, optional readiness record, and
 optional cancellation signal. `packetMarkdown` accepts only the embedded packet;
 it needs neither a source checkout nor credentials. Embedding records preserves
 their original agent contracts, events, inspected excerpts, and reported usage.
+Current code-location records/briefs use version 2, including a host-generated
+overview. Historical version-1 location records remain readable without rewriting
+their model-written summaries. The packet envelope remains version 1; consumers
+must inspect the nested agent record's version independently of the envelope.
 Validation checks internal identity and excerpt grounding; it is not a signature
 or independent verification that a supplied artifact came from its claimed host.
 

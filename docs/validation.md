@@ -1,5 +1,16 @@
 # Validation record
 
+The [bounded reliability pass](reliability-2026-09-18.md) introduces code-location
+result v2 with a host-generated overview and eight general/two test-read/two
+submission steps. All 56 software tests and six live synthetic Terra cases pass.
+The first frozen real trial completed five of six runs, with correct reload-event
+distinctions and one preserved citation-correction failure. A separately recorded
+follow-up aggregates indexed citation errors instead of returning them serially.
+Its two fresh focus attempts completed, with one relevant hidden-tab assertion
+and one weaker keyboard-shortcut test. All 23 accepted real citations matched
+pinned source; relevance remains a separate, unresolved quality concern.
+Historical packet rendering and readiness behavior remain unchanged.
+
 The [v5 test-selection follow-up](test-selection-2026-09-18.md) adds bounded
 fixture/assertion navigation. All 53 software tests and five live synthetic
 Terra cases pass. Five real location runs completed with 19 exact citations:

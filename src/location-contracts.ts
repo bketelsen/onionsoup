@@ -18,16 +18,28 @@ const Pointer = z.object({ excerptId: z.string().regex(/^E[1-9][0-9]*$/),
   startLine: z.number().int().positive(), endLine: z.number().int().positive(),
   symbol: z.string().min(1).max(160).nullable(), reason: z.string().min(1).max(500),
 }).strict();
-export const BriefDraft = z.object({ status: z.enum(['located', 'not_located']), summary: z.string().min(1).max(800),
+export const BriefDraft = z.object({ status: z.enum(['located', 'not_located']),
   codePointers: z.array(Pointer).max(4), testPointers: z.array(Pointer).max(3),
   uncertainties: z.array(z.string().min(1).max(500)).min(1).max(5),
 }).strict();
 export type BriefDraft = z.infer<typeof BriefDraft>;
 export const Citation = z.object({ path: SourcePath, startLine: z.number().int().positive(), endLine: z.number().int().positive(),
   quote: z.string().min(1).max(2000), symbol: z.string().min(1).max(160).nullable(), reason: z.string().min(1).max(500) }).strict();
-export const LocationBrief = z.object({ schemaVersion: z.literal(1), status: z.enum(['located', 'not_located']),
+const BriefFields = { status: z.enum(['located', 'not_located']),
   summary: z.string().min(1).max(800), codePointers: z.array(Citation).max(4), testPointers: z.array(Citation).max(3),
-  uncertainties: z.array(z.string().min(1).max(500)).min(1).max(5) }).strict();
+  uncertainties: z.array(z.string().min(1).max(500)).min(1).max(5) };
+export function locationSummary(brief: { status: 'located' | 'not_located'; codePointers: Array<{ path: string; startLine: number }>; testPointers: unknown[] }) {
+  if (brief.status === 'not_located') return 'No code location established within the bounded search.';
+  const first = brief.codePointers[0];
+  return first ? `Start reading at ${first.path}:${first.startLine}. ${brief.testPointers.length} test citation${brief.testPointers.length === 1 ? '' : 's'} selected; see the evidence and limitations below.` : 'No code location established within the bounded search.';
+}
+// Historical summaries remain historical; only v2 enforces the host-generated overview.
+export const LocationBrief = z.discriminatedUnion('schemaVersion', [
+  z.object({ schemaVersion: z.literal(1), ...BriefFields }).strict(),
+  z.object({ schemaVersion: z.literal(2), ...BriefFields }).strict().superRefine((brief, ctx) => {
+    if (brief.summary !== locationSummary(brief)) ctx.addIssue({ code: 'custom', message: 'SUMMARY_MISMATCH: v2 overview must be generated from validated locations' });
+  }),
+]);
 export type LocationBrief = z.infer<typeof LocationBrief>;
 export type Excerpt = { id: string; path: string; startLine: number; endLine: number; lines: string[] };
 export const LOCATION_LIMITS = { steps: 12, timeoutMs: 180000, inspectionCalls: 12, contextChars: 36000,
@@ -38,17 +50,29 @@ export function resolveBrief(raw: unknown, excerpts: Excerpt[], searchedTests: b
   if (!searchedTests) throw new Error('TEST_SEARCH_REQUIRED: search the tests scope before submitting');
   if (draft.status === 'located' && !draft.codePointers.length) throw new Error('CODE_POINTER_REQUIRED');
   if (draft.status === 'not_located' && (draft.codePointers.length || draft.testPointers.length)) throw new Error('NOT_LOCATED_MUST_HAVE_NO_POINTERS');
-  const resolve = (pointer: z.infer<typeof Pointer>, tests: boolean) => {
+  const errors: string[] = [];
+  const resolve = (pointer: z.infer<typeof Pointer>, tests: boolean, index: number) => {
+    const field = `${tests ? 'testPointers' : 'codePointers'}[${index}]`;
+    const before = errors.length;
     const e = excerpts.find(e => e.id === pointer.excerptId);
-    if (!e || pointer.startLine < e.startLine || pointer.endLine > e.endLine || pointer.startLine > pointer.endLine ||
-      pointer.endLine - pointer.startLine + 1 > LOCATION_LIMITS.citationLines)
-      throw new Error('UNREAD_CITATION: choose at most 30 lines within an excerpt you read');
-    if (tests !== isTestPath(e.path)) throw new Error(tests ? 'TEST_PATH_REQUIRED' : 'CODE_PATH_REQUIRED');
+    if (!e) { errors.push(`${field}: UNREAD_CITATION: choose an excerpt ID you read`); return; }
+    const inBounds = pointer.startLine >= e.startLine && pointer.endLine <= e.endLine && pointer.startLine <= pointer.endLine;
+    if (!inBounds || pointer.endLine - pointer.startLine + 1 > LOCATION_LIMITS.citationLines)
+      errors.push(`${field}: UNREAD_CITATION: choose at most 30 lines inside ${e.id} (${e.startLine}-${e.endLine})`);
+    if (tests !== isTestPath(e.path)) errors.push(`${field}: ${tests ? 'TEST_PATH_REQUIRED' : 'CODE_PATH_REQUIRED'}`);
+    if (!inBounds) return;
     const quote = e.lines.slice(pointer.startLine - e.startLine, pointer.endLine - e.startLine + 1).join('\n');
-    if (pointer.symbol && !quote.includes(pointer.symbol)) throw new Error('SYMBOL_NOT_IN_CITATION: cite its literal text or use null');
+    if (pointer.symbol && !quote.includes(pointer.symbol)) errors.push(`${field}.symbol: SYMBOL_NOT_IN_CITATION: use a symbol in the quoted lines or null`);
+    if (quote.length > 2000) errors.push(`${field}: CITATION_TOO_LARGE: choose at most 2000 characters`);
+    if (errors.length > before) return;
     return Citation.parse({ path: e.path, startLine: pointer.startLine, endLine: pointer.endLine,
       quote, symbol: pointer.symbol, reason: pointer.reason });
   };
-  return LocationBrief.parse({ schemaVersion: 1, ...draft,
-    codePointers: draft.codePointers.map(p => resolve(p, false)), testPointers: draft.testPointers.map(p => resolve(p, true)) });
+  const codePointers = draft.codePointers.map((p, i) => resolve(p, false, i));
+  const testPointers = draft.testPointers.map((p, i) => resolve(p, true, i));
+  // Report every actionable field together; never make the model guess which pointer failed.
+  if (errors.length) throw new Error(errors.join('; '));
+  const brief = { schemaVersion: 2 as const, ...draft,
+    codePointers: codePointers.map(p => Citation.parse(p)), testPointers: testPointers.map(p => Citation.parse(p)) };
+  return LocationBrief.parse({ ...brief, summary: locationSummary(brief) });
 }

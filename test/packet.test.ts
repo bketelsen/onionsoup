@@ -17,7 +17,7 @@ const ready = { schemaVersion: 2, kind: 'bug_report', bug_readiness: 'ready', su
   evidence: fields.map(field => ({ field, source: 'body', quote: issue.body })), questions: [] };
 const code = "export function build() { return 'bad'; }";
 const tests = "test('build', () => expect(build()).toBe('good'));";
-const draft = { status: 'located', summary: 'Read build and its assertion.',
+const draft = { status: 'located',
   codePointers: [{ excerptId: 'E1', startLine: 1, endLine: 1, symbol: 'build', reason: 'Returns the reported value.' }],
   testPointers: [{ excerptId: 'E2', startLine: 1, endLine: 1, symbol: 'build', reason: 'Asserts the expected value.' }], uncertainties: ['Runtime behavior was not reproduced.'] };
 const locationCalls = [
@@ -130,7 +130,9 @@ test('rendering rejects tampered handoffs and evidence and keeps untrusted Markd
   assert.throws(() => packetMarkdown(corrupt), /handoff/);
   const invented = structuredClone(p); invented.location!.brief!.codePointers[0].quote = 'invented';
   assert.throws(() => packetMarkdown(invented), /not grounded/);
-  const prose = structuredClone(p); prose.location!.brief!.summary = '<script>alert(1)</script> [click](javascript:bad)';
+  const badSummary = structuredClone(p); badSummary.location!.brief!.summary = 'A navigation listener exists.';
+  assert.throws(() => packetMarkdown(badSummary), /SUMMARY_MISMATCH/);
+  const prose = structuredClone(p); prose.location!.brief!.codePointers[0].reason = '<script>alert(1)</script> [click](javascript:bad)';
   const md = packetMarkdown(prose);
   assert.ok(!md.includes('<script>')); assert.ok(!md.includes('[click](javascript:bad)')); assert.match(md, /&lt;script&gt;/);
 });
@@ -138,7 +140,7 @@ test('rendering rejects tampered handoffs and evidence and keeps untrusted Markd
 test('a valid not_located brief is an explicit partial packet, with no invented locations', async t => {
   const f = await fixture(t);
   const model = scripted([locationCalls[0], { name: 'submit_brief', input: { status: 'not_located',
-    summary: 'No implementation established.', codePointers: [], testPointers: [], uncertainties: ['Search was inconclusive.'] } }]);
+    codePointers: [], testPointers: [], uncertainties: ['Search was inconclusive.'] } }]);
   const p = await createPacket(issue, { ...f.options, readiness: f.parent,
     modelFactory: async (modelId = 'gpt-5.6-terra', provider: 'copilot' | 'codex' = 'copilot') => ({ modelId, provider, model }) });
   assert.equal(p.status, 'partial'); assert.equal(p.locationDisposition, 'not_located');

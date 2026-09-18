@@ -118,9 +118,12 @@ The [search/test-selection follow-up](docs/code-location-search-2026-09-18.md)
 records the v4 improvements, retained failures, and remaining relevance limits.
 The [v5 follow-up](docs/test-selection-2026-09-18.md) adds fixture-to-assertion
 navigation and records both its gains and remaining selection/summary failures.
-`npm run eval:location` runs five small Terra-only search regression cases,
+The [bounded reliability pass](docs/reliability-2026-09-18.md) reserves test reads,
+uses host-generated v2 overviews, and reports indexed citation errors together.
+`npm run eval:location` runs six small Terra-only search regression cases,
 including misleading paths, embedded instructions, distant fixture consumers,
-and behavior assertions versus lifecycle tests, using the configured
+behavior assertions versus lifecycle tests, and keyboard reload versus navigation,
+using the configured
 subscription. Source navigation and submission reserves are documented in the
 code-location guide.
 

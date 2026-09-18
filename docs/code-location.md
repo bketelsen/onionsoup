@@ -1,21 +1,25 @@
-# Code-location contract, version 1
+# Code-location contract, version 2
 
 **Question:** Where should a maintainer start reading code and tests for this one
 investigation-ready bug report?
 
-**Owner:** `code-location`. **Consumer:** a maintainer viewing the local inbox.
+**Owner:** `code-location`. **Consumers:** the local inbox and portable
+investigation packets.
 The agent identifies candidate locations and explains their relevance. It does
 not diagnose or reproduce a bug, implement a fix, run repository code, or change
 GitHub. Readiness remains a separate agent with its existing contract and prompt.
 
 ## Handoff
 
-Host code admits only an open observed issue whose matching readiness assessment
+The inbox admits only an open observed issue whose matching readiness assessment
 completed as `bug_report / ready`. It preserves the original issue snapshot,
 full input hash, parent readiness run ID, and readiness summary. It pins the
 repository name and commit before the agent starts. A changed title/body without
 a matching ready result cannot reuse an old handoff. Metadata-only changes may
 reuse readiness under the inbox's existing content policy.
+The portable packet workflow accepts a supplied snapshot and matching ready
+assessment; it makes no claim about current GitHub open/closed state. Both
+consumers pass the same public input to the agent.
 
 The public input carries schema version 1, the issue snapshot, parent identity,
 and repository name/commit. Hashes, IDs, versions, paths, and citation text are
@@ -67,6 +71,17 @@ A completed brief contains:
 - Explicit uncertainties. No matching test is a valid finding; inventing a test
   or claiming test coverage without source evidence is not.
 
+Version 2 keeps these fields but host code constructs `summary` from the first
+validated code location and the number of selected test citations. The model
+does not submit a separate free-form summary. Explanations remain beside their
+exact source quotations, with uncertainties separate; their semantic accuracy
+still requires review. This removes a redundant, previously ungrounded narrative
+surface without pretending that quotation validation proves an explanation.
+New run records and briefs use version 2. Readers retain version-1 records and
+their original model-written summaries without rewriting or requalifying them.
+The input handoff remains version 1. Saved v2 summaries must match the host's
+canonical construction; tampered summaries are rejected when rendering/loading.
+
 `located` requires a code pointer. `not_located` has no pointers and explains what
 could not be established. The agent must search the test scope before submitting;
 test pointers must refer to paths recognized as test files. It can report that no
@@ -86,12 +101,20 @@ calls. Citations cover at most 30 lines and 2,000 characters. Files are capped
 at 256 KiB. Git subprocesses have bounded time/output and never execute source.
 The limits are explicit and may produce a useful `not_located` result.
 
-Since prompt/runtime v4, host code allows inspection for at most ten model steps.
-If that phase reaches its step limit without a brief, the same task continues
+In prompt/runtime v6, host code allows general inspection for eight model steps,
+then reserves two steps for reading candidate test files and/or submitting.
+This middle phase removes search and code reads; a path must be a test path to
+be read. Its purpose is to follow an already discovered fixture or continuation
+hint to an assertion. It does not increase the total source budget or assert
+that an assertion was found. `testInspectionStarted` records the transition.
+Reserved model steps do not override an exhausted source-call/context budget.
+The tradeoff is less general exploration; without a candidate test after eight
+steps, the agent may have to report a narrower result instead of searching more.
+If both inspection phases finish without a brief, the same task continues
 with its existing state and only `submit_brief` for the remaining two steps.
 Those steps cover submission and at most one correction; the total stays at 12,
-and both phases share the original deadline. Early valid submission still ends
-immediately. Provider errors and cancellation do not trigger finalization. Usage
+and all phases share the original deadline. Early valid submission still ends
+immediately. Provider errors and cancellation do not trigger later phases. Usage
 is summed across phases, step indices are continuous, and `finalizationStarted`
 is recorded. This is an in-process transition, not a new agent responsibility or
 durable resume. One inspection permits at most two bounded Git searches when
@@ -101,6 +124,9 @@ Host code persists admission before spending model tokens and the final record
 at termination. The run records parent ID, issue hash, commit, prompt/runtime
 version, model/provider, steps, tool activity, inspected excerpts, usage, and
 result/failure. Invalid citations receive bounded correction feedback. Failed
+drafts report all detected citation errors with pointer indexes in one response,
+including invalid ranges, missing symbols, wrong path categories, and oversized
+quotations. A malformed pointer never becomes a partially accepted brief. Failed
 and interrupted runs cannot become completed briefs merely because the model
 emitted plausible prose. There is no durable per-step resume.
 
@@ -158,10 +184,11 @@ whether the suggested files are the best starting points. That requires reading
 the reports and the cited source; successful schema validation alone is not a
 quality score.
 
-`npm run eval:location` runs five tiny synthetic search cases on the configured
+`npm run eval:location` runs six tiny synthetic search cases on the configured
 subscription using Terra only: sparse prose without a path, a misleading path
 with template placeholders, embedded instructions, a distant fixture consumer,
-and a focus assertion competing with a lifecycle test. The source tree also
+and a focus assertion competing with a lifecycle test, plus a keyboard-reload
+handler distinct from renderer navigation. The source tree also
 contains an instruction-injection comment. It checks an expected implementation
 location and an actually quoted test assertion, with expectations kept outside
 model context. Scripted readiness records admit these synthetic reports; only

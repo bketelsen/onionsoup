@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { Agent, defineToolInterface, maxSteps, startState, toolCompleted } from '@humanlayer/agentlayer-core';
 import type { AgentState, TokenUsage } from '@humanlayer/agentlayer-core';
 import type { LanguageModel } from 'ai';
-import { LocationInput, BriefDraft, SourcePath, LOCATION_LIMITS, resolveBrief, type LocationBrief, type Excerpt } from './location-contracts.ts';
+import { LocationInput, BriefDraft, SourcePath, LOCATION_LIMITS, isTestPath, resolveBrief, type LocationBrief, type Excerpt } from './location-contracts.ts';
 import { LocationSource } from './location-source.ts';
 import { LOCATION_PROMPT, LOCATION_PROMPT_VERSION } from './location-prompt.ts';
 import { projectRoot } from './batch-store.ts';
@@ -14,8 +14,8 @@ const SearchInput = z.object({ query: z.string().min(1).max(160), scope: z.enum(
 const ReadInput = z.object({ path: SourcePath, startLine: z.number().int().positive(), endLine: z.number().int().positive() }).strict();
 const Search = defineToolInterface<z.infer<typeof SearchInput>, string>({ name: 'search_repository', description: 'Search a literal string in the pinned repository. pathPrefix is a directory/file prefix, or empty for all paths. A zero-match scoped search retries the same literal repository-wide and reports broadened/searchedPrefixes. Read promising tests before more searches. Previews are not citable.', input: SearchInput });
 const Read = defineToolInterface<z.infer<typeof ReadInput>, string>({ name: 'read_repository', description: 'Read a numbered source window at the pinned commit. Host caps the result at 60 lines starting at startLine, even if endLine is larger. Returns actual bounds, truncation, nextStartLine, and an excerpt ID. Code reads suggest relatedTests paths; test reads suggest same-file fixture references and a next assertion line. All navigation hints are unverified leads; only returned numbered lines are citable.', input: ReadInput });
-const Submit = defineToolInterface<BriefDraft, string>({ name: 'submit_brief', description: 'Submit likely code entry points, related tests, and uncertainties using only excerpts read by this run. Host code supplies metadata and quotes.', input: BriefDraft });
-export type LocationRun = { schemaVersion: 1; agent: 'code-location'; runId: string; input: LocationInput;
+const Submit = defineToolInterface<BriefDraft, string>({ name: 'submit_brief', description: 'Submit likely code entry points, related tests, and uncertainties using only excerpts read by this run. Explain each pointer beside its evidence. Host code supplies the overview, metadata, and quotes; do not submit a separate summary.', input: BriefDraft });
+export type LocationRun = { schemaVersion: 1 | 2; agent: 'code-location'; runId: string; input: LocationInput;
   promptVersion: string; runtimeHash: string; provider: string; model: string;
   status: 'running' | 'completed' | 'failed'; startedAt: string; finishedAt?: string;
   limits: typeof LOCATION_LIMITS; events: Array<{ type: string; at: string; step?: number; tool?: string }>;
@@ -46,7 +46,7 @@ export async function locateCode(raw: unknown, options: { checkout: string; mode
   const input = LocationInput.parse(raw);
   const signal = options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(LOCATION_LIMITS.timeoutMs)]) : AbortSignal.timeout(LOCATION_LIMITS.timeoutMs);
   const source = await LocationSource.open(options.checkout, input.repository.name, input.repository.commit, signal);
-  const record: LocationRun = { schemaVersion: 1, agent: 'code-location', runId: randomUUID(), input,
+  const record: LocationRun = { schemaVersion: 2, agent: 'code-location', runId: randomUUID(), input,
     promptVersion: LOCATION_PROMPT_VERSION, runtimeHash: await locationRuntimeHash(), provider: options.provider, model: options.modelId,
     status: 'running', startedAt: new Date().toISOString(), limits: LOCATION_LIMITS, events: [],
     source: { calls: 0, returnedChars: 0, searchedTests: false, excerpts: [], activities: [] } };
@@ -57,7 +57,7 @@ export async function locateCode(raw: unknown, options: { checkout: string; mode
     brief = resolveBrief(draft, source.excerpts, source.searchedTests);
     return 'Location brief accepted';
   });
-  const inspectionSteps = LOCATION_LIMITS.steps - 2;
+  const inspectionSteps = LOCATION_LIMITS.steps - 4;
   const agent = new Agent({ model: options.model, system: LOCATION_PROMPT, tools: {
     search_repository: Search.define(async input => JSON.stringify(await source.search(input))),
     read_repository: Read.define(async input => JSON.stringify(await source.read(input))),
@@ -78,9 +78,21 @@ export async function locateCode(raw: unknown, options: { checkout: string; mode
     let result = await executePhase(agent, startState([{ role: 'user', content: JSON.stringify({
       issue_snapshot: input.issue, readiness_summary: input.parent.summary, repository: input.repository,
     }) }]), 0);
-    const usedSteps = record.events.filter(e => e.type === 'stepStart').length;
-    if (!brief && !signal.aborted && usedSteps === inspectionSteps &&
-        (result.finishReason === 'maxSteps' || result.stopCondition?.name === 'maxSteps')) {
+    let usedSteps = record.events.filter(e => e.type === 'stepStart').length;
+    const hitLimit = () => result.finishReason === 'maxSteps' || result.stopCondition?.name === 'maxSteps';
+    if (!brief && !signal.aborted && usedSteps === inspectionSteps && hitLimit()) {
+      record.events.push({ type: 'testInspectionStarted', at: new Date().toISOString() });
+      const testReader = new Agent({ model: options.model,
+        system: `${LOCATION_PROMPT}\nGeneral inspection is now closed. You have two steps for reading candidate TEST files or submitting. Follow a promising fixture/continuation hint to its setup and assertion. Search and code reads are unavailable. If the relevant assertion remains unread, leave that test pointer out and explain the limitation. The final two submission/correction steps follow if needed.`,
+        tools: { read_repository: Read.define(async input => {
+          if (!isTestPath(input.path)) throw new Error('TEST_READ_REQUIRED: only test files can be read in this phase');
+          return JSON.stringify(await source.read(input));
+        }), submit_brief: submit }, toolChoice: 'required', maxSteps: 2,
+        stopWhen: [toolCompleted('submit_brief'), maxSteps(2)] });
+      result = await executePhase(testReader, result.state, usedSteps);
+      usedSteps = record.events.filter(e => e.type === 'stepStart').length;
+    }
+    if (!brief && !signal.aborted && usedSteps === inspectionSteps + 2 && hitLimit()) {
       record.events.push({ type: 'finalizationStarted', at: new Date().toISOString() });
       // Same task/state/deadline; source tools are removed for the last two steps.
       const finalizer = new Agent({ model: options.model,
