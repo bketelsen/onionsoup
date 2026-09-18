@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { realpath } from 'node:fs/promises';
 import { Commit, SourcePath, LOCATION_LIMITS as L, isTestPath, type Excerpt } from './location-contracts.ts';
+import { testNavigation } from './test-navigation.ts';
 
 const execute = promisify(execFile);
 type Blob = { oid: string; bytes: number };
@@ -128,7 +129,7 @@ export class LocationSource {
       pending = { id, path: input.path, startLine: input.startLine, endLine, lines: selected };
       return { excerptId: id, path: input.path, startLine: input.startLine, endLine, totalLines: lines.length,
         truncated: endLine < Math.min(input.endLine, lines.length), nextStartLine: endLine < lines.length ? endLine + 1 : null,
-        ...(isTestPath(input.path) ? {} : { relatedTests: this.testCandidates(input.path) }),
+        ...(isTestPath(input.path) ? { testNavigation: testNavigation(lines, input.startLine, endLine) } : { relatedTests: this.testCandidates(input.path) }),
         numberedLines: selected.map((line, i) => `${input.startLine + i}: ${line}`).join('\n') };
     });
     if (pending) this.excerpts.push(pending);

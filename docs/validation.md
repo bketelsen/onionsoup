@@ -1,5 +1,12 @@
 # Validation record
 
+The [v5 test-selection follow-up](test-selection-2026-09-18.md) adds bounded
+fixture/assertion navigation. All 53 software tests and five live synthetic
+Terra cases pass. Five real location runs completed with 19 exact citations:
+OAuth reached a recovery assertion, but browser-focus repeat selection remained
+incomplete. A new reload report also exposed an unsupported summary claim despite
+grounded quotations. Those failures remain visible and limit readiness claims.
+
 The [portable-packet pilot](packet-pilot-2026-09-18.md) demonstrates a second
 consumer without inbox state: five primary packets and two location repeats all
 completed. Four primary reports were location-eligible; a fresh readiness run

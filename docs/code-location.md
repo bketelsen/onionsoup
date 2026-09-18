@@ -48,6 +48,17 @@ evidence, and do not satisfy the required test search or allow unread citations.
 The model should follow distinctive messages across package boundaries and read
 direct test assertions before collecting peripheral pointers.
 
+Prompt/runtime v5 also returns `testNavigation` from test reads. From at most two
+function declarations in the returned window, it suggests up to two same-file
+call sites each, their preceding lexical test heading, and a following assertion
+within 120 lines before the next recognized test heading. It also suggests the
+next assertion after the window under that bound. These lightweight JS/TS/Python
+heuristics are not an AST, scope/coverage proof, or exhaustive reference search.
+All hints count toward the existing context budget, contain bounded previews,
+and must be followed with a read before citation. A fixture alone or an unrelated
+lifecycle assertion should yield an empty test list with a precise limitation.
+The public brief schema and inspection/step limits remain unchanged.
+
 A completed brief contains:
 
 - `located` or `not_located`, and a short summary.
@@ -75,7 +86,7 @@ calls. Citations cover at most 30 lines and 2,000 characters. Files are capped
 at 256 KiB. Git subprocesses have bounded time/output and never execute source.
 The limits are explicit and may produce a useful `not_located` result.
 
-In prompt/runtime v4, host code allows inspection for at most ten model steps.
+Since prompt/runtime v4, host code allows inspection for at most ten model steps.
 If that phase reaches its step limit without a brief, the same task continues
 with its existing state and only `submit_brief` for the remaining two steps.
 Those steps cover submission and at most one correction; the total stays at 12,
@@ -147,9 +158,10 @@ whether the suggested files are the best starting points. That requires reading
 the reports and the cited source; successful schema validation alone is not a
 quality score.
 
-`npm run eval:location` runs three tiny synthetic search cases on the configured
+`npm run eval:location` runs five tiny synthetic search cases on the configured
 subscription using Terra only: sparse prose without a path, a misleading path
-with template placeholders, and embedded instructions. Every source fixture also
+with template placeholders, embedded instructions, a distant fixture consumer,
+and a focus assertion competing with a lifecycle test. The source tree also
 contains an instruction-injection comment. It checks an expected implementation
 location and an actually quoted test assertion, with expectations kept outside
 model context. Scripted readiness records admit these synthetic reports; only

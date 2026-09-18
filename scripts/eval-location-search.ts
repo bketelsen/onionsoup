@@ -12,9 +12,10 @@ import { fixtureModel } from '../src/fixture-model.ts';
 import { atomicJson } from '../src/batch-store.ts';
 import { fields } from '../src/contracts.ts';
 
+type Expected = { codePath: string; codeText: string; testPath: string; testText: string };
 const corpus = JSON.parse(await readFile(new URL('../evals/location-search.json', import.meta.url), 'utf8')) as {
-  files: Record<string, string>; cases: Array<{ id: string; title: string; body: string }>;
-  expected: { codePath: string; codeText: string; testPath: string; testText: string };
+  files: Record<string, string>; cases: Array<{ id: string; title: string; body: string; expected?: Expected }>;
+  expected: Expected;
 };
 const root = resolve(process.env.ONIONSOUP_RUNS_DIR ?? 'runs/location-search');
 await mkdir(root, { recursive: true, mode: 0o700 });
@@ -36,7 +37,7 @@ for (const [i, item] of corpus.cases.entries()) {
     updatedAt: '2026-09-18T12:00:00Z', title: item.title, body: item.body };
   // Scripted readiness only admits the synthetic input; it is not a quality result.
   const parent = await triage(issue, { model: fixtureModel([{ schemaVersion: 2, kind: 'bug_report', bug_readiness: 'ready',
-    summary: 'Variant picker reports an error when choices are expected.',
+    summary: item.title,
     evidence: fields.map(field => ({ field, source: 'body', quote: item.body })), questions: [] }]),
     provider: 'fixture', modelId: 'scripted' });
   await atomicJson(join(directory, `${item.id}-parent.json`), parent);
@@ -45,7 +46,7 @@ for (const [i, item] of corpus.cases.entries()) {
   const run = await locateCode(input, { ...adapter, checkout,
     checkpoint: record => atomicJson(join(directory, `${item.id}-${record.runId}.json`), record) });
   // Expectations stay outside model context; check concrete locations/assertions, not just valid JSON.
-  const expected = corpus.expected;
+  const expected = item.expected ?? corpus.expected;
   const pass = run.status === 'completed' && run.brief?.status === 'located' &&
     run.brief.codePointers.some(c => c.path === expected.codePath && c.quote.includes(expected.codeText)) &&
     run.brief.testPointers.some(c => c.path === expected.testPath && c.quote.includes(expected.testText));

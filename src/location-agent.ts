@@ -13,7 +13,7 @@ import { projectRoot } from './batch-store.ts';
 const SearchInput = z.object({ query: z.string().min(1).max(160), scope: z.enum(['code', 'tests', 'all']), pathPrefix: z.string().max(400) }).strict();
 const ReadInput = z.object({ path: SourcePath, startLine: z.number().int().positive(), endLine: z.number().int().positive() }).strict();
 const Search = defineToolInterface<z.infer<typeof SearchInput>, string>({ name: 'search_repository', description: 'Search a literal string in the pinned repository. pathPrefix is a directory/file prefix, or empty for all paths. A zero-match scoped search retries the same literal repository-wide and reports broadened/searchedPrefixes. Read promising tests before more searches. Previews are not citable.', input: SearchInput });
-const Read = defineToolInterface<z.infer<typeof ReadInput>, string>({ name: 'read_repository', description: 'Read a numbered source window at the pinned commit. Host caps the result at 60 lines starting at startLine, even if endLine is larger. Returns actual bounds, truncation, nextStartLine, and an excerpt ID. Code reads also suggest filename-based relatedTests paths. These are unverified leads; only returned numbered lines are citable.', input: ReadInput });
+const Read = defineToolInterface<z.infer<typeof ReadInput>, string>({ name: 'read_repository', description: 'Read a numbered source window at the pinned commit. Host caps the result at 60 lines starting at startLine, even if endLine is larger. Returns actual bounds, truncation, nextStartLine, and an excerpt ID. Code reads suggest relatedTests paths; test reads suggest same-file fixture references and a next assertion line. All navigation hints are unverified leads; only returned numbered lines are citable.', input: ReadInput });
 const Submit = defineToolInterface<BriefDraft, string>({ name: 'submit_brief', description: 'Submit likely code entry points, related tests, and uncertainties using only excerpts read by this run. Host code supplies metadata and quotes.', input: BriefDraft });
 export type LocationRun = { schemaVersion: 1; agent: 'code-location'; runId: string; input: LocationInput;
   promptVersion: string; runtimeHash: string; provider: string; model: string;
@@ -23,7 +23,7 @@ export type LocationRun = { schemaVersion: 1; agent: 'code-location'; runId: str
   brief?: LocationBrief; failure?: string; finishReason?: string; tokenUsage?: TokenUsage; state?: AgentState };
 export async function locationRuntimeHash() {
   const files = ['src/location-agent.ts', 'src/location-contracts.ts', 'src/location-source.ts', 'src/location-prompt.ts',
-    'src/location-workflow.ts', 'src/location-record.ts', 'src/providers.ts', 'package-lock.json'];
+    'src/location-workflow.ts', 'src/location-record.ts', 'src/test-navigation.ts', 'src/providers.ts', 'package-lock.json'];
   const hash = createHash('sha256');
   for (const file of files) hash.update(file).update('\0').update(await readFile(join(projectRoot, file))).update('\0');
   return hash.digest('hex');

@@ -116,8 +116,11 @@ The [three-report development pilot](docs/code-location-pilot-2026-09-18.md)
 records both useful pointers and search-quality limitations.
 The [search/test-selection follow-up](docs/code-location-search-2026-09-18.md)
 records the v4 improvements, retained failures, and remaining relevance limits.
-`npm run eval:location` runs three small Terra-only search regression cases,
-including misleading paths and embedded instructions, using the configured
+The [v5 follow-up](docs/test-selection-2026-09-18.md) adds fixture-to-assertion
+navigation and records both its gains and remaining selection/summary failures.
+`npm run eval:location` runs five small Terra-only search regression cases,
+including misleading paths, embedded instructions, distant fixture consumers,
+and behavior assertions versus lifecycle tests, using the configured
 subscription. Source navigation and submission reserves are documented in the
 code-location guide.
 

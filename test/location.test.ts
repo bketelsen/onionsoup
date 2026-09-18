@@ -146,6 +146,7 @@ test('related test filenames are bounded hints, never read evidence or confirmed
   const commit = (await f.git('rev-parse', 'HEAD')).stdout.trim();
   const source = await LocationSource.open(f.checkout, repository, commit);
   const read = await source.read({ path: 'src/artifact.ts', startLine: 1, endLine: 4 });
+  assert.ok('relatedTests' in read);
   assert.equal(read.relatedTests?.paths[0], 'src/artifact.test.ts');
   assert.equal(read.relatedTests?.paths.length, 6); assert.equal(read.relatedTests?.truncated, true);
   assert.ok(!read.relatedTests?.paths.some(p => p.includes('.link.')));
@@ -154,7 +155,32 @@ test('related test filenames are bounded hints, never read evidence or confirmed
   assert.throws(() => resolveBrief(draft, source.excerpts, true), /UNREAD_CITATION/);
   const historical = await LocationSource.open(f.checkout, repository, f.commit);
   const old = await historical.read({ path: 'src/artifact.ts', startLine: 1, endLine: 4 });
+  assert.ok('relatedTests' in old);
   assert.deepEqual(old.relatedTests?.paths, ['src/artifact.test.ts']);
+});
+
+test('test navigation uses pinned source and cannot authorize a citation without a follow-up read', async t => {
+  const f = await fixture(t);
+  const path = 'src/artifact.test.ts';
+  await writeFile(join(f.checkout, path), ['function makeArtifact() { return {}; }', ...Array(80).fill(''),
+    'test("builds", () => {', '  const input = makeArtifact();', '  expect(buildArtifact(input)).toBeDefined();', '});'].join('\n'));
+  await f.git('add', '.'); await f.git('commit', '-qm', 'fixture consumer');
+  const commit = (await f.git('rev-parse', 'HEAD')).stdout.trim();
+  await writeFile(join(f.checkout, path), 'dirty working copy with different tests');
+  const source = await LocationSource.open(f.checkout, repository, commit);
+  const hint = await source.read({ path, startLine: 1, endLine: 1 });
+  assert.ok('testNavigation' in hint);
+  assert.equal(hint.testNavigation?.fixtureReferences[0].line, 83);
+  assert.equal(hint.testNavigation?.fixtureReferences[0].followingAssertionLine, 84);
+  assert.equal(source.excerpts.length, 1); assert.equal(source.calls, 1); assert.equal(source.searchedTests, false);
+  const pointer = { excerptId: hint.excerptId, startLine: 84, endLine: 84, symbol: null, reason: 'Assertion' };
+  await source.read({ path: 'src/artifact.ts', startLine: 1, endLine: 4 });
+  assert.throws(() => resolveBrief({ ...draft, codePointers: [{ ...draft.codePointers[0], excerptId: 'E2' }],
+    testPointers: [pointer] }, source.excerpts, true), /UNREAD_CITATION/);
+  const testRead = await source.read({ path, startLine: 82, endLine: 85 });
+  const brief = resolveBrief({ ...draft, codePointers: [{ ...draft.codePointers[0], excerptId: 'E2' }],
+    testPointers: [{ ...pointer, excerptId: testRead.excerptId }] }, source.excerpts, true);
+  assert.equal(brief.testPointers[0].quote, '  expect(buildArtifact(input)).toBeDefined();');
 });
 
 test('real AgentLayer loop corrects unread citations and checkpoints a grounded result', async t => {
