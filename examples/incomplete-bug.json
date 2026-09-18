@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "repository": "example/widget",
+  "number": 42,
+  "updatedAt": "2026-09-18T12:00:00Z",
+  "title": "Export crashes",
+  "body": "Clicking Export crashes with error E42. I expected a CSV download."
+}

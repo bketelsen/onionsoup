@@ -1,0 +1,77 @@
+# “Taco-bell orchestration”: reusable agents, different recipes
+
+Brian's observation: with a collection of small agents, multiple orchestration
+tools can mix and match the same ingredients to achieve different outcomes.
+
+An agent owns one bounded task. An orchestrator owns the workflow that invokes
+it. A new workflow should be able to reuse an agent's public contract without
+inheriting the original workflow's UI, scheduler, storage layout, or conversation.
+Different orchestrators may choose different recipes while preserving each
+ingredient's responsibility and authority.
+
+## Ownership boundaries
+
+| Component | Owns |
+| --- | --- |
+| Agent | Task-specific judgment, bounded context/tools, validated result or explicit failure |
+| Shared contract | Versioned inputs/outputs, evidence, source revision, run identity, provenance |
+| Orchestrator/application | Selection, sequencing, eligibility, source acquisition, provider/model choice, budgets, retry policy, approvals, next action |
+| Consumer | Presentation and use of the resulting artifacts |
+
+The agent runtime still enforces its own hard limits and validates evidence;
+orchestrators may impose tighter budgets. Orchestration does not grant an agent
+new tools or turn a candidate location into a diagnosis. Retries and new inputs
+produce attributable attempts, not silently overwritten judgments.
+
+Pass artifacts rather than shared conversations. Preserve parent run IDs, issue
+hashes, pinned commits, prompt/runtime identities, and failure outcomes across
+handoffs. The provider and model remain explicit at the application edge.
+
+## Example recipes
+
+- **Maintainer inbox (implemented):** assess a report's readiness → for selected
+  ready bugs, locate code and tests → show the maintainer evidence and questions.
+- **Contributor investigation packet (implemented):** choose an issue → assess or
+  reuse matching readiness → locate code/tests when eligible → export a concise
+  Markdown brief and its JSON evidence/provenance for a contributor.
+- **Release investigation (future):** a caller selects reported regressions →
+  reuse readiness/location agents → collect investigation leads for maintainer
+  review. This does not make either existing agent decide release inclusion,
+  severity, or whether a regression is confirmed.
+
+These recipes illustrate reuse; they are not a commitment to build a universal
+orchestrator. The current inbox and CLI are consumers/adapters, and the existing
+`triage` and `locateCode` functions are the starting points for direct invocation.
+The inbox-specific dispatcher is one workflow, not the definition of code-location.
+External orchestration integrations have not yet been demonstrated.
+
+## Second-consumer proof of concept
+
+The [portable investigation-packet command](investigation-packet.md) uses the same
+two agents and contracts as a small application workflow with explicit inputs
+and bounds:
+
+1. Accept one issue snapshot and a caller-selected repository commit/source.
+   Invoke readiness or reuse a validated matching result.
+2. Dispatch code-location only for a ready bug. For other outcomes, carry forward
+   the classification or proposed questions without implying project acceptance.
+3. Produce Markdown for a person and JSON for another orchestration tool, with
+   citations, uncertainties, parent identities, and explicit partial/failure states.
+4. Demonstrate reuse without depending on inbox files or HTML. Preserve inspectable
+   records and verify that presentation adds no unsupported claims.
+
+The packet is a deterministic rendering of existing artifacts; it does not need
+a third model-powered agent to rewrite them. Transport/server/plugin packaging
+can wait for an actual external consumer's requirements.
+
+The [Terra-only pilot](packet-pilot-2026-09-18.md) ran five reports not previously
+used to tune code-location and repeated two eligible location runs. All seven
+packets completed, with 21 exact source citations. One fresh readiness assessment
+withheld location; test selection varied on a broader browser-focus report. The
+assistant's development review is separate from independent maintainer acceptance.
+The known ACP-path limitation from the
+[search follow-up](code-location-search-2026-09-18.md) also remains.
+
+Success means a second useful output consumes the same bounded agent results,
+handoffs remain traceable, and quality limits remain visible. Larger coordination
+infrastructure and broader agent authority require separate evidence of need.

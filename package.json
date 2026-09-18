@@ -1,0 +1,35 @@
+{
+  "name": "onionsoup",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "triage": "node --import tsx src/cli.ts",
+    "demo": "node --import tsx src/cli.ts demo examples/incomplete-bug.json",
+    "test": "node --import tsx --test test/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "verify": "npm run typecheck && npm test",
+    "eval": "node --import tsx scripts/eval.ts",
+    "batch": "node --import tsx src/batch-cli.ts",
+    "inbox": "node --import tsx src/inbox-cli.ts",
+    "locate": "node --import tsx src/location-cli.ts",
+    "eval:location": "node --import tsx scripts/eval-location-search.ts",
+    "packet": "node --import tsx src/packet-cli.ts"
+  },
+  "dependencies": {
+    "@humanlayer/agentlayer-core": "0.0.36",
+    "@humanlayer/agentlayer-provider-auth": "0.0.36",
+    "@humanlayer/agentlayer-provider-github-copilot": "0.0.36",
+    "@humanlayer/agentlayer-provider-openai-codex": "0.0.36",
+    "ai": "6.0.191",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "5.9.3"
+  }
+}
