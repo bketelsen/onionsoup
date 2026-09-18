@@ -19,6 +19,20 @@ Read the applicable skill before doing that work:
 - Implement execution, recovery, or human handoffs: [agent-execution](.agents/skills/agent-execution/SKILL.md).
 - Evaluate behavior, instrument runs, or decide readiness: [agent-evaluation](.agents/skills/agent-evaluation/SKILL.md).
 
+Additional skills for the twenty-factor follow-through:
+
+- Publish a discoverable agent capability: [agent-capabilities](.agents/skills/agent-capabilities/SKILL.md).
+- Make a complete workflow inspectable: [workflow-observability](.agents/skills/workflow-observability/SKILL.md).
+- Bound the whole workflow: [workflow-budgets](.agents/skills/workflow-budgets/SKILL.md).
+- Record a reproducible execution configuration: [agent-release-manifest](.agents/skills/agent-release-manifest/SKILL.md).
+- Keep delegated authority explicit: [agent-authority](.agents/skills/agent-authority/SKILL.md).
+- Persist the workflow at real recovery boundaries: [workflow-durability](.agents/skills/workflow-durability/SKILL.md).
+- Automate useful quality feedback: [agent-quality-review](.agents/skills/agent-quality-review/SKILL.md).
+- Share explicit repository knowledge: [repository-knowledge](.agents/skills/repository-knowledge/SKILL.md).
+
+Deferred capabilities remain deferred unless the task calls for them; loading a
+skill does not authorize new effects or infrastructure.
+
 Start new skills from [.agents/skills/TEMPLATE/SKILL.md](.agents/skills/TEMPLATE/SKILL.md).
 
 ## Code conventions (live — the code exists)
@@ -36,7 +50,7 @@ Start new skills from [.agents/skills/TEMPLATE/SKILL.md](.agents/skills/TEMPLATE
   repository code. See [location-agent.ts](src/location-agent.ts) and
   [location-source.ts](src/location-source.ts).
 - Validate citations against inspected evidence, preserve explicit failed attempts,
-  and use host-generated v2 overviews. Keep legacy v1 records readable. See
+  and use host-generated v2/v3 overviews. Keep legacy v1/v2 records readable. See
   [location-contracts.ts](src/location-contracts.ts) and
   [location-record.ts](src/location-record.ts).
 - Compose agents through versioned artifacts and callable functions; retain parent

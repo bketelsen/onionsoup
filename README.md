@@ -123,7 +123,7 @@ The [v5 follow-up](docs/plans/records/test-selection-2026-09-18.md) adds fixture
 navigation and records both its gains and remaining selection/summary failures.
 The [bounded reliability pass](docs/plans/records/reliability-2026-09-18.md) reserves test reads,
 uses host-generated v2 overviews, and reports indexed citation errors together.
-`npm run eval:location` runs six small Terra-only search regression cases,
+`npm run eval:location` runs nine small Terra-only search regression cases,
 including misleading paths, embedded instructions, distant fixture consumers,
 behavior assertions versus lifecycle tests, and keyboard reload versus navigation,
 using the configured
@@ -182,7 +182,7 @@ v1 outputs retain their original labels and can still receive feedback.
 
 ## Repository skills and contracts
 
-The four skills in [.agents/skills/](.agents/skills/) cover [scope/contracts](.agents/skills/agent-contract/SKILL.md),
+The four foundational skills in [.agents/skills/](.agents/skills/) cover [scope/contracts](.agents/skills/agent-contract/SKILL.md),
 [prompts/context](.agents/skills/agent-context/SKILL.md), [execution/recovery](.agents/skills/agent-execution/SKILL.md),
 and [evaluation/visibility](.agents/skills/agent-evaluation/SKILL.md). [AGENTS.md](AGENTS.md)
 provides canonical instructions; tool-specific paths and the legacy `skills` path
@@ -194,3 +194,27 @@ The [readiness contract](docs/specs/bug-readiness.md) and
 authority, failure, and handoff. [The twelve-factor mapping](docs/design/twelve-factors.md)
 explains what is implemented now and what is intentionally deferred. These
 contracts are the starting point for a future team; there is no team runtime yet.
+
+The [twenty-factor follow-through backlog](docs/plans/backlog.md) adds eight focused
+authoring skills for discovery, observability, budgets, releases, authority,
+durability, automated quality review, and repository knowledge. The canonical
+[skill routing](AGENTS.md#skills-follow-these-for-common-tasks) lists when to use each.
+
+## Discover agents and inspect workflows
+
+```sh
+npm run agents -- list
+npm run agents -- describe code-location
+npm run agents -- events runs/packets/PACKET_DIRECTORY
+```
+
+The [capability catalog](capabilities/catalog.json) publishes versioned schemas,
+callable entry points, effects, bounds, and failure semantics. Event exports work
+without credentials or model calls and distinguish fresh work from reused results.
+See the [discovery contract](docs/specs/agent-discovery.md).
+
+New code-location v3 briefs label selected tests **direct** or **adjacent** and
+explain whether the bounded test search was **completed** or **unfinished**.
+These are model judgments, not measured coverage. Historical briefs retain their
+original fields. The [status report](docs/plans/records/relevance-and-discovery-2026-09-18.md)
+records the live trial and its limitations.

@@ -1,4 +1,4 @@
-# Code-location contract, version 2
+# Code-location contract, version 3
 
 This contract governs source-location inputs, bounded tools, cited results, and historical compatibility.
 
@@ -81,7 +81,7 @@ does not submit a separate free-form summary. Explanations remain beside their
 exact source quotations, with uncertainties separate; their semantic accuracy
 still requires review. This removes a redundant, previously ungrounded narrative
 surface without pretending that quotation validation proves an explanation.
-New run records and briefs use version 2. Readers retain version-1 records and
+The v2 release introduced run records and briefs using version 2; v3 extends them below. Readers retain version-1 records and
 their original model-written summaries without rewriting or requalifying them.
 The input handoff remains version 1. Saved v2 summaries must match the host's
 canonical construction; tampered summaries are rejected when rendering/loading.
@@ -188,10 +188,11 @@ whether the suggested files are the best starting points. That requires reading
 the reports and the cited source; successful schema validation alone is not a
 quality score.
 
-`npm run eval:location` runs six tiny synthetic search cases on the configured
+`npm run eval:location` runs nine tiny synthetic search cases on the configured
 subscription using Terra only: sparse prose without a path, a misleading path
 with template placeholders, embedded instructions, a distant fixture consumer,
-and a focus assertion competing with a lifecycle test, plus a keyboard-reload
+and a focus assertion competing with a lifecycle test, plus an empty-test search,
+explicit catalog/keyboard cases, and a keyboard-reload
 handler distinct from renderer navigation. The source tree also
 contains an instruction-injection comment. It checks an expected implementation
 location and an actually quoted test assertion, with expectations kept outside
@@ -201,6 +202,35 @@ invocation saves its source Git snapshot, parents, runs, and checks under a new
 `runs/location-search/development-*` directory (`ONIONSOUP_RUNS_DIR` overrides the
 root). These are development regression checks, not a held-out accuracy estimate
 or a model-comparison harness.
+
+### Explicit test relevance (version 3)
+
+New run records and briefs use version 3 and prompt `code-location-v7`. The input
+handoff remains version 1. Each test pointer additionally requires `relevance`:
+
+| Value | Model-assessed meaning |
+| --- | --- |
+| `direct` | The inspected setup and assertion observe the reported behavior under the relevant trigger/condition. |
+| `adjacent` | The assertion exercises a related component or a different trigger/condition; its reason identifies the mismatch. |
+
+The brief also requires `testSearch: { status, reason }`, where `status` is
+`completed` or `unfinished`. Completed describes the bounded search stated in the
+reason, never exhaustive repository coverage. Unfinished identifies a remaining
+uninspected lead, setup-to-assertion connection, or necessary condition. This is
+independent of selected pointers: a useful direct/adjacent test can coexist with
+unfinished search. With no test pointers, the reason distinguishes no finding
+within bounds from an unfinished lead.
+
+Host code checks required fields, enums, and existing citation invariants; it does
+not claim to mechanically prove semantic relevance or test execution. Consumers
+label relevance as model-assessed. A fixture without a consuming assertion is not
+a coverage finding. The complete evidence may span a setup citation and a separate
+assertion citation. Reasons and uncertainties must preserve that relationship.
+
+Versions 1 and 2 remain readable without new relevance/search labels. Version 2's
+canonical overview and version 1's historical model summary retain their original
+rules. Version 3 keeps the host-generated overview. Existing cached records and
+packets are not rewritten or silently reclassified.
 
 ## Rules
 
@@ -215,3 +245,6 @@ Only matching ready bug reports and a pinned commit are eligible. Final citation
   [validation](../design/validation.md).
 - Delivery and evidence: [roadmap](../plans/roadmap.md),
   [evaluation plan](../plans/evaluations.md).
+
+Rationale and follow-through: [ADR-0005](../adr/0005-test-relevance-and-portable-agent-discovery.md),
+[discovery](agent-discovery.md), and [backlog](../plans/backlog.md).

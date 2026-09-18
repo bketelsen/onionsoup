@@ -1,0 +1,375 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "kind": {
+      "type": "string",
+      "const": "workflow-events"
+    },
+    "mode": {
+      "type": "string",
+      "const": "derived-snapshot"
+    },
+    "workflowId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "number",
+            "const": 1
+          },
+          "workflowId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "sequence": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "workflow.started",
+              "workflow.completed",
+              "workflow.partial",
+              "workflow.failed",
+              "workflow.unfinished",
+              "agent.started",
+              "agent.completed",
+              "agent.failed",
+              "agent.unfinished",
+              "agent.reused",
+              "agent.step_started",
+              "agent.step_finished",
+              "agent.tool_requested",
+              "stage.skipped",
+              "stage.failed"
+            ]
+          },
+          "agent": {
+            "type": "string",
+            "enum": [
+              "bug-readiness",
+              "code-location"
+            ]
+          },
+          "runId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "parentRunId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "recordVersion": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "promptVersion": {
+            "type": "string",
+            "pattern": "^[\\w.-]+$"
+          },
+          "runtimeHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "inputHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "repositoryCommit": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{40}$"
+          },
+          "provider": {
+            "type": "string",
+            "pattern": "^[\\w.-]+$"
+          },
+          "model": {
+            "type": "string",
+            "pattern": "^[\\w./:-]+$"
+          },
+          "step": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "tool": {
+            "type": "string",
+            "enum": [
+              "submit_assessment",
+              "search_repository",
+              "read_repository",
+              "submit_brief"
+            ]
+          },
+          "failure": {
+            "type": "string",
+            "enum": [
+              "provider_error",
+              "no_valid_assessment",
+              "no_valid_brief",
+              "interrupted_or_timed_out",
+              "execution_error",
+              "stage_execution_or_persistence_error",
+              "unknown_failure"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "not_eligible",
+              "readiness_failed",
+              "location_not_started"
+            ]
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "needs_information",
+              "not_applicable",
+              "out_of_scope",
+              "located",
+              "not_located"
+            ]
+          },
+          "requestKind": {
+            "type": "string",
+            "enum": [
+              "bug_report",
+              "feature_request",
+              "support_question",
+              "other",
+              "unclear",
+              "unclassified_legacy"
+            ]
+          },
+          "testSearch": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "unfinished"
+            ]
+          },
+          "directTests": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "adjacentTests": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "usage": {
+            "type": "object",
+            "properties": {
+              "inputTokens": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "outputTokens": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "cacheReadTokens": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "cacheWriteTokens": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "reasoningTokens": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "estimatedCostUsd": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "inputTokens",
+              "outputTokens",
+              "cacheReadTokens",
+              "cacheWriteTokens",
+              "reasoningTokens",
+              "estimatedCostUsd"
+            ],
+            "additionalProperties": false
+          },
+          "historicalUsage": {
+            "type": "object",
+            "properties": {
+              "inputTokens": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "outputTokens": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "cacheReadTokens": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "cacheWriteTokens": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "reasoningTokens": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "estimatedCostUsd": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "inputTokens",
+              "outputTokens",
+              "cacheReadTokens",
+              "cacheWriteTokens",
+              "reasoningTokens",
+              "estimatedCostUsd"
+            ],
+            "additionalProperties": false
+          },
+          "originalStartedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+          },
+          "originalFinishedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "workflowId",
+          "sequence",
+          "at",
+          "type"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "kind",
+    "mode",
+    "workflowId",
+    "events"
+  ],
+  "additionalProperties": false
+}

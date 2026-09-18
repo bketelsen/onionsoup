@@ -6,7 +6,7 @@ const Excerpt = z.object({ id: z.string().regex(/^E[1-9][0-9]*$/), path: SourceP
   endLine: z.number().int().positive(), lines: z.array(z.string()).min(1).max(60) }).strict();
 export function validateLocationRun(raw: unknown): LocationRun {
   const run = raw as LocationRun;
-  if (!run || ![1, 2].includes(run.schemaVersion) || run.agent !== 'code-location' || !z.string().uuid().safeParse(run.runId).success ||
+  if (!run || ![1, 2, 3].includes(run.schemaVersion) || run.agent !== 'code-location' || !z.string().uuid().safeParse(run.runId).success ||
       !['running', 'completed', 'failed'].includes(run.status) || !z.iso.datetime().safeParse(run.startedAt).success ||
       (run.status !== 'running' && !z.iso.datetime().safeParse(run.finishedAt).success) ||
       !/^[a-f0-9]{64}$/.test(run.runtimeHash) || !run.provider || !run.model || !run.promptVersion)

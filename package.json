@@ -11,14 +11,17 @@
     "demo": "node --import tsx src/cli.ts demo examples/incomplete-bug.json",
     "test": "node --import tsx --test test/*.test.ts",
     "typecheck": "tsc --noEmit",
-    "verify": "npm run check:docs && npm run typecheck && npm test",
+    "verify": "npm run check:docs && npm run check:capabilities && npm run typecheck && npm test",
     "eval": "node --import tsx scripts/eval.ts",
     "batch": "node --import tsx src/batch-cli.ts",
     "inbox": "node --import tsx src/inbox-cli.ts",
     "locate": "node --import tsx src/location-cli.ts",
     "eval:location": "node --import tsx scripts/eval-location-search.ts",
     "packet": "node --import tsx src/packet-cli.ts",
-    "check:docs": "node scripts/check-docs.mjs"
+    "check:docs": "node scripts/check-docs.mjs",
+    "agents": "node --import tsx src/agents-cli.ts",
+    "capabilities:generate": "node --import tsx scripts/generate-capabilities.ts",
+    "check:capabilities": "node --import tsx scripts/generate-capabilities.ts --check"
   },
   "dependencies": {
     "@humanlayer/agentlayer-core": "0.0.36",

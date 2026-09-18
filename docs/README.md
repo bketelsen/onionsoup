@@ -68,6 +68,14 @@ Raw run links are optional local evidence; those files are intentionally not pub
 - [Terra comparison, 2026-09-18](plans/records/terra-comparison-2026-09-18.md)
 - [Following fixtures to assertions — 2026-09-18](plans/records/test-selection-2026-09-18.md)
 
+- [Status: relevance, discovery, events, and skills](plans/records/relevance-and-discovery-2026-09-18.md)
+
+## Current follow-through
+
+- [Backlog: twelve- and twenty-factor recommendations](plans/backlog.md)
+- [ADR-0005: relevance and portable discovery](adr/0005-test-relevance-and-portable-agent-discovery.md)
+- [Capability and workflow-event contract](specs/agent-discovery.md)
+
 ## Related repository material
 
 - [README and commands](../README.md)

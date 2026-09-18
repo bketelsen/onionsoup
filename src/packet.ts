@@ -85,11 +85,13 @@ export function packetMarkdown(raw: unknown) {
   lines.push('## Investigation starting points', '');
   if (l?.brief) {
     lines.push(text(l.brief.summary), '');
+    if (l.brief.schemaVersion === 3) lines.push(`Bounded test search: **${l.brief.testSearch.status}** — ${text(l.brief.testSearch.reason)}`, '', 'Test relevance is model-assessed; it is not measured coverage.', '');
     for (const [label, pointers] of [['Code', l.brief.codePointers], ['Tests', l.brief.testPointers]] as const) {
       lines.push(`### ${label}`, '');
       if (!pointers.length) lines.push(`No ${label.toLowerCase()} location established within this bounded run.`, '');
       for (const c of pointers) {
         const url = `https://github.com/${p.repository.name}/blob/${p.repository.commit}/${c.path.split('/').map(encodeURIComponent).map(s => s.replace(/\(/g, '%28').replace(/\)/g, '%29')).join('/')}#L${c.startLine}-L${c.endLine}`;
+        if ('relevance' in c) lines.push(`Model-assessed relevance: **${text(String(c.relevance))}**`, '');
         lines.push(`[${text(c.path)}:${c.startLine}–${c.endLine}](${url})`, '', text(c.reason), '', quote(c.quote), '');
       }
     }

@@ -15,7 +15,7 @@ const ReadInput = z.object({ path: SourcePath, startLine: z.number().int().posit
 const Search = defineToolInterface<z.infer<typeof SearchInput>, string>({ name: 'search_repository', description: 'Search a literal string in the pinned repository. pathPrefix is a directory/file prefix, or empty for all paths. A zero-match scoped search retries the same literal repository-wide and reports broadened/searchedPrefixes. Read promising tests before more searches. Previews are not citable.', input: SearchInput });
 const Read = defineToolInterface<z.infer<typeof ReadInput>, string>({ name: 'read_repository', description: 'Read a numbered source window at the pinned commit. Host caps the result at 60 lines starting at startLine, even if endLine is larger. Returns actual bounds, truncation, nextStartLine, and an excerpt ID. Code reads suggest relatedTests paths; test reads suggest same-file fixture references and a next assertion line. All navigation hints are unverified leads; only returned numbered lines are citable.', input: ReadInput });
 const Submit = defineToolInterface<BriefDraft, string>({ name: 'submit_brief', description: 'Submit likely code entry points, related tests, and uncertainties using only excerpts read by this run. Explain each pointer beside its evidence. Host code supplies the overview, metadata, and quotes; do not submit a separate summary.', input: BriefDraft });
-export type LocationRun = { schemaVersion: 1 | 2; agent: 'code-location'; runId: string; input: LocationInput;
+export type LocationRun = { schemaVersion: 1 | 2 | 3; agent: 'code-location'; runId: string; input: LocationInput;
   promptVersion: string; runtimeHash: string; provider: string; model: string;
   status: 'running' | 'completed' | 'failed'; startedAt: string; finishedAt?: string;
   limits: typeof LOCATION_LIMITS; events: Array<{ type: string; at: string; step?: number; tool?: string }>;
@@ -46,7 +46,7 @@ export async function locateCode(raw: unknown, options: { checkout: string; mode
   const input = LocationInput.parse(raw);
   const signal = options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(LOCATION_LIMITS.timeoutMs)]) : AbortSignal.timeout(LOCATION_LIMITS.timeoutMs);
   const source = await LocationSource.open(options.checkout, input.repository.name, input.repository.commit, signal);
-  const record: LocationRun = { schemaVersion: 2, agent: 'code-location', runId: randomUUID(), input,
+  const record: LocationRun = { schemaVersion: 3, agent: 'code-location', runId: randomUUID(), input,
     promptVersion: LOCATION_PROMPT_VERSION, runtimeHash: await locationRuntimeHash(), provider: options.provider, model: options.modelId,
     status: 'running', startedAt: new Date().toISOString(), limits: LOCATION_LIMITS, events: [],
     source: { calls: 0, returnedChars: 0, searchedTests: false, excerpts: [], activities: [] } };

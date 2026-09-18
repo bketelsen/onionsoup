@@ -12,7 +12,7 @@ import { fixtureModel } from '../src/fixture-model.ts';
 import { atomicJson } from '../src/batch-store.ts';
 import { fields } from '../src/contracts.ts';
 
-type Expected = { codePath: string; codeText: string; testPath: string; testText: string };
+type Expected = { codePath: string; codeText: string; testPath: string | null; testText: string | null; relevance: 'direct' | 'adjacent' | null };
 const corpus = JSON.parse(await readFile(new URL('../evals/location-search.json', import.meta.url), 'utf8')) as {
   files: Record<string, string>; cases: Array<{ id: string; title: string; body: string; expected?: Expected }>;
   expected: Expected;
@@ -30,6 +30,7 @@ const git = (...args: string[]) => promisify(execFile)('git', ['-C', checkout, '
 await git('init', '-q'); await git('remote', 'add', 'origin', 'https://github.com/example/widget.git');
 await git('add', '.'); await git('commit', '-qm', 'Synthetic code-location development fixture');
 const commit = (await git('rev-parse', 'HEAD')).stdout.trim();
+await atomicJson(join(directory, 'corpus.json'), corpus);
 const adapter = await liveModel(EVALUATION_MODEL);
 const results = [];
 for (const [i, item] of corpus.cases.entries()) {
@@ -49,8 +50,10 @@ for (const [i, item] of corpus.cases.entries()) {
   const expected = item.expected ?? corpus.expected;
   const pass = run.status === 'completed' && run.brief?.status === 'located' &&
     run.brief.codePointers.some(c => c.path === expected.codePath && c.quote.includes(expected.codeText)) &&
-    run.brief.testPointers.some(c => c.path === expected.testPath && c.quote.includes(expected.testText));
-  results.push({ case: item.id, pass, runId: run.runId, status: run.status });
+    (expected.testPath === null ? run.brief.testPointers.length === 0 :
+      run.brief.schemaVersion === 3 && run.brief.testPointers.some(c => c.path === expected.testPath && c.quote.includes(expected.testText!) && c.relevance === expected.relevance));
+  results.push({ case: item.id, pass, runId: run.runId, status: run.status, testSearch: run.brief?.schemaVersion === 3 ? run.brief.testSearch.status : null,
+    relevance: run.brief?.schemaVersion === 3 ? run.brief.testPointers.map(c => c.relevance) : null });
   console.log(JSON.stringify(results.at(-1)));
 }
 await atomicJson(join(directory, 'summary.json'), { provider: adapter.provider, model: adapter.modelId, commit, results });

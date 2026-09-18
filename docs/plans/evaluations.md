@@ -44,18 +44,23 @@ the linked reports publish methods, observed outcomes, and limits.
   small development trials. The latest report includes a failed attempt and weak
   test relevance; this is not broad reliability qualification.
 
-## Phase 4 — Test relevance qualification (planned)
+## Phase 4 — Test relevance development trial
 
 - Design a small frozen trial separating direct coverage, adjacent evidence, and
   unfinished search. Record expectations before changing prompts; reserve fresh
   cases to detect overfitting to the existing trials.
 - Extend [validation design](../design/validation.md) and the
   [location contract](../specs/code-location.md) alongside implementation, following
-  [roadmap Phase 5](roadmap.md#phase-5--explicit-test-relevance-planned).
+  [roadmap Phase 5](roadmap.md#phase-5--explicit-test-relevance).
 - **Done when:** the report separates completion, grounding, test relevance, and
   unsupported claims, retains every attempt, and states whether a narrow change
   helped. Assistant development review must be labeled as such; independent
   maintainer acceptance remains a distinct measurement.
+
+The [relevance and discovery report](records/relevance-and-discovery-2026-09-18.md)
+records 13 completed live development runs, three preserved label disagreements,
+and two focused follow-ups. Contract implementation is complete; broad quality
+qualification is not claimed.
 
 ## Later / ideas
 
@@ -65,9 +70,9 @@ boundary is useful enough to justify them.
 
 ## Open questions
 
-Before Phase 4, agree on test relevance categories and the evidence each requires.
-The current contract has no direct/adjacent/unfinished classification; add one only
-with an explicit contract decision and compatibility plan.
+The v3 categories and compatibility decision are recorded in
+[ADR-0005](../adr/0005-test-relevance-and-portable-agent-discovery.md). Independent
+acceptance and the reliability of the unfinished-search judgment remain unmeasured.
 
 ## References
 

@@ -1,0 +1,72 @@
+# Plan: Twelve- and twenty-factor follow-through
+
+Prioritized on 2026-09-18 after revisiting the original
+[12-Factor Agents source](https://github.com/humanlayer/12-factor-agents/tree/d20c728368bf9c189d6d7aab704744decb6ec0cc)
+and [20-factor](https://github.com/trentas/20-factor/tree/6dc491097d016c9871c32bd214431f0079673533).
+The latter extends cloud-native app principles; its full checklist is not an
+Onionsoup implementation mandate. This backlog complements the [roadmap](roadmap.md).
+
+## Phase 1 — Finish explicit test relevance (implemented)
+
+- Add direct/adjacent test evidence and completed/unfinished bounded search to
+  [code-location](../specs/code-location.md), following
+  [agent design](../design/agents.md) and [validation](../design/validation.md).
+- Preserve historical results and publish a small Terra-only development trial.
+- **Done when:** both consumers display the distinctions, compatibility and
+  consistency checks pass, and live results report grounding and relevance
+  separately, including failures and uncertainty.
+
+## Phase 2 — Capability manifests and workflow events (implemented)
+
+- Publish the two agents' capabilities and schemas; expose portable event exports
+  following [composition](../design/composable-agents.md) and the
+  [discovery contract](../specs/agent-discovery.md).
+- **Done when:** a consumer can discover each agent's interface/effects/bounds and
+  inspect a packet or agent run through common events without model calls, inbox
+  state, raw prompts, or inferred success.
+
+Phases 1–2 implementation and the trial limitations are recorded in the
+[status report](records/relevance-and-discovery-2026-09-18.md). Eight new authoring
+skills make the twenty-factor recommendations reusable; see
+[skill routing](../../AGENTS.md#skills-follow-these-for-common-tasks).
+
+## Phase 3 — Prove external composition (next candidate)
+
+- Connect one actual external orchestrator through a thin adapter to
+  [composition design](../design/composable-agents.md) and
+  [discovery contracts](../specs/agent-discovery.md).
+- **Done when:** the same focused agent produces a traceable result through that
+  consumer with existing contracts and authority unchanged.
+
+## Later / ideas
+
+| Item | Trigger / acceptance evidence |
+| --- | --- |
+| Smaller model context separate from full history (12F 3) | Compare evidence-preserving context assembly on frozen failures before adoption. |
+| Deterministic repository-map prefetch (12F appendix) | Small pinned map reduces discovery work without hiding decisive evidence or consuming the source budget unaccountably. |
+| Repeated-error/no-progress detection (12F 9) | Stop repeated equivalent failures with a useful reason; prove it does not stop recoverable cases early. |
+| Aggregate workflow budgets (20F 18/20) | Shared admission allowance across agents/retries; children cannot reset it. Keep unknown subscription cost unknown. |
+| Complete execution manifests (20F 5/16) | Link code, prompts, schemas, provider configuration, dataset/evaluator versions, and results; record limits of provider model pinning. |
+| Explicit delegated authority (20F 8) | Before write-capable agents, enforce invocation permissions as a subset of caller authorization and agent capability. |
+| Durable waits and recovery (12F 5–8; 20F 13) | Add only for a real wait or meaningful partial effects; test crashes, ambiguous outcomes, version changes, and reconciliation. |
+| Automated relevance review (20F 6) | Version rubric and judge; separate model review from independent acceptance and calibrate against available human anchors. |
+| Shared repository knowledge (20F 19) | Start with explicit scoped facts, source provenance and revision, freshness and deletion rules; keep judgments distinct from facts. |
+
+Defer universal coordinators, registry services, mandatory gateways, vector memory,
+and semantic reuse of issue judgments. Similar text is insufficient to reuse an
+assessment or pinned source citation. Model comparison and local-provider batches
+remain deferred; new development evaluations use Terra only.
+
+## Open questions
+
+- Which external consumer supplies a concrete requirement for Phase 3?
+- When does useful repeated work justify prefetch or context reconstruction?
+- Which workflow first requires durable approval or write-effect reconciliation?
+
+## References
+
+- Rationale: [ADR-0005](../adr/0005-test-relevance-and-portable-agent-discovery.md).
+- Implements: [agents](../design/agents.md), [composition](../design/composable-agents.md),
+  [validation](../design/validation.md), [location](../specs/code-location.md),
+  [discovery](../specs/agent-discovery.md).
+- Evidence: [evaluation plan](evaluations.md).

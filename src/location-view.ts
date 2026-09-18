@@ -9,12 +9,13 @@ export function locationHtml(run?: LocationRun) {
   const pointers = (items: NonNullable<typeof brief>['codePointers']) => items.map(c => {
     const url = `${base}/${c.path.split('/').map(encodeURIComponent).join('/')}#L${c.startLine}-L${c.endLine}`;
     return `<li><a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(c.path)}:${c.startLine}–${c.endLine}</a>${c.symbol ? ` · <code>${esc(c.symbol)}</code>` : ''}
-      <p>${esc(c.reason)}</p><details><summary>Quoted source</summary><pre>${esc(c.quote)}</pre></details></li>`;
+      ${'relevance' in c ? `<p>Model-assessed relevance: <strong>${esc(String(c.relevance))}</strong></p>` : ''}<p>${esc(c.reason)}</p><details><summary>Quoted source</summary><pre>${esc(c.quote)}</pre></details></li>`;
   }).join('');
   return `<section class="location-brief"><h3>Investigation starting points</h3>
     <p class="meta">${esc(run.model)} · pinned commit <code>${esc(run.input.repository.commit.slice(0, 12))}</code> · ${run.source.calls} source inspections</p>
     ${brief ? `<p>${esc(brief.summary)}</p>
       ${brief.codePointers.length ? `<h4>Code to read</h4><ul>${pointers(brief.codePointers)}</ul>` : '<p>No code location established within the search bounds.</p>'}
+      ${brief.schemaVersion === 3 ? `<p>Bounded test search: <strong>${brief.testSearch.status}</strong> — ${esc(brief.testSearch.reason)}</p>` : ''}
       ${brief.testPointers.length ? `<h4>Related tests</h4><ul>${pointers(brief.testPointers)}</ul>` : '<p>No relevant test located within the bounded search.</p>'}
       <h4>Uncertainties</h4><ul>${brief.uncertainties.map(text => `<li>${esc(text)}</li>`).join('')}</ul>` :
       `<p>${run.status === 'running' ? 'Location run is unfinished; its outcome is unknown.' : `No accepted brief: ${esc(run.failure)}.`}</p>`}

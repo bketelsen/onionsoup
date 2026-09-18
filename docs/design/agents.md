@@ -34,7 +34,7 @@ information produces focused questions with quoted issue evidence.
 Code-location consumes a matching ready assessment and caller-pinned Git commit.
 Bounded source tools expose paths, literal search, excerpts, and test navigation
 hints. Only inspected excerpts can support final citations. The host validates
-citations, aggregates correction feedback, and produces the v2 overview from
+citations, aggregates correction feedback, and produces the v2/v3 overview from
 validated fields. The model still chooses locations and writes reasons and
 uncertainties; exact citations do not guarantee useful selections.
 
@@ -47,6 +47,13 @@ to rewrite results or a shared conversation between agents.
 The [factor mapping](twelve-factors.md) explains the implementation choices.
 [Composable agents](composable-agents.md) records the “taco-bell orchestration”
 idea and current recipes; external orchestrator integrations remain unproven.
+
+Version 3 adds per-test direct/adjacent relevance and a separate completed/unfinished
+bounded-search explanation. These model judgments are visible in both consumers;
+the host still validates exact evidence without claiming coverage or execution.
+The [capability catalog](../../capabilities/catalog.json) describes the two callable
+agents. A [common event view](../specs/agent-discovery.md) projects validated run and
+packet artifacts into portable lifecycle and provenance metadata.
 
 ## Operational notes
 
@@ -72,3 +79,6 @@ maintainer acceptance.
 - Built in: [roadmap — Phase 1](../plans/roadmap.md#phase-1--readiness-foundation)
   through [Phase 4](../plans/roadmap.md#phase-4--portable-composition).
 - Evidence: [evaluation plan](../plans/evaluations.md).
+
+Follow-through: [ADR-0005](../adr/0005-test-relevance-and-portable-agent-discovery.md),
+[discovery contract](../specs/agent-discovery.md), and [backlog](../plans/backlog.md).

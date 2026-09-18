@@ -9,6 +9,11 @@ Validation separates software correctness, runtime completion, grounded citation
 
 ## Design
 
+The [relevance/discovery status report](../plans/records/relevance-and-discovery-2026-09-18.md)
+records v3 relevance, the 13-run development trial, preserved expectation
+disagreements, common event exports, capability manifests, and 63 software tests.
+It does not establish independent maintainer acceptance.
+
 The [bounded reliability pass](../plans/records/reliability-2026-09-18.md) introduces code-location
 result v2 with a host-generated overview and eight general/two test-read/two
 submission steps. All 56 software tests and six live synthetic Terra cases pass.
@@ -177,3 +182,6 @@ Run `npm run verify` and `npm run demo` without credentials. Live trials require
   [batch evaluation](../specs/batch-evaluation.md).
 - Built in: [roadmap](../plans/roadmap.md#phase-2--read-only-maintainer-workflow).
 - Evidence: [evaluation plan](../plans/evaluations.md).
+
+Follow-through: [ADR-0005](../adr/0005-test-relevance-and-portable-agent-discovery.md),
+[discovery contract](../specs/agent-discovery.md), and [backlog](../plans/backlog.md).

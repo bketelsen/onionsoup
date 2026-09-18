@@ -98,3 +98,6 @@ The inbox and packet are the two implemented consumers. External orchestration i
   [batch evaluation](../specs/batch-evaluation.md).
 - Built in: [roadmap](../plans/roadmap.md#phase-4--portable-composition).
 - Evidence: [evaluation plan](../plans/evaluations.md).
+
+Follow-through: [ADR-0005](../adr/0005-test-relevance-and-portable-agent-discovery.md),
+[discovery contract](../specs/agent-discovery.md), and [backlog](../plans/backlog.md).

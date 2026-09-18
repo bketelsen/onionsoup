@@ -56,17 +56,29 @@ evidence; implementation completion alone does not establish task accuracy.
   identities, uncertainties, and partial failures and can render without a model.
   Implemented. External orchestration integrations remain future work.
 
-## Phase 5 — Explicit test relevance (planned)
+## Phase 5 — Explicit test relevance
 
-- Next bounded exploration: distinguish direct behavior coverage, adjacent tests,
+- Implemented: distinguish model-assessed direct relevance, adjacent tests,
   and unfinished test search; avoid presenting a precisely quoted weak test as
-  strong coverage. This is a proposal, not a current output field.
+  strong coverage. These are v3 result fields, not coverage measurements.
 - Extend [agent design](../design/agents.md), [validation](../design/validation.md),
-  and [code-location contract](../specs/code-location.md) together after recording
-  the contract decision. Use the [evaluation plan](evaluations.md#phase-4--test-relevance-qualification-planned).
+  and [code-location contract](../specs/code-location.md) together under
+  [ADR-0005](../adr/0005-test-relevance-and-portable-agent-discovery.md). Use the [evaluation plan](evaluations.md#phase-4--test-relevance-development-trial).
 - **Done when:** a frozen, small Terra-only trial reports relevance separately from
   citation validity, preserves failed attempts, and shows whether the change
   improves useful test selection without broadening agent authority.
+
+The [status report](records/relevance-and-discovery-2026-09-18.md) records completed
+implementation, the initial 4/7 expected-label match, focused follow-up, and limits.
+
+## Phase 6 — Portable discovery and workflow events
+
+- Implemented: [capability manifests and workflow exports](../specs/agent-discovery.md)
+  for the existing agents, following [composition design](../design/composable-agents.md).
+- **Done when:** credential-free consumers can discover current schemas, callable
+  entry points, effects and limits, and export correlated events from old/new
+  artifacts with explicit reuse and unknown outcomes. Implemented; external
+  orchestrator integration remains the next candidate.
 
 ## Later / ideas
 
@@ -78,8 +90,8 @@ evidence; implementation completion alone does not establish task accuracy.
 
 ## Open questions
 
-- Before Phase 5, determine how relevance should be represented and which evidence
-  supports each category. Record any contract change in a new ADR.
+- Select an actual external consumer for the next integration proof. The
+  [backlog](backlog.md) retains the remaining twelve- and twenty-factor recommendations.
 - Independent maintainer acceptance remains unmeasured for some historical trials;
   assistant reviews cannot supply that measurement.
 

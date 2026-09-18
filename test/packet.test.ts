@@ -17,9 +17,9 @@ const ready = { schemaVersion: 2, kind: 'bug_report', bug_readiness: 'ready', su
   evidence: fields.map(field => ({ field, source: 'body', quote: issue.body })), questions: [] };
 const code = "export function build() { return 'bad'; }";
 const tests = "test('build', () => expect(build()).toBe('good'));";
-const draft = { status: 'located',
+const draft = { status: 'located', testSearch: { status: 'completed', reason: 'Read the bounded candidate test.' },
   codePointers: [{ excerptId: 'E1', startLine: 1, endLine: 1, symbol: 'build', reason: 'Returns the reported value.' }],
-  testPointers: [{ excerptId: 'E2', startLine: 1, endLine: 1, symbol: 'build', reason: 'Asserts the expected value.' }], uncertainties: ['Runtime behavior was not reproduced.'] };
+  testPointers: [{ relevance: 'direct', excerptId: 'E2', startLine: 1, endLine: 1, symbol: 'build', reason: 'Asserts the expected value.' }], uncertainties: ['Runtime behavior was not reproduced.'] };
 const locationCalls = [
   { name: 'search_repository', input: { query: 'build', scope: 'tests', pathPrefix: '' } },
   { name: 'read_repository', input: { path: 'src/widget.ts', startLine: 1, endLine: 1 } },
@@ -69,6 +69,8 @@ test('standalone snapshot runs both agents and embeds exact handoff and Markdown
   assert.equal(markdown, packetMarkdown(saved));
   assert.ok(markdown.includes(`/blob/${f.options.commit}/src/widget.test.ts#L1-L1`));
   assert.ok(markdown.includes(tests));
+  assert.match(markdown, /Model-assessed relevance: \*\*direct\*\*/);
+  assert.match(markdown, /Bounded test search: \*\*completed\*\*/);
   assert.deepEqual((await readdir(f.options.directory)).sort(), ['packet.json', 'packet.md']);
 });
 
@@ -140,7 +142,7 @@ test('rendering rejects tampered handoffs and evidence and keeps untrusted Markd
 test('a valid not_located brief is an explicit partial packet, with no invented locations', async t => {
   const f = await fixture(t);
   const model = scripted([locationCalls[0], { name: 'submit_brief', input: { status: 'not_located',
-    codePointers: [], testPointers: [], uncertainties: ['Search was inconclusive.'] } }]);
+    codePointers: [], testPointers: [], testSearch: { status: 'unfinished', reason: 'Search was inconclusive.' }, uncertainties: ['Search was inconclusive.'] } }]);
   const p = await createPacket(issue, { ...f.options, readiness: f.parent,
     modelFactory: async (modelId = 'gpt-5.6-terra', provider: 'copilot' | 'codex' = 'copilot') => ({ modelId, provider, model }) });
   assert.equal(p.status, 'partial'); assert.equal(p.locationDisposition, 'not_located');

@@ -8,7 +8,8 @@
     "packages/auth/translation.ts": "export function translateAuthError(message: any) {\n  return { category: message.error === \"session expired\" ? \"unknown\" : \"other\" };\n}\n",
     "packages/auth/translation.test.ts": "import { translateAuthError } from \"./translation\";\nfunction createAuthError() {\n  return { error: \"session expired\" };\n}\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\n// unrelated setup padding\ntest(\"expired session is an authorization failure\", () => {\n  const result = translateAuthError(createAuthError());\n  expect(result.category).toBe(\"unauthorized\");\n});\n",
     "packages/reload/handler.ts": "export function registerReload(window: any, views: any) {\n  window.on(\"before-input-event\", (event: any, input: any) => {\n    if (input.key !== \"F5\") return;\n    views.hide();\n    window.reload();\n  });\n}\n",
-    "packages/reload/handler.test.ts": "import { registerReload } from \"./handler\";\ntest(\"keyboard reload hides views\", () => {\n  const window = fakeWindow();\n  const views = { hide: vi.fn() };\n  registerReload(window, views);\n  window.emit(\"before-input-event\", {}, { key: \"F5\" });\n  expect(views.hide).toHaveBeenCalledOnce();\n});\n"
+    "packages/reload/handler.test.ts": "import { registerReload } from \"./handler\";\ntest(\"keyboard reload hides views\", () => {\n  const window = fakeWindow();\n  const views = { hide: vi.fn() };\n  registerReload(window, views);\n  window.emit(\"before-input-event\", {}, { key: \"F5\" });\n  expect(views.hide).toHaveBeenCalledOnce();\n});\n",
+    "packages/export/csv.ts": "export function exportCsv(rows: string[]) {\n  if (!rows.length) throw new Error('csv input is empty');\n  return rows.join(',');\n}\n"
   },
   "cases": [
     {
@@ -34,7 +35,8 @@
         "codePath": "packages/browser/focus.ts",
         "codeText": "host.focus()",
         "testPath": "packages/browser/focus.test.ts",
-        "testText": "expect(host.focus).not.toHaveBeenCalled()"
+        "testText": "expect(host.focus).not.toHaveBeenCalled()",
+        "relevance": "direct"
       }
     },
     {
@@ -45,7 +47,8 @@
         "codePath": "packages/auth/translation.ts",
         "codeText": "session expired",
         "testPath": "packages/auth/translation.test.ts",
-        "testText": "expect(result.category).toBe(\"unauthorized\")"
+        "testText": "expect(result.category).toBe(\"unauthorized\")",
+        "relevance": "direct"
       }
     },
     {
@@ -56,7 +59,44 @@
         "codePath": "packages/reload/handler.ts",
         "codeText": "before-input-event",
         "testPath": "packages/reload/handler.test.ts",
-        "testText": "expect(views.hide).toHaveBeenCalledOnce()"
+        "testText": "expect(views.hide).toHaveBeenCalledOnce()",
+        "relevance": "adjacent"
+      }
+    },
+    {
+      "id": "empty-test-search",
+      "title": "Empty CSV export crashes",
+      "body": "Linux, widget 1.0. Call exportCsv([]). Expected an empty CSV. Actual csv input is empty. No test path is provided.",
+      "expected": {
+        "codePath": "packages/export/csv.ts",
+        "codeText": "csv input is empty",
+        "testPath": null,
+        "testText": null,
+        "relevance": null
+      }
+    },
+    {
+      "id": "explicit-catalog-function",
+      "title": "loadVariants(undefined) throws",
+      "body": "Linux widget 1.0. Call loadVariants(undefined). Expected an empty list. Actual variant catalog unavailable exception. This report concerns the function behavior only; no UI or provider integration claim.",
+      "expected": {
+        "codePath": "packages/catalog/catalog.ts",
+        "codeText": "variant catalog unavailable",
+        "testPath": "packages/catalog/catalog.test.ts",
+        "testText": "expect(() => loadVariants(undefined))",
+        "relevance": "direct"
+      }
+    },
+    {
+      "id": "explicit-keyboard-trigger",
+      "title": "F5 reload should hide views",
+      "body": "Linux widget 1.0. Register registerReload then emit before-input-event with key F5. Expected views.hide called before reload. Actual preview remains. This report concerns only the keyboard F5 trigger.",
+      "expected": {
+        "codePath": "packages/reload/handler.ts",
+        "codeText": "before-input-event",
+        "testPath": "packages/reload/handler.test.ts",
+        "testText": "expect(views.hide).toHaveBeenCalledOnce()",
+        "relevance": "direct"
       }
     }
   ],
@@ -64,6 +104,8 @@
     "codePath": "packages/catalog/catalog.ts",
     "codeText": "variant catalog unavailable",
     "testPath": "packages/catalog/catalog.test.ts",
-    "testText": "expect("
-  }
+    "testText": "expect(",
+    "relevance": "adjacent"
+  },
+  "relevanceRubricVersion": 2
 }

@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "eventSchema": "capabilities/workflow-events.schema.json",
+  "agents": [
+    {
+      "id": "bug-readiness",
+      "manifest": "capabilities/bug-readiness.json",
+      "capabilityVersion": 2
+    },
+    {
+      "id": "code-location",
+      "manifest": "capabilities/code-location.json",
+      "capabilityVersion": 3
+    }
+  ]
+}

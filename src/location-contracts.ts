@@ -18,13 +18,18 @@ const Pointer = z.object({ excerptId: z.string().regex(/^E[1-9][0-9]*$/),
   startLine: z.number().int().positive(), endLine: z.number().int().positive(),
   symbol: z.string().min(1).max(160).nullable(), reason: z.string().min(1).max(500),
 }).strict();
+export const TestRelevance = z.enum(['direct', 'adjacent']);
+export const TestSearch = z.object({ status: z.enum(['completed', 'unfinished']),
+  reason: z.string().min(1).max(500) }).strict();
 export const BriefDraft = z.object({ status: z.enum(['located', 'not_located']),
-  codePointers: z.array(Pointer).max(4), testPointers: z.array(Pointer).max(3),
+  codePointers: z.array(Pointer).max(4), testPointers: z.array(Pointer.extend({ relevance: TestRelevance })).max(3),
+  testSearch: TestSearch,
   uncertainties: z.array(z.string().min(1).max(500)).min(1).max(5),
 }).strict();
 export type BriefDraft = z.infer<typeof BriefDraft>;
 export const Citation = z.object({ path: SourcePath, startLine: z.number().int().positive(), endLine: z.number().int().positive(),
   quote: z.string().min(1).max(2000), symbol: z.string().min(1).max(160).nullable(), reason: z.string().min(1).max(500) }).strict();
+export const TestCitation = Citation.extend({ relevance: TestRelevance });
 const BriefFields = { status: z.enum(['located', 'not_located']),
   summary: z.string().min(1).max(800), codePointers: z.array(Citation).max(4), testPointers: z.array(Citation).max(3),
   uncertainties: z.array(z.string().min(1).max(500)).min(1).max(5) };
@@ -33,12 +38,17 @@ export function locationSummary(brief: { status: 'located' | 'not_located'; code
   const first = brief.codePointers[0];
   return first ? `Start reading at ${first.path}:${first.startLine}. ${brief.testPointers.length} test citation${brief.testPointers.length === 1 ? '' : 's'} selected; see the evidence and limitations below.` : 'No code location established within the bounded search.';
 }
-// Historical summaries remain historical; only v2 enforces the host-generated overview.
+// Historical v1/v2 results retain their fields; relevance is never inferred for them.
+export const CurrentLocationBrief = z.object({ schemaVersion: z.literal(3), ...BriefFields,
+  testPointers: z.array(TestCitation).max(3), testSearch: TestSearch }).strict().superRefine((brief, ctx) => {
+  if (brief.summary !== locationSummary(brief)) ctx.addIssue({ code: 'custom', message: 'SUMMARY_MISMATCH: overview must be generated from validated locations' });
+});
 export const LocationBrief = z.discriminatedUnion('schemaVersion', [
   z.object({ schemaVersion: z.literal(1), ...BriefFields }).strict(),
   z.object({ schemaVersion: z.literal(2), ...BriefFields }).strict().superRefine((brief, ctx) => {
     if (brief.summary !== locationSummary(brief)) ctx.addIssue({ code: 'custom', message: 'SUMMARY_MISMATCH: v2 overview must be generated from validated locations' });
   }),
+  CurrentLocationBrief,
 ]);
 export type LocationBrief = z.infer<typeof LocationBrief>;
 export type Excerpt = { id: string; path: string; startLine: number; endLine: number; lines: string[] };
@@ -72,7 +82,7 @@ export function resolveBrief(raw: unknown, excerpts: Excerpt[], searchedTests: b
   const testPointers = draft.testPointers.map((p, i) => resolve(p, true, i));
   // Report every actionable field together; never make the model guess which pointer failed.
   if (errors.length) throw new Error(errors.join('; '));
-  const brief = { schemaVersion: 2 as const, ...draft,
-    codePointers: codePointers.map(p => Citation.parse(p)), testPointers: testPointers.map(p => Citation.parse(p)) };
+  const brief = { schemaVersion: 3 as const, ...draft,
+    codePointers: codePointers.map(p => Citation.parse(p)), testPointers: testPointers.map((p, i) => TestCitation.parse({ ...Citation.parse(p), relevance: draft.testPointers[i].relevance })) };
   return LocationBrief.parse({ ...brief, summary: locationSummary(brief) });
 }

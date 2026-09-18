@@ -24,10 +24,10 @@ const observed = observe({ number: 1, title: 'Artifact fails', body: 'Run build.
 const assessment = { schemaVersion: 2, kind: 'bug_report', bug_readiness: 'ready', summary: 'Artifact fails on Linux.',
   evidence: fields.map((field, i) => ({ field, source: 'body', quote: ['Run build.', 'Expected success.', 'Saw ENOENT.', 'Linux v1.'][i] })), questions: [] };
 const code = ['export function buildArtifact() {', '  return run("npm");', '}', 'const text = "</script><img src=x onerror=alert(1)>";'];
-const tests = ['import { buildArtifact } from "./artifact";', 'test("artifact", () => buildArtifact());'];
-const draft: BriefDraft = { status: 'located',
+const tests = ['import { buildArtifact } from "./artifact";', 'test("artifact", () => expect(buildArtifact()).toBeDefined());'];
+const draft: BriefDraft = { status: 'located', testSearch: { status: 'completed', reason: 'Read the bounded candidate test.' },
   codePointers: [{ excerptId: 'E1', startLine: 1, endLine: 4, symbol: 'buildArtifact', reason: 'Calls the reported program.' }],
-  testPointers: [{ excerptId: 'E2', startLine: 1, endLine: 2, symbol: 'buildArtifact', reason: 'Exercises the builder.' }],
+  testPointers: [{ relevance: 'direct', excerptId: 'E2', startLine: 1, endLine: 2, symbol: 'buildArtifact', reason: 'Exercises the builder.' }],
   uncertainties: ['The pinned source may differ from the reported release.'] };
 type Call = { name: string; input: unknown };
 const calls: Call[] = [
@@ -115,7 +115,7 @@ test('citations must use read excerpts, actual symbol text, appropriate paths, a
   assert.throws(() => resolveBrief(draft, excerpts, false), /TEST_SEARCH/);
   for (const change of [{ excerptId: 'E99' }, { startLine: 0 }, { endLine: 5 }, { symbol: 'inventedFunction' }, { excerptId: 'E2', endLine: 2 }])
     assert.throws(() => resolveBrief({ ...draft, codePointers: [{ ...draft.codePointers[0], ...change }] }, excerpts, true));
-  assert.throws(() => resolveBrief({ ...draft, testPointers: draft.codePointers }, excerpts, true), /TEST_PATH/);
+  assert.throws(() => resolveBrief({ ...draft, testPointers: draft.codePointers.map(p => ({ ...p, relevance: "direct" })) }, excerpts, true), /TEST_PATH/);
   const noResult = { ...draft, status: 'not_located', codePointers: [], testPointers: [] };
   assert.equal(resolveBrief(noResult, [], true).status, 'not_located');
 });
@@ -173,7 +173,7 @@ test('test navigation uses pinned source and cannot authorize a citation without
   assert.equal(hint.testNavigation?.fixtureReferences[0].line, 83);
   assert.equal(hint.testNavigation?.fixtureReferences[0].followingAssertionLine, 84);
   assert.equal(source.excerpts.length, 1); assert.equal(source.calls, 1); assert.equal(source.searchedTests, false);
-  const pointer = { excerptId: hint.excerptId, startLine: 84, endLine: 84, symbol: null, reason: 'Assertion' };
+  const pointer = { relevance: 'direct', excerptId: hint.excerptId, startLine: 84, endLine: 84, symbol: null, reason: 'Assertion' };
   await source.read({ path: 'src/artifact.ts', startLine: 1, endLine: 4 });
   assert.throws(() => resolveBrief({ ...draft, codePointers: [{ ...draft.codePointers[0], excerptId: 'E2' }],
     testPointers: [pointer] }, source.excerpts, true), /UNREAD_CITATION/);
@@ -246,15 +246,17 @@ test('test-only phase denies a code read and can finish on a valid submission wi
   assert.equal(run.events.filter(e => e.type === 'finalizationStarted').length, 0);
 });
 
-test('v2 overviews are deterministic, reject invented narratives, and retain v1 history without relabeling', async t => {
+test('v3 overviews are deterministic, reject invented narratives, and retain v1 history without relabeling', async t => {
   const f = await fixture(t);
   const run = await locateCode(f.input, { checkout: f.checkout, model: modelFor(calls), provider: 'fixture', modelId: 'scripted' });
-  assert.equal(run.schemaVersion, 2); assert.equal(run.brief?.schemaVersion, 2);
+  assert.equal(run.schemaVersion, 3); assert.equal(run.brief?.schemaVersion, 3);
   assert.match(run.brief!.summary, /^Start reading at src\/artifact.ts:1\./);
   assert.throws(() => resolveBrief({ ...draft, summary: 'The navigation listener exists.' }, run.source.excerpts, true));
   const altered = structuredClone(run); altered.brief!.summary = 'The navigation listener exists.';
   assert.throws(() => validateLocationRun(altered), /SUMMARY_MISMATCH/);
   altered.schemaVersion = 1; altered.brief!.schemaVersion = 1;
+  delete (altered.brief as any).testSearch;
+  for (const p of altered.brief!.testPointers) delete (p as any).relevance;
   assert.equal(validateLocationRun(altered).brief?.summary, 'The navigation listener exists.');
   assert.equal(validateLocationRun(altered).schemaVersion, 1);
   altered.schemaVersion = 2;
@@ -277,7 +279,7 @@ test('citation feedback reports all failing pointer fields together without acce
   });
   const corrected = { ...bad, codePointers: [{ ...bad.codePointers[0], endLine: 20 }, { ...bad.codePointers[1], symbol: null }],
     testPointers: [{ ...bad.testPointers[0], endLine: 20 }] };
-  assert.equal(resolveBrief(corrected, excerpts, true).schemaVersion, 2);
+  assert.equal(resolveBrief(corrected, excerpts, true).schemaVersion, 3);
 });
 
 test('workflow retains failures, retries explicitly, caches success, and renders only matching grounded briefs', async t => {
@@ -302,8 +304,51 @@ test('workflow retains failures, retries explicitly, caches success, and renders
   const html = await readFile(join(directory, 'index.html'), 'utf8');
   assert.ok(html.includes(`/blob/${f.commit}/src/artifact.ts#L1-L4`));
   assert.ok(!html.includes('</script><img')); assert.match(html, /&lt;img/);
+  assert.match(html, /Model-assessed relevance: <strong>direct<\/strong>/);
+  assert.match(html, /Bounded test search: <strong>completed<\/strong>/);
   const edited = { ...observed, snapshot: { ...observed.snapshot!, body: 'Edited report' } };
   await atomicJson(join(directory, 'index.json'), { schemaVersion: 1, observations: [edited] });
   assert.equal((await dispatch())[0].status, 'ineligible');
   assert.equal((await renderInbox(directory)).locationBriefs, 0);
+});
+
+test('v3 separates test relevance from search completion and rejects missing or invented labels', async t => {
+  const f = await fixture(t);
+  const run = await locateCode(f.input, { checkout: f.checkout, model: modelFor(calls), provider: 'fixture', modelId: 'scripted' });
+  for (const relevance of ['direct', 'adjacent'] as const) for (const status of ['completed', 'unfinished'] as const) {
+    const brief = resolveBrief({ ...draft, testPointers: draft.testPointers.map(p => ({ ...p, relevance })),
+      testSearch: { status, reason: 'Specific inspected condition; another lead remains.' } }, run.source.excerpts, true);
+    assert.equal(brief.schemaVersion, 3);
+    if (brief.schemaVersion !== 3) throw new Error('Expected v3');
+    assert.equal(brief.testSearch.status, status); assert.equal(brief.testPointers[0].relevance, relevance);
+  }
+  for (const status of ['completed', 'unfinished']) {
+    const empty = resolveBrief({ ...draft, testPointers: [], testSearch: { status, reason: 'No assertion established.' } }, run.source.excerpts, true);
+    assert.equal(empty.testPointers.length, 0);
+  }
+  for (const relevance of [undefined, 'covered', 'unfinished'])
+    assert.throws(() => resolveBrief({ ...draft, testPointers: [{ ...draft.testPointers[0], relevance }] }, run.source.excerpts, true));
+  assert.throws(() => resolveBrief({ ...draft, testSearch: undefined }, run.source.excerpts, true));
+  const legacy = structuredClone(run) as any;
+  legacy.schemaVersion = legacy.brief.schemaVersion = 2;
+  delete legacy.brief.testSearch;
+  for (const c of legacy.brief.testPointers) delete c.relevance;
+  const before = JSON.stringify(legacy);
+  assert.equal(validateLocationRun(legacy).schemaVersion, 2);
+  assert.equal(JSON.stringify(legacy), before);
+});
+
+test('common location events preserve parent identities and v3 relevance without exporting source', async t => {
+  const { workflowEvents } = await import('../src/workflow-events.ts');
+  const f = await fixture(t);
+  const run = await locateCode(f.input, { checkout: f.checkout, model: modelFor(calls), provider: 'fixture', modelId: 'scripted' });
+  const events = workflowEvents(run).events;
+  const done = events.find(e => e.type === 'agent.completed')!;
+  assert.equal(done.parentRunId, f.parent.runId); assert.equal(done.repositoryCommit, f.commit);
+  assert.equal(done.recordVersion, 3); assert.equal(done.directTests, 1); assert.equal(done.adjacentTests, 0);
+  assert.equal(done.testSearch, 'completed'); assert.ok(!JSON.stringify(events).includes(code[1]));
+  const legacy = structuredClone(run) as any; legacy.schemaVersion = legacy.brief.schemaVersion = 2;
+  delete legacy.brief.testSearch; for (const p of legacy.brief.testPointers) delete p.relevance;
+  const old = workflowEvents(legacy).events.find(e => e.type === 'agent.completed')!;
+  assert.equal(old.recordVersion, 2); assert.equal(old.directTests, undefined); assert.equal(old.testSearch, undefined);
 });
