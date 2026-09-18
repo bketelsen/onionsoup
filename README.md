@@ -2,7 +2,7 @@
 
 Small OSS maintenance agents with explicit jobs, shared data contracts, and
 inspectable results. Built with [AgentLayer](https://github.com/humanlayer/agentlayer)
-and the [12-Factor Agents principles](docs/twelve-factors.md).
+and the [12-Factor Agents principles](docs/design/twelve-factors.md).
 
 The first agent is **bug-report readiness**: given one issue snapshot, decide
 whether a maintainer has enough information to investigate. It returns a request
@@ -19,9 +19,12 @@ the cause, run repository code, or propose changes.
 
 This is a proof of concept with an explicit handoff between two narrow jobs.
 There is no team scheduler or shared conversation.
-The [“taco-bell orchestration” design note](docs/composable-agents.md) captures the
+The [“taco-bell orchestration” design note](docs/design/composable-agents.md) captures the
 goal: multiple orchestration tools composing the same focused agents into
-different workflows, and the proposed next PoC to demonstrate a second consumer.
+different workflows. The inbox and portable packet demonstrate two consumers.
+
+Start with the [documentation index](docs/README.md) for current contracts,
+architecture decisions, historical evidence, and the [roadmap](docs/plans/roadmap.md).
 
 ## Start locally
 
@@ -93,8 +96,8 @@ issues and assesses up to five new or changed reports with Terra. Open
 `runs/inbox/get-bb--bb/index.html` to browse the results, proposed questions,
 waiting reports, and failures. There are no grading forms or GitHub writes.
 Unchanged title/body content is reused; explicit retries preserve earlier attempts.
-See [the inbox guide](docs/inbox.md) for bounds, freshness, recovery, and commands,
-and [the live pilot record](docs/inbox-pilot-2026-09-18.md) for operational results.
+See [the inbox guide](docs/specs/inbox.md) for bounds, freshness, recovery, and commands,
+and [the live pilot record](docs/plans/records/inbox-pilot-2026-09-18.md) for operational results.
 
 ## Locate investigation starting points
 
@@ -111,14 +114,14 @@ npm run locate -- runs/inbox/get-bb--bb \
 This uses Terra, saves each brief and its inspected evidence, and attaches it to
 the matching inbox card. Repeat the command to reuse completed results without
 model calls. Fetching source and selecting its commit happen outside the agent.
-See [the code-location contract and operating guide](docs/code-location.md).
-The [three-report development pilot](docs/code-location-pilot-2026-09-18.md)
+See [the code-location contract and operating guide](docs/specs/code-location.md).
+The [three-report development pilot](docs/plans/records/code-location-pilot-2026-09-18.md)
 records both useful pointers and search-quality limitations.
-The [search/test-selection follow-up](docs/code-location-search-2026-09-18.md)
+The [search/test-selection follow-up](docs/plans/records/code-location-search-2026-09-18.md)
 records the v4 improvements, retained failures, and remaining relevance limits.
-The [v5 follow-up](docs/test-selection-2026-09-18.md) adds fixture-to-assertion
+The [v5 follow-up](docs/plans/records/test-selection-2026-09-18.md) adds fixture-to-assertion
 navigation and records both its gains and remaining selection/summary failures.
-The [bounded reliability pass](docs/reliability-2026-09-18.md) reserves test reads,
+The [bounded reliability pass](docs/plans/records/reliability-2026-09-18.md) reserves test reads,
 uses host-generated v2 overviews, and reports indexed citation errors together.
 `npm run eval:location` runs six small Terra-only search regression cases,
 including misleading paths, embedded instructions, distant fixture consumers,
@@ -144,8 +147,8 @@ must already exist). Existing directories are never overwritten or retried.
 `npm run packet -- render DIRECTORY` regenerates Markdown from JSON without model
 calls or credentials. Non-bug and incomplete reports retain their classification
 or questions; failed location attempts yield a partial packet. See the
-[packet contract](docs/investigation-packet.md) for lifecycle and portability.
-The [five-report Terra pilot](docs/packet-pilot-2026-09-18.md) includes two repeats
+[packet contract](docs/specs/investigation-packet.md) for lifecycle and portability.
+The [five-report Terra pilot](docs/plans/records/packet-pilot-2026-09-18.md) includes two repeats
 and an assistant review of code/test relevance and consistency.
 
 ## Evaluate and inspect
@@ -160,14 +163,14 @@ configured live subscription and uses its quota. Evaluation pins Terra explicitl
 Expected outcomes are held outside the prompt. Run records include
 the snapshot, its hash, model/provider, prompt version, timestamps, step/tool events,
 usage reported by AgentLayer, termination reason, and final AgentLayer state.
-See [validation](docs/validation.md) for measured results and limitations.
-The [first real-issue pilot](docs/bb-pilot-2026-09-18.md) exposed judgment failures
+See [validation](docs/design/validation.md) for measured results and limitations.
+The [first real-issue pilot](docs/plans/records/bb-pilot-2026-09-18.md) exposed judgment failures
 in the mini model; do not infer task reliability from the offline demo or the
 original six-case result.
 
 For a frozen Terra-only real-issue batch with human feedback, use the
-[batch evaluation workflow](docs/batch-evaluation.md). The historical
-[40-issue Terra/Luna evaluation](docs/bb-heldout-2026-09-18.md) keeps runtime
+[batch evaluation workflow](docs/specs/batch-evaluation.md). The historical
+[40-issue Terra/Luna evaluation](docs/plans/records/bb-heldout-2026-09-18.md) keeps runtime
 success separate from human acceptance and requires an explicit cost decision
 before recommending a supervised pilot.
 
@@ -179,13 +182,15 @@ v1 outputs retain their original labels and can still receive feedback.
 
 ## Repository skills and contracts
 
-The four skills in [skills/](skills/) cover [scope/contracts](skills/agent-contract/SKILL.md),
-[prompts/context](skills/agent-context/SKILL.md), [execution/recovery](skills/agent-execution/SKILL.md),
-and [evaluation/visibility](skills/agent-evaluation/SKILL.md). `.agents/skills`
-links to this directory for discovery, and [AGENTS.md](AGENTS.md) provides routing.
+The four skills in [.agents/skills/](.agents/skills/) cover [scope/contracts](.agents/skills/agent-contract/SKILL.md),
+[prompts/context](.agents/skills/agent-context/SKILL.md), [execution/recovery](.agents/skills/agent-execution/SKILL.md),
+and [evaluation/visibility](.agents/skills/agent-evaluation/SKILL.md). [AGENTS.md](AGENTS.md)
+provides canonical instructions; tool-specific paths and the legacy `skills` path
+are symlinks. The [repository design](docs/design/repository-layout.md) describes
+the adopted agentic-template conventions.
 
-The [readiness contract](docs/bug-readiness.md) and
-[code-location contract](docs/code-location.md) explain success, evidence,
-authority, failure, and handoff. [The twelve-factor mapping](docs/twelve-factors.md)
+The [readiness contract](docs/specs/bug-readiness.md) and
+[code-location contract](docs/specs/code-location.md) explain success, evidence,
+authority, failure, and handoff. [The twelve-factor mapping](docs/design/twelve-factors.md)
 explains what is implemented now and what is intentionally deferred. These
 contracts are the starting point for a future team; there is no team runtime yet.

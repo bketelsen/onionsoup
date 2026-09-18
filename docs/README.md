@@ -1,0 +1,76 @@
+# Onionsoup documentation
+
+Start with the [agent design](design/agents.md), then the exact contracts below.
+The [roadmap](plans/roadmap.md) separates implemented capabilities from planned
+work; the [evaluation plan](plans/evaluations.md) indexes the evidence and limits.
+
+Documentation follows [agentic-template](https://github.com/bketelsen/agentic-template)
+as recorded in [ADR-0003](adr/0003-adopt-agentic-template-retroactively.md).
+Use category templates for new documents and maintain reciprocal links under
+[AGENTS.md](../AGENTS.md). Run `npm run check:docs` to validate the local structure.
+
+## Decisions — why
+
+Accepted decisions record rationale; a later decision supersedes an earlier one.
+
+- [0001 — Record architecture decisions](adr/0001-record-architecture-decisions.md)
+- [0002 — Agent-portable instruction surface](adr/0002-agent-portable-instruction-surface.md)
+- [0003 — Adopt agentic-template without changing agent behavior](adr/0003-adopt-agentic-template-retroactively.md)
+- [0004 — Compose bounded maintenance agents through versioned artifacts](adr/0004-compose-bounded-maintenance-agents.md)
+- [ADR template](adr/TEMPLATE.md)
+
+## Design — how
+
+Living descriptions of the implemented system.
+
+- [Design template](design/TEMPLATE.md)
+- [Focused agents and artifact handoffs](design/agents.md)
+- [“Taco-bell orchestration”: reusable agents, different recipes](design/composable-agents.md)
+- [Repository layout and instruction discovery](design/repository-layout.md)
+- [Twelve factors, applied to Onionsoup](design/twelve-factors.md)
+- [Validation record](design/validation.md)
+
+## Specs — exact contracts
+
+Behavioral contract changes accompany implementation.
+
+- [Specs template](specs/TEMPLATE.md)
+- [Frozen batch evaluation](specs/batch-evaluation.md)
+- [Bug-report readiness contract, version 2](specs/bug-readiness.md)
+- [Code-location contract, version 2](specs/code-location.md)
+- [Read-only maintenance inbox](specs/inbox.md)
+- [Portable investigation packet, version 1](specs/investigation-packet.md)
+- [Spec: Repository layout and documentation checks](specs/repository-layout.md)
+
+## Plans — order of work
+
+Phased delivery with observable Done when outcomes.
+
+- [Plans template](plans/TEMPLATE.md)
+- [Plan: Evaluation evidence and next qualification](plans/evaluations.md)
+- [Plan: Onionsoup roadmap](plans/roadmap.md)
+- [Plan: Retroactive template adoption](plans/template-adoption.md)
+
+### Historical evaluation evidence
+
+These dated appendices preserve the findings and versions of each trial.
+Raw run links are optional local evidence; those files are intentionally not published.
+
+- [Evaluation record template](plans/records/TEMPLATE.md)
+- [Terra/Luna held-out issue evaluation — 2026-09-18](plans/records/bb-heldout-2026-09-18.md)
+- [Real-issue pilot: get-bb/bb, 2026-09-18](plans/records/bb-pilot-2026-09-18.md)
+- [Code-location pilot — 2026-09-18](plans/records/code-location-pilot-2026-09-18.md)
+- [Search and test selection follow-up — 2026-09-18](plans/records/code-location-search-2026-09-18.md)
+- [Read-only intake pilot — 2026-09-18](plans/records/inbox-pilot-2026-09-18.md)
+- [Local server assessment — 2026-09-18](plans/records/local-server-evaluation-2026-09-18.md)
+- [Portable investigation packet pilot — 2026-09-18](plans/records/packet-pilot-2026-09-18.md)
+- [Bounded test completion and source-linked overviews — 2026-09-18](plans/records/reliability-2026-09-18.md)
+- [Terra comparison, 2026-09-18](plans/records/terra-comparison-2026-09-18.md)
+- [Following fixtures to assertions — 2026-09-18](plans/records/test-selection-2026-09-18.md)
+
+## Related repository material
+
+- [README and commands](../README.md)
+- [Canonical contributor instructions](../AGENTS.md)
+- [Sources and attribution](../REFERENCES.md)
+- [Reusable agent skills](../.agents/skills/)
