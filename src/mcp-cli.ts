@@ -1,3 +1,5 @@
+import { open } from 'node:fs/promises';
+import { ReadinessWorkflowInput } from './readiness-workflow.ts';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { createAgentMcpServer } from './mcp-adapter.ts';
 import { liveModel, providerName } from './providers.ts';
@@ -17,7 +19,23 @@ async function main() {
     throw new Error('Missing launch configuration');
   const selectedProvider = providerName(provider);
   const maxInvocations = Number(process.env.ONIONSOUP_MCP_MAX_INVOCATIONS ?? '1');
-  const server = createAgentMcpServer({ runsDirectory, maxInvocations,
+  let preparedInput;
+  if (process.env.ONIONSOUP_WORKFLOW_INPUT) {
+    const file = await open(process.env.ONIONSOUP_WORKFLOW_INPUT, 'r');
+    try {
+      if (!(await file.stat()).isFile()) throw new Error('Not a regular input file');
+      const bytes = Buffer.alloc(524289);
+      let bytesRead = 0;
+      while (bytesRead < bytes.length) {
+        const next = await file.read(bytes, bytesRead, bytes.length - bytesRead, bytesRead);
+        if (!next.bytesRead) break;
+        bytesRead += next.bytesRead;
+      }
+      if (bytesRead > 524288) throw new Error('Prepared input is too large');
+      preparedInput = ReadinessWorkflowInput.parse(JSON.parse(bytes.subarray(0, bytesRead).toString('utf8')));
+    } finally { await file.close(); }
+  }
+  const server = createAgentMcpServer({ runsDirectory, maxInvocations, preparedInput,
     model: () => liveModel(modelId, selectedProvider) });
   for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     process.once(signal, () => { void server.close(); });

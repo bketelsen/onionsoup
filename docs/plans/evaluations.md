@@ -71,6 +71,16 @@ qualification is not claimed.
   [external composition report](records/external-composition-2026-09-18.md).
 - This is integration evidence, not a new task-accuracy evaluation.
 
+## Phase 6 — Bounded multi-issue consumer
+
+- Exercise the [workflow contract](../specs/readiness-workflow.md) through Codex
+  and [MCP](../specs/mcp-adapter.md).
+- **Done when:** the exact three frozen snapshots are preserved through a
+  two-invocation workflow, the third is explicitly unattempted, and software tests
+  cover shared capacity and partial outcomes. Demonstrated in the
+  [workflow report](records/multi-issue-workflow-2026-09-18.md), which preserves the
+  failed input-copying attempt and successful prepared-input follow-up.
+
 ## Later / ideas
 
 Model-comparison infrastructure, new local-provider batches, broader source

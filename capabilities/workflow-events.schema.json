@@ -60,8 +60,41 @@
               "agent.step_finished",
               "agent.tool_requested",
               "stage.skipped",
-              "stage.failed"
+              "stage.failed",
+              "stage.unfinished",
+              "workflow.budget_reserved"
             ]
+          },
+          "budget": {
+            "type": "object",
+            "properties": {
+              "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10
+              },
+              "consumed": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 10
+              },
+              "remaining": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 10
+              }
+            },
+            "required": [
+              "limit",
+              "consumed",
+              "remaining"
+            ],
+            "additionalProperties": false
+          },
+          "issueIndex": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4
           },
           "agent": {
             "type": "string",
@@ -140,7 +173,11 @@
             "enum": [
               "not_eligible",
               "readiness_failed",
-              "location_not_started"
+              "location_not_started",
+              "budget_exhausted",
+              "cancelled",
+              "prior_attempt_unfinished",
+              "not_started"
             ]
           },
           "outcome": {

@@ -88,9 +88,19 @@ implementation, the initial 4/7 expected-label match, focused follow-up, and lim
   it, and inspects a traceable result without broadening the agent's contract or
   authority. Demonstrated in the [proof report](records/external-composition-2026-09-18.md).
 
+## Phase 8 — Shared admission and partial outcomes
+
+- Implemented: the [readiness workflow](../specs/readiness-workflow.md), following
+  [composition design](../design/composable-agents.md) and
+  [ADR-0007](../adr/0007-bound-a-multi-issue-readiness-workflow.md).
+- **Done when:** a model consumer invokes three exact prepared snapshots with an
+  allowance of two, reports the unattempted third issue, and inspection preserves
+  failure/cancellation/persistence boundaries. See the
+  [workflow proof](records/multi-issue-workflow-2026-09-18.md).
+
 ## Later / ideas
 
-- Choose a concrete multi-issue recipe before adding aggregate workflow budgets.
+- Extend shared invocation admission to another agent only for a concrete recipe.
 - Revisit provider/model comparison as a structured study. Local inference remains
   a reasonable exploration route, currently deferred.
 - Add focused agents only when evidence identifies a separate useful job and its

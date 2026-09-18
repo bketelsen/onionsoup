@@ -59,6 +59,16 @@ and inspects the same assessment and common events. The
 [proof report](../plans/records/external-composition-2026-09-18.md) records a successful
 live handoff and the preceding approval-configuration failure.
 
+### Bounded multi-issue recipe
+
+The [readiness workflow](../specs/readiness-workflow.md) processes up to five supplied
+snapshots in caller order. It shares the MCP process's admission allowance with
+single calls and other workflows, and exposes explicit per-issue partial outcomes.
+It is ordinary orchestration around the unchanged readiness agent. The caller
+still owns selection and any next action; it gains no GitHub write authority.
+[ADR-0007](../adr/0007-bound-a-multi-issue-readiness-workflow.md) records the decision;
+[backlog Phase 4](../plans/backlog.md#phase-4--bounded-multi-issue-recipe) tracks delivery.
+
 ### Second-consumer proof of concept
 
 The [portable investigation-packet command](../specs/investigation-packet.md) uses the same

@@ -27,7 +27,7 @@ npm run check:capabilities
 
 For pure JSON stdout without npm's command header, invoke
 `node --import tsx src/agents-cli.ts ...` directly. `events` accepts a raw readiness
-record (v1/v2), raw location record (v1/v2/v3), or packet JSON/directory (v1). It does
+record (v1/v2), raw location record (v1/v2/v3), packet JSON/directory (v1), or [readiness-workflow JSON](readiness-workflow.md) (v1). It does
 not accept inbox wrapper objects or a batch manifest. Output goes to stdout; it
 does not rewrite the source artifact. Invalid inputs exit nonzero with a generic
 message to avoid echoing untrusted content.
@@ -80,6 +80,13 @@ Cost is not a bill or remaining subscription quota. Reuse has only historical
 usage. Unknown failure strings become `unknown_failure`; only known codes are
 exported. Legacy readiness remains `unclassified_legacy`, and old location records
 have no invented relevance counts.
+
+Multi-issue workflows add `workflow.budget_reserved`, `stage.unfinished`, optional
+`budget` snapshots and `issueIndex`, and reasons for exhaustion/cancellation.
+Child run IDs remain intact under the parent workflow ID. Existing record exports
+remain unchanged; strict consumers of the extended vocabulary need the current
+schema. See the [workflow contract](readiness-workflow.md) for exact admission,
+partial-outcome, and persistence semantics.
 
 ## Rules
 

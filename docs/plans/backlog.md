@@ -40,6 +40,18 @@ skills make the twenty-factor recommendations reusable; see
   [external-consumer proof](records/external-composition-2026-09-18.md), including
   the first approval-configuration failure and the successful follow-up.
 
+## Phase 4 — Bounded multi-issue recipe
+
+- Implemented a sequential [readiness workflow](../specs/readiness-workflow.md)
+  through [MCP](../specs/mcp-adapter.md), following
+  [composition design](../design/composable-agents.md).
+- Share one invocation allowance across single calls and workflows; preserve
+  failed, unfinished, cancelled, and budget-exhausted items and common events.
+- **Done when:** a three-issue external consumer proof with capacity for two
+  preserves two completed runs and an explicit unattempted third issue, and
+  failure/cancellation/persistence tests show no extra admission or false success.
+  Demonstrated in the [workflow report](records/multi-issue-workflow-2026-09-18.md).
+
 ## Later / ideas
 
 | Item | Trigger / acceptance evidence |
@@ -47,7 +59,7 @@ skills make the twenty-factor recommendations reusable; see
 | Smaller model context separate from full history (12F 3) | Compare evidence-preserving context assembly on frozen failures before adoption. |
 | Deterministic repository-map prefetch (12F appendix) | Small pinned map reduces discovery work without hiding decisive evidence or consuming the source budget unaccountably. |
 | Repeated-error/no-progress detection (12F 9) | Stop repeated equivalent failures with a useful reason; prove it does not stop recoverable cases early. |
-| Aggregate workflow budgets (20F 18/20) | Shared admission allowance across agents/retries; children cannot reset it. Keep unknown subscription cost unknown. |
+| Broader workflow budgets (20F 18/20) | Phase 4 implements process-local invocation admission. Add durable or cross-agent quotas only for a concrete workflow; keep unknown subscription cost unknown. |
 | Complete execution manifests (20F 5/16) | Link code, prompts, schemas, provider configuration, dataset/evaluator versions, and results; record limits of provider model pinning. |
 | Explicit delegated authority (20F 8) | Before write-capable agents, enforce invocation permissions as a subset of caller authorization and agent capability. |
 | Durable waits and recovery (12F 5–8; 20F 13) | Add only for a real wait or meaningful partial effects; test crashes, ambiguous outcomes, version changes, and reconciliation. |
@@ -61,7 +73,7 @@ remain deferred; new development evaluations use Terra only.
 
 ## Open questions
 
-- Which concrete multi-issue recipe justifies a shared workflow admission budget?
+- Which next recipe needs a second agent under the shared admission allowance?
 - When does useful repeated work justify prefetch or context reconstruction?
 - Which workflow first requires durable approval or write-effect reconciliation?
 

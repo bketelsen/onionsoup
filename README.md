@@ -226,3 +226,10 @@ invoke the existing bug-readiness agent, and inspect its result and workflow
 events. Launch configuration fixes the provider, model, private artifacts, and
 invocation allowance (default one). See the spec for configuration and the
 repeatable `npm run prove:codex -- SNAPSHOT.json` integration proof.
+
+
+A [bounded multi-issue recipe](docs/specs/readiness-workflow.md) handles up to five
+snapshots under the same server allowance as single calls, with explicit partial
+outcomes. For model consumers, prepare inputs once and invoke them by hash to
+preserve full issue bodies. `npm run prove:codex -- --workflow THREE_ISSUES.json`
+proves three issues with a budget of two; the third remains explicitly unattempted.

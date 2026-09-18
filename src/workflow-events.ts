@@ -1,7 +1,7 @@
 import { z } from 'zod';
-import { IssueSnapshot, validateAssessment } from './contracts.ts';
-import { validateLegacyAssessment } from './legacy-contracts.ts';
-import { inputHash } from './triage.ts';
+import { InvocationBudgetSnapshot } from './invocation-budget.ts';
+import { validateReadinessWorkflow } from './readiness-workflow.ts';
+import { validateReadinessRun } from './readiness-record.ts';
 import { validatePacket } from './packet.ts';
 import { validateLocationRun } from './location-record.ts';
 import type { StoredRunRecord } from './assessment-view.ts';
@@ -17,7 +17,9 @@ export const WorkflowEvent = z.object({
   schemaVersion: z.literal(1), workflowId: Id, sequence: z.number().int().nonnegative(), at: z.iso.datetime(),
   type: z.enum(['workflow.started', 'workflow.completed', 'workflow.partial', 'workflow.failed', 'workflow.unfinished',
     'agent.started', 'agent.completed', 'agent.failed', 'agent.unfinished', 'agent.reused',
-    'agent.step_started', 'agent.step_finished', 'agent.tool_requested', 'stage.skipped', 'stage.failed']),
+    'agent.step_started', 'agent.step_finished', 'agent.tool_requested', 'stage.skipped', 'stage.failed',
+    'stage.unfinished', 'workflow.budget_reserved']),
+  budget: InvocationBudgetSnapshot.optional(), issueIndex: z.number().int().min(0).max(4).optional(),
   agent: z.enum(['bug-readiness', 'code-location']).optional(), runId: Id.optional(), parentRunId: Id.optional(),
   recordVersion: z.number().int().positive().optional(), promptVersion: z.string().regex(/^[\w.-]+$/).optional(),
   runtimeHash: z.string().regex(/^[a-f0-9]{64}$/).optional(), inputHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
@@ -25,7 +27,7 @@ export const WorkflowEvent = z.object({
   provider: z.string().regex(/^[\w.-]+$/).optional(), model: z.string().regex(/^[\w./:-]+$/).optional(),
   step: z.number().int().nonnegative().optional(),
   tool: z.enum(['submit_assessment', 'search_repository', 'read_repository', 'submit_brief']).optional(),
-  failure: Failures.optional(), reason: z.enum(['not_eligible', 'readiness_failed', 'location_not_started']).optional(),
+  failure: Failures.optional(), reason: z.enum(['not_eligible', 'readiness_failed', 'location_not_started', 'budget_exhausted', 'cancelled', 'prior_attempt_unfinished', 'not_started']).optional(),
   outcome: z.enum(['ready', 'needs_information', 'not_applicable', 'out_of_scope', 'located', 'not_located']).optional(),
   requestKind: z.enum(['bug_report', 'feature_request', 'support_question', 'other', 'unclear', 'unclassified_legacy']).optional(),
   testSearch: z.enum(['completed', 'unfinished']).optional(), directTests: z.number().int().nonnegative().optional(),
@@ -33,6 +35,8 @@ export const WorkflowEvent = z.object({
   usage: Usage.optional(), historicalUsage: Usage.optional(), originalStartedAt: z.iso.datetime().optional(),
   originalFinishedAt: z.iso.datetime().optional(),
 }).strict().superRefine((event, ctx) => {
+  if (event.type === 'workflow.budget_reserved' && (!event.budget || event.issueIndex === undefined))
+    ctx.addIssue({ code: 'custom', message: 'Budget reservations require allowance and issue identity' });
   if (event.type === 'agent.reused' && event.usage) ctx.addIssue({ code: 'custom', message: 'Reused usage must be historical' });
   if (event.type.startsWith('agent.') && (!event.agent || !event.runId))
     ctx.addIssue({ code: 'custom', message: 'Agent events require identity' });
@@ -51,34 +55,21 @@ const usage = (raw: unknown) => {
   return Usage.parse(Object.fromEntries(Object.keys(Usage.shape).map(key => [key, number(key)])));
 };
 const failure = (raw: unknown): z.infer<typeof Failures> => Failures.safeParse(raw).success ? raw as z.infer<typeof Failures> : 'unknown_failure';
-function readinessRun(raw: unknown): StoredRunRecord {
-  const r = raw as StoredRunRecord;
-  if (!r || ![1, 2].includes(r.schemaVersion) || r.agent !== 'bug-readiness' ||
-      !Id.safeParse(r.runId).success || !r.provider || !r.model || !r.promptVersion || !['running', 'completed', 'failed'].includes(r.status) ||
-      !z.iso.datetime().safeParse(r.startedAt).success || !Array.isArray(r.events) ||
-      (r.status !== 'running' && !z.iso.datetime().safeParse(r.finishedAt).success)) throw new Error('Invalid readiness record');
-  const input = IssueSnapshot.parse(r.input);
-  if (r.inputHash !== inputHash(input)) throw new Error('Readiness input identity mismatch');
-  if (r.status === 'completed') {
-    if (r.schemaVersion === 1) validateLegacyAssessment(r.assessment, input);
-    else validateAssessment(r.assessment, input);
-  } else if (r.assessment) throw new Error('Unfinished readiness has an assessment');
-  return r;
-}
 
 // The original records remain the truth. No provider calls, new timestamps, or raw content.
 export function workflowEvents(raw: unknown) {
   const candidate = raw as Record<string, unknown>;
+  const workflow = candidate?.kind === 'readiness-workflow' ? validateReadinessWorkflow(raw) : undefined;
   const packet = candidate?.packetId ? validatePacket(raw) : undefined;
-  const run = packet ? undefined : candidate?.agent === 'code-location' ? validateLocationRun(raw) : readinessRun(raw);
-  const workflowId = packet?.packetId ?? run!.runId;
+  const run = packet || workflow ? undefined : candidate?.agent === 'code-location' ? validateLocationRun(raw) : validateReadinessRun(raw);
+  const workflowId = workflow?.workflowId ?? packet?.packetId ?? run!.runId;
   const events: WorkflowEvent[] = [];
   const add = (event: Omit<WorkflowEvent, 'schemaVersion' | 'workflowId' | 'sequence'>) => {
     events.push(WorkflowEvent.parse({ schemaVersion: 1, workflowId, sequence: events.length, ...event }));
   };
-  const appendRun = (record: StoredRunRecord | LocationRun, reusedAt?: string) => {
+  const appendRun = (record: StoredRunRecord | LocationRun, reusedAt?: string, issueIndex?: number) => {
     const location = record.agent === 'code-location' ? record : undefined;
-    const base = { agent: record.agent, runId: record.runId, recordVersion: record.schemaVersion,
+    const base = { ...(issueIndex !== undefined ? { issueIndex } : {}), agent: record.agent, runId: record.runId, recordVersion: record.schemaVersion,
       promptVersion: record.promptVersion, provider: record.provider, model: record.model,
       inputHash: location ? location.input.parent.inputHash : (record as StoredRunRecord).inputHash,
       ...(location ? { parentRunId: location.input.parent.runId, runtimeHash: location.runtimeHash,
@@ -116,8 +107,22 @@ export function workflowEvents(raw: unknown) {
       at: record.finishedAt ?? record.events?.filter(e => z.iso.datetime().safeParse(e.at).success).at(-1)?.at ?? record.startedAt,
       failure: record.status === 'failed' ? failure(record.failure) : undefined, usage: totals });
   };
-  add({ type: 'workflow.started', at: packet?.createdAt ?? run!.startedAt });
-  if (packet) {
+  add({ type: 'workflow.started', at: workflow?.startedAt ?? packet?.createdAt ?? run!.startedAt,
+    ...(workflow ? { budget: workflow.budgetAtStart } : {}) });
+  if (workflow) {
+    for (const [issueIndex, item] of workflow.items.entries()) {
+      const base = { issueIndex, inputHash: item.inputHash, at: item.updatedAt, agent: 'bug-readiness' as const };
+      if (item.reservation) add({ ...base, type: 'workflow.budget_reserved', at: item.reservedAt!, budget: item.reservation });
+      if (item.run) appendRun(item.run, undefined, issueIndex);
+      else if (item.status === 'failed') add({ ...base, type: 'stage.failed',
+        failure: item.reason === 'cancelled' ? 'interrupted_or_timed_out' : 'execution_error' });
+      else if (item.status === 'not_attempted') add({ ...base, type: 'stage.skipped',
+        reason: item.reason as 'budget_exhausted' | 'cancelled' | 'prior_attempt_unfinished' });
+      else add({ ...base, type: 'stage.unfinished', reason: 'not_started' });
+    }
+    add({ type: workflow.status === 'running' ? 'workflow.unfinished' : `workflow.${workflow.status}`,
+      at: workflow.finishedAt ?? [workflow.startedAt, ...workflow.items.map(i => i.updatedAt)].sort().at(-1)!, budget: workflow.budget });
+  } else if (packet) {
     if (packet.readiness) appendRun(packet.readiness, packet.reusedReadiness ? packet.createdAt : undefined);
     if (packet.location) appendRun(packet.location);
     else if (packet.status !== 'running') add({ agent: 'code-location', at: packet.finishedAt!,

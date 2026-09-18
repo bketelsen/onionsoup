@@ -173,6 +173,11 @@ The [Codex integration proof](../plans/records/external-composition-2026-09-18.m
 validates an actual external consumer against the [MCP adapter](../specs/mcp-adapter.md).
 It proves a traceable handoff for one snapshot, not assessment quality.
 
+The [multi-issue proof](../plans/records/multi-issue-workflow-2026-09-18.md)
+checks exact input preservation and shared capacity. Its first attempt exposed
+model-side loss of issue bodies; host-prepared input selection corrected that
+handoff without changing the assessment agent or its prompt.
+
 ## Operational notes
 
 Run `npm run verify` and `npm run demo` without credentials. Live trials require a configured subscription and currently use Terra only. Dated findings above qualify their recorded versions, not every later revision.
