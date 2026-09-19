@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "id": "clippy-v1",
+  "repository": "bketelsen/clippy",
+  "repositoryId": 172236427,
+  "baseBranch": "master",
+  "execution": {
+    "adapter": "go-module-v1",
+    "sandbox": "offline-go-v1",
+    "toolchain": {
+      "version": "go version go1.26.7 linux/amd64",
+      "digest": "8d7948878a4b21d5d03904a702d33f7c4f052fafeaccee9d4cc1e93b6b3e1201"
+    },
+    "dependencies": "public-checksummed-go-v1"
+  },
+  "verification": {
+    "required": [
+      "go-build",
+      "go-test",
+      "go-vet",
+      "gofmt"
+    ]
+  },
+  "changes": {
+    "allowed": [
+      "main.go",
+      "main_test.go",
+      "README.md"
+    ],
+    "protected": [
+      ".github/**",
+      "go.mod",
+      "go.sum",
+      "resources/**"
+    ],
+    "maximumFiles": 3,
+    "existingTests": "append-only"
+  },
+  "publication": "draft"
+}

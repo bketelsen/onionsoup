@@ -36,6 +36,7 @@ export function validateBundle(raw:unknown):Bundle {
   const parsed=Bundle.parse(raw);
   if(parsed.schemaVersion===2) {
     const w=validateProject(parsed.project),b=parsed;
+    if(w.job.schemaVersion===2&&(b.target.repositoryId!==w.job.repositoryProfile.repositoryId||b.target.baseBranch!==w.job.repositoryProfile.baseBranch))throw new Error('Publication profile identity changed');
     if(w.status!=='completed'||w.outcome!=='candidate_verified'||hash(w)!==b.projectHash||b.target.repository!==w.job.repository||b.target.baseCommit!==w.job.baseCommit||b.headCommit!==w.headCommit||b.headTree!==w.headTree||b.diff!==w.diff||b.diffHash!==hash(b.diff)||b.publicationId!==identity(b.target,b.projectHash)||b.branch!==`codex/onionsoup-${b.publicationId.slice(0,32)}`||!b.body.endsWith(`<!-- onionsoup-publication:${b.publicationId} -->`))throw new Error('Invalid project publication');
     return {...b,project:w};
   }

@@ -110,3 +110,5 @@ manual inspection. Malformed or symlink-escaped history entries are excluded.
 [ADR-0018](../adr/0018-separate-project-policy-from-language-verification.md) adds
 the Go Clippy profile to the same v2 envelope and exact-commit publisher; the
 profile repository, configured target and accepted base must match.
+
+Repository tasks retain bundle v2 and additionally bind the profile repository ID and base branch under the [repository-profile contract](repository-profiles.md).

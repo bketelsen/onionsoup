@@ -138,6 +138,13 @@ npm run project-change -- propose --profile clippy-bubble-color-v1 --checkout RE
   No revision loop or merge is introduced. The shared-kernel sandbox and tests do
   not establish hostile-code isolation or exhaustive image correctness.
 
+## Reusable task input
+
+The [repository-profile contract](repository-profiles.md), under
+[ADR-0019](../adr/0019-bind-repository-policy-separately-from-task-evidence.md),
+adds separately bound policy/task/check artifacts and accepted job v2 to the same
+functions. It qualifies reusable Go tasks and preserves these historical profiles.
+
 ## Derived artifacts
 
 Common workflow events expose accepted job, parent request and worker identities,

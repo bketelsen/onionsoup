@@ -135,3 +135,9 @@ The [owned-project profile](docs/specs/owned-project-changes.md) separately perm
 workflow with only `main.go` and `README.md` editable, pinned Go/modules and offline
 host-owned checks; see [ADR-0018](docs/adr/0018-separate-project-policy-from-language-verification.md).
 Other real-project repair remains deferred. The resulting feature belongs in a draft PR, not silently on main.
+
+The [reusable repository profile](docs/specs/repository-profiles.md) permits accepted
+Go task artifacts through the same pipeline. Keep host profiles/checks separate
+from task prose, bind exact runtime/dependency/check digests before patching, and
+allow only append-only changes to existing target tests. Generic TypeScript
+onboarding and new-file creation remain unqualified.

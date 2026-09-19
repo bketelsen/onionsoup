@@ -176,6 +176,19 @@ Follow the [project design](../design/owned-project-changes.md) and [contract](.
 
 **Done when:** publication-history filtering reaches an owned-project draft through the proposal, accepted job, offline checks, patch and review pipeline, with exact provenance.
 
+## Phase 15 — Reusable repository profiles
+
+- Separate host repository policy, task evidence and frozen checks under
+  [ADR-0019](../adr/0019-bind-repository-policy-separately-from-task-evidence.md),
+  the [profile contract](../specs/repository-profiles.md) and
+  [project design](../design/owned-project-changes.md).
+- Reuse Go provisioning, execution, agents and publication for a second Clippy task.
+- **Done when:** a task supplied through reviewed artifacts reaches an exact draft
+  PR with committed regression tests, without adding task-specific orchestration
+  code; stale policy/environment/checks and weakened original tests are rejected.
+
+Completed. Evidence: [repository profile trial](records/repository-profiles-2026-09-19.md).
+
 ## Later / ideas
 
 | Item | Trigger / acceptance evidence |

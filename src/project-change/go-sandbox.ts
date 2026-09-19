@@ -1,25 +1,29 @@
+import {repositoryAdapterHash,taskHarness,evaluateTaskOutput} from './task-verification.ts';
+import {VerificationPlan} from './repository-profile.ts';
 import {mkdir,readFile,writeFile} from 'node:fs/promises';
 import {join,resolve} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {atomicJson} from '../batch-store.ts';
 import {hash} from '../repository-brief/contracts.ts';
 import {git} from '../fixture-runner/fixture.ts';
-import {Runtime,Dependency,Verification,validateJob,type Job} from './contracts.ts';
+import {Runtime,Dependency,Verification,validateJob,usesGo,type Job} from './contracts.ts';
 import {GO_PROFILE} from './profiles.ts';
 import {GO_LIMITS as L,goProfileHash,evaluateGoOutput} from './go-profile.ts';
 import {validateGoRuntime} from './go-dependencies.ts';
 import {snapshot,treeDigest,byteHash} from './source.ts';
 import {runContainer} from './container.ts';
 import type {seedsFrom} from './profile.ts';
-export async function verifyGoProject(checkout:string,commit:string,job:Job,runtime:Runtime,dependencies:Dependency,seeds:ReturnType<typeof seedsFrom>,options:{directory:string;phase:'baseline'|'candidate';signal?:AbortSignal;checkpoint?:(intent:unknown)=>Promise<void>}) {
+export async function verifyGoProject(checkout:string,commit:string,job:Job,runtime:Runtime,dependencies:Dependency,seeds:ReturnType<typeof seedsFrom>,options:{directory:string;phase:'baseline'|'candidate';signal?:AbortSignal;verificationPlan?:VerificationPlan;checkpoint?:(intent:unknown)=>Promise<void>}) {
  validateJob(job);Dependency.parse(dependencies);
- if(job.profile!==GO_PROFILE||runtime.schemaVersion!==2||dependencies.schemaVersion!==2||seeds.length)throw new Error('Go profile required');
+ if(!usesGo(job)||runtime.schemaVersion!==2||dependencies.schemaVersion!==2||seeds.length)throw new Error('Go profile required');
+ if(job.schemaVersion===2&&(hash(runtime)!==job.runtimeHash||hash(dependencies)!==job.dependencyHash))throw new Error('Accepted environment changed');
  await validateGoRuntime(runtime);options.signal?.throwIfAborted();
- if(await goProfileHash()!==job.profileHash||dependencies.lockHash!==job.lockHash||dependencies.packageHash!==job.packageHash||dependencies.goHash!==runtime.goHash||await treeDigest(dependencies.directory)!==dependencies.treeHash)throw new Error('Go execution inputs changed');
+ if((job.schemaVersion===2?await repositoryAdapterHash():await goProfileHash())!==job.profileHash||dependencies.lockHash!==job.lockHash||dependencies.packageHash!==job.packageHash||dependencies.goHash!==runtime.goHash||await treeDigest(dependencies.directory)!==dependencies.treeHash)throw new Error('Go execution inputs changed');
+ if((await git(checkout,['ls-tree',commit,'--','onionsoup_trial_test.go'])).trim())throw new Error('Host overlay path collides with target source');
  const directory=resolve(options.directory);await mkdir(directory,{mode:0o700});const work=join(directory,'work'),runner=join(directory,'harness');
  await snapshot(checkout,commit,work,true);await mkdir(runner,{mode:0o755});
- await writeFile(join(runner,'invoke.sh'),await readFile(new URL('go-harness.sh',import.meta.url)),{flag:'wx',mode:0o444});
- await writeFile(join(runner,'onionsoup_trial_test.go'),await readFile(new URL('go-checks.txt',import.meta.url)),{flag:'wx',mode:0o444});
+ await writeFile(join(runner,'invoke.sh'),job.schemaVersion===2?taskHarness(job,options.verificationPlan):await readFile(new URL('go-harness.sh',import.meta.url)),{flag:'wx',mode:0o444});
+ await writeFile(join(runner,'onionsoup_trial_test.go'),job.schemaVersion===2?VerificationPlan.parse(options.verificationPlan).source:await readFile(new URL('go-checks.txt',import.meta.url)),{flag:'wx',mode:0o444});
  await writeFile(join(runner,'overlay.json'),JSON.stringify({Replace:{'/work/onionsoup_trial_test.go':'/harness/onionsoup_trial_test.go'}}),{flag:'wx',mode:0o444});
  const nonce=randomUUID(),receiptId=randomUUID(),containerName='onionsoup-project-'+receiptId,startedAt=new Date().toISOString();
  for(const path of [work,runner,runtime.goDirectory,dependencies.directory])if(!path.startsWith('/')||/[:,\r\n]/.test(path))throw new Error('Unsafe mount path');
@@ -36,7 +40,7 @@ export async function verifyGoProject(checkout:string,commit:string,job:Job,runt
  const {out,err,bytes,stop,exitCode,cleanup}=await runContainer(args,directory,containerName,L,options.signal);
  let status:Verification['status']=stop??'execution_error',checks:Verification['checks']=[];
  if(!stop&&exitCode===0&&cleanup==='removed')try {
-  checks=evaluateGoOutput(out.toString(),nonce,await readFile(join(work,'README.md'),'utf8'));status=checks.every(c=>c.status==='passed')?'passed':'checks_failed';
+  checks=job.schemaVersion===2?evaluateTaskOutput(job,options.verificationPlan,out.toString(),nonce,Object.fromEntries(await Promise.all(job.allowedFiles.map(async p=>[p,await readFile(join(work,p),'utf8')])))):evaluateGoOutput(out.toString(),nonce,await readFile(join(work,'README.md'),'utf8'));status=checks.every(c=>c.status==='passed')?'passed':'checks_failed';
  }catch{status='execution_error';checks=[];}
  await atomicJson(join(directory,'observations.json'),{stdout:out.toString(),stderr:err.toString(),bytes});
  return Verification.parse({schemaVersion:1,...intent,finishedAt:new Date().toISOString(),status,checks,exitCode,cleanup,outputHash:byteHash(Buffer.concat([out,err]))});

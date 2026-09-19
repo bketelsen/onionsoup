@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "adapter": "go-module-v1",
+  "source": "package main\n\nimport (\n \"bytes\"\n \"errors\"\n \"image/png\"\n \"os\"\n \"path/filepath\"\n \"testing\"\n \"time\"\n)\n\nfunc TestOnionsoupOverwriteCompatibility(t *testing.T) {\n path:=filepath.Join(t.TempDir(),\"output.png\")\n if err:=os.WriteFile(path,[]byte(\"old content\"),0600);err!=nil{t.Fatal(err)}\n var stdout,stderr bytes.Buffer\n if err:=run([]string{\"-scale\",\"0.1\",\"-output\",path,\"hello\"},&stdout,&stderr,func()time.Time{return time.Unix(0,0)});err!=nil{t.Fatal(err)}\n data,err:=os.ReadFile(path);if err!=nil{t.Fatal(err)}\n if _,err:=png.Decode(bytes.NewReader(data));err!=nil{t.Fatal(err)}\n if stdout.String()!=path+\"\\n\"{t.Fatalf(\"filename output changed: %q\",stdout.String())}\n}\n\nfunc TestOnionsoupNoClobberFileSafety(t *testing.T) {\n dir:=t.TempDir();path:=filepath.Join(dir,\"existing.png\");before:=[]byte(\"preserve every byte\")\n if err:=os.WriteFile(path,before,0600);err!=nil{t.Fatal(err)}\n var stdout,stderr bytes.Buffer\n err:=run([]string{\"-no-clobber\",\"-scale\",\"0.1\",\"-output\",path,\"hello\"},&stdout,&stderr,func()time.Time{return time.Unix(0,0)})\n if !errors.Is(err,os.ErrExist){t.Fatalf(\"expected wrapped ErrExist, got %v\",err)}\n data,err:=os.ReadFile(path);if err!=nil||!bytes.Equal(data,before)||stdout.Len()!=0{t.Fatal(\"existing file or stdout changed\")}\n // Atomically create new files; do not reject the flag merely for naming a path.\n fresh:=filepath.Join(dir,\"new.png\")\n if err:=run([]string{\"-no-clobber\",\"-scale\",\"0.1\",\"-output\",fresh,\"hello\"},&stdout,&stderr,func()time.Time{return time.Unix(0,0)});err!=nil{t.Fatal(err)}\n data,err=os.ReadFile(fresh);if err!=nil{t.Fatal(err)};if _,err:=png.Decode(bytes.NewReader(data));err!=nil{t.Fatal(err)}\n // The protection also applies when Clippy derives the timestamped filename.\n old,err:=os.Getwd();if err!=nil{t.Fatal(err)}\n if err:=os.Chdir(t.TempDir());err!=nil{t.Fatal(err)}\n defer os.Chdir(old)\n fixed:=func()time.Time{return time.Unix(0,0)}\n generated:=defaultOutputName(fixed())\n if err:=os.WriteFile(generated,before,0600);err!=nil{t.Fatal(err)}\n stdout.Reset()\n err=run([]string{\"-no-clobber\",\"-scale\",\"0.1\",\"hello\"},&stdout,&stderr,fixed)\n if !errors.Is(err,os.ErrExist){t.Fatalf(\"generated output: expected ErrExist, got %v\",err)}\n data,err=os.ReadFile(generated);if err!=nil||!bytes.Equal(data,before)||stdout.Len()!=0{t.Fatal(\"generated file or stdout changed\")}\n if err:=os.Chdir(old);err!=nil{t.Fatal(err)}\n // An explicit false value preserves the pre-existing overwrite behavior.\n if err:=run([]string{\"-no-clobber=false\",\"-scale\",\"0.1\",\"-output\",path,\"hello\"},&stdout,&stderr,func()time.Time{return time.Unix(0,0)});err!=nil{t.Fatal(err)}\n data,err=os.ReadFile(path);if err!=nil{t.Fatal(err)};if _,err:=png.Decode(bytes.NewReader(data));err!=nil{t.Fatal(err)}\n}\n\nfunc TestOnionsoupNoClobberStdout(t *testing.T) {\n var stdout,stderr bytes.Buffer\n if err:=run([]string{\"-no-clobber\",\"-scale\",\"0.1\",\"-output\",\"-\",\"hello\"},&stdout,&stderr,func()time.Time{return time.Unix(0,0)});err!=nil{t.Fatal(err)}\n if _,err:=png.Decode(bytes.NewReader(stdout.Bytes()));err!=nil{t.Fatal(err)}\n}\n",
+  "checks": [
+    {
+      "id": "task-overwrite-compatibility",
+      "kind": "go-test",
+      "test": "TestOnionsoupOverwriteCompatibility"
+    },
+    {
+      "id": "task-no-clobber-files",
+      "kind": "go-test",
+      "test": "TestOnionsoupNoClobberFileSafety"
+    },
+    {
+      "id": "task-no-clobber-stdout",
+      "kind": "go-test",
+      "test": "TestOnionsoupNoClobberStdout"
+    },
+    {
+      "id": "task-regression-tests",
+      "kind": "file-changed",
+      "path": "main_test.go"
+    },
+    {
+      "id": "task-documentation",
+      "kind": "file-changed",
+      "path": "README.md"
+    }
+  ]
+}

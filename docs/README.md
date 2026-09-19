@@ -130,6 +130,10 @@ Raw run links are optional local evidence; those files are intentionally not pub
 - [ADR-0018: separate project policy from language verification](adr/0018-separate-project-policy-from-language-verification.md)
 
 - [Clippy Go trial](plans/records/clippy-go-trial-2026-09-19.md)
+- [Reusable repository profile trial](plans/records/repository-profiles-2026-09-19.md)
+
+- [ADR-0019: separate repository policy from task evidence](adr/0019-bind-repository-policy-separately-from-task-evidence.md)
+- [Repository profiles and accepted tasks](specs/repository-profiles.md)
 
 ## Related repository material
 

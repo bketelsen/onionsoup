@@ -5,7 +5,7 @@ Contract: [owned project changes](../specs/owned-project-changes.md).
 
 ## Overview
 
-Explicit host-owned profiles connect an operator's publication-filter request to existing
+Explicit host-owned profiles connect operator-authored change requests to existing
 requirements/proposal agents, a separately accepted implementation job, bounded
 patch/review workers, offline verification and the existing draft publisher.
 The targets are `bketelsen/onionsoup` (TypeScript publication filtering) and
@@ -75,6 +75,24 @@ available. Go checks have distinct IDs and receipts, using the same workflow and
 publication contracts. Version-1 jobs and version-2 worker/publication envelopes
 add a validated profile alternative without relabeling historical artifacts.
 
+## Reusable repository profiles and tasks
+
+[ADR-0019](../adr/0019-bind-repository-policy-separately-from-task-evidence.md)
+separates repository policy from requests under the
+[repository-profile contract](../specs/repository-profiles.md). The initial reusable
+adapter is `go-module-v1`; historical TypeScript and Go profiles remain supported.
+Operator-controlled JSON supplies repository identity, toolchain, standard checks
+and path boundaries. A task supplies a pinned base, narrower paths, source excerpts,
+request and verification-plan digest. Acceptance records exact resolved runtime
+and dependency identities as well as the adapter definition.
+
+Host-owned test source is stored with the workflow but excluded from model input.
+Workers receive check kinds and names so a file-change assertion cannot masquerade
+as a semantic documentation review. Target tests can be appended to and included
+in the PR; independent overlay tests remain frozen. A second Clippy task enters the
+same functions through data files rather than feature-specific engine branches.
+This implements [Phase 19](../plans/roadmap.md#phase-19--reusable-repository-profiles).
+
 ## Operational notes
 
 Only each profile's existing allowed UTF-8 text files may change. No package/test/
@@ -89,3 +107,5 @@ Interrupted execution is preserved for inspection; a new run is explicit.
 - Contract: [owned project changes](../specs/owned-project-changes.md), [publication](../specs/draft-publication.md).
 - Built in: [Go trial Phase 6](../plans/investigation-to-pr.md#phase-6--go-project-trial), [change-workflow Phase 5](../plans/investigation-to-pr.md#phase-5--one-real-owned-project-change), [roadmap](../plans/roadmap.md).
 - Prior evidence: [fixture patches](../plans/records/fixture-patches-2026-09-19.md), [draft publication](../plans/records/draft-publication-2026-09-19.md).
+
+Trial evidence: [reusable repository profiles](../plans/records/repository-profiles-2026-09-19.md).

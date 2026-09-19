@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "id": "clippy-no-clobber",
+  "repositoryProfileHash": "e43e78befb10abbb1a1be75e5cdea00bff888af1911331cbc9625439274d076e",
+  "baseCommit": "19e8772efb43e1e07c09bd3c1153ce55f3230cab",
+  "title": "Add opt-in protection against overwriting PNG files",
+  "request": "Operator-authorized feature request, not a fetched GitHub issue: add a boolean -no-clobber flag to Clippy. The default is false and existing overwrite behavior must remain unchanged. With -no-clobber, creating a file must use atomic exclusive creation (no check-then-create race); if it already exists, return an error wrapping os.ErrExist, preserve its contents, and do not print a success filename. The flag applies to both an explicit output filename and the generated default filename. New paths must still receive valid PNG output. Explicit -no-clobber=false retains overwrite behavior. With -output -, ignore the file-protection flag and preserve PNG bytes on stdout.\nDocument the default, existing-file error, exclusive creation and stdout behavior in README.md with a usage example. Append meaningful regression tests to main_test.go without changing any existing byte, including imports. Use the already imported bytes, image/png, strings, testing and time packages for those appended tests; the independent host tests cover detailed filesystem assertions. The target tests should exercise repeated writes to one temporary output path and PNG stdout. Only main.go, main_test.go and README.md may change. Do not add dependencies, edit assets, or implement clipboard or bubble-color features.\nThis task uses the accepted clippy-v1 repository profile and fixed host Go checks. No check commands or profile changes may be proposed by the patch worker.",
+  "allowedFiles": [
+    "main.go",
+    "main_test.go",
+    "README.md"
+  ],
+  "context": [
+    {
+      "path": "main.go",
+      "startLine": 1,
+      "endLine": 170
+    },
+    {
+      "path": "main_test.go",
+      "startLine": 1,
+      "endLine": 65
+    },
+    {
+      "path": "README.md",
+      "startLine": 1,
+      "endLine": 48
+    }
+  ],
+  "verificationHash": "b04c4c76c9913b0995dedcec6f2427e25f7b4dffe9c22b3e582b8fb18bb855c8",
+  "checks": [
+    {
+      "id": "task-overwrite-compatibility",
+      "baseline": "pass"
+    },
+    {
+      "id": "task-no-clobber-files",
+      "baseline": "fail"
+    },
+    {
+      "id": "task-no-clobber-stdout",
+      "baseline": "fail"
+    },
+    {
+      "id": "task-regression-tests",
+      "baseline": "observe"
+    },
+    {
+      "id": "task-documentation",
+      "baseline": "observe"
+    }
+  ]
+}
