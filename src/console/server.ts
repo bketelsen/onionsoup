@@ -51,7 +51,15 @@ export function consoleServer(operator:Operator, publisher=operator.config.publi
       if(parts[0]==='publications'&&parts.length<=3) {
         if(!publisher) {send(page('Draft publications','<h1>Draft publications</h1><p>No publisher configured.</p>'));return;}
         const config=await publisher.config(),h=await publicationHistory(config);
-        if(parts.length===1) {send(page('Draft publications',`<h1>Draft publications</h1><p>Inspect exact bundles, record approval, and publish or reconcile owned-fixture drafts.</p>${h.invalid||h.truncated?'<p class="warn">Some records are unavailable or the view is incomplete.</p>':''}${h.entries.map(({bundle:b,state:s})=>`<article><h2>${escapeHtml(b.title)}</h2><p>${escapeHtml(b.target.repository)} · ${s.status}</p><a href="/publications/${b.publicationId}">Inspect publication</a></article>`).join('')||'<p>No prepared bundles.</p>'}`));return;}
+        if(parts.length===1) {
+          const statuses=['prepared','approved','push_intent','branch_published','pr_intent','published','unknown','blocked'];
+          const requested=url.searchParams.getAll('status');
+          if(requested.length>1||requested.length===1&&(!requested[0]||!['all',...statuses].includes(requested[0]))) throw new Error('Invalid publication status');
+          const status=requested[0]??'all',entries=status==='all'?h.entries:h.entries.filter(({state:s})=>s.status===status);
+          const filter=`<form method="get" action="/publications"><label>Status <select name="status"><option value="all" ${status==='all'?'selected':''}>All</option>${statuses.map(value=>`<option value="${value}" ${status===value?'selected':''}>${value}</option>`).join('')}</select></label><button>Filter</button></form>`;
+          const empty=status==='all'?'<p>No prepared bundles.</p>':'<p>No publications match this status.</p>';
+          send(page('Draft publications',`<h1>Draft publications</h1><p>Inspect exact bundles, record approval, and publish or reconcile owned-fixture drafts.</p>${filter}${h.invalid||h.truncated?'<p class="warn">Some records are unavailable or the view is incomplete.</p>':''}${entries.map(({bundle:b,state:s})=>`<article><h2>${escapeHtml(b.title)}</h2><p>${escapeHtml(b.target.repository)} · ${s.status}</p><a href="/publications/${b.publicationId}">Inspect publication</a></article>`).join('')||empty}`));return;
+        }
         const entry=h.entries.find(e=>e.bundle.publicationId===parts[1]);
         if(entry) {
           if(parts.length===2){send(page('Draft publication',publicationHtml(entry,token,!!publisher.active,config)));return;}

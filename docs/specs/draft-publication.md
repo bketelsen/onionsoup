@@ -88,7 +88,14 @@ credential, private path or transport error is exported in events.
 ## Derived artifacts
 
 Console config optionally names `publicationConfig`, resolved relative to console
-configuration. `GET /publications` lists up to 300 bundles. `GET /publications/ID`
+configuration. `GET /publications` lists up to 300 bundles. Its optional single
+`status` query is `all` or one of `prepared`, `approved`, `push_intent`,
+`branch_published`, `pr_intent`, `published`, `unknown`, or `blocked`; an absent
+query and `status=all` show all valid entries in the bounded view. Empty, invalid,
+or repeated `status` values return HTTP 400. The list provides a GET status selector
+that retains the accepted selection and can return to All. A valid filter with no
+matches reports that explicitly, while unavailable or incomplete-history warnings
+remain visible; filtering does not make the bounded view complete. `GET /publications/ID`
 shows exact diff/body, evidence summary, approval and journal; `/json` and `/events`
 provide artifacts. `POST /publication-actions` accepts only CSRF token plus
 `{action: approve|publish, id, bundleHash}`. Existing strict loopback host/origin,
