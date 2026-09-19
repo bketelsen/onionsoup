@@ -308,7 +308,7 @@ agents into code execution or GitHub writes. The
 next boundaries for bugs and features: distinct evidence/requirements preparation,
 a shared change proposal, isolated verification, patch/review, and explicitly
 authorized draft publication. Current feature classification still makes no project
-acceptance decision. Read-only feature preparation and shared proposals are now implemented; execution and publication remain planned.
+acceptance decision. Read-only feature preparation and shared proposals are now implemented; owned-fixture execution is implemented; real-project execution and publication remain planned.
 
 ## Read-only bug and feature proposals
 
@@ -327,3 +327,21 @@ npm run proposal -- render DIRECTORY
 The local console offers **Draft change proposal** on eligible investigation
 pages. [Trial evidence and limitations](docs/plans/records/change-proposal-2026-09-18.md)
 include real bugs/features and explicit synthetic cases.
+
+## Isolated fixture runner and patch agent
+
+The [owned fixture workflow](docs/specs/fixture-execution.md) now exercises one bug
+and one feature through a deterministic rootless Podman runner, scoped patch agent,
+exact diff reconstruction and separate model review. It executes only the bundled
+dependency-free fixture, with no target GitHub writes or publication authority.
+
+```sh
+npm run fixture -- pin --image LOCAL_TRUSTED_IMAGE --output .local/fixture/runtime.json
+npm run fixture -- patch bug --runtime .local/fixture/runtime.json --output runs/NEW_BUG --provider copilot
+npm run fixture -- patch feature --runtime .local/fixture/runtime.json --output runs/NEW_FEATURE --provider copilot
+```
+
+The image must already be available locally; pinning never pulls or changes host
+image policy. Add its saved run parent to the console's `fixtureRoots` to browse
+**Fixture trials**. See the [trial evidence](docs/plans/records/fixture-patches-2026-09-19.md)
+for successful candidates, blocked initial diffs, isolation checks and limitations.

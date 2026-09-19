@@ -73,7 +73,9 @@
               "stage.failed",
               "stage.unfinished",
               "stage.completed",
-              "workflow.budget_reserved"
+              "workflow.budget_reserved",
+              "verification.started",
+              "verification.completed"
             ]
           },
           "operatorAction": {
@@ -154,7 +156,9 @@
               "health",
               "actions",
               "requirements",
-              "proposal"
+              "proposal",
+              "patch",
+              "review"
             ]
           },
           "agent": {
@@ -166,7 +170,9 @@
               "repository-health",
               "maintenance-actions",
               "feature-requirements",
-              "change-proposal"
+              "change-proposal",
+              "scoped-patch",
+              "change-review"
             ]
           },
           "runId": {
@@ -273,6 +279,41 @@
               "other",
               "unclear",
               "unclassified_legacy"
+            ]
+          },
+          "scopeId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "receiptId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "treeHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "verificationPhase": {
+            "type": "string",
+            "enum": [
+              "baseline",
+              "candidate",
+              "probe"
+            ]
+          },
+          "verificationOutcome": {
+            "type": "string",
+            "enum": [
+              "passed",
+              "assertion_failed",
+              "capability_absent",
+              "setup_error",
+              "execution_error",
+              "timeout",
+              "output_limit",
+              "cancelled"
             ]
           },
           "testSearch": {

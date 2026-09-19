@@ -81,7 +81,12 @@ bugs, execute repository code, implement fixes, or mutate GitHub. The inbox and
 packet are consumers of these bounded agents, not new agent authorities. The
 [operator console](docs/specs/operator-console.md) admits explicit host actions
 from configured jobs; browser input cannot select paths, credentials or commands.
-Repair, target-code execution and PR publication remain future capabilities.
+The [owned fixture runner](docs/specs/fixture-execution.md) separately permits
+bounded isolated execution and scoped local candidates under explicit fixture
+authorization. Its patch/review agents have no shell or filesystem tools. Keep
+real OSS repair/execution and PR publication deferred; a ready proposal does not
+grant those effects. Preserve original checks and bind candidate receipts to the
+exact applied diff and accepted base.
 
 The [factor mapping](docs/design/twelve-factors.md) records consciously deferred
 capabilities. Public contracts are [readiness](docs/specs/bug-readiness.md),

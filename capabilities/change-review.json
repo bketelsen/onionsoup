@@ -1,0 +1,1092 @@
+{
+  "schemaVersion": 1,
+  "id": "change-review",
+  "capabilityVersion": 1,
+  "purpose": "Review one exact candidate and verification receipts independently of the patch conversation.",
+  "promptVersion": "change-review-v1",
+  "contracts": {
+    "inputVersion": 1,
+    "resultVersion": 1,
+    "runVersion": 1,
+    "historicalResultVersions": [],
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "number",
+          "const": 1
+        },
+        "scope": {
+          "type": "object",
+          "properties": {
+            "schemaVersion": {
+              "type": "number",
+              "const": 1
+            },
+            "scopeId": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "case": {
+              "type": "string",
+              "enum": [
+                "bug",
+                "feature"
+              ]
+            },
+            "baseCommit": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{40}$"
+            },
+            "baseTree": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "proposal": {
+              "type": "object",
+              "properties": {
+                "schemaVersion": {
+                  "type": "number",
+                  "const": 1
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "proposal_ready",
+                    "needs_information"
+                  ]
+                },
+                "outcome": {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 800
+                    },
+                    "basis": {
+                      "type": "string",
+                      "enum": [
+                        "reported",
+                        "proposed"
+                      ]
+                    },
+                    "evidenceIds": {
+                      "minItems": 1,
+                      "maxItems": 12,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 80
+                      }
+                    }
+                  },
+                  "required": [
+                    "text",
+                    "basis",
+                    "evidenceIds"
+                  ],
+                  "additionalProperties": false
+                },
+                "changes": {
+                  "maxItems": 8,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "text": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 800
+                      },
+                      "basis": {
+                        "type": "string",
+                        "enum": [
+                          "reported",
+                          "proposed"
+                        ]
+                      },
+                      "evidenceIds": {
+                        "minItems": 1,
+                        "maxItems": 12,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 80
+                        }
+                      }
+                    },
+                    "required": [
+                      "text",
+                      "basis",
+                      "evidenceIds"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "nonGoals": {
+                  "maxItems": 6,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "text": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 800
+                      },
+                      "basis": {
+                        "type": "string",
+                        "enum": [
+                          "reported",
+                          "proposed"
+                        ]
+                      },
+                      "evidenceIds": {
+                        "minItems": 1,
+                        "maxItems": 12,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 80
+                        }
+                      }
+                    },
+                    "required": [
+                      "text",
+                      "basis",
+                      "evidenceIds"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "acceptanceCriteria": {
+                  "maxItems": 8,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "pattern": "^AC[1-9][0-9]*$"
+                      },
+                      "criterion": {
+                        "type": "object",
+                        "properties": {
+                          "text": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 800
+                          },
+                          "basis": {
+                            "type": "string",
+                            "enum": [
+                              "reported",
+                              "proposed"
+                            ]
+                          },
+                          "evidenceIds": {
+                            "minItems": 1,
+                            "maxItems": 12,
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 80
+                            }
+                          }
+                        },
+                        "required": [
+                          "text",
+                          "basis",
+                          "evidenceIds"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "criterion"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "verification": {
+                  "maxItems": 12,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "criterionIds": {
+                        "minItems": 1,
+                        "maxItems": 8,
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "regression",
+                          "acceptance",
+                          "compatibility",
+                          "migration",
+                          "documentation",
+                          "manual"
+                        ]
+                      },
+                      "check": {
+                        "type": "object",
+                        "properties": {
+                          "text": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 800
+                          },
+                          "basis": {
+                            "type": "string",
+                            "enum": [
+                              "reported",
+                              "proposed"
+                            ]
+                          },
+                          "evidenceIds": {
+                            "minItems": 1,
+                            "maxItems": 12,
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 80
+                            }
+                          }
+                        },
+                        "required": [
+                          "text",
+                          "basis",
+                          "evidenceIds"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "baselineExpectation": {
+                        "type": "string",
+                        "enum": [
+                          "reported_failure",
+                          "capability_absent",
+                          "existing_behavior",
+                          "not_applicable",
+                          "unknown"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "criterionIds",
+                      "kind",
+                      "check",
+                      "baselineExpectation"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "compatibility": {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 800
+                    },
+                    "basis": {
+                      "type": "string",
+                      "enum": [
+                        "reported",
+                        "proposed"
+                      ]
+                    },
+                    "evidenceIds": {
+                      "minItems": 1,
+                      "maxItems": 12,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 80
+                      }
+                    }
+                  },
+                  "required": [
+                    "text",
+                    "basis",
+                    "evidenceIds"
+                  ],
+                  "additionalProperties": false
+                },
+                "migration": {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 800
+                    },
+                    "basis": {
+                      "type": "string",
+                      "enum": [
+                        "reported",
+                        "proposed"
+                      ]
+                    },
+                    "evidenceIds": {
+                      "minItems": 1,
+                      "maxItems": 12,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 80
+                      }
+                    }
+                  },
+                  "required": [
+                    "text",
+                    "basis",
+                    "evidenceIds"
+                  ],
+                  "additionalProperties": false
+                },
+                "documentation": {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 800
+                    },
+                    "basis": {
+                      "type": "string",
+                      "enum": [
+                        "reported",
+                        "proposed"
+                      ]
+                    },
+                    "evidenceIds": {
+                      "minItems": 1,
+                      "maxItems": 12,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 80
+                      }
+                    }
+                  },
+                  "required": [
+                    "text",
+                    "basis",
+                    "evidenceIds"
+                  ],
+                  "additionalProperties": false
+                },
+                "questions": {
+                  "maxItems": 8,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "question": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 800
+                      },
+                      "blocking": {
+                        "type": "boolean"
+                      },
+                      "evidenceIds": {
+                        "minItems": 1,
+                        "maxItems": 12,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 80
+                        }
+                      }
+                    },
+                    "required": [
+                      "question",
+                      "blocking",
+                      "evidenceIds"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "risks": {
+                  "maxItems": 6,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "text": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 800
+                      },
+                      "basis": {
+                        "type": "string",
+                        "enum": [
+                          "reported",
+                          "proposed"
+                        ]
+                      },
+                      "evidenceIds": {
+                        "minItems": 1,
+                        "maxItems": 12,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 80
+                        }
+                      }
+                    },
+                    "required": [
+                      "text",
+                      "basis",
+                      "evidenceIds"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "schemaVersion",
+                "status",
+                "outcome",
+                "changes",
+                "nonGoals",
+                "acceptanceCriteria",
+                "verification",
+                "compatibility",
+                "migration",
+                "documentation",
+                "questions",
+                "risks"
+              ],
+              "additionalProperties": false
+            },
+            "proposalHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "allowedFiles": {
+              "minItems": 1,
+              "maxItems": 2,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "tasks.mjs",
+                  "README.md"
+                ]
+              }
+            },
+            "authorization": {
+              "type": "string",
+              "const": "explicit_operator_owned_fixture_task"
+            },
+            "policyVersion": {
+              "type": "string",
+              "const": "fixture-policy-v1"
+            }
+          },
+          "required": [
+            "schemaVersion",
+            "scopeId",
+            "case",
+            "baseCommit",
+            "baseTree",
+            "proposal",
+            "proposalHash",
+            "allowedFiles",
+            "authorization",
+            "policyVersion"
+          ],
+          "additionalProperties": false
+        },
+        "before": {
+          "type": "object",
+          "properties": {
+            "tasks.mjs": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 16000
+            },
+            "README.md": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 8000
+            }
+          },
+          "required": [
+            "tasks.mjs",
+            "README.md"
+          ],
+          "additionalProperties": false
+        },
+        "after": {
+          "type": "object",
+          "properties": {
+            "tasks.mjs": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 16000
+            },
+            "README.md": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 8000
+            }
+          },
+          "required": [
+            "tasks.mjs",
+            "README.md"
+          ],
+          "additionalProperties": false
+        },
+        "baseline": {
+          "type": "object",
+          "properties": {
+            "schemaVersion": {
+              "type": "number",
+              "const": 1
+            },
+            "receiptId": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "phase": {
+              "type": "string",
+              "enum": [
+                "baseline",
+                "candidate",
+                "probe"
+              ]
+            },
+            "startedAt": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+            },
+            "finishedAt": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+            },
+            "treeHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "scopeHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "runtimeHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "policyHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "passed",
+                "assertion_failed",
+                "capability_absent",
+                "setup_error",
+                "execution_error",
+                "timeout",
+                "output_limit",
+                "cancelled"
+              ]
+            },
+            "checks": {
+              "maxItems": 30,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9-]+$"
+                  },
+                  "criterionIds": {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "passed",
+                      "assertion_failed",
+                      "capability_absent"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string",
+                    "enum": [
+                      "matched",
+                      "value_mismatch",
+                      "export_absent"
+                    ]
+                  }
+                },
+                "required": [
+                  "id",
+                  "criterionIds",
+                  "status",
+                  "reason"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "exitCode": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "oomKilled": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "cleanup": {
+              "type": "string",
+              "enum": [
+                "removed",
+                "failed"
+              ]
+            },
+            "containerName": {
+              "type": "string",
+              "pattern": "^onionsoup-fixture-[a-f0-9-]{36}$"
+            },
+            "commandHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "definitionHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "caseSetHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "outputHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "outputBytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "harnessHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          },
+          "required": [
+            "schemaVersion",
+            "receiptId",
+            "phase",
+            "startedAt",
+            "finishedAt",
+            "treeHash",
+            "scopeHash",
+            "runtimeHash",
+            "policyHash",
+            "status",
+            "checks",
+            "exitCode",
+            "oomKilled",
+            "cleanup",
+            "containerName",
+            "caseSetHash",
+            "outputHash",
+            "outputBytes",
+            "harnessHash"
+          ],
+          "additionalProperties": false
+        },
+        "candidate": {
+          "type": "object",
+          "properties": {
+            "schemaVersion": {
+              "type": "number",
+              "const": 1
+            },
+            "receiptId": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "phase": {
+              "type": "string",
+              "enum": [
+                "baseline",
+                "candidate",
+                "probe"
+              ]
+            },
+            "startedAt": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+            },
+            "finishedAt": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+            },
+            "treeHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "scopeHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "runtimeHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "policyHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "passed",
+                "assertion_failed",
+                "capability_absent",
+                "setup_error",
+                "execution_error",
+                "timeout",
+                "output_limit",
+                "cancelled"
+              ]
+            },
+            "checks": {
+              "maxItems": 30,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9-]+$"
+                  },
+                  "criterionIds": {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "passed",
+                      "assertion_failed",
+                      "capability_absent"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string",
+                    "enum": [
+                      "matched",
+                      "value_mismatch",
+                      "export_absent"
+                    ]
+                  }
+                },
+                "required": [
+                  "id",
+                  "criterionIds",
+                  "status",
+                  "reason"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "exitCode": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "oomKilled": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "cleanup": {
+              "type": "string",
+              "enum": [
+                "removed",
+                "failed"
+              ]
+            },
+            "containerName": {
+              "type": "string",
+              "pattern": "^onionsoup-fixture-[a-f0-9-]{36}$"
+            },
+            "commandHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "definitionHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "caseSetHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "outputHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "outputBytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "harnessHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          },
+          "required": [
+            "schemaVersion",
+            "receiptId",
+            "phase",
+            "startedAt",
+            "finishedAt",
+            "treeHash",
+            "scopeHash",
+            "runtimeHash",
+            "policyHash",
+            "status",
+            "checks",
+            "exitCode",
+            "oomKilled",
+            "cleanup",
+            "containerName",
+            "caseSetHash",
+            "outputHash",
+            "outputBytes",
+            "harnessHash"
+          ],
+          "additionalProperties": false
+        },
+        "diff": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40000
+        },
+        "diffHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "scope",
+        "before",
+        "after",
+        "baseline",
+        "candidate",
+        "diff",
+        "diffHash"
+      ],
+      "additionalProperties": false
+    },
+    "resultSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "number",
+          "const": 1
+        },
+        "verdict": {
+          "type": "string",
+          "enum": [
+            "no_blocking_findings",
+            "changes_requested",
+            "insufficient_evidence"
+          ]
+        },
+        "findings": {
+          "maxItems": 8,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "severity": {
+                "type": "string",
+                "enum": [
+                  "blocking",
+                  "advisory"
+                ]
+              },
+              "path": {
+                "type": "string",
+                "enum": [
+                  "tasks.mjs",
+                  "README.md"
+                ]
+              },
+              "line": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "criterionIds": {
+                "minItems": 1,
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "explanation": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000
+              }
+            },
+            "required": [
+              "severity",
+              "path",
+              "line",
+              "criterionIds",
+              "explanation"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "limitations": {
+          "minItems": 1,
+          "maxItems": 6,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 600
+          }
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "verdict",
+        "findings",
+        "limitations"
+      ],
+      "additionalProperties": false
+    },
+    "semanticValidation": "validateResult enforces allowed files/base hashes or cited after-lines/criteria and successful candidate evidence before review clearance. Semantic quality remains model-assessed."
+  },
+  "invocation": {
+    "transport": "typescript-function",
+    "module": "src/fixture-runner/agents.ts",
+    "export": "reviewChange",
+    "signature": "(input, options) => Promise<FixtureAgentRun>",
+    "requiredOptions": [
+      "model",
+      "provider",
+      "modelId"
+    ],
+    "optionalOptions": [
+      "signal",
+      "checkpoint"
+    ],
+    "modelDependency": "Caller-supplied AI SDK LanguageModel, explicitly selected at the application edge.",
+    "checkpoint": "Awaited admission and final snapshots. Persistence failures propagate; no automatic resume.",
+    "source": "Supplied bounded structured evidence only."
+  },
+  "lifecycle": {
+    "statuses": [
+      "running",
+      "completed",
+      "failed"
+    ],
+    "cancellation": "Cooperative AbortSignal",
+    "durableResume": false,
+    "query": "Inspect caller-persisted records."
+  },
+  "limits": {
+    "steps": 3,
+    "timeoutMs": 90000,
+    "inputCharacters": 90000
+  },
+  "effects": {
+    "githubWrites": false,
+    "targetCodeExecution": false,
+    "modelCalls": true,
+    "sourceReads": false,
+    "persistence": "Through caller checkpoint only.",
+    "authority": "Manifest does not authorize invocation or effects."
+  },
+  "failures": {
+    "beforeAdmission": [
+      "invalid_input",
+      "persistence_error"
+    ],
+    "recorded": [
+      "provider_error",
+      "no_valid_result",
+      "interrupted_or_timed_out"
+    ],
+    "unexpectedExceptions": "Propagate; inspect saved state. Unknown is not success.",
+    "automaticTaskRetry": false
+  },
+  "resultMeaning": "Completed means structurally validated supplied-evidence output; it does not establish independent task accuracy or authorize actions."
+}

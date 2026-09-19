@@ -1,3 +1,6 @@
+import {fixtureHistory,fixtureId} from '../fixture-runner/console.ts';
+import {fixtureHtml,fixtureMarkdown} from '../fixture-runner/render.ts';
+import {escapeHtml} from '../batch-report.ts';
 import { validateChangeWorkflow } from '../change-proposal/record.ts';
 import { proposalMarkdown } from '../change-proposal/render.ts';
 import { createServer } from 'node:http';
@@ -39,6 +42,21 @@ export function consoleServer(operator:Operator) {
       }
       if(req.method!=='GET') { res.statusCode=405;send('Method not allowed.','text/plain');return; }
       if(url.pathname==='/') { send(await dashboard(operator,token));return; }
+      if(parts[0]==='fixtures'&&parts.length<=3) {
+        const h=await fixtureHistory(operator.config.fixtureRoots);
+        if(parts.length===1) {send(page('Fixture trials',`<h1>Owned fixture trials</h1><p>Saved baseline checks, scoped candidates and independent model review. Publication is not authorized. Launches use the configured CLI, not browser-supplied paths or commands.</p>
+          ${h.invalid||h.truncated?'<p class="warn">Some records are unavailable or this bounded view is incomplete.</p>':''}
+          ${h.entries.map(({record:r})=>`<article><h2>${r.case} · ${r.mode}</h2><p>${escapeHtml(r.outcome??'unfinished; outcome unknown')}</p><p>${escapeHtml(r.startedAt)}</p><a href="/fixtures/${r.workflowId}">Inspect trial</a></article>`).join('')||'<p>No saved fixture trials configured.</p>'}`));return;}
+        const id=fixtureId(parts[1]),entry=h.entries.find(e=>e.record.workflowId===id);
+        if(entry) {
+          const r=entry.record,base=`/fixtures/${id}`;
+          if(parts.length===2) {send(page('Fixture trial',`<h1>Fixture evidence</h1><p><a href="${base}/json">Saved record</a> · <a href="${base}/markdown">Markdown</a> · <a href="${base}/events">Trace</a> · <a href="${base}/diff">Candidate diff</a></p>${fixtureHtml(r)}`));return;}
+          if(parts[2]==='json') {json(r);return;}
+          if(parts[2]==='events') {json(workflowEvents(r));return;}
+          if(parts[2]==='markdown') {send(fixtureMarkdown(r),'text/plain; charset=utf-8');return;}
+          if(parts[2]==='diff') {send(r.diff??'No candidate diff.','text/plain; charset=utf-8');return;}
+        }
+      }
       if(url.pathname==='/operations') { send(await activityPage(operator));return; }
       if(parts[0]==='operations'&&parts[1]&&parts.length<=3) {
         const r=await operator.record(parts[1]);

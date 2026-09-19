@@ -89,3 +89,12 @@ an operator-selected source literal. The page renders scope, criteria, checks an
 open questions with acceptance still unrecorded. This implements
 [backlog P10](../plans/backlog.md#phase-10--change-proposals); later execution remains
 in the [change workflow design](investigation-to-pr.md).
+
+## Owned fixture history
+
+The [fixture execution design](fixture-execution.md), governed by
+[ADR-0015](../adr/0015-isolate-fixture-verification-and-scoped-patches.md), adds a
+read-only `/fixtures` view over configured roots. It exposes base/candidate checks,
+review findings, exact diff and provenance without adding browser execution actions.
+This completes visibility for [P11/P12](../plans/backlog.md#phase-11--isolated-fixture-verification)
+under the [fixture contract](../specs/fixture-execution.md).

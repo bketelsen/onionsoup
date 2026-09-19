@@ -148,6 +148,17 @@ Evidence: [operator console trial](records/operator-console-2026-09-18.md).
 
 Evidence: [proposal trial](records/change-proposal-2026-09-18.md).
 
+## Phase 13 — Isolated fixtures, candidate integrity and review
+
+- Exercise the [fixture contract](../specs/fixture-execution.md) and
+  [design](../design/fixture-execution.md) on an owned bug and feature.
+- **Done when:** actual isolation checks establish the recorded boundary, baseline
+  errors remain distinct, the exact diff reconstructs each verified candidate,
+  and separate model review cannot override failed checks. Preserve all live
+  attempts and distinguish scripted, runtime, model and assistant review evidence.
+
+Evidence: [fixture and patch trial](records/fixture-patches-2026-09-19.md).
+
 ## Later / ideas
 
 Model-comparison infrastructure, new local-provider batches, broader source

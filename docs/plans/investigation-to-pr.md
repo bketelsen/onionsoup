@@ -4,7 +4,9 @@ Proposed follow-through after the [P9 operator console](../specs/operator-consol
 Implements the [change-workflow exploration](../design/investigation-to-pr.md).
 Shared bug/feature scope follows [ADR-0013](../adr/0013-converge-bugs-and-features-on-a-shared-change-proposal.md).
 Phase 1 is implemented under [ADR-0014](../adr/0014-draft-read-only-proposals-from-frozen-evidence.md)
-and the [proposal contract](../specs/change-proposal.md). Sandbox execution and
+and the [proposal contract](../specs/change-proposal.md). Phases 2–3 are implemented
+for the explicitly authorized owned fixture under [ADR-0015](../adr/0015-isolate-fixture-verification-and-scoped-patches.md)
+and the [fixture contract](../specs/fixture-execution.md). Real OSS execution and
 remote writes remain later phases requiring their own authority.
 
 ## Phase 1 — Read-only change proposals
@@ -39,6 +41,9 @@ and assistant review qualify this initial slice; independent acceptance remains 
   criteria and existing-behavior checks remain required. Denied actions stay denied;
   receipts retain exact environments without host credentials or uncontrolled code.
 
+Evidence: [fixture runner and patch trial](records/fixture-patches-2026-09-19.md).
+Runtime/design: [owned fixture execution](../design/fixture-execution.md).
+
 ## Phase 3 — Scoped candidates and independent review
 
 - Add a scoped patch contract and [bounded review](../design/investigation-to-pr.md#bound-candidate-generation-and-review).
@@ -52,6 +57,9 @@ and assistant review qualify this initial slice; independent acceptance remains 
   concerns/limitations, and the operator can assess the complete evidence bundle.
   No GitHub mutation is required to prove this phase. The reviewer checks migration
   and documentation obligations where the feature proposal requires them.
+
+Evidence: [fixture runner and patch trial](records/fixture-patches-2026-09-19.md).
+One candidate per invocation is implemented; automatic revision remains deferred.
 
 ## Phase 4 — Explicit draft publication
 
@@ -72,9 +80,9 @@ and assistant review qualify this initial slice; independent acceptance remains 
 
 ## Open questions
 
-- Which sandbox fits this host and its threat model? Resolve before Phase 2; a
-  container or worktree label alone does not establish isolation.
-- Which first operator-owned fixture repository and behavior best expose failures?
+- Broader repository/sandbox qualification remains necessary before moving beyond
+  the owned task-library fixture. The initial rootless Podman decision and its
+  shared-kernel limits are recorded in [ADR-0015](../adr/0015-isolate-fixture-verification-and-scoped-patches.md).
 - Which checks require platform/network access, and when is incomplete verification
   acceptable to a maintainer? Never let the patch worker decide its own exception.
 

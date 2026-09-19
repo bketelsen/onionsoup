@@ -36,6 +36,16 @@
       "id": "change-proposal",
       "manifest": "capabilities/change-proposal.json",
       "capabilityVersion": 1
+    },
+    {
+      "id": "scoped-patch",
+      "manifest": "capabilities/scoped-patch.json",
+      "capabilityVersion": 1
+    },
+    {
+      "id": "change-review",
+      "manifest": "capabilities/change-review.json",
+      "capabilityVersion": 1
     }
   ]
 }

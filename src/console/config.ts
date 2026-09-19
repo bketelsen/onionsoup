@@ -4,7 +4,7 @@ import { readJson } from '../batch-store.ts';
 import { DeliveryConfig } from '../delivery/contracts.ts';
 import { Commit } from '../location-contracts.ts';
 import { hash } from '../repository-brief/contracts.ts';
-export const ConsoleConfig=z.object({ schemaVersion:z.literal(1),stateDirectory:z.string().min(1),
+export const ConsoleConfig=z.object({ schemaVersion:z.literal(1),stateDirectory:z.string().min(1),fixtureRoots:z.array(z.string().min(1)).max(10).default([]),
   jobs:z.array(z.object({ id:DeliveryConfig.shape.jobId,deliveryConfig:z.string().min(1),deliveryState:z.string().min(1),
     briefRoots:z.array(z.string().min(1)).max(10).default([]),inboxDirectory:z.string().min(1).optional(),
     timerUnit:z.string().regex(/^[a-zA-Z0-9_-]+\.timer$/).optional(),
@@ -15,7 +15,7 @@ export type Job=ConsoleConfig['jobs'][number] & { config:DeliveryConfig;revision
 export async function loadConsoleConfig(file:string) {
   const c=ConsoleConfig.parse(await readJson(file)), base=dirname(resolve(file));
   const path=(p:string)=>isAbsolute(p)?p:resolve(base,p);
-  return { ...c,stateDirectory:path(c.stateDirectory),jobs:c.jobs.map(j=>({ ...j,deliveryConfig:path(j.deliveryConfig),
+  return { ...c,stateDirectory:path(c.stateDirectory),fixtureRoots:c.fixtureRoots.map(path),jobs:c.jobs.map(j=>({ ...j,deliveryConfig:path(j.deliveryConfig),
     deliveryState:path(j.deliveryState),briefRoots:j.briefRoots.map(path),inboxDirectory:j.inboxDirectory?path(j.inboxDirectory):undefined,
     source:j.source?{ ...j.source,checkout:path(j.source.checkout) }:undefined })) };
 }

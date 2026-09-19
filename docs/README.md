@@ -110,6 +110,11 @@ Raw run links are optional local evidence; those files are intentionally not pub
 - [Change proposal contract](specs/change-proposal.md)
 - [Change proposal trial](plans/records/change-proposal-2026-09-18.md)
 
+- [ADR-0015: isolated fixtures and scoped patches](adr/0015-isolate-fixture-verification-and-scoped-patches.md)
+- [Fixture execution design](design/fixture-execution.md)
+- [Fixture execution and patch contract](specs/fixture-execution.md)
+- [Fixture runner and patch trial](plans/records/fixture-patches-2026-09-19.md)
+
 ## Related repository material
 
 - [README and commands](../README.md)

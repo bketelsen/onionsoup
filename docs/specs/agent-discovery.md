@@ -168,3 +168,13 @@ frozen packet; reservations and child run identities share one allowance. Events
 omit query text, requirements, source and proposed changes. These callable
 capabilities do not add new MCP invocation tools. See the
 [change workflow design](../design/investigation-to-pr.md).
+
+### Scoped patch and change-review capabilities
+
+[ADR-0015](../adr/0015-isolate-fixture-verification-and-scoped-patches.md) adds
+`scoped-patch` and `change-review` manifests. Both callable agents return structured
+data; the separate [fixture runner](fixture-execution.md) owns writes and execution.
+Derived traces add `verification.started/completed`, scope/receipt/tree IDs, phase and
+allowlisted outcome, and patch/review stage keys. They omit source/diff text,
+commands, observations and runtime paths. No MCP invocation tool or publication
+capability is added. See [fixture design](../design/fixture-execution.md).

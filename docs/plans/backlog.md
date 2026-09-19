@@ -141,6 +141,27 @@ Implemented: [proposal contract](../specs/change-proposal.md), under
 [ADR-0014](../adr/0014-draft-read-only-proposals-from-frozen-evidence.md).
 Evidence: [read-only proposal trial](records/change-proposal-2026-09-18.md).
 
+## Phase 11 — Isolated fixture verification
+
+- Implement [owned fixture execution](../specs/fixture-execution.md) under
+  [ADR-0015](../adr/0015-isolate-fixture-verification-and-scoped-patches.md), following
+  the [execution design](../design/fixture-execution.md).
+- **Done when:** an actual bug assertion fails on the base, feature absence is
+  distinct, adjacent behavior passes, and isolation/resource/failure checks provide
+  receipts without target credentials, network or writable host mounts.
+- Implemented. Evidence: [fixture trial](records/fixture-patches-2026-09-19.md).
+
+## Phase 12 — Scoped fixture patches and separate review
+
+- Reuse one patch worker and independent-context review for the bug and feature,
+  through the [same fixture contract](../specs/fixture-execution.md) and
+  [design](../design/fixture-execution.md).
+- **Done when:** allowed file edits reconstruct from an exact exported diff, satisfy
+  the accepted criteria under the same isolated checks, and survive separate
+  review; failures/advisories and finite-coverage limits remain visible.
+- Implemented. Evidence: [fixture trial](records/fixture-patches-2026-09-19.md).
+  No automatic revisions or PR publication. Real OSS repair remains deferred.
+
 ## Later / ideas
 
 | Item | Trigger / acceptance evidence |

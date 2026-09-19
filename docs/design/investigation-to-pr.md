@@ -1,7 +1,9 @@
 # From bug reports and feature requests to a reviewable change
 
-Living exploration, recorded 2026-09-18. **Read-only proposals implemented; no repair, test
-execution or publication capability is implemented or authorized by this document.**
+Living exploration, recorded 2026-09-18. **Read-only proposals and the explicitly authorized owned-fixture execution/patch
+slice are implemented. Real OSS execution and publication remain deferred.**
+Fixture boundaries: [ADR-0015](../adr/0015-isolate-fixture-verification-and-scoped-patches.md),
+[design](fixture-execution.md), [contract](../specs/fixture-execution.md).
 Shared bug/feature direction: [ADR-0013](../adr/0013-converge-bugs-and-features-on-a-shared-change-proposal.md).
 Current operator rationale: [ADR-0012](../adr/0012-operate-saved-workflows-through-a-local-console.md).
 Current contracts: [investigation packet](../specs/investigation-packet.md),
@@ -183,8 +185,8 @@ credentials. The current source adapter remains read-only.
 
 ### Bound candidate generation and review
 
-The initial patch trial should admit one issue and one candidate, with one explicit
-revision opportunity after useful failure feedback. Use a shared admission/time
+The implemented fixture trial admits one accepted scope and one candidate. An
+explicit revision opportunity after useful feedback remains deferred. Use a shared admission/time
 allowance across proposal, patch and review; retries consume it. Stop on conflicting
 requirements, missing required bug/feature verification evidence, setup failure, scope expansion, stale base
 or exhausted budgets. Preserve the best available artifact and the stop reason.
@@ -231,10 +233,10 @@ review can assess structure and grounding; maintainer acceptance is a separate
 measurement. Do not ask the user to grade a large batch before this boundary has
 produced concrete useful examples.
 
-After accepting that slice, prove isolated execution on a deliberately small,
-operator-owned fixture repository with both a known bug and a small requested
-feature. Then try one local candidate per request kind through the shared patch
-and independent-review workflow. Remote publication follows after those
+The [owned-fixture trial](../plans/records/fixture-patches-2026-09-19.md) now records
+isolated baseline execution and one successful local candidate per kind through
+the shared patch and separate-review workflow. Its first two attempts were blocked
+by review over an invalid exported diff; the corrected host verifies reconstruction. Remote publication follows after those
 artifacts and effect boundaries are demonstrably useful. The existing `get-bb/bb`
 work remains read-only throughout the current phase.
 

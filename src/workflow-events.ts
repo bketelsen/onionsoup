@@ -1,3 +1,6 @@
+import {FixtureAgentId} from './fixture-runner/contracts.ts';
+import {validateFixtureWorkflow} from './fixture-runner/record.ts';
+import {validateFixtureAgentRun} from './fixture-runner/agents.ts';
 import { ProposalAgentId } from './change-proposal/contracts.ts';
 import { validateChangeWorkflow } from './change-proposal/record.ts';
 import { validateProposalAgentRun } from './change-proposal/agents.ts';
@@ -30,14 +33,14 @@ export const WorkflowEvent = z.object({
     'operator.requested', 'operator.completed', 'operator.failed', 'operator.unfinished',
     'delivery.prepared', 'delivery.attempted', 'delivery.accepted', 'delivery.rejected', 'delivery.unknown', 'delivery.reconciled',
     'agent.step_started', 'agent.step_finished', 'agent.tool_requested', 'stage.skipped', 'stage.failed',
-    'stage.unfinished', 'stage.completed', 'workflow.budget_reserved']),
+    'stage.unfinished', 'stage.completed', 'workflow.budget_reserved','verification.started','verification.completed']),
   operatorAction: z.enum(['run_now','pause','resume','retry','investigate','propose']).optional(),
   issueNumber: z.number().int().positive().optional(),
   deliveryAttempt: z.number().int().min(1).max(3).optional(),
   deliveryResolution: z.enum(['accepted','not_accepted']).optional(),
   childWorkflowId: Id.optional(), parentWorkflowId: Id.optional(), budget: InvocationBudgetSnapshot.optional(), issueIndex: z.number().int().min(0).max(4).optional(),
-  stageKey: z.enum(['collection','issue_themes','pr_themes','health','actions','requirements','proposal']).optional(),
-  agent: z.enum(['bug-readiness', 'code-location', ...RepoAgentId.options, ...ProposalAgentId.options]).optional(), runId: Id.optional(), parentRunId: Id.optional(),
+  stageKey: z.enum(['collection','issue_themes','pr_themes','health','actions','requirements','proposal','patch','review']).optional(),
+  agent: z.enum(['bug-readiness', 'code-location', ...RepoAgentId.options, ...ProposalAgentId.options, ...FixtureAgentId.options]).optional(), runId: Id.optional(), parentRunId: Id.optional(),
   recordVersion: z.number().int().positive().optional(), promptVersion: z.string().regex(/^[\w.-]+$/).optional(),
   runtimeHash: z.string().regex(/^[a-f0-9]{64}$/).optional(), inputHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   repositoryCommit: z.string().regex(/^[a-f0-9]{40}$/).optional(),
@@ -47,6 +50,9 @@ export const WorkflowEvent = z.object({
   failure: Failures.optional(), reason: z.enum(['not_eligible', 'readiness_failed', 'location_not_started', 'budget_exhausted', 'cancelled', 'prior_attempt_unfinished', 'not_started', 'selection_limit', 'no_data', 'disabled']).optional(),
   outcome: z.enum(['ready', 'needs_information', 'not_applicable', 'out_of_scope', 'located', 'not_located', 'proposal_ready', 'sufficient_for_proposal']).optional(),
   requestKind: z.enum(['bug_report', 'feature_request', 'support_question', 'other', 'unclear', 'unclassified_legacy']).optional(),
+  scopeId:Id.optional(), receiptId:Id.optional(), treeHash:z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  verificationPhase:z.enum(['baseline','candidate','probe']).optional(),
+  verificationOutcome:z.enum(['passed','assertion_failed','capability_absent','setup_error','execution_error','timeout','output_limit','cancelled']).optional(),
   testSearch: z.enum(['completed', 'unfinished']).optional(), directTests: z.number().int().nonnegative().optional(),
   adjacentTests: z.number().int().nonnegative().optional(),
   usage: Usage.optional(), historicalUsage: Usage.optional(), originalStartedAt: z.iso.datetime().optional(),
@@ -76,6 +82,37 @@ const failure = (raw: unknown): z.infer<typeof Failures> => Failures.safeParse(r
 // The original records remain the truth. No provider calls, new timestamps, or raw content.
 export function workflowEvents(raw: unknown): z.infer<typeof WorkflowEventExport> {
   const candidate = raw as Record<string, unknown>;
+  if(candidate?.kind==='fixture-change'||FixtureAgentId.safeParse(candidate?.agent).success) {
+    const w=candidate.kind==='fixture-change'?validateFixtureWorkflow(raw):undefined;
+    const standalone=w?undefined:validateFixtureAgentRun(raw),workflowId=w?.workflowId??standalone!.runId,events:WorkflowEvent[]=[];
+    const add=(event:Omit<WorkflowEvent,'schemaVersion'|'workflowId'|'sequence'>)=>events.push(WorkflowEvent.parse({
+      ...event,schemaVersion:1,workflowId,sequence:events.length,...(w?.scope?{scopeId:w.scope.scopeId,repositoryCommit:w.scope.baseCommit}:{})}));
+    add({type:'workflow.started',at:w?.startedAt??standalone!.startedAt});
+    const append=(r:ReturnType<typeof validateFixtureAgentRun>)=>{
+      const base={agent:r.agent,runId:r.runId,inputHash:r.inputHash,promptVersion:r.promptVersion,provider:r.provider,model:r.model,recordVersion:1};
+      add({...base,type:'agent.started',at:r.startedAt});
+      for(const e of r.events) if(z.iso.datetime().safeParse(e.at).success&&['stepStart','stepFinish','toolInputStart'].includes(e.type)) add({...base,
+        type:e.type==='stepStart'?'agent.step_started':e.type==='stepFinish'?'agent.step_finished':'agent.tool_requested',at:e.at,step:e.step,...(e.tool==='submit_result'?{tool:'submit_result' as const}:{})});
+      add({...base,type:r.status==='running'?'agent.unfinished':`agent.${r.status}`,at:r.finishedAt??r.startedAt,usage:usage(r.tokenUsage?.totals),failure:r.failure});
+    };
+    const receipt=(r:NonNullable<ReturnType<typeof validateFixtureWorkflow>['baseline']>)=>{
+      const base={receiptId:r.receiptId,treeHash:r.treeHash,inputHash:r.scopeHash,runtimeHash:r.runtimeHash,verificationPhase:r.phase};
+      add({...base,type:'verification.started',at:r.startedAt});add({...base,type:'verification.completed',at:r.finishedAt,verificationOutcome:r.status});
+    };
+    if(w) {
+      if(w.baseline) receipt(w.baseline);
+      for(const s of w.stages) {
+        if(s.agent==='change-review'&&w.candidate) receipt(w.candidate);
+        add({type:'workflow.budget_reserved',at:s.reservedAt,agent:s.agent,stageKey:s.agent==='scoped-patch'?'patch':'review',budget:s.reservation});
+        if(s.run) append(s.run);
+      }
+      if(w.candidate&&!w.stages.some(s=>s.agent==='change-review')) receipt(w.candidate);
+      if(w.pendingExecution) add({type:'verification.started',at:w.pendingExecution.startedAt,receiptId:w.pendingExecution.receiptId,treeHash:w.pendingExecution.treeHash,verificationPhase:w.pendingExecution.phase});
+    } else append(standalone!);
+    const record=w??standalone!;
+    add({type:record.status==='running'?'workflow.unfinished':`workflow.${record.status}`,at:record.finishedAt??record.startedAt,...(w?{budget:w.budget}:{})});
+    return WorkflowEventExport.parse({schemaVersion:1,kind:'workflow-events',mode:'derived-snapshot',workflowId,events});
+  }
   if(candidate?.kind==='change-proposal'||ProposalAgentId.safeParse(candidate?.agent).success) {
     const w=candidate.kind==='change-proposal'?validateChangeWorkflow(raw):undefined;
     const standalone=w?undefined:validateProposalAgentRun(raw),workflowId=w?.workflowId??standalone!.runId,events:WorkflowEvent[]=[];

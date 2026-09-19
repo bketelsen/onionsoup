@@ -15,6 +15,8 @@ and adjust its paths to existing operator-owned artifacts. Add `source` only
 after selecting a matching local checkout and full commit.
 
 Configuration is strict version 1 with `stateDirectory` and 1–10 unique `jobs`.
+Optional top-level `fixtureRoots` contains at most ten local saved-trial roots.
+Their paths resolve relative to the configuration file.
 Each job has a lowercase/hyphen `id`, `deliveryConfig`, `deliveryState`, and up to
 ten `briefRoots`. Optional fields: `inboxDirectory`, a systemd `timerUnit`, and
 `source: { checkout, commit }` with a full 40-character Git commit. Paths resolve
@@ -28,6 +30,7 @@ current execution remains Terra on their configured Copilot/Codex subscription.
 | `GET /briefs/JOB/UUID` | Saved report plus issue selection and prior-investigation links |
 | `GET /briefs/JOB/UUID/report`, `/markdown`, `/json`, `/events` | Validated derived report or saved evidence/trace |
 | `GET /deliveries/JOB/OCCURRENCE/events` | Validated delivery trace |
+| `GET /fixtures`, `/fixtures/UUID`, `/fixtures/UUID/json`, `/markdown`, `/events`, `/diff` | Read-only owned fixture history and artifacts under configured roots; see [fixture contract](fixture-execution.md) |
 | `GET /operations` | Recorded action history |
 | `GET /operations/UUID` | Action status and any saved investigation packet or proposal |
 | `GET /operations/UUID/events`, `/packet.json`, `/packet.md`, `/packet.events` | Correlated action/packet artifacts |
@@ -123,6 +126,10 @@ packet and the child is the proposal workflow. `inputHash` identifies the typed 
 raw issue text. Events omit CSRF tokens, private configuration, issue content and
 transport diagnostics. An unfinished event remains unknown; no synthetic success
 or inferred provider usage is emitted.
+
+Fixture views implement [ADR-0015](../adr/0015-isolate-fixture-verification-and-scoped-patches.md)
+and the [fixture design](../design/fixture-execution.md); browser actions cannot
+launch patches, select runtimes or execute commands.
 
 ## References
 

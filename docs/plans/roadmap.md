@@ -167,6 +167,18 @@ Implemented: [proposal contract](../specs/change-proposal.md), under
 [ADR-0014](../adr/0014-draft-read-only-proposals-from-frozen-evidence.md).
 Evidence: [read-only proposal trial](records/change-proposal-2026-09-18.md).
 
+## Phase 15 — Isolated baseline and candidate verification
+
+- Deliver [backlog P11](backlog.md#phase-11--isolated-fixture-verification) and
+  [P12](backlog.md#phase-12--scoped-fixture-patches-and-separate-review) under the
+  [fixture contract](../specs/fixture-execution.md),
+  [design](../design/fixture-execution.md) and
+  [ADR-0015](../adr/0015-isolate-fixture-verification-and-scoped-patches.md).
+- **Done when:** both owned fixture kinds have correctly classified baselines,
+  scope-limited candidates, exact diff reconstruction, passing candidate checks and
+  separate model review. Earlier failures and resource-boundary evidence remain
+  inspectable. [Trial record](records/fixture-patches-2026-09-19.md).
+
 ## Broader vision — domain-focused agent teams
 
 Recorded on 2026-09-18: OSS maintenance is the first proving ground for Onionsoup,

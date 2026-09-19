@@ -215,3 +215,13 @@ test('proposal POST binds exact parent, preserves feature classification, render
   await assert.rejects(op.submit({...request,requestId:randomUUID(),query:'different'}));assert.equal(calls,1);
   assert.equal(parent.request.action,'investigate');
 });
+
+test('fixture views stay read-only and report unavailable records without accepting execution parameters',async t=>{
+  const f=await fixture(t);f.config.fixtureRoots=[join(f.root,'missing-fixture-root')];
+  const op=new Operator(f.config),s=await http(t,op),response=await fetch(s.origin+'/fixtures'),html=await response.text();
+  assert.equal(response.status,200);assert.match(html,/Owned fixture trials/);assert.match(html,/records are unavailable/);
+  assert.ok(!html.includes('<form'));
+  assert.equal((await s.post({...f.request('run_now'),action:'fixture',command:'node tasks.mjs'})).status,409);
+  assert.equal((await op.records()).records.length,0);
+  assert.equal((await fetch(s.origin+'/fixtures/'+randomUUID())).status,404);
+});
