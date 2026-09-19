@@ -209,6 +209,19 @@ of value, using the [composition design](../design/composable-agents.md). This n
 records the direction; it does not grant the current OSS agents infrastructure
 access or broaden their responsibilities.
 
+## Phase 18 — Go project trial
+
+- Reuse the [owned-project design](../design/owned-project-changes.md) and
+  [Go profile contract](../specs/owned-project-changes.md#go-profile-clippy-bubble-color-v1)
+  under [ADR-0018](../adr/0018-separate-project-policy-from-language-verification.md).
+- Prove Go compilation, original tests, host acceptance checks, separate review
+  and exact draft publication in `bketelsen/clippy`; retain TypeScript compatibility.
+- **Done when:** one live Terra candidate passes the Go profile and becomes a draft
+  PR through the existing shared publisher, with language-specific receipts and
+  original assets/tests unchanged. No merge or broad Go accuracy claim.
+
+Completed. Evidence: [Clippy Go trial](records/clippy-go-trial-2026-09-19.md).
+
 ## Later / ideas
 
 - Extend shared invocation admission to another agent only for a concrete recipe.

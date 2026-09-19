@@ -106,3 +106,7 @@ manual inspection. Malformed or symlink-escaped history entries are excluded.
 ## Owned-project bundle version 2
 
 [ADR-0017](../adr/0017-execute-one-accepted-owned-project-proposal.md) adds `kind: project-publication`, `schemaVersion: 2`, `project` and `projectHash` in place of fixture fields. The [owned-project contract](owned-project-changes.md) requires an accepted job and exact verified candidate commit. The shared publisher retains the same approval, branch lease and ambiguity rules; version-1 fixture bundles remain readable. Context: [project design](../design/owned-project-changes.md).
+
+[ADR-0018](../adr/0018-separate-project-policy-from-language-verification.md) adds
+the Go Clippy profile to the same v2 envelope and exact-commit publisher; the
+profile repository, configured target and accepted base must match.

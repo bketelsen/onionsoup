@@ -1,6 +1,7 @@
 import {z} from 'zod';
 import {hash} from '../repository-brief/contracts.ts';
-import {Runtime} from '../fixture-runner/contracts.ts';
+import {projectProfile} from './profiles.ts';
+import {Runtime} from './contracts.ts';
 import {Job,Files,Dependency,Verification,PatchResult,ReviewResult,validateJob,CheckId,type WorkerId} from './contracts.ts';
 import {validateParent,proof,type ProjectProposal} from './proposal.ts';
 import {validateProjectAgentRun,type ProjectAgentRun} from './agents.ts';
@@ -11,15 +12,17 @@ export function projectInput(w:ProjectWorkflow,id:WorkerId) {
   const base={schemaVersion:2,job:w.job,before:w.job.files,fileHashes:Object.fromEntries(Object.entries(w.job.files).map(([p,v])=>[p,hash(v)])),baseline:w.baseline};
   return id==='scoped-patch'?base:{...base,after:w.after,candidate:w.candidate,diff:w.diff,diffHash:w.diffHash};
 }
-export function baselineEligibleProject(w:ProjectWorkflow) {return !!w.baseline&&['passed','checks_failed'].includes(w.baseline.status)&&w.baseline.cleanup==='removed'&&['default-history','detail-unchanged','coverage-preserved','typecheck','adjacent-console'].every(id=>w.baseline!.checks.find(c=>c.id===id)?.status==='passed');}
+export function baselineEligibleProject(w:ProjectWorkflow) {return !!w.baseline&&['passed','checks_failed'].includes(w.baseline.status)&&w.baseline.cleanup==='removed'&&projectProfile(w.job.profile).baseline.every(id=>w.baseline!.checks.find(c=>c.id===id)?.status==='passed');}
 export function validateProject(raw:unknown):ProjectWorkflow {
   const w=raw as ProjectWorkflow;
   if(!w||w.schemaVersion!==1||w.kind!=='project-change'||!z.uuid().safeParse(w.workflowId).success||!z.iso.datetime().safeParse(w.startedAt).success||!['running','completed','failed'].includes(w.status)||!Array.isArray(w.stages)||w.stages.length>2)throw new Error('Invalid project workflow');
   const j=validateJob(w.job),parent=validateParent(w.parent);Runtime.parse(w.runtime);Dependency.parse(w.dependencies);
   if(j.parentHash!==hash(parent)||j.proposalHash!==hash(proof(parent.proposal!))||j.requirementsHash!==hash(proof(parent.requirements!))||j.baseCommit!==parent.commit||j.baseTree!==parent.tree||hash(parent.files)!==j.sourceHash||w.dependencies.lockHash!==j.lockHash||w.dependencies.packageHash!==j.packageHash)throw new Error('Parent or dependency binding changed');
+  if((j.profile==='clippy-bubble-color-v1')!==(w.runtime.schemaVersion===2)||(j.profile==='clippy-bubble-color-v1')!==(w.dependencies.schemaVersion===2))throw new Error('Language execution binding changed');
+  if(w.runtime.schemaVersion===2&&w.dependencies.schemaVersion===2&&w.runtime.goHash!==w.dependencies.goHash)throw new Error('Toolchain changed');
   for(const [phase,r] of [['baseline',w.baseline],['candidate',w.candidate]] as const)if(r){Verification.parse(r);
     if(r.phase!==phase||r.jobHash!==hash(j)||r.tree!==(phase==='baseline'?j.baseTree:w.headTree)||r.runtimeHash!==hash(w.runtime)||r.dependencyHash!==hash(w.dependencies)||r.profileHash!==j.profileHash||r.seedHash!==w.seedHash)throw new Error('Verification binding mismatch');
-    if(['passed','checks_failed'].includes(r.status)&&(r.exitCode!==0||r.cleanup!=='removed'||hash(r.checks.map(c=>c.id).sort())!==hash([...CheckId.options].sort())||r.status!==(r.checks.every(c=>c.status==='passed')?'passed':'checks_failed')))throw new Error('Incomplete check evidence');
+    if(['passed','checks_failed'].includes(r.status)&&(r.exitCode!==0||r.cleanup!=='removed'||hash(r.checks.map(c=>c.id).sort())!==hash([...projectProfile(j.profile).checks].sort())||r.status!==(r.checks.every(c=>c.status==='passed')?'passed':'checks_failed')))throw new Error('Incomplete check evidence');
   }
   for(const [i,s] of w.stages.entries()){
     if(s.agent!==(i===0?'scoped-patch':'change-review')||!z.iso.datetime().safeParse(s.reservedAt).success)throw new Error('Invalid reservation');

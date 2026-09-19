@@ -4,7 +4,11 @@ import {hash} from '../repository-brief/contracts.ts';
 import {validateBundle,validateState,identity,State,type Bundle} from '../publication/contracts.ts';
 import {PROFILE,PROFILE_LIMITS,CheckId,type Verification} from './contracts.ts';
 export const statuses=State.shape.status.options;
-export async function profileHash() {return hash({profile:PROFILE,limits:PROFILE_LIMITS,definitions:await Promise.all(['profile.ts','profile-harness.mjs','sandbox.ts','contracts.ts'].map(async p=>[p,await readFile(new URL(p,import.meta.url),'utf8')]))});}
+export async function profileHash(id:string=PROFILE) {
+  if(id==='clippy-bubble-color-v1')return (await import('./go-profile.ts')).goProfileHash();
+  if(id!==PROFILE)throw new Error('Unknown profile');
+  return hash({profile:PROFILE,limits:PROFILE_LIMITS,definitions:await Promise.all(['profile.ts','profile-harness.mjs','sandbox.ts','contracts.ts','profiles.ts','source.ts','container.ts'].map(async p=>[p,await readFile(new URL(p,import.meta.url),'utf8')]))});
+}
 export function seedsFrom(raw:unknown) {
   const original=validateBundle(raw);if(original.schemaVersion!==1)throw new Error('Owned fixture seed required');
   return statuses.map((status,i)=>{

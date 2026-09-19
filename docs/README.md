@@ -127,6 +127,10 @@ Raw run links are optional local evidence; those files are intentionally not pub
 
 - [Owned-project execution preflight](plans/records/owned-project-preflight-2026-09-19.md)
 
+- [ADR-0018: separate project policy from language verification](adr/0018-separate-project-policy-from-language-verification.md)
+
+- [Clippy Go trial](plans/records/clippy-go-trial-2026-09-19.md)
+
 ## Related repository material
 
 - [README and commands](../README.md)

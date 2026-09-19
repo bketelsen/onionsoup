@@ -131,4 +131,7 @@ reviewers also verify that cross-links accurately explain the relationships.
 
 Owned-fixture draft publication uses the separate [publication contract](docs/specs/draft-publication.md): exact approved bundles, configured `bketelsen/*` targets, persisted effect intents and conservative reconciliation. Never publish to `get-bb/bb`. Agents have no publication tools; merging remains out of scope.
 
-The [owned-project profile](docs/specs/owned-project-changes.md) separately permits publication-status filtering in `bketelsen/onionsoup` after a recorded accepted proposal. Preserve its three-file allowlist, frozen dependency/check profile and exact candidate commit; only the host provisions dependencies or executes checks. Other real-project repair remains deferred. The resulting feature belongs in a draft PR, not silently on main.
+The [owned-project profile](docs/specs/owned-project-changes.md) separately permits publication-status filtering in `bketelsen/onionsoup` after a recorded accepted proposal. Preserve its three-file allowlist, frozen dependency/check profile and exact candidate commit; only the host provisions dependencies or executes checks. The separately authorized `clippy-bubble-color-v1` Go trial uses the same
+workflow with only `main.go` and `README.md` editable, pinned Go/modules and offline
+host-owned checks; see [ADR-0018](docs/adr/0018-separate-project-policy-from-language-verification.md).
+Other real-project repair remains deferred. The resulting feature belongs in a draft PR, not silently on main.

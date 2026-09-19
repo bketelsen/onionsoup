@@ -1,0 +1,75 @@
+package main
+
+import (
+ "bytes"
+ "image/color"
+ "os"
+ "path/filepath"
+ "reflect"
+ "strings"
+ "testing"
+ "time"
+
+ "github.com/fogleman/gg"
+ "github.com/golang/freetype/truetype"
+)
+
+// Tests observe rendered output through existing APIs, so baseline compiles too.
+func onionsoupBubblePixels(t *testing.T, args []string) []color.NRGBA {
+ t.Helper()
+ opts, err := parseOptions(args, &bytes.Buffer{})
+ if err != nil { t.Fatal(err) }
+ parsed, err := truetype.Parse(comicSansFont)
+ if err != nil { t.Fatal(err) }
+ dc := gg.NewContext(2390, 1973)
+ layout := measureText(dc, parsed, opts)
+ x, y, w, h := bubbleBounds(layout, opts)
+ closeFace(layout.face)
+ drawBubbleAndText(dc, parsed, opts)
+ // Interior corner: clear of the border, text and pointer.
+ pointerBaseX := x+w-120
+ if w/3 < 120 { pointerBaseX=x+w-w/3 }
+ return []color.NRGBA{
+  color.NRGBAModel.Convert(dc.Image().At(int(x+40), int(y+20))).(color.NRGBA),
+  color.NRGBAModel.Convert(dc.Image().At(int(.8*pointerBaseX+.2*1650),int(.8*(y+h-2)+.2*1100))).(color.NRGBA),
+ }
+}
+
+func TestOnionsoupBubbleDefault(t *testing.T) {
+ for _, got := range onionsoupBubblePixels(t, []string{"Hi"}) { if got != (color.NRGBA{255,255,190,255}) { t.Fatalf("default bubble = %#v",got) } }
+}
+
+func TestOnionsoupBubbleColors(t *testing.T) {
+ for _, tt := range []struct{value string; want color.NRGBA}{
+  {"#336699",color.NRGBA{51,102,153,255}},
+  {"aBcDeF",color.NRGBA{171,205,239,255}},
+  {"#20406080",color.NRGBA{32,64,96,128}},
+  {"20406080",color.NRGBA{32,64,96,128}},
+  {"#00000000",color.NRGBA{0,0,0,0}},
+ } { t.Run(tt.value,func(t *testing.T){
+  for _,got:=range onionsoupBubblePixels(t,[]string{"-bubble-color",tt.value,"Hi"}) {
+   // One channel unit allows the renderer's premultiplied-alpha rounding.
+   near:=func(a,b uint8)bool{return int(a)-int(b)<=1&&int(b)-int(a)<=1}
+   if !near(got.R,tt.want.R)||!near(got.G,tt.want.G)||!near(got.B,tt.want.B)||got.A!=tt.want.A{t.Fatalf("fill = %#v, want %#v",got,tt.want)}
+  }
+ }) }
+ a,err:=parseOptions([]string{"Hi"},&bytes.Buffer{});if err!=nil{t.Fatal(err)}
+ b,err:=parseOptions([]string{"-bubble-color","#FFFFBE","Hi"},&bytes.Buffer{});if err!=nil{t.Fatal(err)}
+ first,err:=render(a);if err!=nil{t.Fatal(err)}
+ second,err:=render(b);if err!=nil{t.Fatal(err)}
+ if !reflect.DeepEqual(first,second){t.Fatal("explicit default changed rendered image")}
+ // The flag must not repurpose text color or other existing parsed options.
+ b,err=parseOptions([]string{"-bubble-color","#336699","-text-color","#112233","-width","800","Hi"},&bytes.Buffer{});if err!=nil{t.Fatal(err)}
+ if b.textColor!=(color.NRGBA{17,34,51,255})||b.width!=800{t.Fatal("unrelated options changed")}
+}
+
+func TestOnionsoupBubbleInvalid(t *testing.T) {
+ for _,v:=range []string{"", "#123", "#12345g", "#123456789", "##123456"} {
+  var out,errout bytes.Buffer
+  err:=run([]string{"-bubble-color",v,"-output","-","Hi"},&out,&errout,func()time.Time{return time.Unix(0,0)})
+  if err==nil||!strings.Contains(err.Error(),"-bubble-color")||out.Len()!=0{t.Fatalf("value %q: error=%v, output bytes=%d",v,err,out.Len())}
+  file:=filepath.Join(t.TempDir(),"invalid.png")
+  err=run([]string{"-bubble-color",v,"-output",file,"Hi"},&out,&errout,func()time.Time{return time.Unix(0,0)})
+  if err==nil{t.Fatal("invalid color accepted")};if _,e:=os.Stat(file);!os.IsNotExist(e){t.Fatal("invalid color created an output file")}
+ }
+}
