@@ -65,6 +65,11 @@
               "workflow.budget_reserved"
             ]
           },
+          "childWorkflowId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
           "parentWorkflowId": {
             "type": "string",
             "format": "uuid",
@@ -182,7 +187,8 @@
               "budget_exhausted",
               "cancelled",
               "prior_attempt_unfinished",
-              "not_started"
+              "not_started",
+              "selection_limit"
             ]
           },
           "outcome": {

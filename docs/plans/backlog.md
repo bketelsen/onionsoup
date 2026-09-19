@@ -64,6 +64,20 @@ skills make the twenty-factor recommendations reusable; see
   or parent failures and exhausted capacity cannot bypass the boundaries. Demonstrated
   in the [two-agent proof](records/two-agent-handoff-2026-09-18.md).
 
+## Phase 6 — On-demand maintenance briefing
+
+- Implemented the [briefing command](../specs/maintenance-briefing.md), following
+  [composition design](../design/composable-agents.md) and
+  [ADR-0009](../adr/0009-produce-a-bounded-maintenance-briefing.md).
+- Capture up to five issue snapshots, pin source, assess readiness and locate the
+  first two ready reports under one seven-invocation allowance. Produce Markdown,
+  private evidence and a common trace, with failures and capacity skips visible.
+- **Done when:** one command produces a useful report from live Terra runs,
+  citations match pinned source, failed/cancelled/storage boundaries prevent extra
+  work, and model-free rendering preserves exact saved outcomes.
+
+Demonstrated in the [briefing proof](records/maintenance-briefing-2026-09-18.md).
+
 ## Later / ideas
 
 | Item | Trigger / acceptance evidence |

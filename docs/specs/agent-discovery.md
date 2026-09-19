@@ -27,7 +27,8 @@ npm run check:capabilities
 
 For pure JSON stdout without npm's command header, invoke
 `node --import tsx src/agents-cli.ts ...` directly. `events` accepts a raw readiness
-record (v1/v2), raw location record (v1/v2/v3), packet JSON/directory (v1), or [readiness-workflow JSON](readiness-workflow.md) (v1). It also accepts [location-handoff JSON](location-handoff.md) (v1). It does
+record (v1/v2), raw location record (v1/v2/v3), packet JSON/directory (v1), or [readiness-workflow JSON](readiness-workflow.md) (v1). It also accepts [location-handoff JSON](location-handoff.md) (v1) and
+[maintenance-briefing JSON](maintenance-briefing.md) (v1). It does
 not accept inbox wrapper objects or a batch manifest. Output goes to stdout; it
 does not rewrite the source artifact. Invalid inputs exit nonzero with a generic
 message to avoid echoing untrusted content.
@@ -91,6 +92,12 @@ partial-outcome, and persistence semantics.
 Location handoffs add optional `parentWorkflowId` correlation, parent reuse, and a
 code-location reservation under the same budget. See the
 [handoff contract](location-handoff.md). This does not alter existing run exports.
+
+Briefing exports compose both child workflows under a root ID. Optional
+`childWorkflowId` preserves each child workflow's identity; handoff
+`parentWorkflowId` still identifies its readiness predecessor. The `selection_limit`
+reason marks deliberate capacity skips. Original agent IDs and historical reuse
+remain intact. See [ADR-0009](../adr/0009-produce-a-bounded-maintenance-briefing.md).
 
 ## Rules
 

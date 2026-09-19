@@ -85,6 +85,22 @@ Replace `OWNER/REPO` and `NUMBER` in both places. This agent assesses only the
 supplied title/body, so start with new reports; it does not read comments or linked
 attachments. Keep the source revision with the result and reassess if it changes.
 
+## Produce a maintenance briefing
+
+```sh
+npm run briefing -- get-bb/bb --checkout .local/repos/get-bb--bb
+npm run briefing -- render runs/briefings/DIRECTORY
+```
+
+Supply an existing Git checkout and configured subscription. The command pins its
+revision, captures up to five open issue snapshots, assesses readiness, and locates
+code/tests for the first two ready reports under one seven-invocation allowance.
+Use `--issues 3886,3337` for explicit selection, `--commit FULL_SHA` for a specific
+revision, and `--provider copilot|codex` for provider selection. Terra is fixed.
+It writes private `briefing.md`, `briefing.json`, and `events.json` beneath `runs/`.
+The report includes questions, citations, failures and capacity skips; rendering
+requires no model calls or grading. See the [briefing contract](docs/specs/maintenance-briefing.md).
+
 ## Use the maintenance inbox
 
 ```sh

@@ -83,6 +83,17 @@ one shared allowance, and the handoff exposes reused readiness separately from n
 location work. See [ADR-0008](../adr/0008-handoff-ready-assessments-to-pinned-source-location.md)
 and [backlog Phase 5](../plans/backlog.md#phase-5--two-agent-handoff-under-shared-admission).
 
+### On-demand maintenance briefing
+
+The [briefing command](../specs/maintenance-briefing.md) is a fixed application
+recipe around the same readiness workflow and location handoff: capture five
+reports at most, pin a checkout, assess all captured reports, and locate the first
+two ready bugs under seven shared admissions. Markdown is derived from original
+results; no synthesis agent or new authority is needed. Capacity skips, intake
+rejections and partial outcomes stay visible. One root trace retains child workflow
+identities. See [ADR-0009](../adr/0009-produce-a-bounded-maintenance-briefing.md) and
+[backlog P6](../plans/backlog.md#phase-6--on-demand-maintenance-briefing).
+
 ### Second-consumer proof of concept
 
 The [portable investigation-packet command](../specs/investigation-packet.md) uses the same

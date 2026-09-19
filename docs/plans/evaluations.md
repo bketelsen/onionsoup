@@ -89,6 +89,17 @@ qualification is not claimed.
   exact parent/source identities, and produce an inspectable brief with verified
   citations. Demonstrated in the [two-agent report](records/two-agent-handoff-2026-09-18.md).
 
+## Phase 8 — On-demand maintenance briefing
+
+- Exercise the [briefing contract](../specs/maintenance-briefing.md) with Copilot /
+  Terra, following [composition](../design/composable-agents.md).
+- **Done when:** a small live command preserves exact captured inputs, shared
+  reservations and pinned citations, reports skips and failures honestly, and
+  renders the same saved output without inference. Assistant review measures
+  grounding and practical usefulness separately; no independent accuracy claim.
+
+Demonstrated in the [briefing proof](records/maintenance-briefing-2026-09-18.md).
+
 ## Later / ideas
 
 Model-comparison infrastructure, new local-provider batches, broader source

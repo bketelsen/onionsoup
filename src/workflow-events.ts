@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { validateBriefing } from './briefing-record.ts';
 import { InvocationBudgetSnapshot } from './invocation-budget.ts';
 import { validateLocationHandoff } from './location-handoff.ts';
 import { validateReadinessWorkflow } from './readiness-workflow.ts';
@@ -20,7 +21,7 @@ export const WorkflowEvent = z.object({
     'agent.started', 'agent.completed', 'agent.failed', 'agent.unfinished', 'agent.reused',
     'agent.step_started', 'agent.step_finished', 'agent.tool_requested', 'stage.skipped', 'stage.failed',
     'stage.unfinished', 'workflow.budget_reserved']),
-  parentWorkflowId: Id.optional(), budget: InvocationBudgetSnapshot.optional(), issueIndex: z.number().int().min(0).max(4).optional(),
+  childWorkflowId: Id.optional(), parentWorkflowId: Id.optional(), budget: InvocationBudgetSnapshot.optional(), issueIndex: z.number().int().min(0).max(4).optional(),
   agent: z.enum(['bug-readiness', 'code-location']).optional(), runId: Id.optional(), parentRunId: Id.optional(),
   recordVersion: z.number().int().positive().optional(), promptVersion: z.string().regex(/^[\w.-]+$/).optional(),
   runtimeHash: z.string().regex(/^[a-f0-9]{64}$/).optional(), inputHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
@@ -28,7 +29,7 @@ export const WorkflowEvent = z.object({
   provider: z.string().regex(/^[\w.-]+$/).optional(), model: z.string().regex(/^[\w./:-]+$/).optional(),
   step: z.number().int().nonnegative().optional(),
   tool: z.enum(['submit_assessment', 'search_repository', 'read_repository', 'submit_brief']).optional(),
-  failure: Failures.optional(), reason: z.enum(['not_eligible', 'readiness_failed', 'location_not_started', 'budget_exhausted', 'cancelled', 'prior_attempt_unfinished', 'not_started']).optional(),
+  failure: Failures.optional(), reason: z.enum(['not_eligible', 'readiness_failed', 'location_not_started', 'budget_exhausted', 'cancelled', 'prior_attempt_unfinished', 'not_started', 'selection_limit']).optional(),
   outcome: z.enum(['ready', 'needs_information', 'not_applicable', 'out_of_scope', 'located', 'not_located']).optional(),
   requestKind: z.enum(['bug_report', 'feature_request', 'support_question', 'other', 'unclear', 'unclassified_legacy']).optional(),
   testSearch: z.enum(['completed', 'unfinished']).optional(), directTests: z.number().int().nonnegative().optional(),
@@ -58,8 +59,34 @@ const usage = (raw: unknown) => {
 const failure = (raw: unknown): z.infer<typeof Failures> => Failures.safeParse(raw).success ? raw as z.infer<typeof Failures> : 'unknown_failure';
 
 // The original records remain the truth. No provider calls, new timestamps, or raw content.
-export function workflowEvents(raw: unknown) {
+export function workflowEvents(raw: unknown): z.infer<typeof WorkflowEventExport> {
   const candidate = raw as Record<string, unknown>;
+  if (candidate?.kind === 'maintenance-briefing') {
+    const b = validateBriefing(raw), events: WorkflowEvent[] = [];
+    const add = (event: Omit<WorkflowEvent, 'schemaVersion' | 'workflowId' | 'sequence'>) => {
+      events.push(WorkflowEvent.parse({ ...event, schemaVersion: 1, workflowId: b.workflowId, sequence: events.length }));
+    };
+    add({ type: 'workflow.started', at: b.startedAt, budget: { limit: 7, consumed: 0, remaining: 7 } });
+    const append = (child: unknown, issueIndex?: number) => {
+      const export_ = workflowEvents(child);
+      for (const e of export_.events) {
+        if (e.type.startsWith('workflow.') && e.type !== 'workflow.budget_reserved') continue;
+        add({ ...e, childWorkflowId: export_.workflowId, ...(issueIndex !== undefined ? { issueIndex } : {}) });
+      }
+    };
+    if (b.readiness) append(b.readiness);
+    for (const [issueIndex, slot] of b.locations.entries()) {
+      if (slot.handoff) append(slot.handoff, issueIndex);
+      else add({ type: slot.disposition === 'pending' ? 'stage.unfinished' : 'stage.skipped',
+        at: b.finishedAt ?? b.readiness?.finishedAt ?? b.startedAt, agent: 'code-location', issueIndex,
+        parentRunId: b.readiness?.items[issueIndex].run?.runId,
+        reason: slot.disposition === 'pending' ? 'not_started' : slot.disposition === 'readiness_unavailable' ? 'readiness_failed' :
+          slot.disposition as 'not_eligible' | 'selection_limit' | 'cancelled' | 'prior_attempt_unfinished' });
+    }
+    add({ type: b.status === 'running' ? 'workflow.unfinished' : `workflow.${b.status}`,
+      at: b.finishedAt ?? events.at(-1)!.at, budget: b.budget, failure: b.failure ? b.failure === 'cancelled' ? 'interrupted_or_timed_out' : 'execution_error' : undefined });
+    return WorkflowEventExport.parse({ schemaVersion: 1, kind: 'workflow-events', mode: 'derived-snapshot', workflowId: b.workflowId, events });
+  }
   const handoff = candidate?.kind === 'location-handoff' ? validateLocationHandoff(raw) : undefined;
   const workflow = candidate?.kind === 'readiness-workflow' ? validateReadinessWorkflow(raw) : undefined;
   const packet = candidate?.packetId ? validatePacket(raw) : undefined;

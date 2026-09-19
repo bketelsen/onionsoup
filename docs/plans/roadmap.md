@@ -108,6 +108,17 @@ implementation, the initial 4/7 expected-label match, focused follow-up, and lim
   identities and truthful partial/failure states. Demonstrated in the
   [two-agent proof](records/two-agent-handoff-2026-09-18.md); this is follow-through backlog P5.
 
+## Phase 10 — On-demand maintenance briefing
+
+- Implemented the [briefing consumer](../specs/maintenance-briefing.md), following
+  [composition design](../design/composable-agents.md) and
+  [ADR-0009](../adr/0009-produce-a-bounded-maintenance-briefing.md).
+- **Done when:** one command captures up to five reports, assesses them and locates
+  the first two ready bugs under seven shared admissions, then produces an
+  inspectable Markdown briefing without requiring human grading. This is backlog P6.
+
+Demonstrated in the [briefing proof](records/maintenance-briefing-2026-09-18.md).
+
 ## Broader vision — domain-focused agent teams
 
 Recorded on 2026-09-18: OSS maintenance is the first proving ground for Onionsoup,

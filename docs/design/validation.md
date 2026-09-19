@@ -183,6 +183,10 @@ readiness-to-location parent/source identity, shared allowance, and four exact
 citations through the external consumer. It preserves adjacent-test uncertainty
 and does not establish diagnosis or independent task acceptance.
 
+The [briefing proof](../plans/records/maintenance-briefing-2026-09-18.md) exercises
+five reports and two location runs under one seven-attempt allowance, with seven
+exact citations, adjacent-test limits and a model-free report projection.
+
 ## Operational notes
 
 Run `npm run verify` and `npm run demo` without credentials. Live trials require a configured subscription and currently use Terra only. Dated findings above qualify their recorded versions, not every later revision.

@@ -68,6 +68,7 @@ Raw run links are optional local evidence; those files are intentionally not pub
 - [Terra comparison, 2026-09-18](plans/records/terra-comparison-2026-09-18.md)
 - [Following fixtures to assertions — 2026-09-18](plans/records/test-selection-2026-09-18.md)
 
+- [On-demand maintenance briefing proof](plans/records/maintenance-briefing-2026-09-18.md)
 - [Two-agent saved-parent handoff proof](plans/records/two-agent-handoff-2026-09-18.md)
 - [Bounded multi-issue workflow proof](plans/records/multi-issue-workflow-2026-09-18.md)
 - [Codex external composition proof](plans/records/external-composition-2026-09-18.md)
@@ -84,6 +85,9 @@ Raw run links are optional local evidence; those files are intentionally not pub
 - [Bounded readiness workflow contract](specs/readiness-workflow.md)
 - [ADR-0008: ready-to-location handoff](adr/0008-handoff-ready-assessments-to-pinned-source-location.md)
 - [Saved readiness to pinned location contract](specs/location-handoff.md)
+
+- [ADR-0009: on-demand maintenance briefing](adr/0009-produce-a-bounded-maintenance-briefing.md)
+- [Maintenance briefing contract](specs/maintenance-briefing.md)
 
 ## Related repository material
 

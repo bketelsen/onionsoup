@@ -67,8 +67,8 @@ export function validatePacket(raw: unknown): Packet {
 }
 
 // Escape prose as text; source quotations are inert fenced blocks with safe delimiters.
-const text = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/([\\`*_{}\[\]()#!|])/g, '\\$1');
-const quote = (s: string) => { const fence = '`'.repeat(Math.max(3, ...[...s.matchAll(/`+/g)].map(m => m[0].length + 1))); return `${fence}text\n${s}\n${fence}`; };
+export const text = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/([\\`*_{}\[\]()#!|])/g, '\\$1');
+export const quote = (s: string) => { const fence = '`'.repeat(Math.max(3, ...[...s.matchAll(/`+/g)].map(m => m[0].length + 1))); return `${fence}text\n${s}\n${fence}`; };
 export function packetMarkdown(raw: unknown) {
   const p = validatePacket(raw), r = p.readiness, a = r?.assessment, l = p.location;
   const lines = [`# Investigation packet: ${text(p.issue.repository)} #${p.issue.number}`, '', text(p.issue.title), '',
