@@ -25,7 +25,9 @@
     "mcp": "node --import tsx src/mcp-cli.ts",
     "prove:codex": "node --import tsx scripts/prove-codex-mcp.ts",
     "briefing": "node --import tsx src/briefing-cli.ts",
-    "repo-brief": "node --import tsx src/repository-brief/cli.ts"
+    "repo-brief": "node --import tsx src/repository-brief/cli.ts",
+    "delivery": "tsx src/delivery/cli.ts",
+    "mail-capture": "tsx src/delivery/capture-cli.ts"
   },
   "dependencies": {
     "@humanlayer/agentlayer-core": "0.0.36",
@@ -34,10 +36,14 @@
     "@humanlayer/agentlayer-provider-openai-codex": "0.0.36",
     "@modelcontextprotocol/sdk": "1.30.0",
     "ai": "6.0.191",
+    "nodemailer": "10.0.10",
+    "smtp-server": "3.19.13",
     "zod": "4.3.6"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "@types/nodemailer": "8.0.2",
+    "@types/smtp-server": "3.5.13",
     "tsx": "^4.20.0",
     "typescript": "5.9.3"
   }

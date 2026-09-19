@@ -56,6 +56,12 @@
               "agent.failed",
               "agent.unfinished",
               "agent.reused",
+              "delivery.prepared",
+              "delivery.attempted",
+              "delivery.accepted",
+              "delivery.rejected",
+              "delivery.unknown",
+              "delivery.reconciled",
               "agent.step_started",
               "agent.step_finished",
               "agent.tool_requested",
@@ -64,6 +70,18 @@
               "stage.unfinished",
               "stage.completed",
               "workflow.budget_reserved"
+            ]
+          },
+          "deliveryAttempt": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3
+          },
+          "deliveryResolution": {
+            "type": "string",
+            "enum": [
+              "accepted",
+              "not_accepted"
             ]
           },
           "childWorkflowId": {

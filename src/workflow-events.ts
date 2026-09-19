@@ -1,3 +1,4 @@
+import { DeliveryRecord } from './delivery/contracts.ts';
 import { RepoAgentId, hash } from './repository-brief/contracts.ts';
 import { validateRepositoryBrief, stageAgent } from './repository-brief/record.ts';
 import { validateRepoAgentRun } from './repository-brief/agents.ts';
@@ -22,8 +23,11 @@ export const WorkflowEvent = z.object({
   schemaVersion: z.literal(1), workflowId: Id, sequence: z.number().int().nonnegative(), at: z.iso.datetime(),
   type: z.enum(['workflow.started', 'workflow.completed', 'workflow.partial', 'workflow.failed', 'workflow.unfinished',
     'agent.started', 'agent.completed', 'agent.failed', 'agent.unfinished', 'agent.reused',
+    'delivery.prepared', 'delivery.attempted', 'delivery.accepted', 'delivery.rejected', 'delivery.unknown', 'delivery.reconciled',
     'agent.step_started', 'agent.step_finished', 'agent.tool_requested', 'stage.skipped', 'stage.failed',
     'stage.unfinished', 'stage.completed', 'workflow.budget_reserved']),
+  deliveryAttempt: z.number().int().min(1).max(3).optional(),
+  deliveryResolution: z.enum(['accepted','not_accepted']).optional(),
   childWorkflowId: Id.optional(), parentWorkflowId: Id.optional(), budget: InvocationBudgetSnapshot.optional(), issueIndex: z.number().int().min(0).max(4).optional(),
   stageKey: z.enum(['collection','issue_themes','pr_themes','health','actions']).optional(),
   agent: z.enum(['bug-readiness', 'code-location', ...RepoAgentId.options]).optional(), runId: Id.optional(), parentRunId: Id.optional(),
@@ -65,6 +69,21 @@ const failure = (raw: unknown): z.infer<typeof Failures> => Failures.safeParse(r
 // The original records remain the truth. No provider calls, new timestamps, or raw content.
 export function workflowEvents(raw: unknown): z.infer<typeof WorkflowEventExport> {
   const candidate = raw as Record<string, unknown>;
+  if (candidate?.kind === 'brief-delivery') {
+    const r=DeliveryRecord.parse(raw), events:WorkflowEvent[]=[];
+    const add=(event:Omit<WorkflowEvent,'schemaVersion'|'workflowId'|'sequence'>)=>events.push(WorkflowEvent.parse({
+      ...event,schemaVersion:1,workflowId:r.workflowId,sequence:events.length }));
+    add({ type:'workflow.started',at:r.createdAt });
+    if (r.analysisFailure) add({ type:'workflow.failed',at:r.analysisFailure.at,failure:'execution_error' });
+    if (r.message) add({ type:'delivery.prepared',at:r.message.preparedAt,parentWorkflowId:r.brief!.workflowId,inputHash:r.message.hash });
+    for (const [index,a] of r.attempts.entries()) {
+      const base={ deliveryAttempt:index+1,parentWorkflowId:r.brief!.workflowId,inputHash:r.message!.hash };
+      add({ ...base,type:'delivery.attempted',at:a.startedAt });
+      add({ ...base,type:a.outcome==='sending'?'delivery.unknown':`delivery.${a.outcome}`,at:a.finishedAt??a.startedAt });
+      if (a.resolution) add({ ...base,type:'delivery.reconciled',at:a.resolution.at,deliveryResolution:a.resolution.outcome });
+    }
+    return WorkflowEventExport.parse({ schemaVersion:1,kind:'workflow-events',mode:'derived-snapshot',workflowId:r.workflowId,events });
+  }
   if (candidate?.kind === 'repository-brief' || RepoAgentId.safeParse(candidate?.agent).success) {
     const b = candidate?.kind === 'repository-brief' ? validateRepositoryBrief(raw) : undefined;
     const standalone = b ? undefined : validateRepoAgentRun(raw);

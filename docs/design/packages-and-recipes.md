@@ -1,7 +1,8 @@
 # Agent packages, recipes, and adapters
 
 Living document. Rationale: [ADR-0010](../adr/0010-compose-a-repository-brief-from-bounded-evidence.md).
-Contracts: [repository brief](../specs/repository-brief.md), [discovery](../specs/agent-discovery.md).
+Delivery rationale: [ADR-0011](../adr/0011-separate-scheduled-analysis-from-mail-delivery.md).
+Contracts: [scheduled delivery](../specs/scheduled-delivery.md), [repository brief](../specs/repository-brief.md), [discovery](../specs/agent-discovery.md).
 
 ## Overview
 
@@ -13,11 +14,12 @@ result. Agents have no knowledge of the transport that invoked them.
 ```mermaid
 flowchart LR
     CLI[CLI adapter] --> Request[Versioned recipe request]
-    Future[Future schedule / webhook / MQTT] -.-> Request
+    Schedule[One-shot schedule adapter] --> Request
+    Future[Future webhook / MQTT] -.-> Request
     Request --> Recipe[Recipe: collector + metrics + focused agents]
     Recipe --> Record[Saved result + evidence + trace]
     Record --> Local[Markdown / HTML / JSON]
-    Record -.-> Delivery[Future email / other delivery]
+    Record --> Delivery[Frozen mail + SMTP delivery ledger]
 ```
 
 ## Design
@@ -51,7 +53,11 @@ new effects. Existing readiness/location agents retain their original jobs.
 
 ### Future trigger and delivery adapters
 
-Only CLI and local-file delivery are implemented. Future adapters should converge
+CLI, local files, scheduled ticks and SMTP delivery are implemented. The
+[schedule/delivery contract](../specs/scheduled-delivery.md) and
+[backlog P8](../plans/backlog.md#phase-8--scheduled-delivery) govern the two host
+adapters. A development capture relay saves mail locally without forwarding.
+Webhook, MQTT and GitHub event listeners remain future work. All adapters converge
 on the same recipe input and saved result rather than embed agent prompts:
 
 - **Schedule:** choose repository/window, maximum suggestions and delivery target;
@@ -67,9 +73,11 @@ on the same recipe input and saved result rather than embed agent prompts:
   artifact hash and delivery identity. A send retry must not repeat agent analysis.
   An ambiguous send response needs reconciliation; do not claim exactly-once delivery.
 
-These are design directions, not installed listeners, scheduled tasks, or permission
-to send mail. Durable queues, leases and delivery tracking become requirements when
-an operational adapter introduces concurrency, restarts or external effects.
+The schedule and mail adapter use one local occurrence ledger and exclusive lock,
+with a frozen configuration, brief and MIME payload. Analysis and delivery have
+separate retry boundaries. Explicit operator configuration authorizes mail; model
+output cannot choose a destination. Ambiguous SMTP outcomes require reconciliation.
+Queues, distributed leases and the remaining event listeners remain deferred.
 
 ### Deployment position
 
@@ -96,7 +104,8 @@ start a new attempt if needed; `render` never resumes work.
 
 Collection totals and theme samples have different coverage. Render denominators,
 unknown histories and missing CI rather than assigning a generic repository health
-score. Scheduled email and event adapters should preserve this evidence and trace.
+score. Scheduled email preserves this evidence and correlates delivery events to the
+original brief workflow. It omits raw agent state and nonportable local-file links.
 
 ## References
 

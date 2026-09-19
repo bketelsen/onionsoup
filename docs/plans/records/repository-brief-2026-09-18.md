@@ -124,7 +124,7 @@ verification; passing mocked tests was insufficient.
 
 The implemented adapter is on-demand CLI with local artifacts. Packaging is a local
 source bundle with public functions and manifests, not a separately published SDK
-or deployed service. Scheduled email is [planned P8](../backlog.md#phase-8--scheduled-delivery-planned):
+or deployed service. Scheduled email is [planned P8](../backlog.md#phase-8--scheduled-delivery):
 configure a recipient and schedule, persist delivery identity, and retry delivery
 from saved results without repeating analysis. Webhook/MQTT/GitHub event adapters
 remain documented directions.

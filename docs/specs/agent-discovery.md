@@ -134,3 +134,15 @@ existing records and do not become an independent source of workflow truth.
 - Contracts: [readiness](bug-readiness.md), [location](code-location.md),
   [packet](investigation-packet.md).
 - Delivery: [backlog](../plans/backlog.md), [roadmap](../plans/roadmap.md).
+
+### Scheduled delivery events
+
+[ADR-0011](../adr/0011-separate-scheduled-analysis-from-mail-delivery.md) adds derived
+`brief-delivery` records from the [delivery contract](scheduled-delivery.md).
+Events add `delivery.prepared/attempted/accepted/rejected/unknown/reconciled`,
+`deliveryAttempt` (1–3), and `deliveryResolution` (`accepted`/`not_accepted`). The
+parent workflow ID identifies the saved brief; `inputHash` identifies MIME bytes.
+No recipient, SMTP host, message body, credentials or operator evidence text is
+exported. A saved unfinished send exports unknown; acceptance means SMTP acceptance,
+not inbox receipt. These are additive v1 event types; consumers must tolerate new
+types. There is no new agent capability or MCP write tool.

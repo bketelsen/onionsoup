@@ -156,3 +156,6 @@ to that adapter's invocable set.
 - Discovery: [capability and event contract](agent-discovery.md).
 - API semantics: [GitHub search](https://docs.github.com/en/rest/search/search),
   [Actions runs](https://docs.github.com/en/rest/actions/workflow-runs).
+
+Delivery consumer: [scheduled delivery](scheduled-delivery.md), following
+[ADR-0011](../adr/0011-separate-scheduled-analysis-from-mail-delivery.md).

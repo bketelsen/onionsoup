@@ -132,6 +132,17 @@ Demonstrated in the [briefing proof](records/maintenance-briefing-2026-09-18.md)
 Demonstrated in the [repository brief trial](records/repository-brief-2026-09-18.md),
 including the initial date-query defect and corrected follow-up.
 
+## Phase 12 — Scheduled brief delivery
+
+- Implement the [scheduled delivery contract](../specs/scheduled-delivery.md) using
+  [host adapters](../design/packages-and-recipes.md), following
+  [ADR-0011](../adr/0011-separate-scheduled-analysis-from-mail-delivery.md).
+- **Done when:** an operator-selected occurrence generates one saved brief, delivery
+  retries reuse frozen bytes, and unknown sends require explicit reconciliation.
+  This is backlog P8. Local capture is qualified in the
+  [delivery trial](records/scheduled-delivery-2026-09-18.md); production mail and
+  unattended executions still require operational observation.
+
 ## Broader vision — domain-focused agent teams
 
 Recorded on 2026-09-18: OSS maintenance is the first proving ground for Onionsoup,

@@ -92,6 +92,22 @@ npm run repo-brief -- get-bb/bb --days 7 --max-suggestions 5
 npm run repo-brief -- render runs/repository-briefs/DIRECTORY
 ```
 
+Scheduled brief delivery uses a host adapter and a saved-message ledger. Start with
+local capture (no forwarding):
+
+```sh
+mkdir -p .local
+cp examples/delivery/config.json .local/delivery.json
+npm run mail-capture -- .local/mail-capture
+# In another terminal, after configuring recipient/schedule:
+npm run delivery -- tick .local/delivery.json
+```
+
+The example selects 08:00 America/New_York. See the
+[delivery contract](docs/specs/scheduled-delivery.md) for systemd scheduling,
+preparing an existing brief, explicit retries, and reconciliation of unknown sends.
+
+
 This on-demand report combines issue/PR counts and themes, closure/merge activity,
 first-time PR authors, CI statistics, health observations and up to N suggested
 maintainer actions. Deterministic code calculates counts; three focused agents

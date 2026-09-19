@@ -93,14 +93,20 @@ Demonstrated in the [briefing proof](records/maintenance-briefing-2026-09-18.md)
 Demonstrated in the [repository brief trial](records/repository-brief-2026-09-18.md),
 including the initial date-query defect and corrected follow-up.
 
-## Phase 8 — Scheduled delivery (planned)
+## Phase 8 — Scheduled delivery
 
 - Follow [adapter boundaries](../design/packages-and-recipes.md#future-trigger-and-delivery-adapters)
   around the existing [repository brief](../specs/repository-brief.md).
 - **Done when:** an operator-configured schedule invokes the recipe and delivers
   its saved artifact to an authorized recipient, with durable delivery identity,
   duplicate prevention and explicit ambiguous-send handling. Retrying delivery
-  must not repeat analysis. Not implemented or scheduled by P7.
+  must not repeat analysis.
+
+Implemented in the [delivery contract](../specs/scheduled-delivery.md), following
+[ADR-0011](../adr/0011-separate-scheduled-analysis-from-mail-delivery.md). The
+[local capture trial](records/scheduled-delivery-2026-09-18.md) proves the adapter
+and failure boundaries. A daily 08:00 America/New_York capture schedule is configured
+locally; real SMTP forwarding and recipient receipt remain unqualified.
 
 ## Later / ideas
 

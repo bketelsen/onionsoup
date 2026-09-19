@@ -112,6 +112,18 @@ Demonstrated in the [briefing proof](records/maintenance-briefing-2026-09-18.md)
 Demonstrated in the [repository brief trial](records/repository-brief-2026-09-18.md),
 including the initial date-query defect and corrected follow-up.
 
+## Phase 10 — Scheduled delivery reliability
+
+- Exercise the [delivery adapter](../specs/scheduled-delivery.md) from
+  [packages and recipes](../design/packages-and-recipes.md).
+- **Done when:** local SMTP tests prove saved-message delivery, duplicate suppression,
+  bounded retries, storage/crash handling, timezone behavior and explicit ambiguous
+  outcomes. Reuse a real saved brief for a capture proof without new model calls.
+  Record configured scheduling separately from observed unattended execution and
+  real recipient receipt.
+
+Evidence: [scheduled delivery trial](records/scheduled-delivery-2026-09-18.md).
+
 ## Later / ideas
 
 Model-comparison infrastructure, new local-provider batches, broader source

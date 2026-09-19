@@ -94,6 +94,10 @@ Raw run links are optional local evidence; those files are intentionally not pub
 - [Agent packages, recipes, and adapters](design/packages-and-recipes.md)
 - [Repository brief contract](specs/repository-brief.md)
 
+- [ADR-0011: separate scheduled analysis from mail delivery](adr/0011-separate-scheduled-analysis-from-mail-delivery.md)
+- [Scheduled delivery contract and operator commands](specs/scheduled-delivery.md)
+- [Scheduled delivery capture trial](plans/records/scheduled-delivery-2026-09-18.md)
+
 ## Related repository material
 
 - [README and commands](../README.md)
