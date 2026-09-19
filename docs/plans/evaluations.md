@@ -100,6 +100,18 @@ qualification is not claimed.
 
 Demonstrated in the [briefing proof](records/maintenance-briefing-2026-09-18.md).
 
+## Phase 9 — Aggregate repository brief
+
+- Exercise the [repository brief](../specs/repository-brief.md) with Copilot/Terra,
+  following [packages and recipes](../design/packages-and-recipes.md).
+- **Done when:** a small live recipe preserves API totals versus sample membership,
+  contributor-history limits and CI denominators; theme IDs and action references
+  validate; assistant review records semantic usefulness separately from runtime
+  correctness, without independent acceptance claims.
+
+Demonstrated in the [repository brief trial](records/repository-brief-2026-09-18.md),
+including the initial date-query defect and corrected follow-up.
+
 ## Later / ideas
 
 Model-comparison infrastructure, new local-provider batches, broader source

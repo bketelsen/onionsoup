@@ -119,6 +119,19 @@ implementation, the initial 4/7 expected-label match, focused follow-up, and lim
 
 Demonstrated in the [briefing proof](records/maintenance-briefing-2026-09-18.md).
 
+## Phase 11 — Aggregate repository brief
+
+- Implemented the [repository brief](../specs/repository-brief.md) and local
+  [package/recipe boundaries](../design/packages-and-recipes.md), following
+  [ADR-0010](../adr/0010-compose-a-repository-brief-from-bounded-evidence.md).
+- **Done when:** counts and aggregate themes, CI/contributor health and bounded
+  action suggestions are available on demand, with exact arithmetic, visible
+  sampling and independently callable agents. This is backlog P7; scheduled
+  delivery and event adapters remain future work.
+
+Demonstrated in the [repository brief trial](records/repository-brief-2026-09-18.md),
+including the initial date-query defect and corrected follow-up.
+
 ## Broader vision — domain-focused agent teams
 
 Recorded on 2026-09-18: OSS maintenance is the first proving ground for Onionsoup,

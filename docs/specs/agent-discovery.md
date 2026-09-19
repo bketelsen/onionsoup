@@ -1,7 +1,7 @@
 # Spec: Agent capability manifests and workflow event exports
 
 Version 1 provides local, transport-independent discovery and inspection for the
-two focused agents. It does not introduce a scheduler or an authorization service.
+focused agents. It does not introduce a scheduler or an authorization service.
 
 ## Interface
 
@@ -98,6 +98,16 @@ Briefing exports compose both child workflows under a root ID. Optional
 `parentWorkflowId` still identifies its readiness predecessor. The `selection_limit`
 reason marks deliberate capacity skips. Original agent IDs and historical reuse
 remain intact. See [ADR-0009](../adr/0009-produce-a-bounded-maintenance-briefing.md).
+
+The [repository brief](repository-brief.md) adds three local callable capabilities:
+`repository-themes`, `repository-health`, and `maintenance-actions`. Their manifests
+are included in the catalog and MCP discovery, but MCP's invocable set remains
+readiness/location only. Root repository briefs and individual new agent records
+support event export. Events add the three agent IDs, `submit_result`,
+`no_valid_result`, `stage.completed`, optional `stageKey`, and `no_data`/`disabled`
+skip reasons. Collection completion means a saved snapshot, which can contain
+unavailable or partial sections; it does not establish complete source coverage.
+See [ADR-0010](../adr/0010-compose-a-repository-brief-from-bounded-evidence.md).
 
 ## Rules
 

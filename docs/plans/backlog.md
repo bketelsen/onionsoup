@@ -78,6 +78,30 @@ skills make the twenty-factor recommendations reusable; see
 
 Demonstrated in the [briefing proof](records/maintenance-briefing-2026-09-18.md).
 
+## Phase 7 — Repository brief
+
+- Implemented the [repository brief](../specs/repository-brief.md), following
+  [packages and recipes](../design/packages-and-recipes.md) and
+  [ADR-0010](../adr/0010-compose-a-repository-brief-from-bounded-evidence.md).
+- Collect timestamped issue/PR/CI evidence, calculate metrics and contributor
+  history, summarize separate issue/PR themes, interpret health, and suggest up to
+  N actions under four shared admissions. Produce local Markdown/HTML/JSON.
+- **Done when:** one real repository trial displays trustworthy counts and sampled
+  coverage, validated theme memberships and evidence references, bounded proposals,
+  an inspectable trace, and model-free rendering; failure boundaries pass tests.
+
+Demonstrated in the [repository brief trial](records/repository-brief-2026-09-18.md),
+including the initial date-query defect and corrected follow-up.
+
+## Phase 8 — Scheduled delivery (planned)
+
+- Follow [adapter boundaries](../design/packages-and-recipes.md#future-trigger-and-delivery-adapters)
+  around the existing [repository brief](../specs/repository-brief.md).
+- **Done when:** an operator-configured schedule invokes the recipe and delivers
+  its saved artifact to an authorized recipient, with durable delivery identity,
+  duplicate prevention and explicit ambiguous-send handling. Retrying delivery
+  must not repeat analysis. Not implemented or scheduled by P7.
+
 ## Later / ideas
 
 | Item | Trigger / acceptance evidence |

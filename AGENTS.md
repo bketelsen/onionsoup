@@ -59,6 +59,12 @@ Start new skills from [.agents/skills/TEMPLATE/SKILL.md](.agents/skills/TEMPLATE
   types, and tests. Use `npm run demo` for a credential-free AgentLayer smoke test.
   Scripted model tests do not establish task accuracy.
 
+- Repository briefs use deterministic counts and explicit sample coverage. Theme
+  agents partition supplied IDs; health/actions cite supplied evidence. Never
+  equate a valid reference with semantic accuracy or authorize proposed actions.
+  See [repository brief](docs/specs/repository-brief.md) and
+  [package boundaries](docs/design/packages-and-recipes.md).
+
 ## Repository boundary
 
 Keep credentials, private keys, raw runs, local clones, and dependencies out of

@@ -82,3 +82,14 @@ maintainer acceptance.
 
 Follow-through: [ADR-0005](../adr/0005-test-relevance-and-portable-agent-discovery.md),
 [discovery contract](../specs/agent-discovery.md), and [backlog](../plans/backlog.md).
+
+## Repository briefing capabilities
+
+The [repository brief contract](../specs/repository-brief.md) adds three focused
+capabilities for a concrete maintainer consumer: grouping supplied issue/PR titles
+and labels, interpreting calculated health evidence, and proposing up to N
+evidence-linked actions. Collection, arithmetic and rendering remain ordinary
+functions. These do not expand readiness or source-location responsibilities.
+See [ADR-0010](../adr/0010-compose-a-repository-brief-from-bounded-evidence.md),
+[packages and recipes](packages-and-recipes.md), and
+[backlog P7](../plans/backlog.md#phase-7--repository-brief).

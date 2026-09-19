@@ -94,6 +94,16 @@ rejections and partial outcomes stay visible. One root trace retains child workf
 identities. See [ADR-0009](../adr/0009-produce-a-bounded-maintenance-briefing.md) and
 [backlog P6](../plans/backlog.md#phase-6--on-demand-maintenance-briefing).
 
+### Aggregate repository brief
+
+The [repository brief](../specs/repository-brief.md) combines deterministic collection
+and arithmetic with three narrow capabilities: themes (called separately for issues
+and PRs), health interpretation, and action suggestions. This provides the concrete
+consumer for [package, recipe and adapter boundaries](packages-and-recipes.md).
+See [ADR-0010](../adr/0010-compose-a-repository-brief-from-bounded-evidence.md) and
+[backlog P7](../plans/backlog.md#phase-7--repository-brief). Scheduled delivery and
+incoming event adapters remain planned; existing agents gain no new authority.
+
 ### Second-consumer proof of concept
 
 The [portable investigation-packet command](../specs/investigation-packet.md) uses the same

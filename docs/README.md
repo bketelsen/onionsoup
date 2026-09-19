@@ -68,6 +68,7 @@ Raw run links are optional local evidence; those files are intentionally not pub
 - [Terra comparison, 2026-09-18](plans/records/terra-comparison-2026-09-18.md)
 - [Following fixtures to assertions — 2026-09-18](plans/records/test-selection-2026-09-18.md)
 
+- [Aggregate repository brief trial](plans/records/repository-brief-2026-09-18.md)
 - [On-demand maintenance briefing proof](plans/records/maintenance-briefing-2026-09-18.md)
 - [Two-agent saved-parent handoff proof](plans/records/two-agent-handoff-2026-09-18.md)
 - [Bounded multi-issue workflow proof](plans/records/multi-issue-workflow-2026-09-18.md)
@@ -88,6 +89,10 @@ Raw run links are optional local evidence; those files are intentionally not pub
 
 - [ADR-0009: on-demand maintenance briefing](adr/0009-produce-a-bounded-maintenance-briefing.md)
 - [Maintenance briefing contract](specs/maintenance-briefing.md)
+
+- [ADR-0010: repository brief composition](adr/0010-compose-a-repository-brief-from-bounded-evidence.md)
+- [Agent packages, recipes, and adapters](design/packages-and-recipes.md)
+- [Repository brief contract](specs/repository-brief.md)
 
 ## Related repository material
 

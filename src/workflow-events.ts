@@ -1,3 +1,6 @@
+import { RepoAgentId, hash } from './repository-brief/contracts.ts';
+import { validateRepositoryBrief, stageAgent } from './repository-brief/record.ts';
+import { validateRepoAgentRun } from './repository-brief/agents.ts';
 import { z } from 'zod';
 import { validateBriefing } from './briefing-record.ts';
 import { InvocationBudgetSnapshot } from './invocation-budget.ts';
@@ -14,22 +17,23 @@ const Count = z.number().finite().nonnegative().nullable();
 const Usage = z.object({ inputTokens: Count, outputTokens: Count, cacheReadTokens: Count,
   cacheWriteTokens: Count, reasoningTokens: Count, estimatedCostUsd: Count }).strict();
 const Failures = z.enum(['provider_error', 'no_valid_assessment', 'no_valid_brief', 'interrupted_or_timed_out',
-  'execution_error', 'stage_execution_or_persistence_error', 'unknown_failure']);
+  'execution_error', 'stage_execution_or_persistence_error', 'unknown_failure', 'no_valid_result']);
 export const WorkflowEvent = z.object({
   schemaVersion: z.literal(1), workflowId: Id, sequence: z.number().int().nonnegative(), at: z.iso.datetime(),
   type: z.enum(['workflow.started', 'workflow.completed', 'workflow.partial', 'workflow.failed', 'workflow.unfinished',
     'agent.started', 'agent.completed', 'agent.failed', 'agent.unfinished', 'agent.reused',
     'agent.step_started', 'agent.step_finished', 'agent.tool_requested', 'stage.skipped', 'stage.failed',
-    'stage.unfinished', 'workflow.budget_reserved']),
+    'stage.unfinished', 'stage.completed', 'workflow.budget_reserved']),
   childWorkflowId: Id.optional(), parentWorkflowId: Id.optional(), budget: InvocationBudgetSnapshot.optional(), issueIndex: z.number().int().min(0).max(4).optional(),
-  agent: z.enum(['bug-readiness', 'code-location']).optional(), runId: Id.optional(), parentRunId: Id.optional(),
+  stageKey: z.enum(['collection','issue_themes','pr_themes','health','actions']).optional(),
+  agent: z.enum(['bug-readiness', 'code-location', ...RepoAgentId.options]).optional(), runId: Id.optional(), parentRunId: Id.optional(),
   recordVersion: z.number().int().positive().optional(), promptVersion: z.string().regex(/^[\w.-]+$/).optional(),
   runtimeHash: z.string().regex(/^[a-f0-9]{64}$/).optional(), inputHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   repositoryCommit: z.string().regex(/^[a-f0-9]{40}$/).optional(),
   provider: z.string().regex(/^[\w.-]+$/).optional(), model: z.string().regex(/^[\w./:-]+$/).optional(),
   step: z.number().int().nonnegative().optional(),
-  tool: z.enum(['submit_assessment', 'search_repository', 'read_repository', 'submit_brief']).optional(),
-  failure: Failures.optional(), reason: z.enum(['not_eligible', 'readiness_failed', 'location_not_started', 'budget_exhausted', 'cancelled', 'prior_attempt_unfinished', 'not_started', 'selection_limit']).optional(),
+  tool: z.enum(['submit_assessment', 'search_repository', 'read_repository', 'submit_brief', 'submit_result']).optional(),
+  failure: Failures.optional(), reason: z.enum(['not_eligible', 'readiness_failed', 'location_not_started', 'budget_exhausted', 'cancelled', 'prior_attempt_unfinished', 'not_started', 'selection_limit', 'no_data', 'disabled']).optional(),
   outcome: z.enum(['ready', 'needs_information', 'not_applicable', 'out_of_scope', 'located', 'not_located']).optional(),
   requestKind: z.enum(['bug_report', 'feature_request', 'support_question', 'other', 'unclear', 'unclassified_legacy']).optional(),
   testSearch: z.enum(['completed', 'unfinished']).optional(), directTests: z.number().int().nonnegative().optional(),
@@ -37,7 +41,7 @@ export const WorkflowEvent = z.object({
   usage: Usage.optional(), historicalUsage: Usage.optional(), originalStartedAt: z.iso.datetime().optional(),
   originalFinishedAt: z.iso.datetime().optional(),
 }).strict().superRefine((event, ctx) => {
-  if (event.type === 'workflow.budget_reserved' && (!event.budget || event.issueIndex === undefined && event.agent !== 'code-location'))
+  if (event.type === 'workflow.budget_reserved' && (!event.budget || event.issueIndex === undefined && event.agent !== 'code-location' && event.stageKey === undefined))
     ctx.addIssue({ code: 'custom', message: 'Budget reservations require allowance and issue identity' });
   if (event.type === 'agent.reused' && event.usage) ctx.addIssue({ code: 'custom', message: 'Reused usage must be historical' });
   if (event.type.startsWith('agent.') && (!event.agent || !event.runId))
@@ -61,6 +65,42 @@ const failure = (raw: unknown): z.infer<typeof Failures> => Failures.safeParse(r
 // The original records remain the truth. No provider calls, new timestamps, or raw content.
 export function workflowEvents(raw: unknown): z.infer<typeof WorkflowEventExport> {
   const candidate = raw as Record<string, unknown>;
+  if (candidate?.kind === 'repository-brief' || RepoAgentId.safeParse(candidate?.agent).success) {
+    const b = candidate?.kind === 'repository-brief' ? validateRepositoryBrief(raw) : undefined;
+    const standalone = b ? undefined : validateRepoAgentRun(raw);
+    const workflowId = b?.workflowId ?? standalone!.runId, events: WorkflowEvent[] = [];
+    const add = (e: Omit<WorkflowEvent,'schemaVersion'|'workflowId'|'sequence'>) => {
+      events.push(WorkflowEvent.parse({ ...e, schemaVersion: 1, workflowId, sequence: events.length }));
+    };
+    const append = (r: ReturnType<typeof validateRepoAgentRun>, stageKey?: WorkflowEvent['stageKey']) => {
+      const base = { stageKey, agent: r.agent, runId: r.runId, inputHash: r.inputHash, promptVersion: r.promptVersion,
+        recordVersion: r.schemaVersion, provider: r.provider, model: r.model };
+      add({ ...base, type: 'agent.started', at: r.startedAt });
+      for (const e of r.events) {
+        const type = e.type === 'stepStart' ? 'agent.step_started' : e.type === 'stepFinish' ? 'agent.step_finished' : e.type === 'toolInputStart' ? 'agent.tool_requested' : undefined;
+        if (type && z.iso.datetime().safeParse(e.at).success) add({ ...base, type, at: e.at, step: e.step,
+          tool: e.tool === 'submit_result' ? 'submit_result' : undefined });
+      }
+      add({ ...base, type: r.status === 'running' ? 'agent.unfinished' : r.status === 'completed' ? 'agent.completed' : 'agent.failed',
+        at: r.finishedAt ?? r.events.at(-1)?.at ?? r.startedAt, failure: r.failure,
+        usage: usage(r.tokenUsage?.totals) });
+    };
+    add({ type: 'workflow.started', at: b?.startedAt ?? standalone!.startedAt,
+      ...(b ? { budget: { limit: 4, consumed: 0, remaining: 4 } } : {}) });
+    if (b) {
+      add({ type: b.snapshot ? 'stage.completed' : b.failure ? 'stage.failed' : 'stage.unfinished', stageKey: 'collection',
+        at: b.snapshot?.finishedAt ?? b.finishedAt ?? b.startedAt, inputHash: b.snapshotHash ?? hash(b.request) });
+      for (const stage of b.stages) {
+        const base = { stageKey: stage.key, agent: stageAgent[stage.key], at: stage.updatedAt };
+        if (stage.reservation) add({ ...base, type: 'workflow.budget_reserved', at: stage.reservedAt!, budget: stage.reservation });
+        if (stage.run) append(stage.run,stage.key);
+        else add({ ...base, type: stage.status === 'failed' ? 'stage.failed' : stage.status === 'not_attempted' ? 'stage.skipped' : 'stage.unfinished',
+          ...(stage.status === 'failed' ? { failure: 'execution_error' as const } : { reason: stage.reason as 'no_data'|'disabled'|'cancelled'|'prior_attempt_unfinished'|undefined ?? 'not_started' }) });
+      }
+      add({ type: b.status === 'running' ? 'workflow.unfinished' : `workflow.${b.status}`, at: b.finishedAt ?? events.at(-1)!.at, budget: b.budget });
+    } else { append(standalone!); add({ type: standalone!.status === 'running' ? 'workflow.unfinished' : `workflow.${standalone!.status}`, at: standalone!.finishedAt ?? events.at(-1)!.at }); }
+    return WorkflowEventExport.parse({ schemaVersion: 1, kind: 'workflow-events', mode: 'derived-snapshot', workflowId, events });
+  }
   if (candidate?.kind === 'maintenance-briefing') {
     const b = validateBriefing(raw), events: WorkflowEvent[] = [];
     const add = (event: Omit<WorkflowEvent, 'schemaVersion' | 'workflowId' | 'sequence'>) => {

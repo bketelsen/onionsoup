@@ -17,6 +17,6 @@ try {
   console.log(JSON.stringify(result, null, 2));
 } catch {
   // Parsing errors can echo untrusted input or provider content. Keep CLI diagnostics inert.
-  console.error('Unable to inspect input. Usage: agents list | describe bug-readiness|code-location | events RECORD.json|PACKET_DIRECTORY');
+  console.error('Unable to inspect input. Usage: agents list | describe AGENT_ID | events RECORD.json|PACKET_DIRECTORY');
   process.exitCode = 1;
 }

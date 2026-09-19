@@ -62,6 +62,7 @@
               "stage.skipped",
               "stage.failed",
               "stage.unfinished",
+              "stage.completed",
               "workflow.budget_reserved"
             ]
           },
@@ -106,11 +107,24 @@
             "minimum": 0,
             "maximum": 4
           },
+          "stageKey": {
+            "type": "string",
+            "enum": [
+              "collection",
+              "issue_themes",
+              "pr_themes",
+              "health",
+              "actions"
+            ]
+          },
           "agent": {
             "type": "string",
             "enum": [
               "bug-readiness",
-              "code-location"
+              "code-location",
+              "repository-themes",
+              "repository-health",
+              "maintenance-actions"
             ]
           },
           "runId": {
@@ -163,7 +177,8 @@
               "submit_assessment",
               "search_repository",
               "read_repository",
-              "submit_brief"
+              "submit_brief",
+              "submit_result"
             ]
           },
           "failure": {
@@ -175,7 +190,8 @@
               "interrupted_or_timed_out",
               "execution_error",
               "stage_execution_or_persistence_error",
-              "unknown_failure"
+              "unknown_failure",
+              "no_valid_result"
             ]
           },
           "reason": {
@@ -188,7 +204,9 @@
               "cancelled",
               "prior_attempt_unfinished",
               "not_started",
-              "selection_limit"
+              "selection_limit",
+              "no_data",
+              "disabled"
             ]
           },
           "outcome": {

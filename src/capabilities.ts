@@ -1,3 +1,5 @@
+import { RepoAgentId } from './repository-brief/contracts.ts';
+import { repositoryCapabilityManifest } from './repository-brief/capabilities.ts';
 import { z } from 'zod';
 import { IssueSnapshot, Assessment } from './contracts.ts';
 import { LIMITS } from './triage.ts';
@@ -5,12 +7,13 @@ import { LocationInput, CurrentLocationBrief, LOCATION_LIMITS } from './location
 import { PROMPT_VERSION } from './prompt.ts';
 import { LOCATION_PROMPT_VERSION } from './location-prompt.ts';
 
-export const AgentId = z.enum(['bug-readiness', 'code-location']);
+export const AgentId = z.enum(['bug-readiness', 'code-location', ...RepoAgentId.options]);
 export type AgentId = z.infer<typeof AgentId>;
 const schema = (value: z.ZodType) => z.toJSONSchema(value, { target: 'draft-2020-12' });
 // Descriptions never grant capabilities. The existing host validators enforce semantics.
 export function capabilityManifest(id: AgentId) {
   AgentId.parse(id);
+  if (RepoAgentId.safeParse(id).success) return repositoryCapabilityManifest(id as RepoAgentId);
   const readiness = id === 'bug-readiness';
   return {
     schemaVersion: 1, id, capabilityVersion: readiness ? 2 : 3,

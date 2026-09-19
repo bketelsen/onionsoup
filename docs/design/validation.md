@@ -187,6 +187,11 @@ The [briefing proof](../plans/records/maintenance-briefing-2026-09-18.md) exerci
 five reports and two location runs under one seven-attempt allowance, with seven
 exact citations, adjacent-test limits and a model-free report projection.
 
+The [repository brief trial](../plans/records/repository-brief-2026-09-18.md)
+records an initial live API date-filter failure and its corrected follow-up.
+It distinguishes host-calculated counts from sampled metadata themes, CI
+denominators and action suggestions; grounded references do not prove semantics.
+
 ## Operational notes
 
 Run `npm run verify` and `npm run demo` without credentials. Live trials require a configured subscription and currently use Terra only. Dated findings above qualify their recorded versions, not every later revision.

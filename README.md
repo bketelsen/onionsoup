@@ -17,7 +17,7 @@ commit, suggest code and tests a maintainer should read. It uses bounded source
 inspection and returns exact citations with uncertainties. It does not diagnose
 the cause, run repository code, or propose changes.
 
-This is a proof of concept with an explicit handoff between two narrow jobs.
+These agents have an explicit handoff between two narrow jobs.
 There is no team scheduler or shared conversation.
 The [“taco-bell orchestration” design note](docs/design/composable-agents.md) captures the
 goal: multiple orchestration tools composing the same focused agents into
@@ -84,6 +84,26 @@ npm run triage -- run issue.json
 Replace `OWNER/REPO` and `NUMBER` in both places. This agent assesses only the
 supplied title/body, so start with new reports; it does not read comments or linked
 attachments. Keep the source revision with the result and reassess if it changes.
+
+## Produce a repository brief
+
+```sh
+npm run repo-brief -- get-bb/bb --days 7 --max-suggestions 5
+npm run repo-brief -- render runs/repository-briefs/DIRECTORY
+```
+
+This on-demand report combines issue/PR counts and themes, closure/merge activity,
+first-time PR authors, CI statistics, health observations and up to N suggested
+maintainer actions. Deterministic code calculates counts; three focused agents
+handle themes, interpretation and proposals under four shared attempts.
+
+Configure `gh` and your subscription first. No target checkout is needed. Output
+includes Markdown, browsable HTML, JSON evidence and a common trace. Sampling,
+missing data and metric definitions stay visible. Copilot/Terra is the default;
+`--provider codex` selects that subscription. See the
+[contract and bounds](docs/specs/repository-brief.md) and
+[package/recipe/adapter design](docs/design/packages-and-recipes.md). Scheduled
+email, webhooks and MQTT adapters are documented future work.
 
 ## Produce a maintenance briefing
 

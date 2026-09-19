@@ -24,7 +24,8 @@
     "check:capabilities": "node --import tsx scripts/generate-capabilities.ts --check",
     "mcp": "node --import tsx src/mcp-cli.ts",
     "prove:codex": "node --import tsx scripts/prove-codex-mcp.ts",
-    "briefing": "node --import tsx src/briefing-cli.ts"
+    "briefing": "node --import tsx src/briefing-cli.ts",
+    "repo-brief": "node --import tsx src/repository-brief/cli.ts"
   },
   "dependencies": {
     "@humanlayer/agentlayer-core": "0.0.36",
