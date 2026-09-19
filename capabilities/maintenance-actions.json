@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "maintenance-actions",
-  "capabilityVersion": 1,
+  "capabilityVersion": 2,
   "purpose": "Suggest at most N immediate maintainer actions supported by supplied evidence; never execute them.",
   "promptVersion": "maintenance-actions-v1",
   "contracts": {
@@ -122,7 +122,7 @@
   },
   "invocation": {
     "transport": "typescript-function",
-    "module": "src/repository-brief/agents.ts",
+    "module": "@onionsoup/repository-analysis",
     "export": "suggestMaintenanceActions",
     "signature": "(input, options) => Promise<RepoAgentRun>",
     "requiredOptions": [

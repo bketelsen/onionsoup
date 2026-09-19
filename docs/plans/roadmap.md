@@ -248,8 +248,26 @@ Completed. Evidence: [repository profile trial](records/repository-profiles-2026
 
 Completed. Evidence: [reusable TypeScript trial](records/typescript-profiles-2026-09-19.md).
 
+## Phase 21 — Reusable packages and thin applications
+
+- Extract repository analysis, the brief recipe and delivery behind public workspace
+  exports under [ADR-0022](../adr/0022-package-capabilities-with-thin-host-applications.md).
+- Share the implementation across CLI, scheduled worker and bounded MCP delegation;
+  preserve existing record versions and legacy commands.
+- Enforce [package boundaries](../specs/workspace-packages.md), compile a portable
+  release, and prove it works without access to root source or developer dependencies.
+- **Done when:** a freshly installed compiled release renders the same saved brief,
+  prepares delivery and serves MCP calls; existing workflow checks remain green and
+  authority/cancellation/interruption tests pass.
+
+Completed. Evidence: [packaging proof](records/workspace-packages-2026-09-19.md).
+
 ## Later / ideas
 
+- Homelab composition: read-only inventory/health over Incus, Podman, Docker,
+  Synology and TrueNAS, incorporating the owner's existing TrueNAS MCP server.
+  First define allowed resources and evidence contracts; retain the same package,
+  recipe and host boundaries described in [the composition design](../design/packages-and-recipes.md#agent-orchestration-and-the-next-domain).
 - Extend shared invocation admission to another agent only for a concrete recipe.
 - Revisit provider/model comparison as a structured study. Local inference remains
   a reasonable exploration route, currently deferred.

@@ -1,4 +1,4 @@
-// Public local bundle. The CLI is a separate adapter and has no import-time side effects here.
+// Legacy compatibility surface. Canonical implementations live in the workspace packages.
 export { BriefRequest, ThemeInput, ThemeResult, HealthInput, HealthResult, ActionsInput, ActionsResult, REPO_BRIEF_LIMITS } from './contracts.ts';
 export { summarizeRepositoryThemes, interpretRepositoryHealth, suggestMaintenanceActions, validateRepoAgentRun } from './agents.ts';
 export { collectRepository, type GithubReader } from './collect.ts';

@@ -35,6 +35,17 @@ skill does not authorize new effects or infrastructure.
 
 Start new skills from [.agents/skills/TEMPLATE/SKILL.md](.agents/skills/TEMPLATE/SKILL.md).
 
+## Package organization
+
+The first portable slice lives in `packages/` with thin entrypoints in `apps/`.
+Use declared `@onionsoup/*` exports between packages. Never import root `src/` or
+application code from a package. Root forwards preserve legacy imports; edit the
+canonical package implementation. Keep remaining sandbox assets in place until a
+qualified extraction moves them. See [workspace contracts](docs/specs/workspace-packages.md).
+`npm run build` compiles deployable JavaScript; `npm run verify` includes package
+boundary checks. `ONIONSOUP_RELEASE_INSTALL=1 npm test` proves a fresh portable
+release install (requires dependency cache or registry access).
+
 ## Code conventions (live — the code exists)
 
 - Select provider and model explicitly at the application edge; prefer Copilot
@@ -139,8 +150,8 @@ Other real-project repair remains deferred. The resulting feature belongs in a d
 The [reusable repository profile](docs/specs/repository-profiles.md) permits accepted
 Go task artifacts through the same pipeline. Keep host profiles/checks separate
 from task prose, bind exact runtime/dependency/check digests before patching, and
-allow only append-only changes to existing target tests. Generic TypeScript
-onboarding and new-file creation remain unqualified.
+allow only append-only changes to existing target tests. New-file creation remains unqualified; TypeScript task qualification follows
+the explicit adapter and declared original-test coverage below.
 
 Reusable TypeScript tasks use the same profile/job pipeline with `node-typescript-v1`.
 Profiles pin Node/npm policy and selected original test files; host checks stay

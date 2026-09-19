@@ -40,6 +40,31 @@ The demo runs the real AgentLayer loop against a **scripted model response**. It
 needs no credentials and does not establish model quality. It saves a run record
 under `runs/` and prints JSON. All inputs and outputs are local synthetic examples.
 
+## Compose or deploy a repository brief
+
+The first portable slice uses private workspaces in `packages/` and thin hosts in
+`apps/`. Import `@onionsoup/repository-analysis` for focused agent calls, or
+`@onionsoup/repository-brief` for the complete recipe. CLI, scheduled delivery and
+MCP delegate to that same implementation. Root source remains for other workflows
+and compatibility imports.
+
+```sh
+npm run repo-brief -- OWNER/REPO --days 7
+npm run delivery -- tick /absolute/config.json --state /absolute/state
+npm run release:brief
+```
+
+Copy `dist/repository-brief` to deploy, then run `npm ci --omit=dev --ignore-scripts`
+and `node verify-release.mjs` there. Compiled hosts run on Node 24+ without `tsx`.
+For chat-agent orchestration, use `npm run mcp:brief` during development or launch
+`apps/brief-mcp/dist/main.js` from the release. Configure an explicit provider,
+repository allowlist and run directory; its tools submit, inspect and cancel bounded
+jobs. The original `npm run mcp` command remains separate.
+
+See the [package/host contract](docs/specs/workspace-packages.md) for configuration,
+release checks and recovery, and [the design](docs/design/packages-and-recipes.md)
+for composition and the future homelab direction.
+
 ## Use a subscription
 
 Copilot is the default provider; Codex is also supported. There is no silent

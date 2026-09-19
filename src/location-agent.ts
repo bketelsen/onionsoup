@@ -23,7 +23,7 @@ export type LocationRun = { schemaVersion: 1 | 2 | 3; agent: 'code-location'; ru
   brief?: LocationBrief; failure?: string; finishReason?: string; tokenUsage?: TokenUsage; state?: AgentState };
 export async function locationRuntimeHash() {
   const files = ['src/location-agent.ts', 'src/location-contracts.ts', 'src/location-source.ts', 'src/location-prompt.ts',
-    'src/location-workflow.ts', 'src/location-record.ts', 'src/test-navigation.ts', 'src/providers.ts', 'package-lock.json'];
+    'src/location-workflow.ts', 'src/location-record.ts', 'src/test-navigation.ts', 'src/providers.ts', 'packages/providers/src/index.ts', 'packages/providers/src/evaluation-policy.ts', 'package-lock.json'];
   const hash = createHash('sha256');
   for (const file of files) hash.update(file).update('\0').update(await readFile(join(projectRoot, file))).update('\0');
   return hash.digest('hex');

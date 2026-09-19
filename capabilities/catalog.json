@@ -15,17 +15,17 @@
     {
       "id": "repository-themes",
       "manifest": "capabilities/repository-themes.json",
-      "capabilityVersion": 1
+      "capabilityVersion": 2
     },
     {
       "id": "repository-health",
       "manifest": "capabilities/repository-health.json",
-      "capabilityVersion": 1
+      "capabilityVersion": 2
     },
     {
       "id": "maintenance-actions",
       "manifest": "capabilities/maintenance-actions.json",
-      "capabilityVersion": 1
+      "capabilityVersion": 2
     },
     {
       "id": "feature-requirements",

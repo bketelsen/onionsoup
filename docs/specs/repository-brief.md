@@ -159,3 +159,6 @@ to that adapter's invocable set.
 
 Delivery consumer: [scheduled delivery](scheduled-delivery.md), following
 [ADR-0011](../adr/0011-separate-scheduled-analysis-from-mail-delivery.md).
+
+Packaging and host composition follow [ADR-0022](../adr/0022-package-capabilities-with-thin-host-applications.md)
+and the [workspace package contract](workspace-packages.md).

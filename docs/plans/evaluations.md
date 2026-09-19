@@ -213,6 +213,16 @@ Completed. Evidence: [repository profile trial](records/repository-profiles-2026
 
 Completed. Evidence: [reusable TypeScript trial](records/typescript-profiles-2026-09-19.md).
 
+## Phase 19 — Portable package qualification
+
+- Qualify [workspace boundaries and hosts](../specs/workspace-packages.md) under
+  [ADR-0022](../adr/0022-package-capabilities-with-thin-host-applications.md) and
+  the [package design](../design/packages-and-recipes.md).
+- **Done when:** the compiled CLI, scheduled worker and MCP host work from a fresh
+  production dependency install outside the source checkout; authority and lifecycle
+  checks pass alongside the previously qualified execution adapters.
+Completed. Evidence: [portable package qualification](records/workspace-packages-2026-09-19.md).
+
 ## Later / ideas
 
 Model-comparison infrastructure, new local-provider batches, broader source

@@ -1,6 +1,6 @@
-import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { join, dirname } from 'node:path';
+import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BatchManifest, Feedback, CostDecision } from './batch-contracts.ts';
 import { inputHash } from './triage.ts';
@@ -10,7 +10,7 @@ import { validateAssessment } from './contracts.ts';
 import { PROMPT_VERSION, SYSTEM_PROMPT } from './prompt.ts';
 
 export const projectRoot = fileURLToPath(new URL('../', import.meta.url));
-const runtimeFiles = ['src/prompt.ts', 'src/contracts.ts', 'src/triage.ts', 'src/providers.ts',
+const runtimeFiles = ['src/prompt.ts', 'src/contracts.ts', 'src/triage.ts', 'src/providers.ts', 'packages/providers/src/index.ts', 'packages/providers/src/evaluation-policy.ts',
   'src/batch-run.ts', 'src/evaluation-policy.ts', 'package-lock.json'];
 export async function freezeRuntime() {
   const entries = await Promise.all(runtimeFiles.map(async file => [file,
@@ -21,19 +21,8 @@ export async function assertFrozen(manifest: BatchManifest) {
   if (JSON.stringify(await freezeRuntime()) !== JSON.stringify(manifest.frozen))
     throw new Error('Frozen runtime changed. Start a separate development batch; do not retune this held-out batch.');
 }
-export async function readJson(file: string): Promise<unknown> {
-  return JSON.parse(await readFile(file, 'utf8'));
-}
-export async function optionalJson(file: string): Promise<unknown | undefined> {
-  try { return await readJson(file); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error; }
-}
-export async function atomicJson(file: string, value: unknown) {
-  await mkdir(dirname(file), { recursive: true, mode: 0o700 });
-  const temporary = `${file}.${randomUUID()}.tmp`;
-  await writeFile(temporary, JSON.stringify(value, null, 2) + '\n', { mode: 0o600, flag: 'wx' });
-  await rename(temporary, file);
-}
+export { readJson, optionalJson, atomicJson } from '@onionsoup/runtime/storage';
+import { readJson, optionalJson } from '@onionsoup/runtime/storage';
 export async function readManifest(directory: string): Promise<BatchManifest> {
   const manifest = BatchManifest.parse(await readJson(join(directory, 'manifest.json')));
   if (new Set(manifest.models).size !== manifest.models.length ||

@@ -67,7 +67,8 @@ export function validatePacket(raw: unknown): Packet {
 }
 
 // Escape prose as text; source quotations are inert fenced blocks with safe delimiters.
-export const text = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/([\\`*_{}\[\]()#!|])/g, '\\$1');
+export { text } from '@onionsoup/runtime/text';
+import { text } from '@onionsoup/runtime/text';
 export const quote = (s: string) => { const fence = '`'.repeat(Math.max(3, ...[...s.matchAll(/`+/g)].map(m => m[0].length + 1))); return `${fence}text\n${s}\n${fence}`; };
 export function packetMarkdown(raw: unknown) {
   const p = validatePacket(raw), r = p.readiness, a = r?.assessment, l = p.location;

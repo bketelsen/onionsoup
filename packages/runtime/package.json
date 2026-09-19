@@ -1,0 +1,42 @@
+{
+  "name": "@onionsoup/runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "exports": {
+    ".": {
+      "onionsoup-source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./budget": {
+      "onionsoup-source": "./src/budget.ts",
+      "types": "./dist/budget.d.ts",
+      "default": "./dist/budget.js"
+    },
+    "./events": {
+      "onionsoup-source": "./src/events.ts",
+      "types": "./dist/events.d.ts",
+      "default": "./dist/events.js"
+    },
+    "./storage": {
+      "onionsoup-source": "./src/storage.ts",
+      "types": "./dist/storage.d.ts",
+      "default": "./dist/storage.js"
+    },
+    "./text": {
+      "onionsoup-source": "./src/text.ts",
+      "types": "./dist/text.d.ts",
+      "default": "./dist/text.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "zod": "4.3.6"
+  }
+}

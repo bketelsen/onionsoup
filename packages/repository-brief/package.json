@@ -1,0 +1,45 @@
+{
+  "name": "@onionsoup/repository-brief",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "exports": {
+    ".": {
+      "onionsoup-source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./events": {
+      "onionsoup-source": "./src/events.ts",
+      "types": "./dist/events.d.ts",
+      "default": "./dist/events.js"
+    },
+    "./recipe": {
+      "onionsoup-source": "./src/recipe.ts",
+      "types": "./dist/recipe.d.ts",
+      "default": "./dist/recipe.js"
+    },
+    "./record": {
+      "onionsoup-source": "./src/record.ts",
+      "types": "./dist/record.d.ts",
+      "default": "./dist/record.js"
+    },
+    "./render": {
+      "onionsoup-source": "./src/render.ts",
+      "types": "./dist/render.d.ts",
+      "default": "./dist/render.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "@onionsoup/providers": "0.1.0",
+    "@onionsoup/repository-analysis": "0.1.0",
+    "@onionsoup/runtime": "0.1.0",
+    "zod": "4.3.6"
+  }
+}

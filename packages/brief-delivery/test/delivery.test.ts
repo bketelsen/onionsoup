@@ -6,14 +6,14 @@ import { mkdtemp, rm, readFile, writeFile, mkdir, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MockLanguageModelV3, simulateReadableStream } from 'ai/test';
-import { DeliveryConfig, DeliveryRecord } from '../src/delivery/contracts.ts';
-import { latestOccurrence } from '../src/delivery/schedule.ts';
-import { smtpSender, bytesHash } from '../src/delivery/mail.ts';
-import { tick, prepareSaved, deliver, inspect, reconcile, type DeliveryOptions } from '../src/delivery/runtime.ts';
-import { createRepositoryBrief } from '../src/repository-brief/recipe.ts';
-import { atomicJson, readJson } from '../src/batch-store.ts';
-import { EVALUATION_MODEL } from '../src/evaluation-policy.ts';
-import { workflowEvents } from '../src/workflow-events.ts';
+import { DeliveryConfig, DeliveryRecord } from '@onionsoup/brief-delivery/contracts';
+import { latestOccurrence } from '@onionsoup/brief-delivery/schedule';
+import { smtpSender, bytesHash } from '@onionsoup/brief-delivery/mail';
+import { tick, prepareSaved, deliver, inspect, reconcile, type DeliveryOptions } from '@onionsoup/brief-delivery/runtime';
+import { createRepositoryBrief } from '@onionsoup/repository-brief/recipe';
+import { atomicJson, readJson } from '@onionsoup/runtime/storage';
+import { EVALUATION_MODEL } from '@onionsoup/providers/evaluation-policy';
+import { workflowEvents } from '@onionsoup/brief-delivery/events';
 const config=DeliveryConfig.parse({ schemaVersion:1,jobId:'test-brief',repository:'example/widget',provider:'copilot',days:7,maxSuggestions:0,
   schedule:{ timeZone:'America/New_York',time:'09:00',weekdays:[1,2,3,4,5],catchUpHours:2 },
   from:'onionsoup@example.invalid',to:'maintainer@example.invalid',smtp:{ host:'127.0.0.1',port:2525,security:'loopback' } });
@@ -174,7 +174,7 @@ test('malformed delivery histories cannot forge safe retry permission',()=>{
 });
 
 test('capture relay persists mail privately, rejects oversize messages, and does not forward',async t=>{
-  const { captureServer }=await import('../src/delivery/capture.ts');
+  const { captureServer }=await import('@onionsoup/brief-delivery/capture');
   const { readdir }=await import('node:fs/promises');
   const f=await fixture(t), directory=join(f.parent,'captured'), server=await captureServer(directory);
   await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));

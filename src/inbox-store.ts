@@ -37,7 +37,7 @@ export function contentHash(input: IssueSnapshot) {
   return createHash('sha256').update(JSON.stringify([input.repository, input.number, input.title, input.body])).digest('hex');
 }
 export async function runtimeHash() {
-  const files = ['src/contracts.ts', 'src/prompt.ts', 'src/triage.ts', 'src/providers.ts',
+  const files = ['src/contracts.ts', 'src/prompt.ts', 'src/triage.ts', 'src/providers.ts', 'packages/providers/src/index.ts', 'packages/providers/src/evaluation-policy.ts',
     'src/inbox-store.ts', 'src/inbox-source.ts', 'src/inbox.ts', 'src/evaluation-policy.ts', 'package-lock.json'];
   const contents = await Promise.all(files.map(file => readFile(join(projectRoot, file))));
   const hash = createHash('sha256');

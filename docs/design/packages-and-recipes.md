@@ -24,20 +24,42 @@ flowchart LR
 
 ## Design
 
-### Current local bundle
+### Private workspace packages
 
-[src/repository-brief/index.ts](../../src/repository-brief/index.ts) is the local
-bundle's public import surface. This is source packaging inside the repository,
-not a published npm package, separate service or container per agent.
+[ADR-0022](../adr/0022-package-capabilities-with-thin-host-applications.md) defines
+private npm workspaces with coordinated versions. The
+[package contract](../specs/workspace-packages.md) records exports, compiled releases,
+host configuration and MCP job semantics. Root `src/repository-brief` and `src/delivery`
+modules are compatibility forwards, not separate implementations.
 
-| Component | Ownership |
+```mermaid
+flowchart TD
+    CLI[Brief CLI] --> Recipe[Repository brief recipe]
+    Worker[Scheduled worker] --> Delivery[Brief delivery]
+    Chat[Agent orchestrator] --> MCP[Brief MCP adapter]
+    MCP --> Recipe
+    Delivery --> Recipe
+    Recipe --> Analysis[Repository analysis capabilities]
+    Recipe --> Providers[Subscription providers]
+    Recipe --> Runtime[Storage / budget / event contract]
+    Analysis --> Runtime
+```
+
+| Package | Ownership |
 | --- | --- |
-| `contracts.ts`, `agents.ts`, `capabilities.ts` | Three callable capabilities, prompts, schemas, validation, limits and manifests |
-| `collect.ts`, `metrics.ts` | Bounded read-only API acquisition, population/sample bookkeeping, exact arithmetic and evidence IDs |
-| `record.ts`, `recipe.ts` | Request identity, sequencing, four shared admissions, persistence, partial outcomes |
-| `cli.ts` | Argument/environment parsing, provider selection and cancellation |
-| `render.ts` | Inert local Markdown/HTML projections; no inference |
-| Common event exporter | Correlated metadata, recorded usage, no raw task text |
+| `repository-analysis` | Three agents, prompts, schemas, collection, metrics, manifests |
+| `repository-brief` | Sequence, four admissions, record validation, events, rendering |
+| `brief-delivery` | Schedule, occurrence ledger, SMTP and capture support |
+| `brief-mcp` | Allowlisted asynchronous delegation and saved-job inspection |
+| `providers` | Subscription adapters, explicit selection, development model policy |
+| `runtime` | Small shared storage, budget, event-schema and text primitives |
+
+Four thin applications select configuration: on-demand CLI, scheduled worker,
+MCP stdio host and local mail capture. Packages cannot import applications or root
+source. Public export checks and a relocated compiled-release test enforce that
+boundary. Existing readiness/location and implementation workflows remain in `src/`
+until a concrete next consumer justifies extraction; sandbox assets and historical
+records stay where their existing qualification expects them.
 
 The same theme capability runs separately for open issues and open PRs. It returns
 member IDs and prose; host code computes counts. Health interpretation receives
@@ -53,7 +75,7 @@ new effects. Existing readiness/location agents retain their original jobs.
 
 ### Future trigger and delivery adapters
 
-CLI, local files, scheduled ticks and SMTP delivery are implemented. The
+CLI, local files, scheduled ticks, SMTP delivery and repository-brief MCP tools are implemented. The
 [schedule/delivery contract](../specs/scheduled-delivery.md) and
 [backlog P8](../plans/backlog.md#phase-8--scheduled-delivery) govern the two host
 adapters. A development capture relay saves mail locally without forwarding.
@@ -79,6 +101,23 @@ separate retry boundaries. Explicit operator configuration authorizes mail; mode
 output cannot choose a destination. Ambiguous SMTP outcomes require reconciliation.
 Queues, distributed leases and the remaining event listeners remain deferred.
 
+### Agent orchestration and the next domain
+
+A chat agent can be the orchestrator: it discovers tools and delegates a bounded
+brief job, then inspects the result. MCP is a transport adapter around the same
+callable recipe. The orchestrator does not gain broader authority from discovery,
+and narrative output cannot select credentials or invoke a different effect.
+An application can import the recipe directly or host this adapter as a process.
+Service/container boundaries are deployment choices, not agent boundaries.
+
+The next candidate domain is the owner's homelab: several Incus servers, Podman
+and Docker services, Synology and TrueNAS. Incorporate the existing working
+TrueNAS MCP server through a future host configuration rather than rebuilding it.
+Start with an explicitly scoped read-only inventory/health recipe after deciding
+resource allowlists and evidence contracts. Service changes, credentials and live
+homelab connectivity are not part of this packaging phase. See
+[roadmap phase 21](../plans/roadmap.md#phase-21--reusable-packages-and-thin-applications).
+
 ### Deployment position
 
 AgentLayer supplies the inner runtime: tool interfaces/executors, agent loops,
@@ -90,7 +129,7 @@ claim that every later runtime feature is installed here.
 
 HumanLayer's separate Agent Control Plane describes a Kubernetes-based agent/task
 orchestrator and labels itself alpha. It is a future evaluation candidate, not an
-Onionsoup dependency. Start with one process hosting the recipe and its selected
+Onionsoup dependency. Use the compiled release for a CLI, external timer or local stdio host, with its selected
 subscription credentials. Choose deployment/queue infrastructure in response to
 specific operational needs; do not require a service boundary for each agent.
 

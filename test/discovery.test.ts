@@ -25,7 +25,7 @@ test('published manifests are usable without credentials and identify callable i
   for (const item of capabilityCatalog().agents) {
     const manifest = capabilityManifest(AgentId.parse(item.id));
     assert.deepEqual(JSON.parse(await readFile(item.manifest, 'utf8')), manifest);
-    const module = await import(`../${manifest.invocation.module}`);
+    const module = await import(manifest.invocation.module.startsWith('@onionsoup/') ? manifest.invocation.module : `../${manifest.invocation.module}`);
     assert.equal(typeof module[manifest.invocation.export], 'function');
     assert.equal(manifest.effects.githubWrites, false); assert.equal(manifest.effects.targetCodeExecution, false);
     assert.equal(manifest.lifecycle.durableResume, false);
@@ -37,7 +37,7 @@ test('published manifests are usable without credentials and identify callable i
     assert.equal(manifest.contracts.resultSchema.type, 'object');
   }
   const manifest = capabilityManifest('bug-readiness');
-  const module = await import(`../${manifest.invocation.module}`);
+  const module = await import(manifest.invocation.module.startsWith('@onionsoup/') ? manifest.invocation.module : `../${manifest.invocation.module}`);
   const result = await module[manifest.invocation.export](issue, { model: fixtureModel([feature]), provider: 'fixture', modelId: 'scripted' });
   assert.equal(result.schemaVersion, manifest.contracts.runVersion);
   assert.equal(result.assessment.schemaVersion, manifest.contracts.resultVersion);

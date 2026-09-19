@@ -1,0 +1,23 @@
+{
+  "name": "@onionsoup/brief-worker-app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "exports": {
+    ".": {
+      "onionsoup-source": "./src/main.ts",
+      "types": "./dist/main.d.ts",
+      "default": "./dist/main.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "@onionsoup/brief-delivery": "0.1.0",
+    "@onionsoup/runtime": "0.1.0"
+  }
+}

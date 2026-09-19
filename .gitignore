@@ -11,3 +11,7 @@ credentials.json
 *.pem
 *.key
 .npmrc
+
+# Compiled workspaces and portable release outputs.
+dist/
+.build/

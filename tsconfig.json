@@ -6,7 +6,20 @@
     "strict": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "customConditions": [
+      "onionsoup-source"
+    ]
   },
-  "include": ["src/**/*.ts", "test/**/*.ts", "scripts/**/*.ts"]
+  "include": [
+    "src/**/*.ts",
+    "test/**/*.ts",
+    "scripts/**/*.ts",
+    "packages/**/*.ts",
+    "apps/**/*.ts"
+  ],
+  "exclude": [
+    "**/dist/**",
+    ".build/**"
+  ]
 }

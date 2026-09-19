@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "repository-themes",
-  "capabilityVersion": 1,
+  "capabilityVersion": 2,
   "purpose": "Partition a bounded collection of open item titles/labels into evidence-linked themes.",
   "promptVersion": "repository-themes-v1",
   "contracts": {
@@ -128,7 +128,7 @@
   },
   "invocation": {
     "transport": "typescript-function",
-    "module": "src/repository-brief/agents.ts",
+    "module": "@onionsoup/repository-analysis",
     "export": "summarizeRepositoryThemes",
     "signature": "(input, options) => Promise<RepoAgentRun>",
     "requiredOptions": [

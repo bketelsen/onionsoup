@@ -7,13 +7,9 @@ import { ProposalAgentId } from './change-proposal/contracts.ts';
 import { validateChangeWorkflow } from './change-proposal/record.ts';
 import { validateProposalAgentRun } from './change-proposal/agents.ts';
 import { OperatorRecord } from './console/contracts.ts';
-import { DeliveryRecord } from './delivery/contracts.ts';
 import { RepoAgentId, hash } from './repository-brief/contracts.ts';
-import { validateRepositoryBrief, stageAgent } from './repository-brief/record.ts';
-import { validateRepoAgentRun } from './repository-brief/agents.ts';
 import { z } from 'zod';
 import { validateBriefing } from './briefing-record.ts';
-import { InvocationBudgetSnapshot } from './invocation-budget.ts';
 import { validateLocationHandoff } from './location-handoff.ts';
 import { validateReadinessWorkflow } from './readiness-workflow.ts';
 import { validateReadinessRun } from './readiness-record.ts';
@@ -22,67 +18,10 @@ import { validateLocationRun } from './location-record.ts';
 import type { StoredRunRecord } from './assessment-view.ts';
 import type { LocationRun } from './location-agent.ts';
 
-const Id = z.string().uuid();
-const Count = z.number().finite().nonnegative().nullable();
-const Usage = z.object({ inputTokens: Count, outputTokens: Count, cacheReadTokens: Count,
-  cacheWriteTokens: Count, reasoningTokens: Count, estimatedCostUsd: Count }).strict();
-const Failures = z.enum(['provider_error', 'no_valid_assessment', 'no_valid_brief', 'interrupted_or_timed_out',
-  'execution_error', 'stage_execution_or_persistence_error', 'unknown_failure', 'no_valid_result']);
-export const WorkflowEvent = z.object({
-  schemaVersion: z.literal(1), workflowId: Id, sequence: z.number().int().nonnegative(), at: z.iso.datetime(),
-  type: z.enum(['workflow.started', 'workflow.completed', 'workflow.partial', 'workflow.failed', 'workflow.unfinished',
-    'agent.started', 'agent.completed', 'agent.failed', 'agent.unfinished', 'agent.reused',
-    'operator.requested', 'operator.completed', 'operator.failed', 'operator.unfinished',
-    'delivery.prepared', 'delivery.attempted', 'delivery.accepted', 'delivery.rejected', 'delivery.unknown', 'delivery.reconciled',
-    'agent.step_started', 'agent.step_finished', 'agent.tool_requested', 'stage.skipped', 'stage.failed',
-    'stage.unfinished', 'stage.completed', 'workflow.budget_reserved','verification.started','verification.completed',
-    'publication.prepared','publication.approved','publication.push_intent','publication.branch_published','publication.pr_intent','publication.published','publication.unknown','publication.blocked']),
-  publicationId:z.string().regex(/^[a-f0-9]{64}$/).optional(),
-  publicationReason:z.enum(['operator_authorized','remote_observed','effect_intent','remote_uncertain','remote_conflict','stale_base','stale_approval','prepared']).optional(),
-  operatorAction: z.enum(['run_now','pause','resume','retry','investigate','propose']).optional(),
-  issueNumber: z.number().int().positive().optional(),
-  deliveryAttempt: z.number().int().min(1).max(3).optional(),
-  deliveryResolution: z.enum(['accepted','not_accepted']).optional(),
-  childWorkflowId: Id.optional(), parentWorkflowId: Id.optional(), budget: InvocationBudgetSnapshot.optional(), issueIndex: z.number().int().min(0).max(4).optional(),
-  stageKey: z.enum(['collection','issue_themes','pr_themes','health','actions','requirements','proposal','patch','review']).optional(),
-  agent: z.enum(['bug-readiness', 'code-location', ...RepoAgentId.options, ...ProposalAgentId.options, ...FixtureAgentId.options]).optional(), runId: Id.optional(), parentRunId: Id.optional(),
-  recordVersion: z.number().int().positive().optional(), promptVersion: z.string().regex(/^[\w.-]+$/).optional(),
-  runtimeHash: z.string().regex(/^[a-f0-9]{64}$/).optional(), inputHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
-  repositoryCommit: z.string().regex(/^[a-f0-9]{40}$/).optional(),
-  provider: z.string().regex(/^[\w.-]+$/).optional(), model: z.string().regex(/^[\w./:-]+$/).optional(),
-  step: z.number().int().nonnegative().optional(),
-  tool: z.enum(['submit_assessment', 'search_repository', 'read_repository', 'submit_brief', 'submit_result']).optional(),
-  failure: Failures.optional(), reason: z.enum(['not_eligible', 'readiness_failed', 'location_not_started', 'budget_exhausted', 'cancelled', 'prior_attempt_unfinished', 'not_started', 'selection_limit', 'no_data', 'disabled']).optional(),
-  outcome: z.enum(['ready', 'needs_information', 'not_applicable', 'out_of_scope', 'located', 'not_located', 'proposal_ready', 'sufficient_for_proposal']).optional(),
-  requestKind: z.enum(['bug_report', 'feature_request', 'support_question', 'other', 'unclear', 'unclassified_legacy']).optional(),
-  scopeId:Id.optional(), receiptId:Id.optional(), treeHash:z.string().regex(/^[a-f0-9]{64}$/).optional(),
-  verificationPhase:z.enum(['baseline','candidate','probe']).optional(),
-  verificationOutcome:z.enum(['passed','assertion_failed','capability_absent','setup_error','execution_error','timeout','output_limit','cancelled']).optional(),
-  testSearch: z.enum(['completed', 'unfinished']).optional(), directTests: z.number().int().nonnegative().optional(),
-  adjacentTests: z.number().int().nonnegative().optional(),
-  usage: Usage.optional(), historicalUsage: Usage.optional(), originalStartedAt: z.iso.datetime().optional(),
-  originalFinishedAt: z.iso.datetime().optional(),
-}).strict().superRefine((event, ctx) => {
-  if (event.type === 'workflow.budget_reserved' && (!event.budget || event.issueIndex === undefined && event.agent !== 'code-location' && event.stageKey === undefined))
-    ctx.addIssue({ code: 'custom', message: 'Budget reservations require allowance and issue identity' });
-  if (event.type === 'agent.reused' && event.usage) ctx.addIssue({ code: 'custom', message: 'Reused usage must be historical' });
-  if (event.type.startsWith('agent.') && (!event.agent || !event.runId))
-    ctx.addIssue({ code: 'custom', message: 'Agent events require identity' });
-});
-export type WorkflowEvent = z.infer<typeof WorkflowEvent>;
-export const WorkflowEventExport = z.object({ schemaVersion: z.literal(1), kind: z.literal('workflow-events'),
-  mode: z.literal('derived-snapshot'), workflowId: Id, events: z.array(WorkflowEvent),
-}).strict().superRefine((value, ctx) => {
-  if (value.events.some((event, index) => event.sequence !== index || event.workflowId !== value.workflowId))
-    ctx.addIssue({ code: 'custom', message: 'Event sequence/workflow identity mismatch' });
-});
-const usage = (raw: unknown) => {
-  if (!raw || typeof raw !== 'object') return undefined;
-  const value = raw as Record<string, unknown>;
-  const number = (key: string) => typeof value[key] === 'number' && Number.isFinite(value[key]) && value[key] >= 0 ? value[key] : null;
-  return Usage.parse(Object.fromEntries(Object.keys(Usage.shape).map(key => [key, number(key)])));
-};
-const failure = (raw: unknown): z.infer<typeof Failures> => Failures.safeParse(raw).success ? raw as z.infer<typeof Failures> : 'unknown_failure';
+export { WorkflowEvent, WorkflowEventExport } from '@onionsoup/runtime/events';
+import { WorkflowEvent, WorkflowEventExport, usage, failure } from '@onionsoup/runtime/events';
+import { workflowEvents as repositoryBriefEvents } from '@onionsoup/repository-brief/events';
+import { workflowEvents as deliveryEvents } from '@onionsoup/brief-delivery/events';
 
 // The original records remain the truth. No provider calls, new timestamps, or raw content.
 export function workflowEvents(raw: unknown): z.infer<typeof WorkflowEventExport> {
@@ -172,57 +111,8 @@ export function workflowEvents(raw: unknown): z.infer<typeof WorkflowEventExport
         ...(r.result && 'workflowId' in r.result?{ childWorkflowId:r.result.workflowId }:{}) },
     ] });
   }
-  if (candidate?.kind === 'brief-delivery') {
-    const r=DeliveryRecord.parse(raw), events:WorkflowEvent[]=[];
-    const add=(event:Omit<WorkflowEvent,'schemaVersion'|'workflowId'|'sequence'>)=>events.push(WorkflowEvent.parse({
-      ...event,schemaVersion:1,workflowId:r.workflowId,sequence:events.length }));
-    add({ type:'workflow.started',at:r.createdAt });
-    if (r.analysisFailure) add({ type:'workflow.failed',at:r.analysisFailure.at,failure:'execution_error' });
-    if (r.message) add({ type:'delivery.prepared',at:r.message.preparedAt,parentWorkflowId:r.brief!.workflowId,inputHash:r.message.hash });
-    for (const [index,a] of r.attempts.entries()) {
-      const base={ deliveryAttempt:index+1,parentWorkflowId:r.brief!.workflowId,inputHash:r.message!.hash };
-      add({ ...base,type:'delivery.attempted',at:a.startedAt });
-      add({ ...base,type:a.outcome==='sending'?'delivery.unknown':`delivery.${a.outcome}`,at:a.finishedAt??a.startedAt });
-      if (a.resolution) add({ ...base,type:'delivery.reconciled',at:a.resolution.at,deliveryResolution:a.resolution.outcome });
-    }
-    return WorkflowEventExport.parse({ schemaVersion:1,kind:'workflow-events',mode:'derived-snapshot',workflowId:r.workflowId,events });
-  }
-  if (candidate?.kind === 'repository-brief' || RepoAgentId.safeParse(candidate?.agent).success) {
-    const b = candidate?.kind === 'repository-brief' ? validateRepositoryBrief(raw) : undefined;
-    const standalone = b ? undefined : validateRepoAgentRun(raw);
-    const workflowId = b?.workflowId ?? standalone!.runId, events: WorkflowEvent[] = [];
-    const add = (e: Omit<WorkflowEvent,'schemaVersion'|'workflowId'|'sequence'>) => {
-      events.push(WorkflowEvent.parse({ ...e, schemaVersion: 1, workflowId, sequence: events.length }));
-    };
-    const append = (r: ReturnType<typeof validateRepoAgentRun>, stageKey?: WorkflowEvent['stageKey']) => {
-      const base = { stageKey, agent: r.agent, runId: r.runId, inputHash: r.inputHash, promptVersion: r.promptVersion,
-        recordVersion: r.schemaVersion, provider: r.provider, model: r.model };
-      add({ ...base, type: 'agent.started', at: r.startedAt });
-      for (const e of r.events) {
-        const type = e.type === 'stepStart' ? 'agent.step_started' : e.type === 'stepFinish' ? 'agent.step_finished' : e.type === 'toolInputStart' ? 'agent.tool_requested' : undefined;
-        if (type && z.iso.datetime().safeParse(e.at).success) add({ ...base, type, at: e.at, step: e.step,
-          tool: e.tool === 'submit_result' ? 'submit_result' : undefined });
-      }
-      add({ ...base, type: r.status === 'running' ? 'agent.unfinished' : r.status === 'completed' ? 'agent.completed' : 'agent.failed',
-        at: r.finishedAt ?? r.events.at(-1)?.at ?? r.startedAt, failure: r.failure,
-        usage: usage(r.tokenUsage?.totals) });
-    };
-    add({ type: 'workflow.started', at: b?.startedAt ?? standalone!.startedAt,
-      ...(b ? { budget: { limit: 4, consumed: 0, remaining: 4 } } : {}) });
-    if (b) {
-      add({ type: b.snapshot ? 'stage.completed' : b.failure ? 'stage.failed' : 'stage.unfinished', stageKey: 'collection',
-        at: b.snapshot?.finishedAt ?? b.finishedAt ?? b.startedAt, inputHash: b.snapshotHash ?? hash(b.request) });
-      for (const stage of b.stages) {
-        const base = { stageKey: stage.key, agent: stageAgent[stage.key], at: stage.updatedAt };
-        if (stage.reservation) add({ ...base, type: 'workflow.budget_reserved', at: stage.reservedAt!, budget: stage.reservation });
-        if (stage.run) append(stage.run,stage.key);
-        else add({ ...base, type: stage.status === 'failed' ? 'stage.failed' : stage.status === 'not_attempted' ? 'stage.skipped' : 'stage.unfinished',
-          ...(stage.status === 'failed' ? { failure: 'execution_error' as const } : { reason: stage.reason as 'no_data'|'disabled'|'cancelled'|'prior_attempt_unfinished'|undefined ?? 'not_started' }) });
-      }
-      add({ type: b.status === 'running' ? 'workflow.unfinished' : `workflow.${b.status}`, at: b.finishedAt ?? events.at(-1)!.at, budget: b.budget });
-    } else { append(standalone!); add({ type: standalone!.status === 'running' ? 'workflow.unfinished' : `workflow.${standalone!.status}`, at: standalone!.finishedAt ?? events.at(-1)!.at }); }
-    return WorkflowEventExport.parse({ schemaVersion: 1, kind: 'workflow-events', mode: 'derived-snapshot', workflowId, events });
-  }
+  if (candidate?.kind === 'brief-delivery') return deliveryEvents(raw);
+  if (candidate?.kind === 'repository-brief' || RepoAgentId.safeParse(candidate?.agent).success) return repositoryBriefEvents(raw);
   if (candidate?.kind === 'maintenance-briefing') {
     const b = validateBriefing(raw), events: WorkflowEvent[] = [];
     const add = (event: Omit<WorkflowEvent, 'schemaVersion' | 'workflowId' | 'sequence'>) => {

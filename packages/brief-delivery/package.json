@@ -1,0 +1,62 @@
+{
+  "name": "@onionsoup/brief-delivery",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "exports": {
+    ".": {
+      "onionsoup-source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./capture": {
+      "onionsoup-source": "./src/capture.ts",
+      "types": "./dist/capture.d.ts",
+      "default": "./dist/capture.js"
+    },
+    "./contracts": {
+      "onionsoup-source": "./src/contracts.ts",
+      "types": "./dist/contracts.d.ts",
+      "default": "./dist/contracts.js"
+    },
+    "./control": {
+      "onionsoup-source": "./src/control.ts",
+      "types": "./dist/control.d.ts",
+      "default": "./dist/control.js"
+    },
+    "./events": {
+      "onionsoup-source": "./src/events.ts",
+      "types": "./dist/events.d.ts",
+      "default": "./dist/events.js"
+    },
+    "./mail": {
+      "onionsoup-source": "./src/mail.ts",
+      "types": "./dist/mail.d.ts",
+      "default": "./dist/mail.js"
+    },
+    "./runtime": {
+      "onionsoup-source": "./src/runtime.ts",
+      "types": "./dist/runtime.d.ts",
+      "default": "./dist/runtime.js"
+    },
+    "./schedule": {
+      "onionsoup-source": "./src/schedule.ts",
+      "types": "./dist/schedule.d.ts",
+      "default": "./dist/schedule.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "@onionsoup/repository-analysis": "0.1.0",
+    "@onionsoup/repository-brief": "0.1.0",
+    "@onionsoup/runtime": "0.1.0",
+    "nodemailer": "10.0.10",
+    "smtp-server": "3.19.13",
+    "zod": "4.3.6"
+  }
+}

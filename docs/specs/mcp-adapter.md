@@ -191,3 +191,7 @@ versions. Transport-independent manifests retain their TypeScript entry points.
 - Contracts: [readiness](bug-readiness.md), [readiness workflow](readiness-workflow.md),
   [discovery/events](agent-discovery.md).
 - Delivery: [backlog](../plans/backlog.md), [roadmap](../plans/roadmap.md).
+
+The separate `npm run mcp:brief` application exposes repository-brief delegation
+under the [workspace package contract](workspace-packages.md). This does not extend
+the tools or authority of the original readiness/location adapter described here.

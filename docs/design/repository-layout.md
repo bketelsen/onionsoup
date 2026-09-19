@@ -20,7 +20,11 @@ with older local skill catalogs; `.agents/skills/` is the real directory.
 
 | Path | Contents |
 | --- | --- |
-| `src/`, `test/`, `scripts/`, `examples/` | Application, tests, local utilities, synthetic inputs |
+| `packages/*/src`, `packages/*/test` | Portable capability, recipe, adapter and runtime workspaces with focused tests |
+| `apps/*/src` | Thin CLI, scheduled worker, MCP and local capture entrypoints |
+| `src/`, `test/` | Remaining legacy workflows, compatibility forwards and cross-workflow integration tests |
+| `scripts/`, `examples/` | Build/check utilities and synthetic inputs |
+| `dist/`, `packages/*/dist`, `apps/*/dist` | Ignored compiled deployment outputs |
 | `docs/adr/` | Accepted rationale and subsequent decisions |
 | `docs/design/` | Current mechanisms and architecture |
 | `docs/specs/` | Exact public and repository contracts |
@@ -38,6 +42,11 @@ Each category includes a starter `TEMPLATE.md`. Historical reports retain their
 original findings and gain navigation back to their plan. New reports use the
 record appendix template. All documents, including templates, appear in
 [the documentation index](../README.md).
+
+The first extraction follows [ADR-0022](../adr/0022-package-capabilities-with-thin-host-applications.md),
+the [package design](packages-and-recipes.md) and [workspace contract](../specs/workspace-packages.md),
+implemented in [roadmap phase 21](../plans/roadmap.md#phase-21--reusable-packages-and-thin-applications).
+This is an incremental migration; the remaining root source is not yet a deployable package.
 
 ## Operational notes
 

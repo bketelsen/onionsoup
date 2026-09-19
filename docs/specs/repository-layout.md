@@ -53,3 +53,6 @@ prompt, or raw run artifact is derived from this layout contract.
 - Context: [repository design](../design/repository-layout.md).
 - Delivery: [template adoption](../plans/template-adoption.md),
   [roadmap — Phase 0](../plans/roadmap.md#phase-0--repository-conventions).
+
+Packaging and host composition follow [ADR-0022](../adr/0022-package-capabilities-with-thin-host-applications.md)
+and the [workspace package contract](workspace-packages.md).

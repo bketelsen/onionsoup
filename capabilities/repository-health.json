@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "repository-health",
-  "capabilityVersion": 1,
+  "capabilityVersion": 2,
   "purpose": "Explain supplied repository metrics while preserving sampled scope and uncertainty.",
   "promptVersion": "repository-health-v1",
   "contracts": {
@@ -110,7 +110,7 @@
   },
   "invocation": {
     "transport": "typescript-function",
-    "module": "src/repository-brief/agents.ts",
+    "module": "@onionsoup/repository-analysis",
     "export": "interpretRepositoryHealth",
     "signature": "(input, options) => Promise<RepoAgentRun>",
     "requiredOptions": [

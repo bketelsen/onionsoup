@@ -149,3 +149,6 @@ checked inside the delivery lock. Historical v1 records remain readable. Paused
 ticks return `paused` without analysis/send; explicit run-now remains available.
 The external timer continues to run and observe the flag. These are host controls,
 not new agent permissions. See [console design](../design/operator-console.md).
+
+Packaging and host composition follow [ADR-0022](../adr/0022-package-capabilities-with-thin-host-applications.md)
+and the [workspace package contract](workspace-packages.md).

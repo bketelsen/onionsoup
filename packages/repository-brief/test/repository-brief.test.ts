@@ -4,15 +4,15 @@ import { mkdtemp, rm, readFile, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MockLanguageModelV3, simulateReadableStream } from 'ai/test';
-import { collectRepository, type GithubReader } from '../src/repository-brief/collect.ts';
-import { repositoryMetrics, validateSnapshot } from '../src/repository-brief/metrics.ts';
-import { BriefRequest, ThemeInput, validateAgentResult } from '../src/repository-brief/contracts.ts';
-import { summarizeRepositoryThemes } from '../src/repository-brief/agents.ts';
-import { createRepositoryBrief, renderRepositoryBrief } from '../src/repository-brief/recipe.ts';
-import { validateRepositoryBrief } from '../src/repository-brief/record.ts';
-import { workflowEvents } from '../src/workflow-events.ts';
-import { atomicJson } from '../src/batch-store.ts';
-import { EVALUATION_MODEL } from '../src/evaluation-policy.ts';
+import { collectRepository, type GithubReader } from '@onionsoup/repository-analysis/collect';
+import { repositoryMetrics, validateSnapshot } from '@onionsoup/repository-analysis/metrics';
+import { BriefRequest, ThemeInput, validateAgentResult } from '@onionsoup/repository-analysis/contracts';
+import { summarizeRepositoryThemes } from '@onionsoup/repository-analysis/agents';
+import { createRepositoryBrief, renderRepositoryBrief } from '@onionsoup/repository-brief/recipe';
+import { validateRepositoryBrief } from '@onionsoup/repository-brief/record';
+import { workflowEvents } from '@onionsoup/repository-brief/events';
+import { atomicJson } from '@onionsoup/runtime/storage';
+import { EVALUATION_MODEL } from '@onionsoup/providers/evaluation-policy';
 const request = { schemaVersion: 1 as const, repository:'example/widget', since:'2026-09-18T00:00:00Z', until:'2026-09-19T00:00:00Z', maxSuggestions:2 };
 const stamp = '2026-09-18T12:00:00Z';
 const item = (number: number, pr = false, overrides = {}) => ({ number, repository_url:'https://api.github.com/repos/example/widget',
@@ -158,7 +158,7 @@ test('request rejects empty/reversed or overly broad windows and excessive actio
 });
 
 test('known credential strings are absent from model views while private collection evidence is preserved', async () => {
-  const { themeInput, itemEvidence } = await import('../src/repository-brief/metrics.ts');
+  const { themeInput, itemEvidence } = await import('@onionsoup/repository-analysis/metrics');
   const token = 'ghp_' + 'x'.repeat(36);
   const s = await collectRepository(request,{ signal:new AbortController().signal,reader:async(endpoint,signal)=>{
     const response = await reader(endpoint,signal) as any;
@@ -193,7 +193,7 @@ test('suggestion limits and zero-denominator CI are enforced without inventing s
 });
 
 test('GitHub time filters use one inclusive range; exact and fractional request boundaries exclude out-of-window seconds', async () => {
-  const { githubDateRange,collectionQuery } = await import('../src/repository-brief/collect.ts');
+  const { githubDateRange,collectionQuery } = await import('@onionsoup/repository-analysis/collect');
   assert.equal(githubDateRange(request),'2026-09-18T00:00:00Z..2026-09-18T23:59:59Z');
   assert.equal(githubDateRange({ ...request,since:'2026-09-18T00:00:00.500Z',until:'2026-09-18T00:00:02.500Z' }),
     '2026-09-18T00:00:01Z..2026-09-18T00:00:02Z');

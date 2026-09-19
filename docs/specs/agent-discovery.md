@@ -41,7 +41,12 @@ The checked-in [catalog](../../capabilities/catalog.json) links the
 `npm run verify` checks exact generated artifact drift. JSON Schema describes
 shape; the named runtime validators also enforce semantic invariants.
 
-Manifests specify existing TypeScript function entry points and required options.
+Manifests specify callable function entry points and required options. An
+`invocation.module` beginning with `@onionsoup/` is a bare package import; legacy
+`src/` paths resolve relative to the source checkout. Repository-analysis capability
+version 2 advertises the package surface under [ADR-0022](../adr/0022-package-capabilities-with-thin-host-applications.md)
+and the [workspace contract](workspace-packages.md). Its prompts and record contracts
+remain version 1. Consumers must not prepend a filesystem prefix to a package name.
 The [local MCP adapter](mcp-adapter.md) exposes readiness to Codex separately;
 these manifests do not expose a generic remote invocation service. A caller supplies the AI
 SDK model/provider identity, persistence callback, and (for location) a matching
