@@ -43,6 +43,14 @@ addresses in the example are placeholders suitable only for capture tests.
 
 ## Rules
 
+- `nextOccurrences(raw, count, now = new Date())` is an exported, read-only schedule
+  preview helper. It accepts an integer `count` from 1 through 14 and returns exactly
+  that many chronological `{ key, dueAt }` occurrences strictly after `now`, or throws
+  if valid results cannot be found within its bounded 120-day future search. It never
+  returns a partial preview and performs no delivery, analysis, network, or file work.
+  Preview identities are local `YYYY-MM-DDTHH:MM`: nonexistent spring-forward minutes
+  are omitted, and a fall-back repeated minute is represented only by its first UTC
+  instant, including when `now` is between the two instants.
 - A one-shot `tick` finds only the latest scheduled local minute within catch-up.
   Weekdays are evaluated in the configured zone. A spring-forward skipped minute
   has no occurrence; a fall-back repeated minute uses its first UTC instant and

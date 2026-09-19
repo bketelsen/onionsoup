@@ -223,3 +223,35 @@ test('delivery attempt precondition is checked inside the effect lock',async t=>
   await assert.rejects(deliver(config,first.occurrence,{ ...options,expectedAttempts:0 }));assert.equal(sends,1);
   await deliver(config,first.occurrence,{ ...options,expectedAttempts:1 });assert.equal(sends,2);
 });
+
+test('schedule preview returns strict-future weekday occurrences without mutating inputs',async()=>{
+  const { nextOccurrences }=await import('../src/delivery/schedule.ts');
+  const now=new Date('2026-09-18T13:05:00Z'), before=now.toISOString();
+  assert.deepEqual(nextOccurrences(config,2,now),[
+    { key:'2026-09-21T09:00',dueAt:'2026-09-21T13:00:00.000Z' },
+    { key:'2026-09-22T09:00',dueAt:'2026-09-22T13:00:00.000Z' }
+  ]);
+  const sundays={ ...config,schedule:{ ...config.schedule,time:'09:00',weekdays:[0] } };
+  assert.deepEqual(nextOccurrences(sundays,1,now),[{ key:'2026-09-20T09:00',dueAt:'2026-09-20T13:00:00.000Z' }]);
+  assert.equal(now.toISOString(),before);
+  assert.equal(nextOccurrences(config,14,now).length,14);
+});
+
+test('schedule preview skips DST gaps and uses only the first folded local minute',async()=>{
+  const { nextOccurrences }=await import('../src/delivery/schedule.ts');
+  const sunday={ ...config,schedule:{ ...config.schedule,time:'02:30',weekdays:[0] } };
+  assert.deepEqual(nextOccurrences(sunday,1,new Date('2026-03-07T00:00:00Z')),[
+    { key:'2026-03-15T02:30',dueAt:'2026-03-15T06:30:00.000Z' }
+  ]);
+  const fold={ ...config,schedule:{ ...config.schedule,time:'01:30',weekdays:[0] } };
+  assert.deepEqual(nextOccurrences(fold,1,new Date('2026-11-01T05:45:00Z')),[
+    { key:'2026-11-08T01:30',dueAt:'2026-11-08T06:30:00.000Z' }
+  ]);
+});
+
+test('schedule preview rejects invalid counts, clocks, and configurations',async()=>{
+  const { nextOccurrences }=await import('../src/delivery/schedule.ts');
+  for(const count of [0,15,1.5,Number.NaN]) assert.throws(()=>nextOccurrences(config,count));
+  assert.throws(()=>nextOccurrences(config,1,new Date('invalid')));
+  assert.throws(()=>nextOccurrences({ ...config,schedule:{ ...config.schedule,timeZone:'Not/AZone' } },1));
+});
