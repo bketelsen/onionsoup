@@ -34,3 +34,21 @@ export function nextOccurrence(raw:DeliveryConfig,now=new Date()) {
   }
   return undefined;
 }
+
+// Upcoming configured occurrences strictly after now, bounded to 120 future days.
+export function nextOccurrences(raw:DeliveryConfig,count:number,now=new Date()) {
+  const c=DeliveryConfig.parse(raw), timestamp=now.getTime();
+  if (!Number.isFinite(timestamp)) throw new Error('Invalid clock');
+  if (!Number.isInteger(count) || count<1 || count>14) throw new Error('Invalid count');
+  const format=new Intl.DateTimeFormat('en-CA',{ timeZone:c.schedule.timeZone,year:'numeric',month:'2-digit',day:'2-digit',
+    hour:'2-digit',minute:'2-digit',hourCycle:'h23',weekday:'short' });
+  const weekdays=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'], occurrences:{ key:string; dueAt:string }[]=[];
+  for(let t=Math.floor(timestamp/60000)*60000+60000;t<=timestamp+120*86400000;t+=60000) {
+    const p=Object.fromEntries(format.formatToParts(t).map(p=>[p.type,p.value]));
+    if (`${p.hour}:${p.minute}`!==c.schedule.time || !c.schedule.weekdays.includes(weekdays.indexOf(p.weekday))) continue;
+    const occurrence=latestOccurrence({ ...c,schedule:{ ...c.schedule,catchUpHours:24 } },new Date(t));
+    if (occurrence && Date.parse(occurrence.dueAt)===t) occurrences.push(occurrence);
+    if (occurrences.length===count) return occurrences;
+  }
+  throw new Error('Insufficient occurrences within horizon');
+}
