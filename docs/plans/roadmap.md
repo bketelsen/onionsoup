@@ -152,7 +152,7 @@ including the initial date-query defect and corrected follow-up.
   identities and parent/child provenance. This is backlog P9; see the
   [console trial](records/operator-console-2026-09-18.md).
 
-## Phase 14 — Investigation toward a change proposal (planned)
+## Phase 14 — Investigation toward a change proposal
 
 - Follow the [change-workflow exploration](../design/investigation-to-pr.md) and
   its [staged plan](investigation-to-pr.md), beginning with shared read-only proposals
@@ -162,6 +162,10 @@ including the initial date-query defect and corrected follow-up.
 - **Done when:** a maintainer can assess a grounded scope and verification proposal
   before granting workspace, execution or remote-publication authority. Subsequent
   phases have their own observable gates; no repair or PR creation ships with P9.
+
+Implemented: [proposal contract](../specs/change-proposal.md), under
+[ADR-0014](../adr/0014-draft-read-only-proposals-from-frozen-evidence.md).
+Evidence: [read-only proposal trial](records/change-proposal-2026-09-18.md).
 
 ## Broader vision — domain-focused agent teams
 

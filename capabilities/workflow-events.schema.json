@@ -83,7 +83,8 @@
               "pause",
               "resume",
               "retry",
-              "investigate"
+              "investigate",
+              "propose"
             ]
           },
           "issueNumber": {
@@ -151,7 +152,9 @@
               "issue_themes",
               "pr_themes",
               "health",
-              "actions"
+              "actions",
+              "requirements",
+              "proposal"
             ]
           },
           "agent": {
@@ -161,7 +164,9 @@
               "code-location",
               "repository-themes",
               "repository-health",
-              "maintenance-actions"
+              "maintenance-actions",
+              "feature-requirements",
+              "change-proposal"
             ]
           },
           "runId": {
@@ -254,7 +259,9 @@
               "not_applicable",
               "out_of_scope",
               "located",
-              "not_located"
+              "not_located",
+              "proposal_ready",
+              "sufficient_for_proposal"
             ]
           },
           "requestKind": {

@@ -1,6 +1,6 @@
 # From bug reports and feature requests to a reviewable change
 
-Living exploration, recorded 2026-09-18. **Proposed direction; no repair, test
+Living exploration, recorded 2026-09-18. **Read-only proposals implemented; no repair, test
 execution or publication capability is implemented or authorized by this document.**
 Shared bug/feature direction: [ADR-0013](../adr/0013-converge-bugs-and-features-on-a-shared-change-proposal.md).
 Current operator rationale: [ADR-0012](../adr/0012-operate-saved-workflows-through-a-local-console.md).
@@ -16,7 +16,7 @@ toward a PR crosses three additional authority boundaries: modifying a workspace
 executing untrusted project code, and publishing a remote artifact. Those effects
 belong to separate host adapters with separate operator permissions.
 
-The next smallest useful shared agent is a **change-proposal agent**. Its one job
+The first shared continuation is a **change-proposal agent**. Its one job
 is to specify a grounded, reviewable change. Bug preparation supplies a frozen
 investigation packet; feature preparation supplies a requirements brief and bounded
 source context. The result names desired behavior, scope, acceptance criteria,
@@ -95,8 +95,9 @@ This is a decomposition hypothesis, not a requirement to add all these capabilit
 once. Verification planning can initially be a human-owned part of the proposal.
 The publisher and executor are deterministic functions. Add model judgments only
 when a distinct input/output decision and useful evaluation can be demonstrated.
-Initially a human-authored feature requirements brief can exercise the shared
-proposal boundary before a separate requirements agent is qualified.
+The initial slice now includes a focused feature-requirements agent and a
+deterministic source adapter. The trial qualifies neither as generally reliable;
+requirements and source relevance remain visible for review.
 
 ### Contracts and provenance before longer loops
 
@@ -108,12 +109,13 @@ identity. Review and publication authorization bind to that same diff and eviden
 Changing the issue, base, proposal, tests or candidate invalidates the relevant
 approval rather than silently carrying it forward.
 
-The proposed shared proposal envelope carries the desired outcome, explicit scope
+The implemented [shared proposal envelope](../specs/change-proposal.md) carries the desired outcome, explicit scope
 and non-goals, individually identified acceptance criteria, evidence references,
 open decisions, source/base identity, verification profile, and compatibility,
 migration and documentation obligations. Its input is a discriminated variant:
 `bug_fix` references bug investigation evidence; `feature` references requirements
-and feature-context evidence. These are design fields, not shipped schemas.
+and feature-context evidence. The linked contract defines the shipped schemas.
+Candidate, execution, review and publication envelopes remain design work.
 
 Maintain four separate facts: request kind, evidence/requirements sufficiency,
 maintainer scope decision, and execution/publication authorization. A structurally
@@ -219,10 +221,12 @@ Use Copilot/Codex with Terra under the existing evaluation policy.
 
 ## Operational notes
 
-The first next slice is **shared read-only change proposals from bug and feature
-evidence**. Use a few frozen bug packets and explicit feature requirements/source
-briefs, including ambiguous and incompatible requests, to test whether the agent
-asks for missing evidence instead of inventing requirements or a repair plan. Assistant
+The implemented slice is **shared read-only change proposals from bug and feature
+evidence**, under [ADR-0014](../adr/0014-draft-read-only-proposals-from-frozen-evidence.md)
+and the [proposal contract](../specs/change-proposal.md). Bugs reuse frozen packet
+quotes. Features use a requirements agent and deterministic literal search with
+three inspected file leads. Both feed one proposal agent. The
+[trial](../plans/records/change-proposal-2026-09-18.md) records strengths and limits. Assistant
 review can assess structure and grounding; maintainer acceptance is a separate
 measurement. Do not ask the user to grade a large batch before this boundary has
 produced concrete useful examples.
@@ -242,6 +246,6 @@ work remains read-only throughout the current phase.
 - Current contracts: [packet](../specs/investigation-packet.md),
   [operator console](../specs/operator-console.md).
 - Proposed sequence and gates: [change workflow plan](../plans/investigation-to-pr.md).
-- Roadmap direction: [backlog P10](../plans/backlog.md#phase-10--change-proposals-planned).
+- Roadmap direction: [backlog P10](../plans/backlog.md#phase-10--change-proposals).
 - Reusable pattern: [composable agents](composable-agents.md),
   [packages and recipes](packages-and-recipes.md).

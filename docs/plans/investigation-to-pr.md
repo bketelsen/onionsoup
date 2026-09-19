@@ -3,8 +3,9 @@
 Proposed follow-through after the [P9 operator console](../specs/operator-console.md).
 Implements the [change-workflow exploration](../design/investigation-to-pr.md).
 Shared bug/feature scope follows [ADR-0013](../adr/0013-converge-bugs-and-features-on-a-shared-change-proposal.md).
-Only planning is delivered here; new agents, sandbox execution and remote writes
-require their own implementation phases and authority.
+Phase 1 is implemented under [ADR-0014](../adr/0014-draft-read-only-proposals-from-frozen-evidence.md)
+and the [proposal contract](../specs/change-proposal.md). Sandbox execution and
+remote writes remain later phases requiring their own authority.
 
 ## Phase 1 — Read-only change proposals
 
@@ -22,6 +23,9 @@ require their own implementation phases and authority.
   feature, a compatibility-sensitive feature, and a mixed bug/feature request.
   Record project acceptance separately from classification and information sufficiency.
   Record assistant review separately from independent acceptance. No edits or tests.
+
+Evidence: [proposal trial](records/change-proposal-2026-09-18.md). Scripted checks
+and assistant review qualify this initial slice; independent acceptance remains unknown.
 
 ## Phase 2 — Isolated baseline verification
 
@@ -81,4 +85,4 @@ require their own implementation phases and authority.
   [packet contract](../specs/investigation-packet.md).
 - Shared direction: [ADR-0013](../adr/0013-converge-bugs-and-features-on-a-shared-change-proposal.md).
 - Existing rationale: [ADR-0012](../adr/0012-operate-saved-workflows-through-a-local-console.md).
-- Roadmap: [backlog P10](backlog.md#phase-10--change-proposals-planned).
+- Roadmap: [backlog P10](backlog.md#phase-10--change-proposals).

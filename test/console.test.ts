@@ -178,3 +178,40 @@ test('real pinned Git source validation works through the operator handoff',asyn
   const packet=await (await fetch(`${server.origin}/operations/${id}/packet.json`)).json() as any;
   assert.equal(packet.repository.commit,commit);assert.equal(packet.locationDisposition,'not_eligible');
 });
+
+test('proposal POST binds exact parent, preserves feature classification, renders safely and deduplicates selection',async t=>{
+  const {createPacket}=await import('../src/packet.ts'),{triage}=await import('../src/triage.ts'),{fixtureModel}=await import('../src/fixture-model.ts');
+  const {createChangeProposal}=await import('../src/change-proposal/recipe.ts');
+  const f=await fixture(t),snapshot={schemaVersion:1 as const,repository:delivery.repository,number:7,title:'Export list',body:'Export list to JSON.',updatedAt:stamp};
+  const readiness=await triage(snapshot,{provider:'copilot',modelId:'gpt-5.6-terra',model:fixtureModel([{schemaVersion:2,kind:'feature_request',bug_readiness:'not_applicable',summary:'A feature request.',evidence:[],questions:[]}])});
+  let calls=0;
+  const c={text:'<script>choose an interface</script>',basis:'proposed',evidenceIds:['issue:body']},questions=[{question:'Which interface?',blocking:true,evidenceIds:['issue:body']}];
+  const req={schemaVersion:1,status:'needs_information',userNeed:c,scenarios:[],constraints:[],nonGoals:[],questions};
+  const result={schemaVersion:1,status:'needs_information',outcome:c,changes:[],nonGoals:[],acceptanceCriteria:[],verification:[],compatibility:c,migration:c,documentation:c,questions,risks:[]};
+  const op=new Operator(f.config,{openSource:async()=>({}) as any,source:{scan:async()=>{throw new Error();},get:async()=>({number:7,title:snapshot.title,state:'open',updatedAt:stamp,observedAt:stamp,commentsExcluded:0,snapshot})},
+    packet:(raw,opts)=>createPacket(raw,{...opts,readiness}),proposal:(raw,opts)=>{
+      calls++;let stage=0;return createChangeProposal(raw,{...opts,prepareFeature:async()=>({sources:[],attempts:[],limitations:['No source context.']}),
+        modelFactory:async()=>({provider:'copilot',modelId:'gpt-5.6-terra',model:model(stage++===0?req:result)})});
+    }});
+  const parentId=await op.submit(f.investigation());await op.idle();const parent=await op.record(parentId);
+  const packet=await readJson(join(op.directory(parentId),'packet/packet.json')) as any;
+  const request={...f.request('run_now'),action:'propose',parentOperationId:parentId,packetId:packet.packetId,packetHash:hash(packet),query:'list'};
+  const s=await http(t,op),parentPage=await(await fetch(`${s.origin}/operations/${parentId}`)).text();
+  assert.match(parentPage,/Draft change proposal/);assert.match(parentPage,/name="query"/);
+  for(const bad of [{...request,packetHash:'b'.repeat(64)},{...request,query:undefined},{...request,parentOperationId:randomUUID()},{...request,checkout:'/tmp/other'}])
+    await assert.rejects(op.submit(bad));
+  assert.equal(calls,0);
+  const posted=await s.post(request);assert.equal(posted.status,303);await op.idle();
+  assert.equal(await op.submit({...request,requestId:randomUUID()}),request.requestId);assert.equal(calls,1);
+  const record=await op.record(request.requestId);assert.equal(record.status,'completed');assert.equal(record.result?.type,'proposal');
+  const html=await(await fetch(s.origin+posted.headers.get('location'))).text();assert.ok(!html.includes('<script>choose'));
+  assert.match(html,/needs_information/);assert.match(html,/Maintainer acceptance: not recorded/);
+  assert.equal((await fetch(`${s.origin}/operations/${request.requestId}/proposal.events`)).status,200);
+  const saved=await(await fetch(`${s.origin}/operations/${request.requestId}/proposal.json`)).json() as any;
+  assert.equal(saved.parent.readiness.assessment.kind,'feature_request');assert.equal(saved.parentHash,request.packetHash);
+  assert.equal(workflowEvents(record).events[0].parentWorkflowId,packet.packetId);
+  // Any later alteration to the saved parent is rejected before a new selection can run.
+  await atomicJson(join(op.directory(parentId),'packet/packet.json'),{...packet,packetId:randomUUID()});
+  await assert.rejects(op.submit({...request,requestId:randomUUID(),query:'different'}));assert.equal(calls,1);
+  assert.equal(parent.request.action,'investigate');
+});

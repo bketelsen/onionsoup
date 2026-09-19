@@ -106,6 +106,10 @@ Raw run links are optional local evidence; those files are intentionally not pub
 - [Bug/feature-to-PR boundary exploration](design/investigation-to-pr.md)
 - [Staged bug/feature-to-PR plan](plans/investigation-to-pr.md)
 
+- [ADR-0014: read-only proposals from frozen evidence](adr/0014-draft-read-only-proposals-from-frozen-evidence.md)
+- [Change proposal contract](specs/change-proposal.md)
+- [Change proposal trial](plans/records/change-proposal-2026-09-18.md)
+
 ## Related repository material
 
 - [README and commands](../README.md)

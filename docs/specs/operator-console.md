@@ -29,8 +29,9 @@ current execution remains Terra on their configured Copilot/Codex subscription.
 | `GET /briefs/JOB/UUID/report`, `/markdown`, `/json`, `/events` | Validated derived report or saved evidence/trace |
 | `GET /deliveries/JOB/OCCURRENCE/events` | Validated delivery trace |
 | `GET /operations` | Recorded action history |
-| `GET /operations/UUID` | Action status and any saved investigation packet |
+| `GET /operations/UUID` | Action status and any saved investigation packet or proposal |
 | `GET /operations/UUID/events`, `/packet.json`, `/packet.md`, `/packet.events` | Correlated action/packet artifacts |
+| `GET /operations/UUID/proposal.json`, `/proposal.md`, `/proposal.events` | Validated proposal evidence, text and trace |
 | `GET /issues/JOB/index.html` | Existing static issue inbox, regenerated without inference |
 | `GET /issues/JOB/records/NAME.json`, `/locations/NAME.json` | Scoped issue-inbox evidence files |
 | `POST /actions` | Admit one typed operator action, then 303 to its status page |
@@ -48,6 +49,8 @@ Local processes are trusted; this is not authentication for remote users.
 | `pause`, `resume` | None | Set a durable per-delivery-job admission flag |
 | `retry` | `occurrence`, expected `attempts` 0–2 | Send a prepared or definitely rejected message, with existing three-attempt maximum |
 | `investigate` | `briefId`, `briefHash`, issue `number` | One fresh issue read; readiness and eligible location, at most two agents |
+
+| `propose` | `parentOperationId`, `packetId`, `packetHash`; feature-only `query` | One saved-packet proposal recipe, at most two agents |
 
 ## Rules
 
@@ -72,6 +75,14 @@ Local processes are trusted; this is not authentication for remote users.
   issue comments or publish PRs. A packet's repository/issue/snapshot/commit/identity
   must match its action before serving it. Handoff deadline: 300 seconds; the
   packet retains its existing 240-second cooperative bound.
+- Proposal admission MUST bind the saved parent action, job/revision, repository,
+  issue snapshot, packet UUID/hash and source pin. Features require a bounded
+  literal query; bugs reject it. Repeated identical parent/query selection returns
+  the same operation, even after failure; a different query is a deliberate new
+  preparation. The [proposal contract](change-proposal.md) controls eligibility,
+  scope and the 240-second recipe bound. No provider/path/command can be supplied
+  by this form. Artifacts live under `operations/UUID/proposal/`; deduplication
+  identity is stored in `proposals/HASH.json`.
 - `run_now` uses stable `ondemand-REQUEST_UUID` delivery identity. It neither
   consumes nor replaces the next scheduled occurrence. Replaying the same ID
   reuses the existing delivery and cannot repeat analysis. It remains available
@@ -107,13 +118,15 @@ investigation identity. The root `.action.lock` serializes mutations.
 
 Common event export adds `operator.requested/completed/failed/unfinished`, optional
 `operatorAction` and `issueNumber`. The parent is the selected brief; the child is
-the resulting packet or delivery. `inputHash` identifies the typed request, not
+the resulting packet or delivery. For a proposal action the parent is its saved
+packet and the child is the proposal workflow. `inputHash` identifies the typed request, not
 raw issue text. Events omit CSRF tokens, private configuration, issue content and
 transport diagnostics. An unfinished event remains unknown; no synthetic success
 or inferred provider usage is emitted.
 
 ## References
 
+- Proposal rationale: [ADR-0014](../adr/0014-draft-read-only-proposals-from-frozen-evidence.md).
 - Rationale: [ADR-0012](../adr/0012-operate-saved-workflows-through-a-local-console.md).
 - Context: [console design](../design/operator-console.md),
   [packages and recipes](../design/packages-and-recipes.md).

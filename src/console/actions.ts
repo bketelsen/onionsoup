@@ -1,3 +1,6 @@
+import { createChangeProposal } from '../change-proposal/recipe.ts';
+import { eligiblePacket } from '../change-proposal/record.ts';
+import type { Packet } from '../packet.ts';
 import { mkdir, rm, readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { atomicJson, optionalJson, readJson } from '../batch-store.ts';
@@ -11,7 +14,7 @@ import { loadJob, type ConsoleConfig } from './config.ts';
 import { history, scopedJson } from './history.ts';
 import { OperatorRequest, OperatorRecord } from './contracts.ts';
 import { workflowEvents } from '../workflow-events.ts';
-export type OperatorDependencies={ runNow?:typeof runNow; deliver?:typeof deliver; packet?:typeof createPacket;
+export type OperatorDependencies={ runNow?:typeof runNow; deliver?:typeof deliver; packet?:typeof createPacket; proposal?:typeof createChangeProposal;
   source?:typeof githubSource; openSource?:typeof LocationSource.open; deliveryOptions?:Partial<DeliveryOptions>; persist?:typeof atomicJson };
 const at=()=>new Date().toISOString();
 export class Operator {
@@ -60,7 +63,25 @@ export class Operator {
       if(raced) { const prior=OperatorRecord.parse(raced);if(prior.inputHash!==hash(request)) throw new Error('Action ID reused');return prior.workflowId; }
       const job=await loadJob(this.config,request.jobId);
       if(job.revision!==request.revision) throw new Error('Configuration changed');
-      let handoffFile:string|undefined;
+      let handoffFile:string|undefined, parentPacket:Packet|undefined;
+      if(request.action==='propose') {
+        if(!job.source) throw new Error('No pinned source');
+        const parent=await this.record(request.parentOperationId);
+        if(parent.status!=='completed'||parent.request.action!=='investigate'||parent.request.jobId!==job.id||parent.request.revision!==job.revision||parent.result?.type!=='packet') throw new Error('Invalid proposal parent');
+        parentPacket=eligiblePacket(await scopedJson(this.config.stateDirectory,`operations/${parent.workflowId}/packet/packet.json`));
+        if(parentPacket.packetId!==request.packetId||parent.result.workflowId!==request.packetId||hash(parentPacket)!==request.packetHash||
+          hash(parentPacket.issue)!==hash(parent.snapshot)||parentPacket.issue.number!==parent.request.number||parentPacket.repository.name!==job.config.repository||
+          parentPacket.repository.commit!==job.source.commit||parentPacket.repository.commit!==parent.commit) throw new Error('Parent packet changed');
+        if(parentPacket.readiness!.assessment!.kind==='feature_request'?!request.query:request.query!==undefined) throw new Error('Invalid feature query');
+        const identity=[job.id,job.revision,request.parentOperationId,request.packetId,request.packetHash,request.query??null];
+        handoffFile=join(this.config.stateDirectory,'proposals',`${hash(identity)}.json`);
+        const prior=await optionalJson(handoffFile);
+        if(prior) {
+          const existing=await this.record((prior as {operationId:string}).operationId),q=existing.request;
+          if(q.action!=='propose'||hash([q.jobId,q.revision,q.parentOperationId,q.packetId,q.packetHash,q.query??null])!==hash(identity)) throw new Error('Proposal identity mismatch');
+          return existing.workflowId;
+        }
+      }
       if(request.action==='investigate') {
         if(!job.source) throw new Error('No configured pinned source');
         const b=(await history(job)).briefs.find(b=>b.brief.workflowId===request.briefId);
@@ -95,6 +116,10 @@ export class Operator {
           } else if(request.action==='pause'||request.action==='resume') {
             const c=await setSchedulePaused(job.deliveryState,job.config.jobId,request.action==='pause');
             r.result={ type:'schedule',paused:c.paused };
+          } else if(request.action==='propose') {
+            const proposal=await (this.deps.proposal??createChangeProposal)(parentPacket!,{directory:join(directory,'proposal'),provider:job.config.provider,
+              checkout:job.source!.checkout,query:request.query,signal:AbortSignal.timeout(240000)});
+            r.result={type:'proposal',workflowId:proposal.workflowId,status:proposal.status};
           } else {
             const signal=AbortSignal.timeout(300000);
             await (this.deps.openSource??LocationSource.open.bind(LocationSource))(job.source!.checkout,job.config.repository,job.source!.commit,signal);

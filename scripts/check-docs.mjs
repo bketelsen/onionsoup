@@ -70,7 +70,7 @@ function links(source) {
     .map((match) => match[1] ?? match[2]);
 }
 function anchors(source) {
-  const found = new Set();
+  const found = new Set([...prose(source).matchAll(/<a\s+id="([^"]+)"\s*><\/a>/g)].map(match => match[1]));
   for (const line of prose(source).split("\n")) {
     const heading = /^ {0,3}#{1,6}\s+(.+?)\s*#*\s*$/.exec(line);
     if (!heading) continue;

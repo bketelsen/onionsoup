@@ -79,3 +79,13 @@ A stale source checkout remains pinned; the operator must deliberately update it
 - Built in: [backlog P9](../plans/backlog.md#phase-9--operator-console),
   [roadmap Phase 13](../plans/roadmap.md#phase-13--operator-console).
 - Next exploration: [investigation to PR](investigation-to-pr.md).
+
+## Shared proposal continuation
+
+Under [ADR-0014](../adr/0014-draft-read-only-proposals-from-frozen-evidence.md), a
+completed investigation can enter the [proposal recipe](../specs/change-proposal.md)
+through an exact saved-parent handoff. Bugs reuse source evidence; features require
+an operator-selected source literal. The page renders scope, criteria, checks and
+open questions with acceptance still unrecorded. This implements
+[backlog P10](../plans/backlog.md#phase-10--change-proposals); later execution remains
+in the [change workflow design](investigation-to-pr.md).

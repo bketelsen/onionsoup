@@ -29,7 +29,11 @@ test('published manifests are usable without credentials and identify callable i
     assert.equal(typeof module[manifest.invocation.export], 'function');
     assert.equal(manifest.effects.githubWrites, false); assert.equal(manifest.effects.targetCodeExecution, false);
     assert.equal(manifest.lifecycle.durableResume, false);
-    assert.equal(manifest.contracts.inputSchema.type, 'object');
+    if(item.id==='change-proposal') {
+      const variants=manifest.contracts.inputSchema.oneOf as Array<{type:string;properties:{changeKind:{const:string}}}>;
+      assert.deepEqual(variants.map(v=>v.properties.changeKind.const),['bug_fix','feature']);
+      assert.ok(variants.every(v=>v.type==='object'));
+    } else assert.equal(manifest.contracts.inputSchema.type, 'object');
     assert.equal(manifest.contracts.resultSchema.type, 'object');
   }
   const manifest = capabilityManifest('bug-readiness');

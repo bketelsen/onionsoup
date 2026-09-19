@@ -156,3 +156,15 @@ Derived events add `operator.requested/completed/failed/unfinished`, optional
 commit and child packet/delivery IDs provide correlation without task text,
 configuration, CSRF tokens or raw failures. An unfinished action has unknown outcome;
 its child records may contain meaningful completed work. See [console design](../design/operator-console.md).
+
+### Change proposal discovery and events
+
+[ADR-0014](../adr/0014-draft-read-only-proposals-from-frozen-evidence.md) adds
+`feature-requirements` and `change-proposal` manifests and derived agent/workflow
+records from the [proposal contract](change-proposal.md). Events add the
+`requirements`/`proposal` stage keys, `propose` operator action and
+`sufficient_for_proposal`/`proposal_ready` outcomes. The parent workflow is the
+frozen packet; reservations and child run identities share one allowance. Events
+omit query text, requirements, source and proposed changes. These callable
+capabilities do not add new MCP invocation tools. See the
+[change workflow design](../design/investigation-to-pr.md).

@@ -1,0 +1,329 @@
+{
+  "schemaVersion": 1,
+  "id": "feature-requirements",
+  "capabilityVersion": 1,
+  "purpose": "Extract reported requirements and open questions for one feature request.",
+  "promptVersion": "feature-requirements-v1",
+  "contracts": {
+    "inputVersion": 1,
+    "resultVersion": 1,
+    "runVersion": 1,
+    "historicalResultVersions": [],
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "number",
+          "const": 1
+        },
+        "issue": {
+          "type": "object",
+          "properties": {
+            "schemaVersion": {
+              "type": "number",
+              "const": 1
+            },
+            "repository": {
+              "type": "string",
+              "pattern": "^[\\w.-]+\\/[\\w.-]+$"
+            },
+            "number": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "updatedAt": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+            },
+            "title": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            },
+            "body": {
+              "type": "string",
+              "maxLength": 24000
+            }
+          },
+          "required": [
+            "schemaVersion",
+            "repository",
+            "number",
+            "updatedAt",
+            "title",
+            "body"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "issue"
+      ],
+      "additionalProperties": false
+    },
+    "resultSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "number",
+          "const": 1
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "sufficient_for_proposal",
+            "needs_information"
+          ]
+        },
+        "userNeed": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 800
+            },
+            "basis": {
+              "type": "string",
+              "enum": [
+                "reported",
+                "proposed"
+              ]
+            },
+            "evidenceIds": {
+              "minItems": 1,
+              "maxItems": 12,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              }
+            }
+          },
+          "required": [
+            "text",
+            "basis",
+            "evidenceIds"
+          ],
+          "additionalProperties": false
+        },
+        "scenarios": {
+          "maxItems": 6,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 800
+              },
+              "basis": {
+                "type": "string",
+                "enum": [
+                  "reported",
+                  "proposed"
+                ]
+              },
+              "evidenceIds": {
+                "minItems": 1,
+                "maxItems": 12,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                }
+              }
+            },
+            "required": [
+              "text",
+              "basis",
+              "evidenceIds"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "constraints": {
+          "maxItems": 6,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 800
+              },
+              "basis": {
+                "type": "string",
+                "enum": [
+                  "reported",
+                  "proposed"
+                ]
+              },
+              "evidenceIds": {
+                "minItems": 1,
+                "maxItems": 12,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                }
+              }
+            },
+            "required": [
+              "text",
+              "basis",
+              "evidenceIds"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "nonGoals": {
+          "maxItems": 6,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 800
+              },
+              "basis": {
+                "type": "string",
+                "enum": [
+                  "reported",
+                  "proposed"
+                ]
+              },
+              "evidenceIds": {
+                "minItems": 1,
+                "maxItems": 12,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                }
+              }
+            },
+            "required": [
+              "text",
+              "basis",
+              "evidenceIds"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "questions": {
+          "maxItems": 8,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "question": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 800
+              },
+              "blocking": {
+                "type": "boolean"
+              },
+              "evidenceIds": {
+                "minItems": 1,
+                "maxItems": 12,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                }
+              }
+            },
+            "required": [
+              "question",
+              "blocking",
+              "evidenceIds"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "status",
+        "userNeed",
+        "scenarios",
+        "constraints",
+        "nonGoals",
+        "questions"
+      ],
+      "additionalProperties": false
+    },
+    "semanticValidation": "validateResult enforces evidence IDs, blocking questions, criterion coverage and kind-specific verification profiles. Semantic support remains model-assessed."
+  },
+  "invocation": {
+    "transport": "typescript-function",
+    "module": "src/change-proposal/agents.ts",
+    "export": "extractFeatureRequirements",
+    "signature": "(input, options) => Promise<ProposalAgentRun>",
+    "requiredOptions": [
+      "model",
+      "provider",
+      "modelId"
+    ],
+    "optionalOptions": [
+      "signal",
+      "checkpoint"
+    ],
+    "modelDependency": "Caller-supplied AI SDK LanguageModel, explicitly selected at the application edge.",
+    "checkpoint": "Awaited admission and final snapshots. Persistence failures propagate; no automatic resume.",
+    "source": "Supplied bounded structured evidence only."
+  },
+  "lifecycle": {
+    "statuses": [
+      "running",
+      "completed",
+      "failed"
+    ],
+    "cancellation": "Cooperative AbortSignal",
+    "durableResume": false,
+    "query": "Inspect caller-persisted records."
+  },
+  "limits": {
+    "steps": 3,
+    "timeoutMs": 90000,
+    "inputCharacters": 60000
+  },
+  "effects": {
+    "githubWrites": false,
+    "targetCodeExecution": false,
+    "modelCalls": true,
+    "sourceReads": false,
+    "persistence": "Through caller checkpoint only.",
+    "authority": "Manifest does not authorize invocation or effects."
+  },
+  "failures": {
+    "beforeAdmission": [
+      "invalid_input",
+      "persistence_error"
+    ],
+    "recorded": [
+      "provider_error",
+      "no_valid_result",
+      "interrupted_or_timed_out"
+    ],
+    "unexpectedExceptions": "Propagate; inspect saved state. Unknown is not success.",
+    "automaticTaskRetry": false
+  },
+  "resultMeaning": "Completed means structurally validated supplied-evidence output; it does not establish independent task accuracy or authorize actions."
+}

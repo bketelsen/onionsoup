@@ -53,6 +53,10 @@ Start new skills from [.agents/skills/TEMPLATE/SKILL.md](.agents/skills/TEMPLATE
   and use host-generated v2/v3 overviews. Keep legacy v1/v2 records readable. See
   [location-contracts.ts](src/location-contracts.ts) and
   [location-record.ts](src/location-record.ts).
+- Prepare features separately from ready bugs and converge through the read-only
+  [proposal contract](docs/specs/change-proposal.md). Preserve reported/proposed
+  scope, source limitations, unrecorded acceptance and unexecuted checks. Neither
+  a ready proposal nor classification authorizes patches, tests or publication.
 - Compose agents through versioned artifacts and callable functions; retain parent
   run identities and provenance. See [packet.ts](src/packet.ts).
 - Run `npm run verify` for code or documentation changes. It checks documentation,

@@ -1,3 +1,6 @@
+import { hash } from '../repository-brief/contracts.ts';
+import { eligiblePacket, type ChangeWorkflow } from '../change-proposal/record.ts';
+import { proposalHtml } from '../change-proposal/render.ts';
 import { randomUUID } from 'node:crypto';
 import { escapeHtml as esc } from '../batch-report.ts';
 import { scheduleControl } from '../delivery/control.ts';
@@ -13,9 +16,9 @@ const styles=`:root{color-scheme:light;--ink:#233b35;--muted:#596960;--line:#d8d
 export function page(title:string,body:string,refresh=false) {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${refresh?'<meta http-equiv="refresh" content="5">':''}<title>${esc(title)} · Onionsoup</title><style>${styles}</style></head><body><main><nav><strong>Onionsoup</strong><a href="/">Repositories</a><a href="/operations">Activity</a><a href="/">Refresh</a></nav>${body}<footer>Local operator console · Model suggestions require judgment. No target code execution or GitHub writes.</footer></main></body></html>`;
 }
-function form(job:Job,token:string,action:OperatorRequest['action'],label:string,extra:Record<string,string|number>={},disabled=false) {
+function form(job:Job,token:string,action:OperatorRequest['action'],label:string,extra:Record<string,string|number>={},disabled=false,featureQuery=false) {
   const fields={ csrf:token,requestId:randomUUID(),jobId:job.id,revision:job.revision,action,...extra };
-  return `<form method="post" action="/actions">${Object.entries(fields).map(([k,v])=>`<input type="hidden" name="${k}" value="${esc(String(v))}">`).join('')}<button ${disabled?'disabled':''} class="${action==='run_now'?'':'secondary'}">${esc(label)}</button></form>`;
+  return `<form method="post" action="/actions">${Object.entries(fields).map(([k,v])=>`<input type="hidden" name="${k}" value="${esc(String(v))}">`).join('')}${featureQuery?'<label>Source search literal <input name="query" maxlength="160" required placeholder="A relevant symbol or phrase"></label> ':''}<button ${disabled?'disabled':''} class="${action==='run_now'?'':'secondary'}">${esc(label)}</button></form>`;
 }
 const status=(s:string)=>`<span class="tag">${esc(s.replaceAll('_',' '))}</span>`;
 export async function dashboard(operator:Operator,token:string) {
@@ -52,14 +55,23 @@ export async function briefPage(operator:Operator,job:Job,entry:BriefEntry,token
       return `<article><div class="row"><div><strong>#${item.number}</strong><h3>${esc(item.title)}</h3><a href="https://github.com/${b.request.repository}/issues/${item.number}">Original issue</a></div>${previous?`<a href="/operations/${previous.workflowId}">View investigation</a>`:form(job,token,'investigate','Assess & investigate',{ briefId:b.workflowId,briefHash:entry.hash,number:item.number },!job.source||busy||!['completed','partial'].includes(b.status))}</div></article>`;
     }).join('')||'<p>No captured issue candidates.</p>'}`);
 }
-export function operationPage(r:OperatorRecord,active:boolean,packet?:Packet) {
+export function operationPage(r:OperatorRecord,active:boolean,packet?:Packet,controls?:{job:Job;token:string;busy:boolean},proposal?:ChangeWorkflow) {
   const q=r.request;
   let details='';
   if(packet) {
     const p=validatePacket(packet), a=p.readiness?.assessment;
     details=`<h2>Investigation result</h2><h3>#${p.issue.number}: ${esc(p.issue.title)}</h3><p>${status(p.status)} ${a?`${status(a.kind)} ${status(a.bug_readiness)}`:''}</p><p>${esc(a?.summary??'No accepted readiness result.')}</p>${a?.questions.length?`<h3>Missing information</h3><ul>${a.questions.map(q=>`<li>${esc(q.question)}</li>`).join('')}</ul>`:''}${locationHtml(p.location).replace(/<a href="locations\/[^\"]+">Original code-location record<\/a>/g,`<a href="/operations/${r.workflowId}/packet.json">Saved packet</a>`)}<p><a href="/operations/${r.workflowId}/packet.json">Packet evidence</a> · <a href="/operations/${r.workflowId}/packet.md">Markdown packet</a> · <a href="/operations/${r.workflowId}/packet.events">Packet trace</a></p>`;
   }
-  return page('Operator action',`<h1>${esc(q.action.replaceAll('_',' '))}</h1><p>${status(r.status==='running'?(active?'running':'interrupted — outcome unknown'):r.status)} · Job ${esc(q.jobId)}</p><p>Started ${esc(r.startedAt)}${r.finishedAt?` · Finished ${esc(r.finishedAt)}`:''}</p>${q.action==='investigate'?`<p><a href="/briefs/${q.jobId}/${q.briefId}">Parent repository brief</a> · Selected issue #${q.number}</p>`:''}${r.result?`<p>Result: ${esc(r.result.type==='delivery'?r.result.status:r.result.type==='packet'?r.result.status:r.result.type==='skipped'?r.result.reason:r.result.paused?'schedule paused':'schedule resumed')}</p>`:''}${r.status==='failed'?'<p class="warn">The action stopped. Inspect child artifacts before starting another attempt; completed external effects may still exist.</p>':''}${r.status==='running'&&!active?'<p class="warn">No automatic replay. Inspect the delivery/packet records and any retained lock before recovery.</p>':''}${r.result?.type==='delivery'?`<p><a href="/">View delivery history</a></p>`:''}${details}<details><summary>Provenance</summary><pre>${esc(JSON.stringify({ actionId:r.workflowId,inputHash:r.inputHash,request:r.request,sourceCommit:r.commit,snapshotUpdatedAt:r.snapshot?.updatedAt },null,2))}</pre><a href="/operations/${r.workflowId}/events">Action trace</a></details>`,active);
+  if(packet&&controls&&r.status==='completed'&&controls.job.revision===q.revision) {
+    try {
+      eligiblePacket(packet);
+      details+=`<article><h2>Prepare a change proposal</h2><p>Draft scope, acceptance criteria, checks and open questions. Up to two Terra calls. This does not accept scope or authorize implementation.</p>${form(controls.job,controls.token,'propose','Draft change proposal',
+        {parentOperationId:r.workflowId,packetId:packet.packetId,packetHash:hash(packet)},controls.busy,packet.readiness!.assessment!.kind==='feature_request')}</article>`;
+    } catch { /* The classification remains visible without broadening eligibility. */ }
+  }
+  if(proposal) details+=`<h2>Saved change proposal</h2><p><a href="/operations/${r.workflowId}/proposal.json">Proposal evidence</a> · <a href="/operations/${r.workflowId}/proposal.md">Markdown</a> · <a href="/operations/${r.workflowId}/proposal.events">Proposal trace</a></p>${proposalHtml(proposal)}`;
+  if(q.action==='propose') details+=`<p><a href="/operations/${q.parentOperationId}">Parent investigation</a></p>`;
+  return page('Operator action',`<h1>${esc(q.action.replaceAll('_',' '))}</h1><p>${status(r.status==='running'?(active?'running':'interrupted — outcome unknown'):r.status)} · Job ${esc(q.jobId)}</p><p>Started ${esc(r.startedAt)}${r.finishedAt?` · Finished ${esc(r.finishedAt)}`:''}</p>${q.action==='investigate'?`<p><a href="/briefs/${q.jobId}/${q.briefId}">Parent repository brief</a> · Selected issue #${q.number}</p>`:''}${r.result?`<p>Result: ${esc(r.result.type==='delivery'?r.result.status:r.result.type==='packet'||r.result.type==='proposal'?r.result.status:r.result.type==='skipped'?r.result.reason:r.result.paused?'schedule paused':'schedule resumed')}</p>`:''}${r.status==='failed'?'<p class="warn">The action stopped. Inspect child artifacts before starting another attempt; completed external effects may still exist.</p>':''}${r.status==='running'&&!active?'<p class="warn">No automatic replay. Inspect the delivery/packet records and any retained lock before recovery.</p>':''}${r.result?.type==='delivery'?`<p><a href="/">View delivery history</a></p>`:''}${details}<details><summary>Provenance</summary><pre>${esc(JSON.stringify({ actionId:r.workflowId,inputHash:r.inputHash,request:r.request,sourceCommit:r.commit,snapshotUpdatedAt:r.snapshot?.updatedAt },null,2))}</pre><a href="/operations/${r.workflowId}/events">Action trace</a></details>`,active);
 }
 export async function activityPage(operator:Operator) {
   const h=await operator.records();

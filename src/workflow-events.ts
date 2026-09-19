@@ -1,3 +1,6 @@
+import { ProposalAgentId } from './change-proposal/contracts.ts';
+import { validateChangeWorkflow } from './change-proposal/record.ts';
+import { validateProposalAgentRun } from './change-proposal/agents.ts';
 import { OperatorRecord } from './console/contracts.ts';
 import { DeliveryRecord } from './delivery/contracts.ts';
 import { RepoAgentId, hash } from './repository-brief/contracts.ts';
@@ -28,13 +31,13 @@ export const WorkflowEvent = z.object({
     'delivery.prepared', 'delivery.attempted', 'delivery.accepted', 'delivery.rejected', 'delivery.unknown', 'delivery.reconciled',
     'agent.step_started', 'agent.step_finished', 'agent.tool_requested', 'stage.skipped', 'stage.failed',
     'stage.unfinished', 'stage.completed', 'workflow.budget_reserved']),
-  operatorAction: z.enum(['run_now','pause','resume','retry','investigate']).optional(),
+  operatorAction: z.enum(['run_now','pause','resume','retry','investigate','propose']).optional(),
   issueNumber: z.number().int().positive().optional(),
   deliveryAttempt: z.number().int().min(1).max(3).optional(),
   deliveryResolution: z.enum(['accepted','not_accepted']).optional(),
   childWorkflowId: Id.optional(), parentWorkflowId: Id.optional(), budget: InvocationBudgetSnapshot.optional(), issueIndex: z.number().int().min(0).max(4).optional(),
-  stageKey: z.enum(['collection','issue_themes','pr_themes','health','actions']).optional(),
-  agent: z.enum(['bug-readiness', 'code-location', ...RepoAgentId.options]).optional(), runId: Id.optional(), parentRunId: Id.optional(),
+  stageKey: z.enum(['collection','issue_themes','pr_themes','health','actions','requirements','proposal']).optional(),
+  agent: z.enum(['bug-readiness', 'code-location', ...RepoAgentId.options, ...ProposalAgentId.options]).optional(), runId: Id.optional(), parentRunId: Id.optional(),
   recordVersion: z.number().int().positive().optional(), promptVersion: z.string().regex(/^[\w.-]+$/).optional(),
   runtimeHash: z.string().regex(/^[a-f0-9]{64}$/).optional(), inputHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   repositoryCommit: z.string().regex(/^[a-f0-9]{40}$/).optional(),
@@ -42,7 +45,7 @@ export const WorkflowEvent = z.object({
   step: z.number().int().nonnegative().optional(),
   tool: z.enum(['submit_assessment', 'search_repository', 'read_repository', 'submit_brief', 'submit_result']).optional(),
   failure: Failures.optional(), reason: z.enum(['not_eligible', 'readiness_failed', 'location_not_started', 'budget_exhausted', 'cancelled', 'prior_attempt_unfinished', 'not_started', 'selection_limit', 'no_data', 'disabled']).optional(),
-  outcome: z.enum(['ready', 'needs_information', 'not_applicable', 'out_of_scope', 'located', 'not_located']).optional(),
+  outcome: z.enum(['ready', 'needs_information', 'not_applicable', 'out_of_scope', 'located', 'not_located', 'proposal_ready', 'sufficient_for_proposal']).optional(),
   requestKind: z.enum(['bug_report', 'feature_request', 'support_question', 'other', 'unclear', 'unclassified_legacy']).optional(),
   testSearch: z.enum(['completed', 'unfinished']).optional(), directTests: z.number().int().nonnegative().optional(),
   adjacentTests: z.number().int().nonnegative().optional(),
@@ -73,10 +76,34 @@ const failure = (raw: unknown): z.infer<typeof Failures> => Failures.safeParse(r
 // The original records remain the truth. No provider calls, new timestamps, or raw content.
 export function workflowEvents(raw: unknown): z.infer<typeof WorkflowEventExport> {
   const candidate = raw as Record<string, unknown>;
+  if(candidate?.kind==='change-proposal'||ProposalAgentId.safeParse(candidate?.agent).success) {
+    const w=candidate.kind==='change-proposal'?validateChangeWorkflow(raw):undefined;
+    const standalone=w?undefined:validateProposalAgentRun(raw),workflowId=w?.workflowId??standalone!.runId,events:WorkflowEvent[]=[];
+    const add=(event:Omit<WorkflowEvent,'schemaVersion'|'workflowId'|'sequence'>)=>events.push(WorkflowEvent.parse({
+      ...event,schemaVersion:1,workflowId,sequence:events.length,...(w?{parentWorkflowId:w.parent.packetId,repositoryCommit:w.parent.repository.commit}:{}) }));
+    add({type:'workflow.started',at:w?.startedAt??standalone!.startedAt});
+    const append=(r:ReturnType<typeof validateProposalAgentRun>)=>{
+      const base={agent:r.agent,runId:r.runId,inputHash:r.inputHash,promptVersion:r.promptVersion,provider:r.provider,model:r.model,recordVersion:1};
+      add({...base,type:'agent.started',at:r.startedAt});
+      for(const e of r.events) if(z.iso.datetime().safeParse(e.at).success&&['stepStart','stepFinish','toolInputStart'].includes(e.type))
+        add({...base,type:e.type==='stepStart'?'agent.step_started':e.type==='stepFinish'?'agent.step_finished':'agent.tool_requested',at:e.at,step:e.step,
+          ...(e.tool==='submit_result'?{tool:'submit_result' as const}:{})});
+      add({...base,type:r.status==='running'?'agent.unfinished':`agent.${r.status}`,at:r.finishedAt??r.startedAt,usage:usage(r.tokenUsage?.totals),
+        ...(r.result?{outcome:(r.result as {status:'proposal_ready'|'needs_information'|'sufficient_for_proposal'}).status}:{}),failure:r.failure});
+    };
+    if(w) for(const s of w.stages) {
+      add({type:'workflow.budget_reserved',at:s.reservedAt,agent:s.agent,stageKey:s.agent==='feature-requirements'?'requirements':'proposal',budget:s.reservation});
+      if(s.run) append(s.run);
+      else add({type:w.status==='running'?'stage.unfinished':'stage.failed',agent:s.agent,at:w.finishedAt??s.reservedAt});
+    } else append(standalone!);
+    const record=w??standalone!;
+    add({type:record.status==='running'?'workflow.unfinished':`workflow.${record.status}`,at:record.finishedAt??record.startedAt,...(w?{budget:w.budget}:{})});
+    return WorkflowEventExport.parse({schemaVersion:1,kind:'workflow-events',mode:'derived-snapshot',workflowId,events});
+  }
   if (candidate?.kind === 'operator-action') {
     const r=OperatorRecord.parse(raw), q=r.request;
     const base={ schemaVersion:1 as const,workflowId:r.workflowId,operatorAction:q.action,inputHash:r.inputHash,
-      ...(q.action==='investigate'?{ parentWorkflowId:q.briefId,issueNumber:q.number }:{}),repositoryCommit:r.commit };
+      ...(q.action==='investigate'?{ parentWorkflowId:q.briefId,issueNumber:q.number }:q.action==='propose'?{parentWorkflowId:q.packetId}:{}),repositoryCommit:r.commit };
     return WorkflowEventExport.parse({ schemaVersion:1,kind:'workflow-events',mode:'derived-snapshot',workflowId:r.workflowId,events:[
       { ...base,sequence:0,type:'operator.requested',at:r.startedAt },
       { ...base,sequence:1,type:r.status==='running'?'operator.unfinished':`operator.${r.status}`,at:r.finishedAt??r.startedAt,

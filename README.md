@@ -308,4 +308,22 @@ agents into code execution or GitHub writes. The
 next boundaries for bugs and features: distinct evidence/requirements preparation,
 a shared change proposal, isolated verification, patch/review, and explicitly
 authorized draft publication. Current feature classification still makes no project
-acceptance decision; feature-specific preparation remains planned.
+acceptance decision. Read-only feature preparation and shared proposals are now implemented; execution and publication remain planned.
+
+## Read-only bug and feature proposals
+
+The [proposal recipe](docs/specs/change-proposal.md) turns a saved investigation
+packet into scope, acceptance criteria, planned checks and open questions. Features
+first get a requirements brief and bounded Git source context; bugs reuse inspected
+packet evidence. Both use one shared proposal worker. Ready means ready for scope
+review, not accepted, tested or implemented.
+
+```sh
+npm run proposal -- PATH/packet.json --provider copilot --output NEW_DIRECTORY
+# For a feature packet, also supply --checkout PATH --query A_SPECIFIC_SYMBOL.
+npm run proposal -- render DIRECTORY
+```
+
+The local console offers **Draft change proposal** on eligible investigation
+pages. [Trial evidence and limitations](docs/plans/records/change-proposal-2026-09-18.md)
+include real bugs/features and explicit synthetic cases.

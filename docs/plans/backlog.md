@@ -120,7 +120,10 @@ locally; real SMTP forwarding and recipient receipt remain unqualified.
 
 Evidence: [operator console trial](records/operator-console-2026-09-18.md).
 
-## Phase 10 — Change proposals (planned)
+<!-- Preserve the anchor referenced by immutable ADR-0013. -->
+<a id="phase-10--change-proposals-planned"></a>
+
+## Phase 10 — Change proposals
 
 - Start the [investigation-to-PR plan](investigation-to-pr.md) with a read-only
   shared proposal agent for bugs and features, following the [boundary exploration](../design/investigation-to-pr.md).
@@ -134,10 +137,15 @@ Evidence: [operator console trial](records/operator-console-2026-09-18.md).
 - Sandbox execution, patches, independent review and explicit draft publication are
   later separately gated phases. Current OSS agents retain their read-only boundary.
 
+Implemented: [proposal contract](../specs/change-proposal.md), under
+[ADR-0014](../adr/0014-draft-read-only-proposals-from-frozen-evidence.md).
+Evidence: [read-only proposal trial](records/change-proposal-2026-09-18.md).
+
 ## Later / ideas
 
 | Item | Trigger / acceptance evidence |
 | --- | --- |
+| Feature source selection | The [P10 trial](records/change-proposal-2026-09-18.md) shows broad literals finding unrelated files. Prove explicit path selection or bounded follow-up reads improve relevant context before adding a feature-location agent. |
 | Smaller model context separate from full history (12F 3) | Compare evidence-preserving context assembly on frozen failures before adoption. |
 | Deterministic repository-map prefetch (12F appendix) | Small pinned map reduces discovery work without hiding decisive evidence or consuming the source budget unaccountably. |
 | Repeated-error/no-progress detection (12F 9) | Stop repeated equivalent failures with a useful reason; prove it does not stop recoverable cases early. |

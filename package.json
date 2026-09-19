@@ -27,7 +27,8 @@
     "briefing": "node --import tsx src/briefing-cli.ts",
     "repo-brief": "node --import tsx src/repository-brief/cli.ts",
     "delivery": "tsx src/delivery/cli.ts",
-    "mail-capture": "tsx src/delivery/capture-cli.ts"
+    "mail-capture": "tsx src/delivery/capture-cli.ts",
+    "proposal": "node --import tsx src/change-proposal/cli.ts"
   },
   "dependencies": {
     "@humanlayer/agentlayer-core": "0.0.36",

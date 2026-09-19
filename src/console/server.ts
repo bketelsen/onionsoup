@@ -1,3 +1,5 @@
+import { validateChangeWorkflow } from '../change-proposal/record.ts';
+import { proposalMarkdown } from '../change-proposal/render.ts';
 import { createServer } from 'node:http';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { join } from 'node:path';
@@ -45,7 +47,18 @@ export function consoleServer(operator:Operator) {
         try { packet=validatePacket(await scopedJson(operator.config.stateDirectory,`operations/${r.workflowId}/packet/packet.json`));
           if(r.request.action!=='investigate'||packet.issue.number!==r.request.number||packet.repository.commit!==r.commit||hash(packet.issue)!==hash(r.snapshot)||r.result?.type==='packet'&&r.result.workflowId!==packet.packetId) throw new Error('Packet binding mismatch');
         } catch(e) { if((e as NodeJS.ErrnoException).code!=='ENOENT') throw e; }
-        if(!parts[2]) { send(operationPage(r,operator.active===r.workflowId,packet));return; }
+        let proposal;
+        if(r.request.action==='propose') {
+          try {
+            proposal=validateChangeWorkflow(await scopedJson(operator.config.stateDirectory,`operations/${r.workflowId}/proposal/proposal.json`));
+            if(proposal.parent.packetId!==r.request.packetId||proposal.parentHash!==r.request.packetHash||proposal.query!==r.request.query||
+              r.result?.type==='proposal'&&r.result.workflowId!==proposal.workflowId) throw new Error('Proposal binding mismatch');
+          } catch(e) {if((e as NodeJS.ErrnoException).code!=='ENOENT') throw e;}
+        }
+        if(!parts[2]) { send(operationPage(r,operator.active===r.workflowId,packet,{job:await loadJob(operator.config,r.request.jobId),token,busy:!!operator.active||await operator.locked()},proposal));return; }
+        if(proposal&&parts[2]==='proposal.json') {json(proposal);return;}
+        if(proposal&&parts[2]==='proposal.md') {send(proposalMarkdown(proposal),'text/plain; charset=utf-8');return;}
+        if(proposal&&parts[2]==='proposal.events') {json(workflowEvents(proposal));return;}
         if(packet&&parts[2]==='packet.json') { json(packet);return; }
         if(packet&&parts[2]==='packet.md') { send(packetMarkdown(packet),'text/plain; charset=utf-8');return; }
         if(packet&&parts[2]==='packet.events') { json(workflowEvents(packet));return; }

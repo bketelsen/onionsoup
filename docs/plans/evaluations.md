@@ -136,6 +136,18 @@ Evidence: [scheduled delivery trial](records/scheduled-delivery-2026-09-18.md).
 
 Evidence: [operator console trial](records/operator-console-2026-09-18.md).
 
+## Phase 12 — Shared bug and feature proposals
+
+- Exercise the [proposal contract](../specs/change-proposal.md) in the
+  [change workflow](../design/investigation-to-pr.md), using frozen real packets
+  and clearly marked operator-authored fixtures.
+- **Done when:** bugs and features share the proposal worker; ambiguous/mixed
+  requests expose blocking questions; measurable criteria map to checks;
+  relevance weaknesses and all attempts are recorded separately from runtime
+  validity. No execution or maintainer acceptance is inferred.
+
+Evidence: [proposal trial](records/change-proposal-2026-09-18.md).
+
 ## Later / ideas
 
 Model-comparison infrastructure, new local-provider batches, broader source
