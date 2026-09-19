@@ -19,7 +19,7 @@ export function seedsFrom(raw:unknown) {
   });
 }
 export function evaluateObservations(raw:any,seeds:ReturnType<typeof seedsFrom>):Verification['checks'] {
-  if(!Array.isArray(raw.responses)||raw.responses.length!==statuses.length+6)throw new Error('Incomplete observations');
+  if(!Array.isArray(raw.responses)||raw.responses.length!==statuses.length+9)throw new Error('Incomplete observations');
   const get=(q:string)=>{const values=raw.responses.filter((r:any)=>r.query===q);if(values.length!==1||typeof values[0].html!=='string'||values[0].html.length>200000)throw new Error('Invalid observation');return values[0];};
   const ids=(html:string)=>[...html.matchAll(/href="\/publications\/([a-f0-9]{64})"/g)].map(m=>m[1]).sort();
   const all=seeds.map(s=>s.bundle.publicationId).sort(),base=get(''),explicit=get('?status=all');
@@ -27,8 +27,8 @@ export function evaluateObservations(raw:any,seeds:ReturnType<typeof seedsFrom>)
   return [check('default-history',base.status===200&&explicit.status===200&&hash(ids(base.html))===hash(all)&&hash(ids(explicit.html))===hash(all)),
     check('status-filter',statuses.every(status=>{const r=get('?status='+status);return r.status===200&&hash(ids(r.html))===hash(seeds.filter(s=>s.state.status===status).map(s=>s.bundle.publicationId));})),
     check('invalid-filter',['?status=bogus','?status=blocked&status=unknown','?status='].every(q=>get(q).status===400)),
-    check('filter-controls',statuses.every(status=>{const h=get('?status='+status).html;return /<form[^>]*method="get"/i.test(h)&&/<select[^>]*name="status"/i.test(h)&&new RegExp(`<option[^>]*value="${status}"[^>]*selected`).test(h)&&/<option[^>]*value="all"/.test(h);})),
+    check('filter-controls',get('empty-status').status===200&&ids(get('empty-status').html).length===0&&/no (?:[^<]{0,100})(?:match|publication|result|entr)/i.test(get('empty-status').html)&&statuses.every(status=>{const h=get('?status='+status).html;return /<form[^>]*method="get"/i.test(h)&&/<select[^>]*name="status"/i.test(h)&&new RegExp(`<option[^>]*value="${status}"[^>]*selected`).test(h)&&/<option[^>]*value="all"/.test(h);})),
     check('coverage-preserved',[base,...statuses.map(s=>get('?status='+s))].every(r=>/unavailable|incomplete|invalid|unreadable/i.test(r.html))&&raw.writes===0),
-    check('detail-unchanged',get('/'+seeds[0].bundle.publicationId+'?status=bogus').status===200),
+    check('detail-unchanged',['','/json','/events'].every(s=>get('/'+seeds[0].bundle.publicationId+s+'?status=bogus').status===200)),
     check('typecheck',raw.typecheck?.code===0),check('adjacent-console',raw.adjacent?.code===0&&/pass [1-9]/.test(raw.adjacent?.output??''))];
 }

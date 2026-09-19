@@ -125,6 +125,8 @@ Raw run links are optional local evidence; those files are intentionally not pub
 - [Owned-project implementation design](design/owned-project-changes.md)
 - [Accepted project job contract](specs/owned-project-changes.md)
 
+- [Owned-project execution preflight](plans/records/owned-project-preflight-2026-09-19.md)
+
 ## Related repository material
 
 - [README and commands](../README.md)

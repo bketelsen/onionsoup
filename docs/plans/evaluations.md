@@ -172,6 +172,8 @@ Exercise the [project profile](../design/owned-project-changes.md) and [contract
 
 **Done when:** the real baseline preserves current behavior while recording new-feature gaps, an accepted model proposal yields a scoped candidate satisfying every mapped check, separate review has no blocking findings, and the exact tested commit becomes an owned draft. Record live failures separately from scripted boundary checks and independent human acceptance. The local workflow and published draft retain the complete trial provenance.
 
+Preflight evidence: [owned-project qualification](records/owned-project-preflight-2026-09-19.md). Final feature evidence remains a separate live trial.
+
 ## Later / ideas
 
 Model-comparison infrastructure, new local-provider batches, broader source

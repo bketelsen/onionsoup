@@ -61,7 +61,7 @@ operator's judgment; structural coverage alone does not establish semantic relev
 - Execution requires the existing rootless Podman/cgroup-v2 pinned runtime. No image
   pulls, network, credentials, Git metadata or writable host mount. Read-only source,
   dependencies, Node and host harness; UID 65534, no capabilities, no-new-privileges,
-  private namespaces, 768 MiB memory, 128 PIDs, two CPUs, 128 MiB noexec scratch,
+  private namespaces, 1536 MiB memory, 128 PIDs, two CPUs, 128 MiB noexec scratch,
   90 seconds and 512 KiB combined output. Forced cleanup targets the exact named
   container. A failed intent checkpoint prevents launch; cleanup failure is failure.
 - The trusted harness starts the local HTTP server inside the isolated namespace,
