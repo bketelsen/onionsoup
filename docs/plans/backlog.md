@@ -160,7 +160,15 @@ Evidence: [read-only proposal trial](records/change-proposal-2026-09-18.md).
   the accepted criteria under the same isolated checks, and survive separate
   review; failures/advisories and finite-coverage limits remain visible.
 - Implemented. Evidence: [fixture trial](records/fixture-patches-2026-09-19.md).
-  No automatic revisions or PR publication. Real OSS repair remains deferred.
+  No automatic revisions. Publication is a separate P13 authority; real OSS repair remains deferred.
+
+## Phase 13 — Owned-fixture draft publication
+
+Implement the [publication design](../design/draft-publication.md) and [contract](../specs/draft-publication.md), completing [change-workflow Phase 4](investigation-to-pr.md#phase-4--explicit-draft-publication).
+
+**Done when:** approved exact bundles produce one bug and one feature draft in an owned repository, with tested ambiguity, stale-state and concurrency handling.
+
+Implemented. Evidence: [publication trial](records/draft-publication-2026-09-19.md).
 
 ## Later / ideas
 

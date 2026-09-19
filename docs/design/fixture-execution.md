@@ -73,3 +73,5 @@ The [trial record](../plans/records/fixture-patches-2026-09-19.md) distinguishes
 - Contract: [fixture execution](../specs/fixture-execution.md), [discovery/events](../specs/agent-discovery.md).
 - Built in: [backlog P11/P12](../plans/backlog.md#phase-11--isolated-fixture-verification), [change workflow phases 2–3](../plans/investigation-to-pr.md).
 - Broader context: [investigation-to-PR design](investigation-to-pr.md).
+
+Owned-fixture publication is now a separate [approved-bundle boundary](../specs/draft-publication.md), under [ADR-0016](../adr/0016-publish-only-approved-fixture-bundles.md). Fixture results themselves retain `publication: not_authorized`.

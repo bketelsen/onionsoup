@@ -98,3 +98,5 @@ read-only `/fixtures` view over configured roots. It exposes base/candidate chec
 review findings, exact diff and provenance without adding browser execution actions.
 This completes visibility for [P11/P12](../plans/backlog.md#phase-11--isolated-fixture-verification)
 under the [fixture contract](../specs/fixture-execution.md).
+
+Owned-fixture publication is now a separate [approved-bundle boundary](../specs/draft-publication.md), under [ADR-0016](../adr/0016-publish-only-approved-fixture-bundles.md). Fixture results themselves retain `publication: not_authorized`.

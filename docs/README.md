@@ -115,6 +115,12 @@ Raw run links are optional local evidence; those files are intentionally not pub
 - [Fixture execution and patch contract](specs/fixture-execution.md)
 - [Fixture runner and patch trial](plans/records/fixture-patches-2026-09-19.md)
 
+- [ADR-0016: approved fixture publication](adr/0016-publish-only-approved-fixture-bundles.md)
+- [Owned-fixture publication design](design/draft-publication.md)
+- [Draft publication contract](specs/draft-publication.md)
+
+- [Owned-fixture draft publication trial](plans/records/draft-publication-2026-09-19.md)
+
 ## Related repository material
 
 - [README and commands](../README.md)

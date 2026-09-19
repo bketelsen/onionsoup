@@ -345,3 +345,7 @@ The image must already be available locally; pinning never pulls or changes host
 image policy. Add its saved run parent to the console's `fixtureRoots` to browse
 **Fixture trials**. See the [trial evidence](docs/plans/records/fixture-patches-2026-09-19.md)
 for successful candidates, blocked initial diffs, isolation checks and limitations.
+
+### Owned-fixture draft publication
+
+Prepare and inspect a concrete bundle, record existing operator authorization, then publish or reconcile it with `npm run publication --`. The [publication contract](docs/specs/draft-publication.md) lists commands and host configuration. The console exposes `/publications` when `publicationConfig` is configured. Only exact configured `bketelsen/*` targets are supported; no merge or external OSS publication.

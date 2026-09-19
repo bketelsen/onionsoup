@@ -1,7 +1,7 @@
 # From bug reports and feature requests to a reviewable change
 
 Living exploration, recorded 2026-09-18. **Read-only proposals and the explicitly authorized owned-fixture execution/patch
-slice are implemented. Real OSS execution and publication remain deferred.**
+slice are implemented. Real OSS execution remains deferred. Owned-fixture draft publication is implemented through [approved bundles](draft-publication.md).**
 Fixture boundaries: [ADR-0015](../adr/0015-isolate-fixture-verification-and-scoped-patches.md),
 [design](fixture-execution.md), [contract](../specs/fixture-execution.md).
 Shared bug/feature direction: [ADR-0013](../adr/0013-converge-bugs-and-features-on-a-shared-change-proposal.md).
@@ -117,7 +117,7 @@ open decisions, source/base identity, verification profile, and compatibility,
 migration and documentation obligations. Its input is a discriminated variant:
 `bug_fix` references bug investigation evidence; `feature` references requirements
 and feature-context evidence. The linked contract defines the shipped schemas.
-Candidate, execution, review and publication envelopes remain design work.
+Owned-fixture candidate, execution and review envelopes now follow the [fixture contract](../specs/fixture-execution.md); approved publication bundles follow the [publication contract](../specs/draft-publication.md). General project envelopes remain future work.
 
 Maintain four separate facts: request kind, evidence/requirements sufficiency,
 maintainer scope decision, and execution/publication authorization. A structurally
@@ -223,7 +223,7 @@ Use Copilot/Codex with Terra under the existing evaluation policy.
 
 ## Operational notes
 
-The implemented slice is **shared read-only change proposals from bug and feature
+The implemented read-only entry stage is **shared change proposals from bug and feature
 evidence**, under [ADR-0014](../adr/0014-draft-read-only-proposals-from-frozen-evidence.md)
 and the [proposal contract](../specs/change-proposal.md). Bugs reuse frozen packet
 quotes. Features use a requirements agent and deterministic literal search with
@@ -236,8 +236,7 @@ produced concrete useful examples.
 The [owned-fixture trial](../plans/records/fixture-patches-2026-09-19.md) now records
 isolated baseline execution and one successful local candidate per kind through
 the shared patch and separate-review workflow. Its first two attempts were blocked
-by review over an invalid exported diff; the corrected host verifies reconstruction. Remote publication follows after those
-artifacts and effect boundaries are demonstrably useful. The existing `get-bb/bb`
+by review over an invalid exported diff; the corrected host verifies reconstruction. Remote draft publication now follows through a separate [approved bundle](draft-publication.md), under [ADR-0016](../adr/0016-publish-only-approved-fixture-bundles.md). The existing `get-bb/bb`
 work remains read-only throughout the current phase.
 
 ## References

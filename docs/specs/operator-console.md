@@ -16,7 +16,7 @@ after selecting a matching local checkout and full commit.
 
 Configuration is strict version 1 with `stateDirectory` and 1–10 unique `jobs`.
 Optional top-level `fixtureRoots` contains at most ten local saved-trial roots.
-Their paths resolve relative to the configuration file.
+Optional top-level `publicationConfig` names the host [draft publisher configuration](draft-publication.md). These paths resolve relative to the configuration file.
 Each job has a lowercase/hyphen `id`, `deliveryConfig`, `deliveryState`, and up to
 ten `briefRoots`. Optional fields: `inboxDirectory`, a systemd `timerUnit`, and
 `source: { checkout, commit }` with a full 40-character Git commit. Paths resolve
@@ -37,9 +37,11 @@ current execution remains Terra on their configured Copilot/Codex subscription.
 | `GET /operations/UUID/proposal.json`, `/proposal.md`, `/proposal.events` | Validated proposal evidence, text and trace |
 | `GET /issues/JOB/index.html` | Existing static issue inbox, regenerated without inference |
 | `GET /issues/JOB/records/NAME.json`, `/locations/NAME.json` | Scoped issue-inbox evidence files |
+| `GET /publications`, `/publications/ID`, `/publications/ID/json`, `/events` | Prepared owned-fixture publication bundles and journals; see [publication contract](draft-publication.md) |
+| `POST /publication-actions` | Approve an exact saved bundle, or asynchronously publish/reconcile it; fields are `csrf`, `action`, `id`, `bundleHash` |
 | `POST /actions` | Admit one typed operator action, then 303 to its status page |
 
-POST bodies are form-encoded, at most 8 KiB, with unique fields. Required common
+POST bodies are form-encoded, at most 8 KiB, with unique fields. For `/actions`, required common
 fields: `csrf`, UUID `requestId`, `jobId`, configuration `revision` hash and `action`.
 The schema rejects extra fields. Host MUST match `127.0.0.1:PORT`; POST Origin MUST
 match the same origin and its CSRF token. Cross-site fetch metadata is denied. No
@@ -141,3 +143,5 @@ launch patches, select runtimes or execute commands.
   [common events](agent-discovery.md).
 - Phase/evidence: [backlog P9](../plans/backlog.md#phase-9--operator-console),
   [console trial](../plans/records/operator-console-2026-09-18.md).
+
+Owned-fixture publication is now a separate [approved-bundle boundary](../design/draft-publication.md), under [ADR-0016](../adr/0016-publish-only-approved-fixture-bundles.md). Fixture results themselves retain `publication: not_authorized`.

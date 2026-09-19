@@ -84,7 +84,8 @@ from configured jobs; browser input cannot select paths, credentials or commands
 The [owned fixture runner](docs/specs/fixture-execution.md) separately permits
 bounded isolated execution and scoped local candidates under explicit fixture
 authorization. Its patch/review agents have no shell or filesystem tools. Keep
-real OSS repair/execution and PR publication deferred; a ready proposal does not
+real OSS repair/execution deferred; owned-fixture publication uses the separate
+approved-bundle boundary below; a ready proposal does not
 grant those effects. Preserve original checks and bind candidate receipts to the
 exact applied diff and accepted base.
 
@@ -127,3 +128,5 @@ reviewers also verify that cross-links accurately explain the relationships.
 - Record significant decisions in an ADR first, then update affected designs/specs.
 - Use absolute dates in documentation.
 - Edit the canonical `.agents/skills/` files, not separate tool-specific copies.
+
+Owned-fixture draft publication uses the separate [publication contract](docs/specs/draft-publication.md): exact approved bundles, configured `bketelsen/*` targets, persisted effect intents and conservative reconciliation. Never publish to `get-bb/bb`. Agents have no publication tools; merging remains out of scope.

@@ -75,7 +75,32 @@
               "stage.completed",
               "workflow.budget_reserved",
               "verification.started",
-              "verification.completed"
+              "verification.completed",
+              "publication.prepared",
+              "publication.approved",
+              "publication.push_intent",
+              "publication.branch_published",
+              "publication.pr_intent",
+              "publication.published",
+              "publication.unknown",
+              "publication.blocked"
+            ]
+          },
+          "publicationId": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "publicationReason": {
+            "type": "string",
+            "enum": [
+              "operator_authorized",
+              "remote_observed",
+              "effect_intent",
+              "remote_uncertain",
+              "remote_conflict",
+              "stale_base",
+              "stale_approval",
+              "prepared"
             ]
           },
           "operatorAction": {

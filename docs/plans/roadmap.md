@@ -179,6 +179,14 @@ Evidence: [read-only proposal trial](records/change-proposal-2026-09-18.md).
   separate model review. Earlier failures and resource-boundary evidence remain
   inspectable. [Trial record](records/fixture-patches-2026-09-19.md).
 
+## Phase 16 — Owned-fixture draft publication
+
+Implement [approved bundles and conservative reconciliation](../design/draft-publication.md) under the [publication contract](../specs/draft-publication.md) and [ADR-0016](../adr/0016-publish-only-approved-fixture-bundles.md).
+
+**Done when:** a bug and feature produce exact-evidence draft PRs in an owned fixture repository, stale approvals and ambiguous responses cannot create extra PRs, and console approval/publication is inspectable. No merge.
+
+Implemented. Evidence: [publication trial](records/draft-publication-2026-09-19.md).
+
 ## Broader vision — domain-focused agent teams
 
 Recorded on 2026-09-18: OSS maintenance is the first proving ground for Onionsoup,

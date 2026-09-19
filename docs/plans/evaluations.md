@@ -159,6 +159,13 @@ Evidence: [proposal trial](records/change-proposal-2026-09-18.md).
 
 Evidence: [fixture and patch trial](records/fixture-patches-2026-09-19.md).
 
+## Phase 14 — Approved draft publication
+
+- Exercise the [publisher](../design/draft-publication.md) and [contract](../specs/draft-publication.md).
+- **Done when:** exact approved bug/feature bundles become draft PRs in an owned repository; fault tests distinguish unknown effects, stale authority and conflicts without duplicate creation. Human acceptance remains separate.
+
+Implemented. Evidence: [publication trial](records/draft-publication-2026-09-19.md).
+
 ## Later / ideas
 
 Model-comparison infrastructure, new local-provider batches, broader source

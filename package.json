@@ -29,7 +29,8 @@
     "delivery": "tsx src/delivery/cli.ts",
     "mail-capture": "tsx src/delivery/capture-cli.ts",
     "proposal": "node --import tsx src/change-proposal/cli.ts",
-    "fixture": "node --import tsx src/fixture-runner/cli.ts"
+    "fixture": "node --import tsx src/fixture-runner/cli.ts",
+    "publication": "node --import tsx src/publication/cli.ts"
   },
   "dependencies": {
     "@humanlayer/agentlayer-core": "0.0.36",

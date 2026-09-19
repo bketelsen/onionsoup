@@ -6,8 +6,10 @@ Shared bug/feature scope follows [ADR-0013](../adr/0013-converge-bugs-and-featur
 Phase 1 is implemented under [ADR-0014](../adr/0014-draft-read-only-proposals-from-frozen-evidence.md)
 and the [proposal contract](../specs/change-proposal.md). Phases 2–3 are implemented
 for the explicitly authorized owned fixture under [ADR-0015](../adr/0015-isolate-fixture-verification-and-scoped-patches.md)
-and the [fixture contract](../specs/fixture-execution.md). Real OSS execution and
-remote writes remain later phases requiring their own authority.
+and the [fixture contract](../specs/fixture-execution.md). Phase 4 is implemented for owned-fixture draft publication under
+[ADR-0016](../adr/0016-publish-only-approved-fixture-bundles.md) and the
+[publication contract](../specs/draft-publication.md). Real OSS execution remains a
+later phase requiring its own authority.
 
 ## Phase 1 — Read-only change proposals
 
@@ -70,6 +72,9 @@ One candidate per invocation is implemented; automatic revision remains deferred
 - **Done when:** an explicitly authorized draft PR matches the reviewed artifact, with request
   kind and criterion-specific verification limits accurately described;
   ambiguous retries reconcile to that PR rather than creating duplicates. No merge.
+
+Implemented. Evidence: [owned draft publication trial](records/draft-publication-2026-09-19.md).
+Design: [approved bundles](../design/draft-publication.md).
 
 ## Later / ideas
 

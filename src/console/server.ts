@@ -1,3 +1,5 @@
+import {PublicationOperator,publicationHistory,publicationHtml} from '../publication/console.ts';
+import {publicationEvents} from '../publication/events.ts';
 import {fixtureHistory,fixtureId} from '../fixture-runner/console.ts';
 import {fixtureHtml,fixtureMarkdown} from '../fixture-runner/render.ts';
 import {escapeHtml} from '../batch-report.ts';
@@ -15,7 +17,7 @@ import { repositoryBriefHtml, repositoryBriefMarkdown } from '../repository-brie
 import { workflowEvents } from '../workflow-events.ts';
 import { renderInbox } from '../inbox-report.ts';
 import { packetMarkdown, validatePacket } from '../packet.ts';
-export function consoleServer(operator:Operator) {
+export function consoleServer(operator:Operator, publisher=operator.config.publicationConfig?new PublicationOperator(operator.config.publicationConfig):undefined) {
   const token=randomBytes(32).toString('hex');
   const server=createServer(async(req,res)=>{
     const address=server.address();
@@ -30,7 +32,7 @@ export function consoleServer(operator:Operator) {
     try {
       if(req.headers.host!==origin.slice(7)||req.headers['sec-fetch-site']==='cross-site') { res.statusCode=403;send('Local origin required.','text/plain');return; }
       const url=new URL(req.url??'/',origin), parts=url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
-      if(req.method==='POST'&&url.pathname==='/actions') {
+      if(req.method==='POST'&&['/actions','/publication-actions'].includes(url.pathname)) {
         if(req.headers.origin!==origin || req.headers['content-type']?.split(';')[0]!=='application/x-www-form-urlencoded') throw new Error('Invalid origin or content type');
         let bytes=0,body='';for await(const chunk of req) { bytes+=chunk.length;if(bytes>8192) throw new Error('Body too large');body+=chunk.toString(); }
         const params=new URLSearchParams(body);if(new Set(params.keys()).size!==[...params.keys()].length) throw new Error('Duplicate fields');
@@ -38,13 +40,28 @@ export function consoleServer(operator:Operator) {
         if(supplied.length!==token.length||!timingSafeEqual(Buffer.from(supplied),Buffer.from(token))) throw new Error('Invalid CSRF');
         params.delete('csrf'); const raw:Record<string,unknown>=Object.fromEntries(params);
         for(const field of ['attempts','number']) if(field in raw) { if(!/^\d+$/.test(String(raw[field]))) throw new Error('Invalid number');raw[field]=Number(raw[field]); }
+        if(url.pathname==='/publication-actions') {
+          if(!publisher)throw new Error('Publisher not configured');
+          const id=await publisher.submit(raw);res.statusCode=303;res.setHeader('Location',`/publications/${id}`);send('Publication action recorded.','text/plain');return;
+        }
         const id=await operator.submit(raw);res.statusCode=303;res.setHeader('Location',`/operations/${id}`);send('Action recorded.','text/plain');return;
       }
       if(req.method!=='GET') { res.statusCode=405;send('Method not allowed.','text/plain');return; }
       if(url.pathname==='/') { send(await dashboard(operator,token));return; }
+      if(parts[0]==='publications'&&parts.length<=3) {
+        if(!publisher) {send(page('Draft publications','<h1>Draft publications</h1><p>No publisher configured.</p>'));return;}
+        const config=await publisher.config(),h=await publicationHistory(config);
+        if(parts.length===1) {send(page('Draft publications',`<h1>Draft publications</h1><p>Inspect exact bundles, record approval, and publish or reconcile owned-fixture drafts.</p>${h.invalid||h.truncated?'<p class="warn">Some records are unavailable or the view is incomplete.</p>':''}${h.entries.map(({bundle:b,state:s})=>`<article><h2>${escapeHtml(b.title)}</h2><p>${escapeHtml(b.target.repository)} · ${s.status}</p><a href="/publications/${b.publicationId}">Inspect publication</a></article>`).join('')||'<p>No prepared bundles.</p>'}`));return;}
+        const entry=h.entries.find(e=>e.bundle.publicationId===parts[1]);
+        if(entry) {
+          if(parts.length===2){send(page('Draft publication',publicationHtml(entry,token,!!publisher.active,config)));return;}
+          if(parts[2]==='json'){json(entry);return;}
+          if(parts[2]==='events'){json(publicationEvents(entry.bundle,entry.state));return;}
+        }
+      }
       if(parts[0]==='fixtures'&&parts.length<=3) {
         const h=await fixtureHistory(operator.config.fixtureRoots);
-        if(parts.length===1) {send(page('Fixture trials',`<h1>Owned fixture trials</h1><p>Saved baseline checks, scoped candidates and independent model review. Publication is not authorized. Launches use the configured CLI, not browser-supplied paths or commands.</p>
+        if(parts.length===1) {send(page('Fixture trials',`<h1>Owned fixture trials</h1><p>Saved baseline checks, scoped candidates and independent model review. Each fixture result grants no publication authority; separately approved bundles appear under <a href="/publications">Draft publications</a>. Launches use the configured CLI, not browser-supplied paths or commands.</p>
           ${h.invalid||h.truncated?'<p class="warn">Some records are unavailable or this bounded view is incomplete.</p>':''}
           ${h.entries.map(({record:r})=>`<article><h2>${r.case} · ${r.mode}</h2><p>${escapeHtml(r.outcome??'unfinished; outcome unknown')}</p><p>${escapeHtml(r.startedAt)}</p><a href="/fixtures/${r.workflowId}">Inspect trial</a></article>`).join('')||'<p>No saved fixture trials configured.</p>'}`));return;}
         const id=fixtureId(parts[1]),entry=h.entries.find(e=>e.record.workflowId===id);
