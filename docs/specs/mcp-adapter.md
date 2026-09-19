@@ -2,7 +2,8 @@
 
 Codex is the first external consumer of this stdio adapter. The adapter calls
 existing bug-readiness without changing its input, assessment, prompt, limits, or
-GitHub authority. Code-location is discoverable but not invocable here.
+GitHub authority. Optional operator-configured source enables the existing
+code-location agent through the [saved-parent handoff](location-handoff.md).
 
 ## Interface
 
@@ -28,12 +29,15 @@ No provider is initialized until an assessment is admitted.
 | `assess_prepared_issues` (optional) | `{ inputHash: SHA256 }` | Executes the immutable operator-prepared workflow advertised by discovery |
 | `assess_issues` | `{ issues: IssueSnapshot[] }` | Persisted [readiness workflow](readiness-workflow.md) with ordered per-issue outcomes |
 | `inspect_workflow` | `{ workflowId: UUID }` | Saved public workflow plus current shared process budget |
+| `locate_ready_issue` (optional) | `{ readinessRunId: UUID }` | Saved [location handoff](location-handoff.md), using operator-pinned source and the shared allowance |
+| `inspect_handoff` (optional) | `{ workflowId: UUID }` | Saved handoff with parent/child identities, brief, and events |
 | `inspect_run` | `{ runId: UUID }` | `schemaVersion: 1`, same saved public run projection, or `run_not_found` |
 
 All inputs are strict. Callers cannot pass provider settings, model choices,
 credential paths, output paths, source checkouts, or filesystem read requests.
 Discovery reports both transport-independent manifests and
-`adapter.invocable: ["bug-readiness"]`; the two are not interchangeable.
+`adapter.invocable` (readiness plus location when source is configured); the two
+are not interchangeable.
 
 A public run contains `runId`, `recordVersion`, `agent`, `promptVersion`,
 `inputHash`, `issue: {repository, number, updatedAt}`, `provider`, `model`,
@@ -50,7 +54,8 @@ inspection has `isError: false` even when the inspected record is failed or
 unfinished: consumers MUST inspect `run.status` and the event outcomes.
 
 Adapter errors are `busy`, `invocation_limit`, `cancelled`, `run_not_found`, `workflow_not_found`, `prepared_input_mismatch`, and
-`execution_or_persistence_error`. MCP handles invalid schemas and unknown tools
+`execution_or_persistence_error`, `readiness_not_eligible`,
+`source_repository_mismatch`, and `handoff_not_found`. MCP handles invalid schemas and unknown tools
 as protocol/tool errors before model admission. Raw provider exceptions are never
 returned. The dedicated CLI suppresses SDK warning details and replaces console
 logging with a fixed diagnostic on stderr; stdout carries protocol messages only.
@@ -144,6 +149,24 @@ fails this expectation remains an unverified artifact. Verification alone does n
 spend model capacity. For other MCP consumers, allow enough transport time for the
 configured number of sequential 60-second child limits; the example uses 330
 seconds for up to five children. Cancellation remains cooperative.
+
+### Two-agent external recipe
+
+Supply one prepared snapshot as `{ "issues": [SNAPSHOT] }` plus the three source
+settings documented in the [handoff contract](location-handoff.md):
+
+```sh
+npm run prove:codex -- --handoff ONE_ISSUE.json
+```
+
+With the same provider/auth/executable setup as the other proofs, this uses Terra
+for the consumer and both agents, a two-invocation allowance, and a 220-second tool
+timeout. The consumer discovers, assesses the prepared input, selects the ready
+run ID for `locate_ready_issue`, and inspects the handoff. The proof freezes the
+repository/commit, verifies exact input/parent/child identities, saved/returned
+brief and events, shared capacity, and final consumer output. Failures stay artifacts;
+`--verify` rechecks them without inference. The overall consumer deadline is 480
+seconds. No global Codex configuration is changed.
 
 ## Rules
 

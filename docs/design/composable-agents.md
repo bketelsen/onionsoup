@@ -18,6 +18,11 @@ inheriting the original workflow's UI, scheduler, storage layout, or conversatio
 Different orchestrators may choose different recipes while preserving each
 ingredient's responsibility and authority.
 
+The [broader roadmap vision](../plans/roadmap.md#broader-vision--domain-focused-agent-teams)
+applies this operating pattern to domain-specific teams, including possible homelab
+maintenance. Reuse contracts and orchestration principles while keeping each
+agent's capabilities, permissions, and evidence requirements specific to its job.
+
 ### Ownership boundaries
 
 | Component | Owns |
@@ -69,6 +74,15 @@ still owns selection and any next action; it gains no GitHub write authority.
 [ADR-0007](../adr/0007-bound-a-multi-issue-readiness-workflow.md) records the decision;
 [backlog Phase 4](../plans/backlog.md#phase-4--bounded-multi-issue-recipe) tracks delivery.
 
+### Explicit ready-to-location handoff
+
+The [location handoff](../specs/location-handoff.md) adds a consumer-selected second
+step. The host resolves a saved ready run and operator-pinned checkout; the model
+passes a run ID. Source acquisition stays with the operator. Both agents consume
+one shared allowance, and the handoff exposes reused readiness separately from new
+location work. See [ADR-0008](../adr/0008-handoff-ready-assessments-to-pinned-source-location.md)
+and [backlog Phase 5](../plans/backlog.md#phase-5--two-agent-handoff-under-shared-admission).
+
 ### Second-consumer proof of concept
 
 The [portable investigation-packet command](../specs/investigation-packet.md) uses the same
@@ -103,7 +117,7 @@ infrastructure and broader agent authority require separate evidence of need.
 ## Operational notes
 
 The inbox, packet, and Codex MCP adapter consume the same bounded agents. The
-MCP adapter exposes readiness only, with operator-selected provider/model and
+MCP adapter exposes readiness plus optional pinned-source location, with operator-selected provider/model and
 per-process admission limits. Preserve provenance and explicit failures across
 every handoff. Delivery is tracked in [backlog Phase 3](../plans/backlog.md#phase-3--prove-external-composition-implemented).
 

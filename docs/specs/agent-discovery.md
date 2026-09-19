@@ -27,7 +27,7 @@ npm run check:capabilities
 
 For pure JSON stdout without npm's command header, invoke
 `node --import tsx src/agents-cli.ts ...` directly. `events` accepts a raw readiness
-record (v1/v2), raw location record (v1/v2/v3), packet JSON/directory (v1), or [readiness-workflow JSON](readiness-workflow.md) (v1). It does
+record (v1/v2), raw location record (v1/v2/v3), packet JSON/directory (v1), or [readiness-workflow JSON](readiness-workflow.md) (v1). It also accepts [location-handoff JSON](location-handoff.md) (v1). It does
 not accept inbox wrapper objects or a batch manifest. Output goes to stdout; it
 does not rewrite the source artifact. Invalid inputs exit nonzero with a generic
 message to avoid echoing untrusted content.
@@ -87,6 +87,10 @@ Child run IDs remain intact under the parent workflow ID. Existing record export
 remain unchanged; strict consumers of the extended vocabulary need the current
 schema. See the [workflow contract](readiness-workflow.md) for exact admission,
 partial-outcome, and persistence semantics.
+
+Location handoffs add optional `parentWorkflowId` correlation, parent reuse, and a
+code-location reservation under the same budget. See the
+[handoff contract](location-handoff.md). This does not alter existing run exports.
 
 ## Rules
 

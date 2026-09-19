@@ -81,6 +81,14 @@ qualification is not claimed.
   [workflow report](records/multi-issue-workflow-2026-09-18.md), which preserves the
   failed input-copying attempt and successful prepared-input follow-up.
 
+## Phase 7 — Two-agent external handoff
+
+- Exercise the [location handoff](../specs/location-handoff.md) through Codex,
+  following [composition](../design/composable-agents.md).
+- **Done when:** readiness and location share a two-invocation allowance, preserve
+  exact parent/source identities, and produce an inspectable brief with verified
+  citations. Demonstrated in the [two-agent report](records/two-agent-handoff-2026-09-18.md).
+
 ## Later / ideas
 
 Model-comparison infrastructure, new local-provider batches, broader source

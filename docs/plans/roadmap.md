@@ -98,6 +98,32 @@ implementation, the initial 4/7 expected-label match, focused follow-up, and lim
   failure/cancellation/persistence boundaries. See the
   [workflow proof](records/multi-issue-workflow-2026-09-18.md).
 
+## Phase 9 — Cross-agent admission and source ownership
+
+- Implemented the [location handoff](../specs/location-handoff.md) following
+  [composition design](../design/composable-agents.md) and
+  [ADR-0008](../adr/0008-handoff-ready-assessments-to-pinned-source-location.md).
+- **Done when:** the external consumer selects a saved ready assessment for pinned
+  source location under a shared allowance, and results retain exact source/parent
+  identities and truthful partial/failure states. Demonstrated in the
+  [two-agent proof](records/two-agent-handoff-2026-09-18.md); this is follow-through backlog P5.
+
+## Broader vision — domain-focused agent teams
+
+Recorded on 2026-09-18: OSS maintenance is the first proving ground for Onionsoup,
+not the limit of the concept. The same approach could support a homelab team:
+separate agents could assess backup evidence, report service health, or propose
+bounded maintenance actions. Other domains may have their own focused teams.
+
+Reuse the operating pattern—single-purpose agents, explicit public contracts,
+artifact-based handoffs, shared budgets, and inspectable outcomes—while each domain
+owns its data sources, authority, and success criteria. A homelab agent that reads
+health data and one that changes infrastructure have different responsibilities
+and permissions. New domains should start with one useful bounded job and evidence
+of value, using the [composition design](../design/composable-agents.md). This note
+records the direction; it does not grant the current OSS agents infrastructure
+access or broaden their responsibilities.
+
 ## Later / ideas
 
 - Extend shared invocation admission to another agent only for a concrete recipe.

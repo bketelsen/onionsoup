@@ -52,6 +52,18 @@ skills make the twenty-factor recommendations reusable; see
   failure/cancellation/persistence tests show no extra admission or false success.
   Demonstrated in the [workflow report](records/multi-issue-workflow-2026-09-18.md).
 
+## Phase 5 — Two-agent handoff under shared admission
+
+- Implemented: use a saved ready assessment and operator-pinned source to invoke code-location
+  through the [location handoff](../specs/location-handoff.md), following
+  [composition design](../design/composable-agents.md).
+- Preserve exact parent/source identity, historical reused usage, independent agent
+  boundaries, and explicit exhausted/failed/unfinished outcomes.
+- **Done when:** an external consumer completes readiness then location with a
+  two-invocation allowance, inspects correlated results, and tests prove that source
+  or parent failures and exhausted capacity cannot bypass the boundaries. Demonstrated
+  in the [two-agent proof](records/two-agent-handoff-2026-09-18.md).
+
 ## Later / ideas
 
 | Item | Trigger / acceptance evidence |
@@ -73,7 +85,7 @@ remain deferred; new development evaluations use Terra only.
 
 ## Open questions
 
-- Which next recipe needs a second agent under the shared admission allowance?
+- Which next bounded job provides evidence for another domain-specific team?
 - When does useful repeated work justify prefetch or context reconstruction?
 - Which workflow first requires durable approval or write-effect reconciliation?
 

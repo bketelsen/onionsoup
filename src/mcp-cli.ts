@@ -1,4 +1,5 @@
 import { open } from 'node:fs/promises';
+import { LocationSourceConfig } from './location-handoff.ts';
 import { ReadinessWorkflowInput } from './readiness-workflow.ts';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { createAgentMcpServer } from './mcp-adapter.ts';
@@ -35,7 +36,10 @@ async function main() {
       preparedInput = ReadinessWorkflowInput.parse(JSON.parse(bytes.subarray(0, bytesRead).toString('utf8')));
     } finally { await file.close(); }
   }
-  const server = createAgentMcpServer({ runsDirectory, maxInvocations, preparedInput,
+  const sourceValues = [process.env.ONIONSOUP_SOURCE_CHECKOUT, process.env.ONIONSOUP_SOURCE_REPOSITORY, process.env.ONIONSOUP_SOURCE_COMMIT];
+  const locationSource = sourceValues.some(Boolean) ? LocationSourceConfig.parse({ checkout: sourceValues[0],
+    repository: { name: sourceValues[1], commit: sourceValues[2] } }) : undefined;
+  const server = createAgentMcpServer({ runsDirectory, maxInvocations, preparedInput, locationSource,
     model: () => liveModel(modelId, selectedProvider) });
   for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     process.once(signal, () => { void server.close(); });

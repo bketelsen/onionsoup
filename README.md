@@ -233,3 +233,9 @@ snapshots under the same server allowance as single calls, with explicit partial
 outcomes. For model consumers, prepare inputs once and invoke them by hash to
 preserve full issue bodies. `npm run prove:codex -- --workflow THREE_ISSUES.json`
 proves three issues with a budget of two; the third remains explicitly unattempted.
+
+
+Optional [pinned-source handoffs](docs/specs/location-handoff.md) let the consumer
+select a saved ready run for code-location under the same allowance. The host owns
+checkout and commit selection. See `npm run prove:codex -- --handoff ONE_ISSUE.json`
+and the spec for the three source settings.

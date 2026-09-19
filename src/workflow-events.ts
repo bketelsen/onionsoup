@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { InvocationBudgetSnapshot } from './invocation-budget.ts';
+import { validateLocationHandoff } from './location-handoff.ts';
 import { validateReadinessWorkflow } from './readiness-workflow.ts';
 import { validateReadinessRun } from './readiness-record.ts';
 import { validatePacket } from './packet.ts';
@@ -19,7 +20,7 @@ export const WorkflowEvent = z.object({
     'agent.started', 'agent.completed', 'agent.failed', 'agent.unfinished', 'agent.reused',
     'agent.step_started', 'agent.step_finished', 'agent.tool_requested', 'stage.skipped', 'stage.failed',
     'stage.unfinished', 'workflow.budget_reserved']),
-  budget: InvocationBudgetSnapshot.optional(), issueIndex: z.number().int().min(0).max(4).optional(),
+  parentWorkflowId: Id.optional(), budget: InvocationBudgetSnapshot.optional(), issueIndex: z.number().int().min(0).max(4).optional(),
   agent: z.enum(['bug-readiness', 'code-location']).optional(), runId: Id.optional(), parentRunId: Id.optional(),
   recordVersion: z.number().int().positive().optional(), promptVersion: z.string().regex(/^[\w.-]+$/).optional(),
   runtimeHash: z.string().regex(/^[a-f0-9]{64}$/).optional(), inputHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
@@ -35,7 +36,7 @@ export const WorkflowEvent = z.object({
   usage: Usage.optional(), historicalUsage: Usage.optional(), originalStartedAt: z.iso.datetime().optional(),
   originalFinishedAt: z.iso.datetime().optional(),
 }).strict().superRefine((event, ctx) => {
-  if (event.type === 'workflow.budget_reserved' && (!event.budget || event.issueIndex === undefined))
+  if (event.type === 'workflow.budget_reserved' && (!event.budget || event.issueIndex === undefined && event.agent !== 'code-location'))
     ctx.addIssue({ code: 'custom', message: 'Budget reservations require allowance and issue identity' });
   if (event.type === 'agent.reused' && event.usage) ctx.addIssue({ code: 'custom', message: 'Reused usage must be historical' });
   if (event.type.startsWith('agent.') && (!event.agent || !event.runId))
@@ -59,13 +60,14 @@ const failure = (raw: unknown): z.infer<typeof Failures> => Failures.safeParse(r
 // The original records remain the truth. No provider calls, new timestamps, or raw content.
 export function workflowEvents(raw: unknown) {
   const candidate = raw as Record<string, unknown>;
+  const handoff = candidate?.kind === 'location-handoff' ? validateLocationHandoff(raw) : undefined;
   const workflow = candidate?.kind === 'readiness-workflow' ? validateReadinessWorkflow(raw) : undefined;
   const packet = candidate?.packetId ? validatePacket(raw) : undefined;
-  const run = packet || workflow ? undefined : candidate?.agent === 'code-location' ? validateLocationRun(raw) : validateReadinessRun(raw);
-  const workflowId = workflow?.workflowId ?? packet?.packetId ?? run!.runId;
+  const run = packet || workflow || handoff ? undefined : candidate?.agent === 'code-location' ? validateLocationRun(raw) : validateReadinessRun(raw);
+  const workflowId = handoff?.workflowId ?? workflow?.workflowId ?? packet?.packetId ?? run!.runId;
   const events: WorkflowEvent[] = [];
   const add = (event: Omit<WorkflowEvent, 'schemaVersion' | 'workflowId' | 'sequence'>) => {
-    events.push(WorkflowEvent.parse({ schemaVersion: 1, workflowId, sequence: events.length, ...event }));
+    events.push(WorkflowEvent.parse({ schemaVersion: 1, workflowId, sequence: events.length, ...(handoff?.readinessWorkflowId ? { parentWorkflowId: handoff.readinessWorkflowId } : {}), ...event }));
   };
   const appendRun = (record: StoredRunRecord | LocationRun, reusedAt?: string, issueIndex?: number) => {
     const location = record.agent === 'code-location' ? record : undefined;
@@ -107,9 +109,22 @@ export function workflowEvents(raw: unknown) {
       at: record.finishedAt ?? record.events?.filter(e => z.iso.datetime().safeParse(e.at).success).at(-1)?.at ?? record.startedAt,
       failure: record.status === 'failed' ? failure(record.failure) : undefined, usage: totals });
   };
-  add({ type: 'workflow.started', at: workflow?.startedAt ?? packet?.createdAt ?? run!.startedAt,
-    ...(workflow ? { budget: workflow.budgetAtStart } : {}) });
-  if (workflow) {
+  add({ type: 'workflow.started', at: handoff?.startedAt ?? workflow?.startedAt ?? packet?.createdAt ?? run!.startedAt,
+    ...(handoff ? { budget: handoff.budgetAtStart } : workflow ? { budget: workflow.budgetAtStart } : {}) });
+  if (handoff) {
+    appendRun(handoff.readiness, handoff.startedAt);
+    const base = { agent: 'code-location' as const, parentRunId: handoff.readiness.runId,
+      inputHash: handoff.readiness.inputHash, repositoryCommit: handoff.repository.commit };
+    if (handoff.reservation) add({ ...base, type: 'workflow.budget_reserved', at: handoff.reservedAt!, budget: handoff.reservation });
+    if (handoff.location) appendRun(handoff.location);
+    else if (handoff.disposition === 'failed') add({ ...base, type: 'stage.failed', at: handoff.finishedAt!,
+      failure: handoff.reason === 'cancelled' ? 'interrupted_or_timed_out' : 'execution_error' });
+    else if (handoff.disposition === 'not_attempted') add({ ...base, type: 'stage.skipped', at: handoff.finishedAt!,
+      reason: handoff.reason as 'cancelled' | 'budget_exhausted' });
+    else add({ ...base, type: 'stage.unfinished', at: handoff.reservedAt ?? handoff.startedAt, reason: 'not_started' });
+    add({ type: handoff.status === 'running' ? 'workflow.unfinished' : `workflow.${handoff.status}`,
+      at: handoff.finishedAt ?? events.at(-1)!.at, budget: handoff.budget });
+  } else if (workflow) {
     for (const [issueIndex, item] of workflow.items.entries()) {
       const base = { issueIndex, inputHash: item.inputHash, at: item.updatedAt, agent: 'bug-readiness' as const };
       if (item.reservation) add({ ...base, type: 'workflow.budget_reserved', at: item.reservedAt!, budget: item.reservation });

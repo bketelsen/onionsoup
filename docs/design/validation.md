@@ -178,6 +178,11 @@ checks exact input preservation and shared capacity. Its first attempt exposed
 model-side loss of issue bodies; host-prepared input selection corrected that
 handoff without changing the assessment agent or its prompt.
 
+The [two-agent proof](../plans/records/two-agent-handoff-2026-09-18.md) verifies
+readiness-to-location parent/source identity, shared allowance, and four exact
+citations through the external consumer. It preserves adjacent-test uncertainty
+and does not establish diagnosis or independent task acceptance.
+
 ## Operational notes
 
 Run `npm run verify` and `npm run demo` without credentials. Live trials require a configured subscription and currently use Terra only. Dated findings above qualify their recorded versions, not every later revision.
