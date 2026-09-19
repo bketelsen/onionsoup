@@ -6,6 +6,7 @@ import { Repository, recoverInbox } from './inbox-store.ts';
 import { providerName } from './providers.ts';
 
 async function main() {
+  if(process.argv[2]==='serve') { await (await import('./console/cli.ts')).serve(process.argv.slice(3)); return; }
   const { values, positionals } = parseArgs({ allowPositionals: true, options: {
     directory: { type: 'string' }, provider: { type: 'string', default: 'copilot' },
     'max-issues': { type: 'string', default: '5' }, 'max-seconds': { type: 'string', default: '300' },

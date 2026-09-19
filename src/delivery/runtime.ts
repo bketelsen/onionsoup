@@ -1,3 +1,5 @@
+import { z } from 'zod';
+import { scheduleControl } from './control.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile, rename, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -9,7 +11,7 @@ import { DeliveryConfig, DeliveryRecord, validateBinding, occurrenceId, delivery
 import { latestOccurrence } from './schedule.ts';
 import { bytesHash, composeMail, smtpSender, type MailSender } from './mail.ts';
 import { workflowEvents } from '../workflow-events.ts';
-export type DeliveryOptions={ stateDirectory:string; now?:Date; sender?:MailSender;
+export type DeliveryOptions={ stateDirectory:string; now?:Date; expectedAttempts?:number; sender?:MailSender;
   generate?:typeof createRepositoryBrief; persist?:typeof atomicJson };
 const stamp=()=>new Date().toISOString();
 const recordPath=(directory:string)=>join(directory,'delivery.json');
@@ -70,7 +72,15 @@ function summary(directory:string,r:DeliveryRecord) {
 }
 export async function tick(raw:unknown,options:DeliveryOptions) {
   const c=DeliveryConfig.parse(raw), occurrence=latestOccurrence(c,options.now);
+  if ((await scheduleControl(options.stateDirectory,c.jobId)).paused) return { status:'paused' as const };
   if (!occurrence) return { status:'not_due' as const };
+  return runOccurrence(c,occurrence,options);
+}
+export async function runNow(raw:unknown,requestId:string,options:DeliveryOptions) {
+  const c=DeliveryConfig.parse(raw); z.uuid().parse(requestId);
+  return runOccurrence(c,{ key:`ondemand-${requestId}`,dueAt:(options.now??new Date()).toISOString() },options);
+}
+async function runOccurrence(c:DeliveryConfig,occurrence:{ key:string;dueAt:string },options:DeliveryOptions) {
   const directory=deliveryDirectory(c,options.stateDirectory,occurrence.key);
   return locked(directory,async()=>{
     const existing=await optionalJson(recordPath(directory));
@@ -114,6 +124,7 @@ export async function deliver(raw:unknown,key:string,options:DeliveryOptions) {
   const c=DeliveryConfig.parse(raw), directory=deliveryDirectory(c,options.stateDirectory,key);
   return locked(directory,async()=>{
     const r=await load(c,directory,key);
+    if(options.expectedAttempts!==undefined && r.attempts.length!==options.expectedAttempts) throw new Error('Delivery attempt precondition changed');
     await prepare(c,directory,r,options);
     await send(c,directory,r,options,true);
     return summary(directory,r);

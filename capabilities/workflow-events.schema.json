@@ -56,6 +56,10 @@
               "agent.failed",
               "agent.unfinished",
               "agent.reused",
+              "operator.requested",
+              "operator.completed",
+              "operator.failed",
+              "operator.unfinished",
               "delivery.prepared",
               "delivery.attempted",
               "delivery.accepted",
@@ -71,6 +75,21 @@
               "stage.completed",
               "workflow.budget_reserved"
             ]
+          },
+          "operatorAction": {
+            "type": "string",
+            "enum": [
+              "run_now",
+              "pause",
+              "resume",
+              "retry",
+              "investigate"
+            ]
+          },
+          "issueNumber": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
           },
           "deliveryAttempt": {
             "type": "integer",

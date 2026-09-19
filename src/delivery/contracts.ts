@@ -24,7 +24,7 @@ export const DeliveryConfig = z.object({
 export type DeliveryConfig = z.infer<typeof DeliveryConfig>;
 export const DeliveryRecord = z.object({
   schemaVersion:z.literal(1), kind:z.literal('brief-delivery'), workflowId:z.uuid(),
-  jobId:DeliveryConfig.shape.jobId, occurrence:z.string().regex(/^(?:\d{4}-\d{2}-\d{2}T\d{2}:\d{2}|manual-[a-f0-9-]{36})$/),
+  jobId:DeliveryConfig.shape.jobId, occurrence:z.string().regex(/^(?:\d{4}-\d{2}-\d{2}T\d{2}:\d{2}|(?:manual|ondemand)-[a-f0-9-]{36})$/),
   dueAt:z.iso.datetime(), createdAt:z.iso.datetime(), configHash:Digest, request:BriefRequest,
   analysisFailure:z.object({ at:z.iso.datetime(),outcome:z.literal('failed') }).strict().optional(),
   brief:z.object({ workflowId:z.uuid(), hash:Digest }).strict().optional(),

@@ -143,6 +143,23 @@ including the initial date-query defect and corrected follow-up.
   [delivery trial](records/scheduled-delivery-2026-09-18.md); production mail and
   unattended executions still require operational observation.
 
+## Phase 13 — Operator console
+
+- Implement [local operator controls](../specs/operator-console.md) using the
+  [console design](../design/operator-console.md).
+- **Done when:** saved briefs, delivery outcomes and issue investigations are
+  inspectable in one local inbox, with bounded explicit actions, persisted replay
+  identities and parent/child provenance. This is backlog P9; see the
+  [console trial](records/operator-console-2026-09-18.md).
+
+## Phase 14 — Investigation toward a change proposal (planned)
+
+- Follow the [change-workflow exploration](../design/investigation-to-pr.md) and
+  its [staged plan](investigation-to-pr.md), beginning with read-only proposals.
+- **Done when:** a maintainer can assess a grounded scope and verification proposal
+  before granting workspace, execution or remote-publication authority. Subsequent
+  phases have their own observable gates; no repair or PR creation ships with P9.
+
 ## Broader vision — domain-focused agent teams
 
 Recorded on 2026-09-18: OSS maintenance is the first proving ground for Onionsoup,

@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "stateDirectory": "./state",
+  "jobs": [
+    {
+      "id": "get-bb-bb",
+      "deliveryConfig": "../delivery/get-bb-bb.json",
+      "deliveryState": "../delivery/state",
+      "briefRoots": ["../../runs/repository-briefs"],
+      "inboxDirectory": "../../runs/inbox/get-bb--bb",
+      "timerUnit": "onionsoup-repo-brief.timer"
+    }
+  ]
+}

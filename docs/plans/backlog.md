@@ -108,6 +108,28 @@ Implemented in the [delivery contract](../specs/scheduled-delivery.md), followin
 and failure boundaries. A daily 08:00 America/New_York capture schedule is configured
 locally; real SMTP forwarding and recipient receipt remain unqualified.
 
+## Phase 9 — Operator console
+
+- Implement the [local operator contract](../specs/operator-console.md), following
+  [console design](../design/operator-console.md) and
+  [ADR-0012](../adr/0012-operate-saved-workflows-through-a-local-console.md).
+- **Done when:** a loopback inbox displays saved briefs and operational history,
+  admits explicit run/pause/retry controls with durable identities, and hands a
+  selected saved issue to fresh readiness and eligible pinned source location.
+  Duplicate requests, stale authority and interrupted work cannot silently replay.
+
+Evidence: [operator console trial](records/operator-console-2026-09-18.md).
+
+## Phase 10 — Change proposals (planned)
+
+- Start the [investigation-to-PR plan](investigation-to-pr.md) with a read-only
+  proposal agent, following the [boundary exploration](../design/investigation-to-pr.md).
+- **Done when:** a few frozen investigation packets produce grounded change scope,
+  measurable acceptance criteria, competing hypotheses and explicit missing evidence,
+  giving a maintainer a concrete decision before edits or test execution.
+- Sandbox execution, patches, independent review and explicit draft publication are
+  later separately gated phases. Current OSS agents retain their read-only boundary.
+
 ## Later / ideas
 
 | Item | Trigger / acceptance evidence |

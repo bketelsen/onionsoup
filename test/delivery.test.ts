@@ -215,3 +215,11 @@ test('changed frozen request and unknown ledger version stop before SMTP',async 
   await atomicJson(file,{ ...raw,schemaVersion:2 });
   await assert.rejects(deliver(config,first.occurrence,options)); assert.equal(sends,0);
 });
+
+test('delivery attempt precondition is checked inside the effect lock',async t=>{
+  const f=await fixture(t);let sends=0;
+  const options={ ...f.options,sender:async()=>{ sends++;return 'rejected' as const; } };
+  const first=await tick(config,options);assert.ok('occurrence' in first);
+  await assert.rejects(deliver(config,first.occurrence,{ ...options,expectedAttempts:0 }));assert.equal(sends,1);
+  await deliver(config,first.occurrence,{ ...options,expectedAttempts:1 });assert.equal(sends,2);
+});

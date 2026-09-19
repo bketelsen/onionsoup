@@ -98,6 +98,13 @@ Raw run links are optional local evidence; those files are intentionally not pub
 - [Scheduled delivery contract and operator commands](specs/scheduled-delivery.md)
 - [Scheduled delivery capture trial](plans/records/scheduled-delivery-2026-09-18.md)
 
+- [ADR-0012: operate saved workflows through a local console](adr/0012-operate-saved-workflows-through-a-local-console.md)
+- [Local operator console design](design/operator-console.md)
+- [Local operator console contract](specs/operator-console.md)
+- [Operator console trial](plans/records/operator-console-2026-09-18.md)
+- [Investigation-to-PR boundary exploration](design/investigation-to-pr.md)
+- [Staged investigation-to-PR plan](plans/investigation-to-pr.md)
+
 ## Related repository material
 
 - [README and commands](../README.md)

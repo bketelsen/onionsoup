@@ -74,7 +74,10 @@ with a configured subscription; the local-provider exploration remains deferred.
 Do not broaden readiness into general triage, debugging, or GitHub mutation.
 Code-location suggests grounded code/test starting points; it must not diagnose
 bugs, execute repository code, implement fixes, or mutate GitHub. The inbox and
-packet are consumers of these bounded agents, not new agent authorities.
+packet are consumers of these bounded agents, not new agent authorities. The
+[operator console](docs/specs/operator-console.md) admits explicit host actions
+from configured jobs; browser input cannot select paths, credentials or commands.
+Repair, target-code execution and PR publication remain future capabilities.
 
 The [factor mapping](docs/design/twelve-factors.md) records consciously deferred
 capabilities. Public contracts are [readiness](docs/specs/bug-readiness.md),

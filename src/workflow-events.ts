@@ -1,3 +1,4 @@
+import { OperatorRecord } from './console/contracts.ts';
 import { DeliveryRecord } from './delivery/contracts.ts';
 import { RepoAgentId, hash } from './repository-brief/contracts.ts';
 import { validateRepositoryBrief, stageAgent } from './repository-brief/record.ts';
@@ -23,9 +24,12 @@ export const WorkflowEvent = z.object({
   schemaVersion: z.literal(1), workflowId: Id, sequence: z.number().int().nonnegative(), at: z.iso.datetime(),
   type: z.enum(['workflow.started', 'workflow.completed', 'workflow.partial', 'workflow.failed', 'workflow.unfinished',
     'agent.started', 'agent.completed', 'agent.failed', 'agent.unfinished', 'agent.reused',
+    'operator.requested', 'operator.completed', 'operator.failed', 'operator.unfinished',
     'delivery.prepared', 'delivery.attempted', 'delivery.accepted', 'delivery.rejected', 'delivery.unknown', 'delivery.reconciled',
     'agent.step_started', 'agent.step_finished', 'agent.tool_requested', 'stage.skipped', 'stage.failed',
     'stage.unfinished', 'stage.completed', 'workflow.budget_reserved']),
+  operatorAction: z.enum(['run_now','pause','resume','retry','investigate']).optional(),
+  issueNumber: z.number().int().positive().optional(),
   deliveryAttempt: z.number().int().min(1).max(3).optional(),
   deliveryResolution: z.enum(['accepted','not_accepted']).optional(),
   childWorkflowId: Id.optional(), parentWorkflowId: Id.optional(), budget: InvocationBudgetSnapshot.optional(), issueIndex: z.number().int().min(0).max(4).optional(),
@@ -69,6 +73,16 @@ const failure = (raw: unknown): z.infer<typeof Failures> => Failures.safeParse(r
 // The original records remain the truth. No provider calls, new timestamps, or raw content.
 export function workflowEvents(raw: unknown): z.infer<typeof WorkflowEventExport> {
   const candidate = raw as Record<string, unknown>;
+  if (candidate?.kind === 'operator-action') {
+    const r=OperatorRecord.parse(raw), q=r.request;
+    const base={ schemaVersion:1 as const,workflowId:r.workflowId,operatorAction:q.action,inputHash:r.inputHash,
+      ...(q.action==='investigate'?{ parentWorkflowId:q.briefId,issueNumber:q.number }:{}),repositoryCommit:r.commit };
+    return WorkflowEventExport.parse({ schemaVersion:1,kind:'workflow-events',mode:'derived-snapshot',workflowId:r.workflowId,events:[
+      { ...base,sequence:0,type:'operator.requested',at:r.startedAt },
+      { ...base,sequence:1,type:r.status==='running'?'operator.unfinished':`operator.${r.status}`,at:r.finishedAt??r.startedAt,
+        ...(r.result && 'workflowId' in r.result?{ childWorkflowId:r.result.workflowId }:{}) },
+    ] });
+  }
   if (candidate?.kind === 'brief-delivery') {
     const r=DeliveryRecord.parse(raw), events:WorkflowEvent[]=[];
     const add=(event:Omit<WorkflowEvent,'schemaVersion'|'workflowId'|'sequence'>)=>events.push(WorkflowEvent.parse({

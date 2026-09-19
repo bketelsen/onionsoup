@@ -20,3 +20,17 @@ export function latestOccurrence(raw:DeliveryConfig, now=new Date()) {
   }
   return chosen && Date.parse(chosen.dueAt)>=oldest ? chosen:undefined;
 }
+
+// First configured occurrence strictly after now; skip duplicate DST fold minutes.
+export function nextOccurrence(raw:DeliveryConfig,now=new Date()) {
+  const c=DeliveryConfig.parse(raw), format=new Intl.DateTimeFormat('en-CA',{ timeZone:c.schedule.timeZone,
+    year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23',weekday:'short' });
+  const weekdays=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  for(let t=Math.floor(now.getTime()/60000)*60000+60000;t<=now.getTime()+8*86400000;t+=60000) {
+    const p=Object.fromEntries(format.formatToParts(t).map(p=>[p.type,p.value]));
+    if (`${p.hour}:${p.minute}`!==c.schedule.time || !c.schedule.weekdays.includes(weekdays.indexOf(p.weekday))) continue;
+    const occurrence=latestOccurrence({ ...c,schedule:{ ...c.schedule,catchUpHours:24 } },new Date(t));
+    if (occurrence && Date.parse(occurrence.dueAt)===t) return occurrence;
+  }
+  return undefined;
+}

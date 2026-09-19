@@ -146,3 +146,13 @@ No recipient, SMTP host, message body, credentials or operator evidence text is
 exported. A saved unfinished send exports unknown; acceptance means SMTP acceptance,
 not inbox receipt. These are additive v1 event types; consumers must tolerate new
 types. There is no new agent capability or MCP write tool.
+
+### Operator action events
+
+[ADR-0012](../adr/0012-operate-saved-workflows-through-a-local-console.md) adds
+`operator-action` records from the [console contract](operator-console.md).
+Derived events add `operator.requested/completed/failed/unfinished`, optional
+`operatorAction` and `issueNumber`. Request identity/hash, parent brief, pinned
+commit and child packet/delivery IDs provide correlation without task text,
+configuration, CSRF tokens or raw failures. An unfinished action has unknown outcome;
+its child records may contain meaningful completed work. See [console design](../design/operator-console.md).

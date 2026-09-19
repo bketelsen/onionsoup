@@ -138,3 +138,14 @@ its derived event projection fails; `inspect` regenerates events without effects
 - Evidence: [delivery trial](../plans/records/scheduled-delivery-2026-09-18.md).
 - Transport APIs: [Nodemailer SMTP](https://nodemailer.com/smtp),
   [SMTP server](https://nodemailer.com/extras/smtp-server).
+
+### Operator console additions
+
+[ADR-0012](../adr/0012-operate-saved-workflows-through-a-local-console.md) and the
+[console contract](operator-console.md) add `ondemand-UUID` occurrence identities,
+`runNow(config, requestId, options)`, a persisted schedule pause flag under the
+shared delivery state directory, and an optional expected-attempt precondition
+checked inside the delivery lock. Historical v1 records remain readable. Paused
+ticks return `paused` without analysis/send; explicit run-now remains available.
+The external timer continues to run and observe the flag. These are host controls,
+not new agent permissions. See [console design](../design/operator-console.md).

@@ -92,3 +92,9 @@ The packet MUST preserve original agent records and provenance. Failed location 
   [validation](../design/validation.md).
 - Delivery and evidence: [roadmap](../plans/roadmap.md),
   [evaluation plan](../plans/evaluations.md).
+
+The [operator console](operator-console.md) consumes this contract unchanged. Its
+[design](../design/operator-console.md) and [ADR-0012](../adr/0012-operate-saved-workflows-through-a-local-console.md)
+link an aggregate parent brief to a fresh issue snapshot and pinned packet through
+a separate operator action record. The [proposed change workflow](../design/investigation-to-pr.md)
+describes future consumers without granting repair or publication authority.

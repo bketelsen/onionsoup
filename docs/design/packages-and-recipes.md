@@ -117,3 +117,11 @@ original brief workflow. It omits raw agent state and nonportable local-file lin
   [state persistence](https://github.com/humanlayer/agentlayer/blob/main/packages/docs/content/concepts/state.md),
   [docs-agent](https://github.com/humanlayer/agentlayer/tree/main/agents/docs-agent),
   [Agent Control Plane](https://github.com/humanlayer/agentcontrolplane).
+
+The [operator console](operator-console.md), governed by
+[ADR-0012](../adr/0012-operate-saved-workflows-through-a-local-console.md) and its
+[contract](../specs/operator-console.md), is another host consumer of these recipes.
+It joins saved briefs, delivery and an explicit investigation handoff in
+[backlog P9](../plans/backlog.md#phase-9--operator-console). The
+[investigation-to-PR exploration](investigation-to-pr.md) proposes later artifact
+and authority boundaries; it does not add current effects.

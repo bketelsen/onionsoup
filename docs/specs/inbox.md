@@ -7,8 +7,9 @@ This contract governs bounded issue intake, durable local attempts, freshness, a
 The inbox wraps the existing bug-readiness agent in a bounded intake workflow.
 Ordinary code fetches GitHub issues, tracks observations, decides which snapshots
 need work, and renders a local page. Terra still assesses one title/body snapshot;
-its tools, prompt v4, and contract v2 are unchanged. There are no GitHub writes,
-messages, scheduler, or coordinating agents.
+its tools, prompt v4, and contract v2 are unchanged. This static intake workflow has no GitHub writes, messages, scheduler or
+coordinating agents. The separate [operator console](operator-console.md) now
+provides a loopback surface for repository briefs and explicit bounded controls.
 
 ### Refresh and open
 
@@ -145,3 +146,6 @@ Intake MUST remain bounded and read-only on GitHub. Reuse follows the documented
   [validation](../design/validation.md).
 - Delivery and evidence: [roadmap](../plans/roadmap.md),
   [evaluation plan](../plans/evaluations.md).
+
+- Operator surface: [ADR-0012](../adr/0012-operate-saved-workflows-through-a-local-console.md),
+  [console design](../design/operator-console.md), [console contract](operator-console.md).

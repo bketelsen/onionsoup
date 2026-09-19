@@ -124,6 +124,18 @@ including the initial date-query defect and corrected follow-up.
 
 Evidence: [scheduled delivery trial](records/scheduled-delivery-2026-09-18.md).
 
+## Phase 11 — Operator console and explicit handoff
+
+- Exercise the [console contract](../specs/operator-console.md) and
+  [design](../design/operator-console.md) using existing saved brief evidence.
+- **Done when:** HTTP tests establish action authority, persistence, duplicate
+  suppression, corruption handling and schedule controls; a small live selected
+  issue trial preserves fresh input, pinned source and parent/packet provenance.
+  Distinguish HTTP/HTML checks from visual browser testing and assistant review
+  from maintainer acceptance.
+
+Evidence: [operator console trial](records/operator-console-2026-09-18.md).
+
 ## Later / ideas
 
 Model-comparison infrastructure, new local-provider batches, broader source
