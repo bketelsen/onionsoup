@@ -76,6 +76,12 @@ One candidate per invocation is implemented; automatic revision remains deferred
 Implemented. Evidence: [owned draft publication trial](records/draft-publication-2026-09-19.md).
 Design: [approved bundles](../design/draft-publication.md).
 
+## Phase 5 — One real owned-project change
+
+Implement [accepted proposal execution](../design/owned-project-changes.md) through the [project contract](../specs/owned-project-changes.md), under [ADR-0017](../adr/0017-execute-one-accepted-owned-project-proposal.md).
+
+**Done when:** an agent-produced proposal for publication-status filtering is explicitly accepted, patched, verified offline and separately reviewed, then published as an exact-evidence draft PR in `bketelsen/onionsoup`. The feature remains separate from pipeline infrastructure. Preserve unsuccessful attempts; no merge.
+
 ## Later / ideas
 
 - Extend to one real OSS issue after fixture evidence and maintainer approval.

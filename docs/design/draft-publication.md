@@ -59,3 +59,5 @@ inspection; do not silently regenerate a partially prepared bundle.
 - Contracts: [publication](../specs/draft-publication.md), [operator console](../specs/operator-console.md).
 - Built in: [change workflow Phase 4](../plans/investigation-to-pr.md#phase-4--explicit-draft-publication), [roadmap](../plans/roadmap.md).
 - Broader direction: [investigation to PR](investigation-to-pr.md).
+
+The [owned-project continuation](owned-project-changes.md), under [ADR-0017](../adr/0017-execute-one-accepted-owned-project-proposal.md), adds a version-2 bundle for the exact already-tested project commit. It uses the same effect engine and separate approval; the original two-file check remains mandatory for version 1.

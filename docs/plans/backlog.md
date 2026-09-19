@@ -170,6 +170,12 @@ Implement the [publication design](../design/draft-publication.md) and [contract
 
 Implemented. Evidence: [publication trial](records/draft-publication-2026-09-19.md).
 
+## Phase 14 — Accepted proposal to an owned-project draft
+
+Follow the [project design](../design/owned-project-changes.md) and [contract](../specs/owned-project-changes.md).
+
+**Done when:** publication-history filtering reaches an owned-project draft through the proposal, accepted job, offline checks, patch and review pipeline, with exact provenance.
+
 ## Later / ideas
 
 | Item | Trigger / acceptance evidence |

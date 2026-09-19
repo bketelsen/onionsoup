@@ -102,3 +102,7 @@ manual inspection. Malformed or symlink-escaped history entries are excluded.
 - Context: [publication design](../design/draft-publication.md), [console design](../design/operator-console.md).
 - Plan: [Phase 4](../plans/investigation-to-pr.md#phase-4--explicit-draft-publication).
 - GitHub APIs: [pull requests](https://docs.github.com/en/rest/pulls/pulls), [Git references](https://docs.github.com/en/rest/git/refs).
+
+## Owned-project bundle version 2
+
+[ADR-0017](../adr/0017-execute-one-accepted-owned-project-proposal.md) adds `kind: project-publication`, `schemaVersion: 2`, `project` and `projectHash` in place of fixture fields. The [owned-project contract](owned-project-changes.md) requires an accepted job and exact verified candidate commit. The shared publisher retains the same approval, branch lease and ambiguity rules; version-1 fixture bundles remain readable. Context: [project design](../design/owned-project-changes.md).

@@ -187,6 +187,12 @@ Implement [approved bundles and conservative reconciliation](../design/draft-pub
 
 Implemented. Evidence: [publication trial](records/draft-publication-2026-09-19.md).
 
+## Phase 17 — First real-project implementation
+
+Use the [owned-project profile](../design/owned-project-changes.md) and [contract](../specs/owned-project-changes.md) to connect model proposals to accepted implementation jobs.
+
+**Done when:** one actual Onionsoup feature reaches an exact-evidence draft PR through the full pipeline, with no external-project writes or merge. See [change-workflow Phase 5](investigation-to-pr.md#phase-5--one-real-owned-project-change).
+
 ## Broader vision — domain-focused agent teams
 
 Recorded on 2026-09-18: OSS maintenance is the first proving ground for Onionsoup,

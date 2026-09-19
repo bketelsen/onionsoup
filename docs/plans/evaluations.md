@@ -166,6 +166,12 @@ Evidence: [fixture and patch trial](records/fixture-patches-2026-09-19.md).
 
 Implemented. Evidence: [publication trial](records/draft-publication-2026-09-19.md).
 
+## Phase 15 — Accepted owned-project proposal
+
+Exercise the [project profile](../design/owned-project-changes.md) and [contract](../specs/owned-project-changes.md) on publication-status filtering.
+
+**Done when:** the real baseline preserves current behavior while recording new-feature gaps, an accepted model proposal yields a scoped candidate satisfying every mapped check, separate review has no blocking findings, and the exact tested commit becomes an owned draft. Record live failures separately from scripted boundary checks and independent human acceptance. The local workflow and published draft retain the complete trial provenance.
+
 ## Later / ideas
 
 Model-comparison infrastructure, new local-provider batches, broader source

@@ -1,3 +1,5 @@
+import {inputSchema as projectInput,resultSchema as projectResult,PROFILE_LIMITS} from '../project-change/contracts.ts';
+import {prompts as projectPrompts} from '../project-change/agents.ts';
 import { z } from 'zod';
 import { FixtureAgentId, inputSchema, resultSchema, POLICY } from './contracts.ts';
 import { prompts } from './agents.ts';
@@ -6,7 +8,7 @@ export function fixtureCapabilityManifest(id: FixtureAgentId) {
   const purpose={'scoped-patch':'Propose one allowed text patch for an explicitly accepted owned fixture scope. No direct writes or execution.',
     'change-review':'Review one exact candidate and verification receipts independently of the patch conversation.'};
   const entry={'scoped-patch':'proposeScopedPatch','change-review':'reviewChange'};
-  return { schemaVersion: 1, id, capabilityVersion: 1, purpose: purpose[id], promptVersion: prompts[id].version,
+  return { schemaVersion: 1, id, capabilityVersion: 2, profiles:[{id:'onionsoup-publication-filter-v1',inputVersion:2,resultVersion:2,runVersion:2,promptVersion:projectPrompts[id].version,module:'src/project-change/agents.ts',export:id==='scoped-patch'?'patchProject':'reviewProject',inputSchema:z.toJSONSchema(projectInput(id),{target:'draft-2020-12'}),resultSchema:z.toJSONSchema(projectResult(id),{target:'draft-2020-12'}),limits:{steps:PROFILE_LIMITS.steps,timeoutMs:PROFILE_LIMITS.agentMs,inputCharacters:PROFILE_LIMITS.contextCharacters}}], purpose: purpose[id], promptVersion: prompts[id].version,
     contracts: { inputVersion: 1, resultVersion: 1, runVersion: 1, historicalResultVersions: [],
       inputSchema: z.toJSONSchema(inputSchema(id),{ target:'draft-2020-12' }), resultSchema: z.toJSONSchema(resultSchema(id),{ target:'draft-2020-12' }),
       semanticValidation: 'validateResult enforces allowed files/base hashes or cited after-lines/criteria and successful candidate evidence before review clearance. Semantic quality remains model-assessed.' },

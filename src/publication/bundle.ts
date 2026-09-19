@@ -5,7 +5,7 @@ import {hash} from '../repository-brief/contracts.ts';
 import {atomicJson,readJson,optionalJson} from '../batch-store.ts';
 import {git} from '../fixture-runner/fixture.ts';
 import {validateFixtureWorkflow} from '../fixture-runner/record.ts';
-import {PublicationConfig,Target,identity,validateBundle,validateState,type Bundle,type State} from './contracts.ts';
+import {PublicationConfig,Target,identity,validateBundle,validateState,type Bundle,type FixtureBundle,type State} from './contracts.ts';
 export async function loadPublicationConfig(file:string) {
   const c=PublicationConfig.parse(await readJson(file));return {...c,stateDirectory:resolve(dirname(resolve(file)),c.stateDirectory)};
 }
@@ -37,7 +37,7 @@ export function bodyFor(w:ReturnType<typeof validateFixtureWorkflow>,id:string) 
     `Evidence: workflow \`${w.workflowId}\`; fixture digest \`${hash(w)}\`; scope \`${w.scope!.scopeId}\`; diff \`${w.diffHash}\`; baseline receipt \`${w.baseline!.receiptId}\`; candidate receipt \`${w.candidate!.receiptId}\`; candidate content \`${w.candidate!.treeHash}\`; runtime \`${w.candidate!.runtimeHash}\`. Raw evidence remains in the operator's local artifact store.`,
     `<!-- onionsoup-publication:${id} -->`].join('\n\n');
 }
-export async function preparePublication(config:PublicationConfig,fixtureDirectory:string,rawTarget:unknown):Promise<Bundle> {
+export async function preparePublication(config:PublicationConfig,fixtureDirectory:string,rawTarget:unknown):Promise<FixtureBundle> {
   PublicationConfig.parse(config);const target=Target.parse(rawTarget);
   if(!config.targets.some(t=>hash(t)===hash(target))) throw new Error('Target not configured');
   const w=validateFixtureWorkflow(await readJson(join(fixtureDirectory,'fixture.json')));
@@ -45,7 +45,7 @@ export async function preparePublication(config:PublicationConfig,fixtureDirecto
   const id=identity(target,hash(w));
   return locked(config,async()=>{
     const dir=directory(config,id),prior=await optionalJson(join(dir,'bundle.json'));
-    if(prior) {const b=validateBundle(prior);assertConfig(config,b);await loadState(config,b);return b;}
+    if(prior) {const b=validateBundle(prior);assertConfig(config,b);await loadState(config,b);if(b.schemaVersion!==1)throw new Error('Fixture bundle required');return b;}
     await mkdir(dir,{mode:0o700});const checkout=join(dir,'git');
     await git(dir,['clone','--no-local','--quiet','--no-checkout',resolve(fixtureDirectory,'base'),checkout]);
     const entries=(await git(checkout,['ls-tree',target.baseCommit])).trim().split('\n');
@@ -65,6 +65,7 @@ export async function preparePublication(config:PublicationConfig,fixtureDirecto
     const b=validateBundle({schemaVersion:1,kind:'fixture-publication',workflowId:randomUUID(),publicationId:id,createdAt:new Date().toISOString(),target,configHash:hash(config),fixtureHash:hash(w),fixture:w,
       headCommit:head,headTree:tree,branch:`codex/onionsoup-${id.slice(0,32)}`,diff,diffHash:hash(diff),
       title:w.case==='bug'?'Fix exact-boolean completed task count (fixture trial)':'Add JSON task export (fixture trial)',body:bodyFor(w,id)});
+    if(b.schemaVersion!==1)throw new Error('Fixture bundle required');
     await atomicJson(join(dir,'bundle.json'),b);
     const s:State={schemaVersion:1,publicationId:id,bundleHash:hash(b),status:'prepared',events:[{sequence:0,at:b.createdAt,type:'prepared',reason:'prepared'}]};
     await atomicJson(join(dir,'state.json'),validateState(s,b));return b;
@@ -75,6 +76,14 @@ export async function validateCommit(config:PublicationConfig,b:Bundle) {
   const parent=(await git(repo,['rev-list','--parents','-n','1',b.headCommit])).trim();
   if(parent!==`${b.headCommit} ${b.target.baseCommit}`||(await git(repo,['rev-parse',`${b.headCommit}^{tree}`])).trim()!==b.headTree||
     await git(repo,['diff','--no-ext-diff','--no-textconv',b.target.baseCommit,b.headCommit])!==b.diff) throw new Error('Prepared commit changed');
+  if(b.schemaVersion===2) {
+    const paths=b.project.job.allowedFiles,changed=(await git(repo,['diff','--name-only',b.target.baseCommit,b.headCommit])).trim().split('\n');
+    if(changed.some(p=>!paths.includes(p as any)))throw new Error('Project scope changed');
+    for(const path of paths) {
+      if(!/^100644 blob [a-f0-9]{40}\t/.test(await git(repo,['ls-tree',b.headCommit,'--',path]))||await git(repo,['show',`${b.headCommit}:${path}`])!==b.project.after![path])throw new Error('Project candidate changed');
+    }
+    return repo;
+  }
   const entries=(await git(repo,['ls-tree',b.headCommit])).trim().split('\n');
   if(entries.length!==2||entries.some(e=>!/^100644 blob [a-f0-9]{40}\t(README.md|tasks.mjs)$/.test(e))) throw new Error('Candidate contains unexpected entries');
   for(const [path,text] of Object.entries(b.fixture.after!)) if(await git(repo,['show',`${b.headCommit}:${path}`])!==text) throw new Error('Commit differs from verified candidate');

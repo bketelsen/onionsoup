@@ -1,0 +1,23 @@
+import {parseArgs} from 'node:util';
+import {resolve} from 'node:path';
+import {readJson} from '../batch-store.ts';
+import {hash} from '../repository-brief/contracts.ts';
+import {providerName} from '../providers.ts';
+import {Runtime} from '../fixture-runner/contracts.ts';
+import {proposeProject,acceptProject} from './proposal.ts';
+import {provisionDependencies} from './dependencies.ts';
+import {executeProject} from './recipe.ts';
+import {Dependency} from './contracts.ts';
+import {prepareProjectPublication} from './publication.ts';
+import {loadPublicationConfig} from '../publication/bundle.ts';
+globalThis.AI_SDK_LOG_WARNINGS=false;
+try {
+ const {positionals,values:v}=parseArgs({allowPositionals:true,options:{checkout:{type:'string'},commit:{type:'string'},output:{type:'string'},proposal:{type:'string'},mapping:{type:'string'},reason:{type:'string'},runtime:{type:'string'},dependencies:{type:'string'},seed:{type:'string'},provider:{type:'string'},config:{type:'string'},project:{type:'string'},'target-index':{type:'string'}}});
+ const command=positionals[0];if(positionals.length!==1)throw new Error('Arguments');let result:unknown;
+ if(command==='propose'&&v.checkout&&v.commit&&v.output&&v.provider){const r=await proposeProject(resolve(v.checkout),v.commit,resolve(v.output),providerName(v.provider));result={requestId:r.requestId,status:r.status,result:r.proposal?.result};}
+ else if(command==='accept'&&v.checkout&&v.proposal&&v.mapping&&v.reason){const j=await acceptProject(resolve(v.checkout),resolve(v.proposal),await readJson(v.mapping) as any,v.reason);result={jobId:j.jobId,jobHash:hash(j)};}
+ else if(command==='dependencies'&&v.checkout&&v.commit&&v.output)result=await provisionDependencies(resolve(v.checkout),v.commit,resolve(v.output));
+ else if(command==='execute'&&v.checkout&&v.proposal&&v.output&&v.runtime&&v.dependencies&&v.seed&&v.provider){const w=await executeProject(resolve(v.checkout),resolve(v.proposal),{directory:resolve(v.output),runtime:Runtime.parse(await readJson(v.runtime)),dependencies:Dependency.parse(await readJson(v.dependencies)),seedBundle:await readJson(v.seed),provider:providerName(v.provider)});result={workflowId:w.workflowId,status:w.status,outcome:w.outcome,stages:w.stages.length};if(w.outcome!=='candidate_verified')process.exitCode=1;}
+ else if(command==='prepare-publication'&&v.config&&v.project&&/^\d+$/.test(v['target-index']??'')){const c=await loadPublicationConfig(v.config),b=await prepareProjectPublication(c,resolve(v.project),c.targets[Number(v['target-index'])]);result={publicationId:b.publicationId,bundleHash:hash(b),headCommit:b.headCommit};}
+ else throw new Error('Arguments');process.stdout.write(JSON.stringify(result,null,2)+'\n');
+}catch{process.stderr.write('Project command failed. Inspect saved artifacts; no automatic replay. Commands: propose, accept, dependencies, execute, prepare-publication.\n');process.exitCode=1;}

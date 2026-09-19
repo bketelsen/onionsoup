@@ -46,8 +46,8 @@ export function publicationHtml(entry:Awaited<ReturnType<typeof publicationHisto
   return `<h1>${e(b.title)}</h1><p>Status: <strong>${e(s.status)}</strong>${busy?' · publisher busy':''}</p>
     <p>Target: ${e(b.target.repository)} · ${e(b.target.baseBranch)} → ${e(b.branch)}</p>
     <p>Base: <code>${b.target.baseCommit}</code><br>Head: <code>${b.headCommit}</code><br>Bundle: <code>${hash(b)}</code></p>
-    <p>Baseline: ${b.fixture.baseline!.status} · Candidate: ${b.fixture.candidate!.status} · separate-context model review: no blocking findings.</p>
-    <p><a href="/fixtures/${b.fixture.workflowId}">Source fixture evidence</a> · <a href="/publications/${b.publicationId}/json">Bundle and state</a> · <a href="/publications/${b.publicationId}/events">Events</a></p>
+    <p>Baseline: ${(b.schemaVersion===1?b.fixture:b.project).baseline!.status} · Candidate: ${(b.schemaVersion===1?b.fixture:b.project).candidate!.status} · separate-context model review: no blocking findings.</p>
+    <p>${b.schemaVersion===1?`<a href="/fixtures/${b.fixture.workflowId}">Source fixture evidence</a> · `: `Accepted project job: ${b.project.job.jobId} · `}<a href="/publications/${b.publicationId}/json">Bundle and state</a> · <a href="/publications/${b.publicationId}/events">Events</a></p>
     ${s.pull?`<p>Observed PR: <a href="${e(s.pull.url)}">#${s.pull.number}</a> (${s.pull.state}, ${s.pull.draft?'draft':'not draft'}). Check status above for binding conflicts.</p>`:''}
     ${!current?'<p class="warn">Configuration changed. This bundle cannot authorize new effects.</p>':''}
     <h2>Exact candidate diff</h2><pre>${e(b.diff)}</pre><h2>Exact draft PR body</h2><pre>${e(b.body)}</pre>

@@ -1,3 +1,5 @@
+import {validateProject} from './project-change/record.ts';
+import {validateProjectAgentRun} from './project-change/agents.ts';
 import {FixtureAgentId} from './fixture-runner/contracts.ts';
 import {validateFixtureWorkflow} from './fixture-runner/record.ts';
 import {validateFixtureAgentRun} from './fixture-runner/agents.ts';
@@ -85,6 +87,26 @@ const failure = (raw: unknown): z.infer<typeof Failures> => Failures.safeParse(r
 // The original records remain the truth. No provider calls, new timestamps, or raw content.
 export function workflowEvents(raw: unknown): z.infer<typeof WorkflowEventExport> {
   const candidate = raw as Record<string, unknown>;
+  if(candidate?.kind==='project-change'||candidate?.schemaVersion===2&&FixtureAgentId.safeParse(candidate?.agent).success) {
+    const w=candidate.kind==='project-change'?validateProject(raw):undefined;
+    const standalone=w?undefined:validateProjectAgentRun(raw),workflowId=w?.workflowId??standalone!.runId,events:WorkflowEvent[]=[];
+    const add=(event:Omit<WorkflowEvent,'schemaVersion'|'workflowId'|'sequence'>)=>events.push(WorkflowEvent.parse({...event,schemaVersion:1,workflowId,sequence:events.length,...(w?{scopeId:w.job.jobId,repositoryCommit:w.job.baseCommit,parentWorkflowId:w.parent.requestId}:{})}));
+    const receipt=(r:NonNullable<ReturnType<typeof validateProject>['baseline']>)=>{
+      const base={receiptId:r.receiptId,inputHash:r.jobHash,runtimeHash:r.runtimeHash,verificationPhase:r.phase};
+      add({...base,type:'verification.started',at:r.startedAt});add({...base,type:'verification.completed',at:r.finishedAt,verificationOutcome:r.status==='checks_failed'?'assertion_failed':r.status});
+    };
+    const append=(r:ReturnType<typeof validateProjectAgentRun>)=>{const base={agent:r.agent,runId:r.runId,inputHash:r.inputHash,promptVersion:r.promptVersion,provider:r.provider,model:r.model,recordVersion:2};
+      add({...base,type:'agent.started',at:r.startedAt});add({...base,type:r.status==='running'?'agent.unfinished':`agent.${r.status}`,at:r.finishedAt??r.startedAt,usage:usage(r.tokenUsage?.totals),failure:r.failure});};
+    add({type:'workflow.started',at:w?.startedAt??standalone!.startedAt});
+    if(w){if(w.baseline)receipt(w.baseline);for(const [i,s] of w.stages.entries()){
+      if(s.agent==='change-review'&&w.candidate)receipt(w.candidate);
+      add({type:'workflow.budget_reserved',at:s.reservedAt,agent:s.agent,stageKey:s.agent==='scoped-patch'?'patch':'review',budget:{limit:2,consumed:i+1,remaining:1-i}});if(s.run)append(s.run);
+    }if(w.candidate&&!w.stages.some(s=>s.agent==='change-review'))receipt(w.candidate);
+    }else append(standalone!);
+    const r=w??standalone!;add({type:r.status==='running'?'workflow.unfinished':`workflow.${r.status}`,at:r.finishedAt??r.startedAt});
+    return WorkflowEventExport.parse({schemaVersion:1,kind:'workflow-events',mode:'derived-snapshot',workflowId,events});
+  }
+
   if(candidate?.kind==='fixture-change'||FixtureAgentId.safeParse(candidate?.agent).success) {
     const w=candidate.kind==='fixture-change'?validateFixtureWorkflow(raw):undefined;
     const standalone=w?undefined:validateFixtureAgentRun(raw),workflowId=w?.workflowId??standalone!.runId,events:WorkflowEvent[]=[];

@@ -180,3 +180,5 @@ commands, observations and runtime paths. No MCP invocation tool or publication
 capability is added. See [fixture design](../design/fixture-execution.md).
 
 The [deterministic publisher](draft-publication.md) exports `publication.prepared`, `publication.approved`, `publication.push_intent`, `publication.branch_published`, `publication.pr_intent`, `publication.published`, `publication.unknown` and `publication.blocked`. Events add `publicationId` and allowlisted `publicationReason`; existing bundle hashes use `inputHash`, and the fixture parent uses `parentWorkflowId`. No new agent capability or model authority is introduced.
+
+Scoped patch and change review capability version 2 advertise an additional [owned-project profile](owned-project-changes.md) with input/result/run version 2 and its separate callable TypeScript exports. Their original fixture interfaces remain version 1. No additional agent responsibility or GitHub tool is introduced. Common project events preserve parent request/job identities and two implementation reservations; proposal preparation remains a separately budgeted parent.

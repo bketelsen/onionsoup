@@ -349,3 +349,7 @@ for successful candidates, blocked initial diffs, isolation checks and limitatio
 ### Owned-fixture draft publication
 
 Prepare and inspect a concrete bundle, record existing operator authorization, then publish or reconcile it with `npm run publication --`. The [publication contract](docs/specs/draft-publication.md) lists commands and host configuration. The console exposes `/publications` when `publicationConfig` is configured. Only exact configured `bketelsen/*` targets are supported; no merge or external OSS publication.
+
+### Accepted proposal to an owned-project change
+
+`npm run project-change --` exposes the first [real-project profile](docs/specs/owned-project-changes.md): propose, accept, provision dependencies, execute a bounded candidate, and prepare its publication bundle. The initial task is publication-status filtering; source, dependencies and checks are pinned separately, and the feature is delivered as a draft PR.

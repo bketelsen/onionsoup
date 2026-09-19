@@ -121,6 +121,10 @@ Raw run links are optional local evidence; those files are intentionally not pub
 
 - [Owned-fixture draft publication trial](plans/records/draft-publication-2026-09-19.md)
 
+- [ADR-0017: accepted owned-project proposals](adr/0017-execute-one-accepted-owned-project-proposal.md)
+- [Owned-project implementation design](design/owned-project-changes.md)
+- [Accepted project job contract](specs/owned-project-changes.md)
+
 ## Related repository material
 
 - [README and commands](../README.md)

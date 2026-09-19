@@ -1,3 +1,4 @@
+import {validateProject,type ProjectWorkflow} from '../project-change/record.ts';
 import {z} from 'zod';
 import {Digest} from '../fixture-runner/contracts.ts';
 import {hash} from '../repository-brief/contracts.ts';
@@ -9,11 +10,15 @@ export const Target=z.object({repository:Repository,repositoryId:z.number().int(
 export const PublicationConfig=z.object({schemaVersion:z.literal(1),stateDirectory:z.string().min(1),
   targets:z.array(Target).min(1).max(10)}).strict().refine(c=>new Set(c.targets.map(t=>t.repository+':'+t.baseBranch)).size===c.targets.length,'Duplicate target');
 export type PublicationConfig=z.infer<typeof PublicationConfig>;
-export const Bundle=z.object({schemaVersion:z.literal(1),kind:z.literal('fixture-publication'),workflowId:z.uuid(),publicationId:Digest,createdAt:z.iso.datetime(),
+export const FixtureBundle=z.object({schemaVersion:z.literal(1),kind:z.literal('fixture-publication'),workflowId:z.uuid(),publicationId:Digest,createdAt:z.iso.datetime(),
   target:Target,configHash:Digest,fixtureHash:Digest,fixture:z.unknown(),headCommit:Commit,headTree:Commit,
   branch:z.string().regex(/^codex\/onionsoup-[a-f0-9]{32}$/),diff:z.string().min(1).max(40000),diffHash:Digest,
   title:z.string().min(1).max(180),body:z.string().min(1).max(20000)}).strict();
-export type Bundle=Omit<z.infer<typeof Bundle>,'fixture'> & {fixture:FixtureWorkflow};
+export type FixtureBundle=Omit<z.infer<typeof FixtureBundle>,'fixture'> & {fixture:FixtureWorkflow};
+export const ProjectBundle=FixtureBundle.omit({fixture:true,fixtureHash:true}).extend({schemaVersion:z.literal(2),kind:z.literal('project-publication'),project:z.unknown(),projectHash:Digest}).strict();
+export type ProjectBundle=Omit<z.infer<typeof ProjectBundle>,'project'> & {project:ProjectWorkflow};
+export const Bundle=z.discriminatedUnion('schemaVersion',[FixtureBundle,ProjectBundle]);
+export type Bundle=FixtureBundle|ProjectBundle;
 export const Approval=z.object({bundleHash:Digest,configHash:Digest,approvedAt:z.iso.datetime(),expiresAt:z.iso.datetime(),
   authority:z.enum(['console_operator','explicit_user_session']),reason:z.string().min(1).max(1000)}).strict();
 export const Pull=z.object({number:z.number().int().positive(),url:z.string().regex(/^https:\/\/github\.com\/bketelsen\/[a-zA-Z0-9_.-]+\/pull\/[1-9][0-9]*$/),repositoryId:z.number().int().positive(),
@@ -28,7 +33,13 @@ export const State=z.object({schemaVersion:z.literal(1),publicationId:Digest,bun
 export type State=z.infer<typeof State>;
 export function identity(target:z.infer<typeof Target>,fixtureHash:string) {return hash({version:1,target,fixtureHash});}
 export function validateBundle(raw:unknown):Bundle {
-  const b=Bundle.parse(raw),w=validateFixtureWorkflow(b.fixture);
+  const parsed=Bundle.parse(raw);
+  if(parsed.schemaVersion===2) {
+    const w=validateProject(parsed.project),b=parsed;
+    if(w.status!=='completed'||w.outcome!=='candidate_verified'||hash(w)!==b.projectHash||b.target.repository!==w.job.repository||b.target.baseCommit!==w.job.baseCommit||b.headCommit!==w.headCommit||b.headTree!==w.headTree||b.diff!==w.diff||b.diffHash!==hash(b.diff)||b.publicationId!==identity(b.target,b.projectHash)||b.branch!==`codex/onionsoup-${b.publicationId.slice(0,32)}`||!b.body.endsWith(`<!-- onionsoup-publication:${b.publicationId} -->`))throw new Error('Invalid project publication');
+    return {...b,project:w};
+  }
+  const b=parsed,w=validateFixtureWorkflow(b.fixture);
   if(w.status!=='completed'||w.outcome!=='candidate_verified'||!w.diff||w.pendingExecution||hash(w)!==b.fixtureHash||
     b.target.baseCommit!==w.scope!.baseCommit||b.diff!==w.diff||b.diffHash!==hash(b.diff)||b.publicationId!==identity(b.target,b.fixtureHash)||
     b.branch!==`codex/onionsoup-${b.publicationId.slice(0,32)}`||!b.body.endsWith(`<!-- onionsoup-publication:${b.publicationId} -->`)) throw new Error('Invalid publication bundle');
