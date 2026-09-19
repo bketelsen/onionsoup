@@ -3,7 +3,7 @@ import {z} from 'zod';
 import {hash} from '../repository-brief/contracts.ts';
 import {projectProfile} from './profiles.ts';
 import {Runtime} from './contracts.ts';
-import {Job,Files,Dependency,Verification,PatchResult,ReviewResult,validateJob,CheckId,jobPolicy,usesGo,type WorkerId} from './contracts.ts';
+import {Job,Files,Dependency,Verification,PatchResult,ReviewResult,validateJob,CheckId,jobPolicy,usesGo,applyProjectPatch,type WorkerId} from './contracts.ts';
 import {validateParent,proof,type ProjectProposal} from './proposal.ts';
 import {validateProjectAgentRun,type ProjectAgentRun} from './agents.ts';
 export type ProjectWorkflow={schemaVersion:1;kind:'project-change';workflowId:string;startedAt:string;finishedAt?:string;status:'running'|'completed'|'failed';
@@ -30,7 +30,7 @@ export function validateProject(raw:unknown):ProjectWorkflow {
     if(s.agent!==(i===0?'scoped-patch':'change-review')||!z.iso.datetime().safeParse(s.reservedAt).success)throw new Error('Invalid reservation');
     if(s.run){const r=validateProjectAgentRun(s.run);if(r.inputHash!==hash(projectInput(w,s.agent))||r.agent!==s.agent||r.model!=='gpt-5.6-terra'||!['copilot','codex'].includes(r.provider))throw new Error('Worker input changed');}
   }
-  if(w.after){Files.parse(w.after);const p=PatchResult.parse(w.stages[0]?.run?.result);if(p.status!=='candidate'||hash(w.after)!==hash({...j.files,...Object.fromEntries(p.edits.map(e=>[e.path,e.content]))}))throw new Error('Unbound patch');}
+  if(w.after){Files.parse(w.after);const p=PatchResult.parse(w.stages[0]?.run?.result);if(p.status!=='candidate'||hash(w.after)!==hash(applyProjectPatch(j,p)))throw new Error('Unbound patch');}
   if(w.diff!==undefined&&hash(w.diff)!==w.diffHash)throw new Error('Diff mismatch');
   if(w.status==='running'?w.finishedAt!==undefined||w.outcome!==undefined:!z.iso.datetime().safeParse(w.finishedAt).success||!w.outcome)throw new Error('Termination mismatch');
   if(w.outcome==='candidate_verified'&&(w.status!=='completed'||!baselineEligibleProject(w)||w.pendingExecution||!w.headCommit||!w.headTree||!w.diff||w.appliedTree!==w.headTree||w.candidate?.status!=='passed'||w.stages[1]?.run?.status!=='completed'||ReviewResult.parse(w.stages[1].run.result).verdict!=='no_blocking_findings'))throw new Error('Invalid verified candidate');

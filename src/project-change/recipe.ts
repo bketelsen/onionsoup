@@ -10,7 +10,7 @@ import {Runtime} from './contracts.ts';
 import {projectProfile,GO_PROFILE} from './profiles.ts';
 import {verifyGoProject} from './go-sandbox.ts';
 import {liveModel} from '../providers.ts';
-import {Dependency,validateJob,PatchResult,ReviewResult,PROFILE_LIMITS,paths,type WorkerId,jobPolicy,usesGo} from './contracts.ts';
+import {Dependency,validateJob,PatchResult,ReviewResult,PROFILE_LIMITS,paths,type WorkerId,jobPolicy,usesGo,applyProjectPatch} from './contracts.ts';
 import {patchProject,reviewProject} from './agents.ts';
 import {verifyProject} from './sandbox.ts';
 import {sourceFiles} from './source.ts';
@@ -19,10 +19,10 @@ import {seedsFrom,profileHash} from './profile.ts';
 import {projectInput,validateProject,baselineEligibleProject,type ProjectWorkflow} from './record.ts';
 export async function executeProject(checkout:string,proposalDirectory:string,options:{directory:string;runtime:Runtime;dependencies:Dependency;seedBundle?:unknown;provider:'copilot'|'codex';modelFactory?:typeof liveModel;verify?:typeof verifyProject;signal?:AbortSignal;persist?:typeof atomicJson}) {
   const job=validateJob(await readJson(join(proposalDirectory,'job.json'))),parent=validateParent(await readJson(join(proposalDirectory,'proposal.json')));
-  if(job.profileHash!==(job.schemaVersion===2?await repositoryAdapterHash():await profileHash(job.profile))||hash(await sourceFiles(checkout,job.baseCommit,job.allowedFiles))!==job.sourceHash)throw new Error('Frozen project inputs changed');
+  if(job.profileHash!==(job.schemaVersion===2?await repositoryAdapterHash(job.repositoryProfile.execution.adapter):await profileHash(job.profile))||hash(await sourceFiles(checkout,job.baseCommit,job.allowedFiles))!==job.sourceHash)throw new Error('Frozen project inputs changed');
   const verificationPlan=job.schemaVersion===2?VerificationPlan.parse(await readJson(join(proposalDirectory,'checks.json'))):undefined;
   if(job.schemaVersion===2){validateTask(job.repositoryProfile,job.task,verificationPlan);if(hash(options.runtime)!==job.runtimeHash||hash(options.dependencies)!==job.dependencyHash)throw new Error('Accepted execution environment changed');}
-  const dir=resolve(options.directory);await mkdir(dir,{mode:0o700});const seeds=usesGo(job)?[]:seedsFrom(options.seedBundle);await atomicJson(join(dir,'seeds.json'),seeds);
+  const dir=resolve(options.directory);await mkdir(dir,{mode:0o700});const seeds=job.schemaVersion===2||usesGo(job)?[]:seedsFrom(options.seedBundle);await atomicJson(join(dir,'seeds.json'),seeds);
   const w:ProjectWorkflow={schemaVersion:1,kind:'project-change',workflowId:randomUUID(),startedAt:new Date().toISOString(),status:'running',parent,job,runtime:options.runtime,dependencies:options.dependencies,seedHash:hash(seeds),...(verificationPlan?{verificationPlan}:{}),stages:[]};
   let broken=false;const save=async()=>{try{await(options.persist??atomicJson)(join(dir,'project.json'),structuredClone(validateProject(w)));}catch{broken=true;throw new Error('Project persistence failed');}};await save();
   const signal=AbortSignal.any([...(options.signal?[options.signal]:[]),AbortSignal.timeout(PROFILE_LIMITS.workflowMs)]);
@@ -42,7 +42,7 @@ export async function executeProject(checkout:string,proposalDirectory:string,op
     const patch=PatchResult.parse(await agent('scoped-patch'));
     if(patch.status==='needs_information')w.outcome='needs_information';
     else {
-      w.after={...job.files,...Object.fromEntries(patch.edits.map(e=>[e.path,e.content]))};await save();
+      w.after=applyProjectPatch(job,patch);await save();
       const candidate=join(dir,'candidate');await git(dir,['clone','--no-local','--quiet','--no-checkout',resolve(checkout),candidate]);await git(candidate,['read-tree',job.baseCommit]);
       for(const path of job.allowedFiles){await mkdir(join(candidate,path,'..'),{recursive:true});await writeFile(join(candidate,path),w.after[path],{flag:'wx',mode:0o600});}
       await git(candidate,['add','--',...job.allowedFiles]);

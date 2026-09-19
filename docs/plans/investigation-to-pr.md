@@ -108,6 +108,19 @@ Completed. Evidence: [Clippy Go trial](records/clippy-go-trial-2026-09-19.md).
 
 Completed. Evidence: [repository profile trial](records/repository-profiles-2026-09-19.md).
 
+## Phase 8 — Reusable TypeScript tasks
+
+- Qualify the [TypeScript adapter](../specs/repository-profiles.md#typescript-adapter)
+  under [ADR-0020](../adr/0020-qualify-typescript-tasks-through-the-shared-profile-contract.md)
+  and the [shared project design](../design/owned-project-changes.md).
+- Exercise a bounded delivery-schedule preview task with committed regression tests,
+  fixed typechecking, explicit original test-file coverage and frozen host checks.
+- **Done when:** an exact draft uses the same task acceptance/worker/publication
+  contracts as Go, all declared checks pass, historical records still validate,
+  and mismatched adapters or weakened check coverage fail before model work.
+
+Completed. Evidence: [reusable TypeScript trial](records/typescript-profiles-2026-09-19.md).
+
 ## Later / ideas
 
 - Extend to one real OSS issue after fixture evidence and maintainer approval.

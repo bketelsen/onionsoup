@@ -141,3 +141,8 @@ Go task artifacts through the same pipeline. Keep host profiles/checks separate
 from task prose, bind exact runtime/dependency/check digests before patching, and
 allow only append-only changes to existing target tests. Generic TypeScript
 onboarding and new-file creation remain unqualified.
+
+Reusable TypeScript tasks use the same profile/job pipeline with `node-typescript-v1`.
+Profiles pin Node/npm policy and selected original test files; host checks stay
+outside worker context. Do not describe selected-file checks as a complete suite.
+See [repository profiles](docs/specs/repository-profiles.md#typescript-adapter).

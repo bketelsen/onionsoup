@@ -40,12 +40,12 @@
     {
       "id": "scoped-patch",
       "manifest": "capabilities/scoped-patch.json",
-      "capabilityVersion": 4
+      "capabilityVersion": 5
     },
     {
       "id": "change-review",
       "manifest": "capabilities/change-review.json",
-      "capabilityVersion": 4
+      "capabilityVersion": 5
     }
   ]
 }

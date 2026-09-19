@@ -9,7 +9,8 @@ Explicit host-owned profiles connect operator-authored change requests to existi
 requirements/proposal agents, a separately accepted implementation job, bounded
 patch/review workers, offline verification and the existing draft publisher.
 The targets are `bketelsen/onionsoup` (TypeScript publication filtering) and
-`bketelsen/clippy` (Go bubble color). This does not qualify arbitrary repositories.
+`bketelsen/clippy` (Go bubble color and no-clobber). Reusable profiles also
+qualify a TypeScript delivery-preview task. This does not qualify arbitrary repositories.
 Language separation follows [ADR-0018](../adr/0018-separate-project-policy-from-language-verification.md).
 
 ## Design
@@ -95,8 +96,8 @@ This implements [Phase 19](../plans/roadmap.md#phase-19--reusable-repository-pro
 
 ## Operational notes
 
-Only each profile's existing allowed UTF-8 text files may change. No package/test/
-workflow/credential edits. The registry host, execution commands and bounds are
+Only each profile's existing allowed UTF-8 text files may change. No package, workflow or credential edits; reusable profiles permit append-only
+regression tests while preserving original bytes. The registry host, execution commands and bounds are
 host policy, not model arguments. New dependencies, further projects, a revision loop,
 power-loss recovery and hostile multi-tenant execution remain unqualified.
 Interrupted execution is preserved for inspection; a new run is explicit.
@@ -109,3 +110,21 @@ Interrupted execution is preserved for inspection; a new run is explicit.
 - Prior evidence: [fixture patches](../plans/records/fixture-patches-2026-09-19.md), [draft publication](../plans/records/draft-publication-2026-09-19.md).
 
 Trial evidence: [reusable repository profiles](../plans/records/repository-profiles-2026-09-19.md).
+
+## Reusable TypeScript tasks
+
+[ADR-0020](../adr/0020-qualify-typescript-tasks-through-the-shared-profile-contract.md)
+adds a second reusable language adapter to the [profile contract](../specs/repository-profiles.md#typescript-adapter).
+It reuses Node dependency provisioning and isolation while replacing feature-specific
+seeds and commands with a profile-selected original suite and separately frozen host
+check module. The same requirements, proposal, accepted job, patch, review, events
+and publication functions remain shared. [Roadmap Phase 20](../plans/roadmap.md#phase-20--reusable-typescript-tasks)
+qualifies the boundary through a read-only delivery-schedule preview task.
+
+[ADR-0021](../adr/0021-apply-test-appends-without-model-reconstruction.md) removes
+unnecessary original-test copying from model output: an explicit test append carries
+only new bytes and the original hash. Host application and record reconstruction
+share one function. The [edit contract](../specs/repository-profiles.md#test-append-edits)
+retains complete replacement compatibility and confines appends to approved tests.
+
+TypeScript qualification: [trial evidence](../plans/records/typescript-profiles-2026-09-19.md).

@@ -9,7 +9,7 @@ import {liveModel} from '../providers.ts';
 import {extractFeatureRequirements,draftChangeProposal,validateProposalAgentRun,type ProposalAgentRun} from '../change-proposal/agents.ts';
 import {Proposal,FeatureRequirements} from '../change-proposal/contracts.ts';
 import {sourceFiles} from './source.ts';
-import {Job,validateJob,PROFILE,paths,GoRuntime,GoDependency,type Files} from './contracts.ts';
+import {Job,validateJob,PROFILE,paths,GoRuntime,GoDependency,Runtime,NodeDependency,type Files} from './contracts.ts';
 export {requestText} from './profiles.ts';
 import {projectProfile,profiles,GO_PROFILE,type ProfileId} from './profiles.ts';
 import {RepositoryProfile,Task,VerificationPlan,REPOSITORY_TASK,validateTask,profilePolicy} from './repository-profile.ts';
@@ -63,14 +63,20 @@ export async function acceptProject(checkout:string,directory:string,mapping:Job
   const proposal=proof(p.proposal!),requirements=proof(p.requirements!);
   let binding={};
   if(prepared){
-    const runtime=GoRuntime.parse(options.runtime),dependencies=GoDependency.parse(options.dependencies),plan=VerificationPlan.parse(options.verificationPlan);
+    const runtime=Runtime.parse(options.runtime),dependencies=prepared.profile.execution.adapter==='go-module-v1'?GoDependency.parse(options.dependencies):NodeDependency.parse(options.dependencies),plan=VerificationPlan.parse(options.verificationPlan);
     validateTask(prepared.profile,prepared.task,plan);
-    if(runtime.goHash!==prepared.profile.execution.toolchain.digest||runtime.goVersion!==prepared.profile.execution.toolchain.version||dependencies.goHash!==runtime.goHash||dependencies.goVersion!==runtime.goVersion||dependencies.packageHash!==hash(await git(checkout,['show',p.commit+':go.mod']))||dependencies.lockHash!==hash(await git(checkout,['show',p.commit+':go.sum'])))throw new Error('Resolved environment mismatch');
+    if(runtime.schemaVersion===2&&dependencies.schemaVersion===2){if(runtime.goHash!==prepared.profile.execution.toolchain.digest||runtime.goVersion!==prepared.profile.execution.toolchain.version||dependencies.goHash!==runtime.goHash||dependencies.goVersion!==runtime.goVersion||dependencies.packageHash!==hash(await git(checkout,['show',p.commit+':go.mod']))||dependencies.lockHash!==hash(await git(checkout,['show',p.commit+':go.sum'])))throw new Error('Resolved environment mismatch');}
+    else if(runtime.schemaVersion===1&&dependencies.schemaVersion===1){
+      const {readFile}=await import('node:fs/promises'),{byteHash}=await import('./source.ts');
+      const {execFile}=await import('node:child_process'),{promisify}=await import('node:util');
+      if(runtime.nodeHash!==prepared.profile.execution.toolchain.digest||byteHash(await readFile(runtime.nodePath))!==runtime.nodeHash||dependencies.nodeHash!==runtime.nodeHash||(await promisify(execFile)(runtime.nodePath,['--version'],{timeout:10000,env:{}})).stdout.trim()!==prepared.profile.execution.toolchain.version||dependencies.packageHash!==hash(await git(checkout,['show',p.commit+':package.json']))||dependencies.lockHash!==hash(await git(checkout,['show',p.commit+':package-lock.json'])))throw new Error('Resolved environment mismatch');
+      if('testFiles'in prepared.profile.verification)await sourceFiles(checkout,p.commit,prepared.profile.verification.testFiles);
+    }else throw new Error('Adapter environment mismatch');
     binding={repositoryProfile:prepared.profile,task:prepared.task,verificationSummary:plan.checks,runtimeHash:hash(runtime),dependencyHash:hash(dependencies)};
   }
   const j=validateJob({schemaVersion:prepared?2:1,...binding,kind:'accepted-project-job',jobId:randomUUID(),profile:profileId,repository:p.repository,baseCommit:p.commit,baseTree:p.tree,sourceHash:hash(p.files),files:p.files,parentHash:hash(p),
     proposal,proposalHash:hash(proposal),requirements,requirementsHash:hash(requirements),allowedFiles:profile.paths,mapping,
-    packageHash:hash(await git(checkout,['show',p.commit+':'+profile.manifests[0]])),lockHash:hash(await git(checkout,['show',p.commit+':'+profile.manifests[1]])),profileHash:prepared?await repositoryAdapterHash():await (await import('./profile.ts')).profileHash(profileId),acceptedAt:new Date().toISOString(),authority:'explicit_user_session',acceptedBy:'assistant_under_user_authority',reason});
+    packageHash:hash(await git(checkout,['show',p.commit+':'+profile.manifests[0]])),lockHash:hash(await git(checkout,['show',p.commit+':'+profile.manifests[1]])),profileHash:prepared?await repositoryAdapterHash(prepared.profile.execution.adapter):await (await import('./profile.ts')).profileHash(profileId),acceptedAt:new Date().toISOString(),authority:'explicit_user_session',acceptedBy:'assistant_under_user_authority',reason});
   // Explicit one-shot acceptance; no replacement of existing authority.
   const {writeFile}=await import('node:fs/promises');if(prepared)await writeFile(join(directory,'checks.json'),JSON.stringify(VerificationPlan.parse(options.verificationPlan),null,2)+'\n',{flag:'wx',mode:0o600});await writeFile(join(directory,'job.json'),JSON.stringify(j,null,2)+'\n',{flag:'wx',mode:0o600});return j;
 }

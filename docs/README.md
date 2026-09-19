@@ -141,3 +141,8 @@ Raw run links are optional local evidence; those files are intentionally not pub
 - [Canonical contributor instructions](../AGENTS.md)
 - [Sources and attribution](../REFERENCES.md)
 - [Reusable agent skills](../.agents/skills/)
+
+- [ADR-0020: Reusable TypeScript tasks](adr/0020-qualify-typescript-tasks-through-the-shared-profile-contract.md)
+
+- [ADR-0021: Host-applied test appends](adr/0021-apply-test-appends-without-model-reconstruction.md)
+- [Reusable TypeScript trial](plans/records/typescript-profiles-2026-09-19.md)

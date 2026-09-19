@@ -1,14 +1,14 @@
 {
   "schemaVersion": 1,
   "id": "scoped-patch",
-  "capabilityVersion": 4,
+  "capabilityVersion": 5,
   "profiles": [
     {
       "id": "onionsoup-publication-filter-v1",
       "inputVersion": 2,
       "resultVersion": 2,
       "runVersion": 2,
-      "promptVersion": "scoped-patch-project-v1",
+      "promptVersion": "scoped-patch-project-v2",
       "module": "src/project-change/agents.ts",
       "export": "patchProject",
       "inputSchema": {
@@ -817,7 +817,9 @@
                                   "gofmt",
                                   "bubble-default",
                                   "bubble-colors",
-                                  "bubble-invalid"
+                                  "bubble-invalid",
+                                  "node-typecheck",
+                                  "node-tests"
                                 ]
                               },
                               {
@@ -1683,7 +1685,9 @@
                                   "gofmt",
                                   "bubble-default",
                                   "bubble-colors",
-                                  "bubble-invalid"
+                                  "bubble-invalid",
+                                  "node-typecheck",
+                                  "node-tests"
                                 ]
                               },
                               {
@@ -1732,176 +1736,356 @@
                     "maxLength": 1500
                   },
                   "repositoryProfile": {
-                    "type": "object",
-                    "properties": {
-                      "schemaVersion": {
-                        "type": "number",
-                        "const": 1
-                      },
-                      "id": {
-                        "type": "string",
-                        "pattern": "^[a-z][a-z0-9-]{0,70}$"
-                      },
-                      "repository": {
-                        "type": "string",
-                        "pattern": "^bketelsen\\/[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}$"
-                      },
-                      "repositoryId": {
-                        "type": "integer",
-                        "exclusiveMinimum": 0,
-                        "maximum": 9007199254740991
-                      },
-                      "baseBranch": {
-                        "type": "string",
-                        "pattern": "^[\\w/-]{1,100}$"
-                      },
-                      "execution": {
+                    "anyOf": [
+                      {
                         "type": "object",
                         "properties": {
-                          "adapter": {
-                            "type": "string",
-                            "const": "go-module-v1"
+                          "schemaVersion": {
+                            "type": "number",
+                            "const": 1
                           },
-                          "sandbox": {
+                          "id": {
                             "type": "string",
-                            "const": "offline-go-v1"
+                            "pattern": "^[a-z][a-z0-9-]{0,70}$"
                           },
-                          "toolchain": {
+                          "repository": {
+                            "type": "string",
+                            "pattern": "^bketelsen\\/[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}$"
+                          },
+                          "repositoryId": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "baseBranch": {
+                            "type": "string",
+                            "pattern": "^[\\w/-]{1,100}$"
+                          },
+                          "execution": {
                             "type": "object",
                             "properties": {
-                              "version": {
+                              "adapter": {
                                 "type": "string",
-                                "pattern": "^go version go1\\.\\d+\\.\\d+ linux\\/amd64$"
+                                "const": "go-module-v1"
                               },
-                              "digest": {
+                              "sandbox": {
                                 "type": "string",
-                                "pattern": "^[a-f0-9]{64}$"
+                                "const": "offline-go-v1"
+                              },
+                              "toolchain": {
+                                "type": "object",
+                                "properties": {
+                                  "version": {
+                                    "type": "string",
+                                    "pattern": "^go version go1\\.\\d+\\.\\d+ linux\\/amd64$"
+                                  },
+                                  "digest": {
+                                    "type": "string",
+                                    "pattern": "^[a-f0-9]{64}$"
+                                  }
+                                },
+                                "required": [
+                                  "version",
+                                  "digest"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "dependencies": {
+                                "type": "string",
+                                "const": "public-checksummed-go-v1"
                               }
                             },
                             "required": [
-                              "version",
-                              "digest"
+                              "adapter",
+                              "sandbox",
+                              "toolchain",
+                              "dependencies"
                             ],
                             "additionalProperties": false
                           },
-                          "dependencies": {
-                            "type": "string",
-                            "const": "public-checksummed-go-v1"
-                          }
-                        },
-                        "required": [
-                          "adapter",
-                          "sandbox",
-                          "toolchain",
-                          "dependencies"
-                        ],
-                        "additionalProperties": false
-                      },
-                      "verification": {
-                        "type": "object",
-                        "properties": {
-                          "required": {
-                            "type": "array",
-                            "prefixItems": [
-                              {
-                                "type": "string",
-                                "const": "go-build"
-                              },
-                              {
-                                "type": "string",
-                                "const": "go-test"
-                              },
-                              {
-                                "type": "string",
-                                "const": "go-vet"
-                              },
-                              {
-                                "type": "string",
-                                "const": "gofmt"
+                          "verification": {
+                            "type": "object",
+                            "properties": {
+                              "required": {
+                                "type": "array",
+                                "prefixItems": [
+                                  {
+                                    "type": "string",
+                                    "const": "go-build"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "go-test"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "go-vet"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "gofmt"
+                                  }
+                                ]
                               }
-                            ]
+                            },
+                            "required": [
+                              "required"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "changes": {
+                            "type": "object",
+                            "properties": {
+                              "allowed": {
+                                "minItems": 1,
+                                "maxItems": 30,
+                                "type": "array",
+                                "items": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 180,
+                                      "pattern": "^[a-zA-Z0-9_.-]+(?:\\/[a-zA-Z0-9_.-]+)*$"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "pattern": ".*\\/\\*\\*$"
+                                    }
+                                  ]
+                                }
+                              },
+                              "protected": {
+                                "maxItems": 30,
+                                "type": "array",
+                                "items": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 180,
+                                      "pattern": "^[a-zA-Z0-9_.-]+(?:\\/[a-zA-Z0-9_.-]+)*$"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "pattern": ".*\\/\\*\\*$"
+                                    }
+                                  ]
+                                }
+                              },
+                              "maximumFiles": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 6
+                              },
+                              "existingTests": {
+                                "type": "string",
+                                "const": "append-only"
+                              }
+                            },
+                            "required": [
+                              "allowed",
+                              "protected",
+                              "maximumFiles",
+                              "existingTests"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "publication": {
+                            "type": "string",
+                            "const": "draft"
                           }
                         },
                         "required": [
-                          "required"
+                          "schemaVersion",
+                          "id",
+                          "repository",
+                          "repositoryId",
+                          "baseBranch",
+                          "execution",
+                          "verification",
+                          "changes",
+                          "publication"
                         ],
                         "additionalProperties": false
                       },
-                      "changes": {
+                      {
                         "type": "object",
                         "properties": {
-                          "allowed": {
-                            "minItems": 1,
-                            "maxItems": 30,
-                            "type": "array",
-                            "items": {
-                              "anyOf": [
-                                {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 180,
-                                  "pattern": "^[a-zA-Z0-9_.-]+(?:\\/[a-zA-Z0-9_.-]+)*$"
-                                },
-                                {
-                                  "type": "string",
-                                  "pattern": ".*\\/\\*\\*$"
-                                }
-                              ]
-                            }
+                          "schemaVersion": {
+                            "type": "number",
+                            "const": 1
                           },
-                          "protected": {
-                            "maxItems": 30,
-                            "type": "array",
-                            "items": {
-                              "anyOf": [
-                                {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 180,
-                                  "pattern": "^[a-zA-Z0-9_.-]+(?:\\/[a-zA-Z0-9_.-]+)*$"
-                                },
-                                {
-                                  "type": "string",
-                                  "pattern": ".*\\/\\*\\*$"
-                                }
-                              ]
-                            }
-                          },
-                          "maximumFiles": {
-                            "type": "integer",
-                            "minimum": 1,
-                            "maximum": 6
-                          },
-                          "existingTests": {
+                          "id": {
                             "type": "string",
-                            "const": "append-only"
+                            "pattern": "^[a-z][a-z0-9-]{0,70}$"
+                          },
+                          "repository": {
+                            "type": "string",
+                            "pattern": "^bketelsen\\/[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}$"
+                          },
+                          "repositoryId": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "baseBranch": {
+                            "type": "string",
+                            "pattern": "^[\\w/-]{1,100}$"
+                          },
+                          "execution": {
+                            "type": "object",
+                            "properties": {
+                              "adapter": {
+                                "type": "string",
+                                "const": "node-typescript-v1"
+                              },
+                              "sandbox": {
+                                "type": "string",
+                                "const": "offline-node-v1"
+                              },
+                              "toolchain": {
+                                "type": "object",
+                                "properties": {
+                                  "version": {
+                                    "type": "string",
+                                    "pattern": "^v24\\.\\d+\\.\\d+$"
+                                  },
+                                  "digest": {
+                                    "type": "string",
+                                    "pattern": "^[a-f0-9]{64}$"
+                                  }
+                                },
+                                "required": [
+                                  "version",
+                                  "digest"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "dependencies": {
+                                "type": "string",
+                                "const": "public-locked-npm-v1"
+                              }
+                            },
+                            "required": [
+                              "adapter",
+                              "sandbox",
+                              "toolchain",
+                              "dependencies"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "verification": {
+                            "type": "object",
+                            "properties": {
+                              "required": {
+                                "type": "array",
+                                "prefixItems": [
+                                  {
+                                    "type": "string",
+                                    "const": "node-typecheck"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "node-tests"
+                                  }
+                                ]
+                              },
+                              "testFiles": {
+                                "minItems": 1,
+                                "maxItems": 20,
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 180,
+                                  "pattern": "^[a-zA-Z0-9_.-]+(?:\\/[a-zA-Z0-9_.-]+)*$"
+                                }
+                              }
+                            },
+                            "required": [
+                              "required",
+                              "testFiles"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "changes": {
+                            "type": "object",
+                            "properties": {
+                              "allowed": {
+                                "minItems": 1,
+                                "maxItems": 30,
+                                "type": "array",
+                                "items": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 180,
+                                      "pattern": "^[a-zA-Z0-9_.-]+(?:\\/[a-zA-Z0-9_.-]+)*$"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "pattern": ".*\\/\\*\\*$"
+                                    }
+                                  ]
+                                }
+                              },
+                              "protected": {
+                                "maxItems": 30,
+                                "type": "array",
+                                "items": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 180,
+                                      "pattern": "^[a-zA-Z0-9_.-]+(?:\\/[a-zA-Z0-9_.-]+)*$"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "pattern": ".*\\/\\*\\*$"
+                                    }
+                                  ]
+                                }
+                              },
+                              "maximumFiles": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 6
+                              },
+                              "existingTests": {
+                                "type": "string",
+                                "const": "append-only"
+                              }
+                            },
+                            "required": [
+                              "allowed",
+                              "protected",
+                              "maximumFiles",
+                              "existingTests"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "publication": {
+                            "type": "string",
+                            "const": "draft"
                           }
                         },
                         "required": [
-                          "allowed",
-                          "protected",
-                          "maximumFiles",
-                          "existingTests"
+                          "schemaVersion",
+                          "id",
+                          "repository",
+                          "repositoryId",
+                          "baseBranch",
+                          "execution",
+                          "verification",
+                          "changes",
+                          "publication"
                         ],
                         "additionalProperties": false
-                      },
-                      "publication": {
-                        "type": "string",
-                        "const": "draft"
                       }
-                    },
-                    "required": [
-                      "schemaVersion",
-                      "id",
-                      "repository",
-                      "repositoryId",
-                      "baseBranch",
-                      "execution",
-                      "verification",
-                      "changes",
-                      "publication"
-                    ],
-                    "additionalProperties": false
+                    ]
                   },
                   "task": {
                     "type": "object",
@@ -2026,29 +2210,58 @@
                     "maxItems": 8,
                     "type": "array",
                     "items": {
-                      "oneOf": [
+                      "anyOf": [
                         {
-                          "type": "object",
-                          "properties": {
-                            "id": {
-                              "type": "string",
-                              "pattern": "^task-[a-z][a-z0-9-]{0,50}$"
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string",
+                                  "pattern": "^task-[a-z][a-z0-9-]{0,50}$"
+                                },
+                                "kind": {
+                                  "type": "string",
+                                  "const": "go-test"
+                                },
+                                "test": {
+                                  "type": "string",
+                                  "pattern": "^Test[A-Za-z0-9_]{1,100}$"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "kind",
+                                "test"
+                              ],
+                              "additionalProperties": false
                             },
-                            "kind": {
-                              "type": "string",
-                              "const": "go-test"
-                            },
-                            "test": {
-                              "type": "string",
-                              "pattern": "^Test[A-Za-z0-9_]{1,100}$"
+                            {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string",
+                                  "pattern": "^task-[a-z][a-z0-9-]{0,50}$"
+                                },
+                                "kind": {
+                                  "type": "string",
+                                  "const": "file-changed"
+                                },
+                                "path": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 180,
+                                  "pattern": "^[a-zA-Z0-9_.-]+(?:\\/[a-zA-Z0-9_.-]+)*$"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "kind",
+                                "path"
+                              ],
+                              "additionalProperties": false
                             }
-                          },
-                          "required": [
-                            "id",
-                            "kind",
-                            "test"
-                          ],
-                          "additionalProperties": false
+                          ]
                         },
                         {
                           "type": "object",
@@ -2059,19 +2272,17 @@
                             },
                             "kind": {
                               "type": "string",
-                              "const": "file-changed"
+                              "const": "node-check"
                             },
-                            "path": {
+                            "function": {
                               "type": "string",
-                              "minLength": 1,
-                              "maxLength": 180,
-                              "pattern": "^[a-zA-Z0-9_.-]+(?:\\/[a-zA-Z0-9_.-]+)*$"
+                              "pattern": "^check[A-Za-z0-9_]{1,100}$"
                             }
                           },
                           "required": [
                             "id",
                             "kind",
-                            "path"
+                            "function"
                           ],
                           "additionalProperties": false
                         }
@@ -2230,7 +2441,9 @@
                             "gofmt",
                             "bubble-default",
                             "bubble-colors",
-                            "bubble-invalid"
+                            "bubble-invalid",
+                            "node-typecheck",
+                            "node-tests"
                           ]
                         },
                         {
@@ -2353,6 +2566,13 @@
                 "beforeHash": {
                   "type": "string",
                   "pattern": "^[a-f0-9]{64}$"
+                },
+                "operation": {
+                  "type": "string",
+                  "enum": [
+                    "replace",
+                    "append"
+                  ]
                 },
                 "content": {
                   "type": "string",
@@ -2398,7 +2618,7 @@
       "inputVersion": 2,
       "resultVersion": 2,
       "runVersion": 2,
-      "promptVersion": "scoped-patch-project-v1",
+      "promptVersion": "scoped-patch-project-v2",
       "module": "src/project-change/agents.ts",
       "export": "patchProject",
       "inputSchema": {
@@ -3207,7 +3427,9 @@
                                   "gofmt",
                                   "bubble-default",
                                   "bubble-colors",
-                                  "bubble-invalid"
+                                  "bubble-invalid",
+                                  "node-typecheck",
+                                  "node-tests"
                                 ]
                               },
                               {
@@ -4073,7 +4295,9 @@
                                   "gofmt",
                                   "bubble-default",
                                   "bubble-colors",
-                                  "bubble-invalid"
+                                  "bubble-invalid",
+                                  "node-typecheck",
+                                  "node-tests"
                                 ]
                               },
                               {
@@ -4122,176 +4346,356 @@
                     "maxLength": 1500
                   },
                   "repositoryProfile": {
-                    "type": "object",
-                    "properties": {
-                      "schemaVersion": {
-                        "type": "number",
-                        "const": 1
-                      },
-                      "id": {
-                        "type": "string",
-                        "pattern": "^[a-z][a-z0-9-]{0,70}$"
-                      },
-                      "repository": {
-                        "type": "string",
-                        "pattern": "^bketelsen\\/[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}$"
-                      },
-                      "repositoryId": {
-                        "type": "integer",
-                        "exclusiveMinimum": 0,
-                        "maximum": 9007199254740991
-                      },
-                      "baseBranch": {
-                        "type": "string",
-                        "pattern": "^[\\w/-]{1,100}$"
-                      },
-                      "execution": {
+                    "anyOf": [
+                      {
                         "type": "object",
                         "properties": {
-                          "adapter": {
-                            "type": "string",
-                            "const": "go-module-v1"
+                          "schemaVersion": {
+                            "type": "number",
+                            "const": 1
                           },
-                          "sandbox": {
+                          "id": {
                             "type": "string",
-                            "const": "offline-go-v1"
+                            "pattern": "^[a-z][a-z0-9-]{0,70}$"
                           },
-                          "toolchain": {
+                          "repository": {
+                            "type": "string",
+                            "pattern": "^bketelsen\\/[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}$"
+                          },
+                          "repositoryId": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "baseBranch": {
+                            "type": "string",
+                            "pattern": "^[\\w/-]{1,100}$"
+                          },
+                          "execution": {
                             "type": "object",
                             "properties": {
-                              "version": {
+                              "adapter": {
                                 "type": "string",
-                                "pattern": "^go version go1\\.\\d+\\.\\d+ linux\\/amd64$"
+                                "const": "go-module-v1"
                               },
-                              "digest": {
+                              "sandbox": {
                                 "type": "string",
-                                "pattern": "^[a-f0-9]{64}$"
+                                "const": "offline-go-v1"
+                              },
+                              "toolchain": {
+                                "type": "object",
+                                "properties": {
+                                  "version": {
+                                    "type": "string",
+                                    "pattern": "^go version go1\\.\\d+\\.\\d+ linux\\/amd64$"
+                                  },
+                                  "digest": {
+                                    "type": "string",
+                                    "pattern": "^[a-f0-9]{64}$"
+                                  }
+                                },
+                                "required": [
+                                  "version",
+                                  "digest"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "dependencies": {
+                                "type": "string",
+                                "const": "public-checksummed-go-v1"
                               }
                             },
                             "required": [
-                              "version",
-                              "digest"
+                              "adapter",
+                              "sandbox",
+                              "toolchain",
+                              "dependencies"
                             ],
                             "additionalProperties": false
                           },
-                          "dependencies": {
-                            "type": "string",
-                            "const": "public-checksummed-go-v1"
-                          }
-                        },
-                        "required": [
-                          "adapter",
-                          "sandbox",
-                          "toolchain",
-                          "dependencies"
-                        ],
-                        "additionalProperties": false
-                      },
-                      "verification": {
-                        "type": "object",
-                        "properties": {
-                          "required": {
-                            "type": "array",
-                            "prefixItems": [
-                              {
-                                "type": "string",
-                                "const": "go-build"
-                              },
-                              {
-                                "type": "string",
-                                "const": "go-test"
-                              },
-                              {
-                                "type": "string",
-                                "const": "go-vet"
-                              },
-                              {
-                                "type": "string",
-                                "const": "gofmt"
+                          "verification": {
+                            "type": "object",
+                            "properties": {
+                              "required": {
+                                "type": "array",
+                                "prefixItems": [
+                                  {
+                                    "type": "string",
+                                    "const": "go-build"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "go-test"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "go-vet"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "gofmt"
+                                  }
+                                ]
                               }
-                            ]
+                            },
+                            "required": [
+                              "required"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "changes": {
+                            "type": "object",
+                            "properties": {
+                              "allowed": {
+                                "minItems": 1,
+                                "maxItems": 30,
+                                "type": "array",
+                                "items": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 180,
+                                      "pattern": "^[a-zA-Z0-9_.-]+(?:\\/[a-zA-Z0-9_.-]+)*$"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "pattern": ".*\\/\\*\\*$"
+                                    }
+                                  ]
+                                }
+                              },
+                              "protected": {
+                                "maxItems": 30,
+                                "type": "array",
+                                "items": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 180,
+                                      "pattern": "^[a-zA-Z0-9_.-]+(?:\\/[a-zA-Z0-9_.-]+)*$"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "pattern": ".*\\/\\*\\*$"
+                                    }
+                                  ]
+                                }
+                              },
+                              "maximumFiles": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 6
+                              },
+                              "existingTests": {
+                                "type": "string",
+                                "const": "append-only"
+                              }
+                            },
+                            "required": [
+                              "allowed",
+                              "protected",
+                              "maximumFiles",
+                              "existingTests"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "publication": {
+                            "type": "string",
+                            "const": "draft"
                           }
                         },
                         "required": [
-                          "required"
+                          "schemaVersion",
+                          "id",
+                          "repository",
+                          "repositoryId",
+                          "baseBranch",
+                          "execution",
+                          "verification",
+                          "changes",
+                          "publication"
                         ],
                         "additionalProperties": false
                       },
-                      "changes": {
+                      {
                         "type": "object",
                         "properties": {
-                          "allowed": {
-                            "minItems": 1,
-                            "maxItems": 30,
-                            "type": "array",
-                            "items": {
-                              "anyOf": [
-                                {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 180,
-                                  "pattern": "^[a-zA-Z0-9_.-]+(?:\\/[a-zA-Z0-9_.-]+)*$"
-                                },
-                                {
-                                  "type": "string",
-                                  "pattern": ".*\\/\\*\\*$"
-                                }
-                              ]
-                            }
+                          "schemaVersion": {
+                            "type": "number",
+                            "const": 1
                           },
-                          "protected": {
-                            "maxItems": 30,
-                            "type": "array",
-                            "items": {
-                              "anyOf": [
-                                {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 180,
-                                  "pattern": "^[a-zA-Z0-9_.-]+(?:\\/[a-zA-Z0-9_.-]+)*$"
-                                },
-                                {
-                                  "type": "string",
-                                  "pattern": ".*\\/\\*\\*$"
-                                }
-                              ]
-                            }
-                          },
-                          "maximumFiles": {
-                            "type": "integer",
-                            "minimum": 1,
-                            "maximum": 6
-                          },
-                          "existingTests": {
+                          "id": {
                             "type": "string",
-                            "const": "append-only"
+                            "pattern": "^[a-z][a-z0-9-]{0,70}$"
+                          },
+                          "repository": {
+                            "type": "string",
+                            "pattern": "^bketelsen\\/[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}$"
+                          },
+                          "repositoryId": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "baseBranch": {
+                            "type": "string",
+                            "pattern": "^[\\w/-]{1,100}$"
+                          },
+                          "execution": {
+                            "type": "object",
+                            "properties": {
+                              "adapter": {
+                                "type": "string",
+                                "const": "node-typescript-v1"
+                              },
+                              "sandbox": {
+                                "type": "string",
+                                "const": "offline-node-v1"
+                              },
+                              "toolchain": {
+                                "type": "object",
+                                "properties": {
+                                  "version": {
+                                    "type": "string",
+                                    "pattern": "^v24\\.\\d+\\.\\d+$"
+                                  },
+                                  "digest": {
+                                    "type": "string",
+                                    "pattern": "^[a-f0-9]{64}$"
+                                  }
+                                },
+                                "required": [
+                                  "version",
+                                  "digest"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "dependencies": {
+                                "type": "string",
+                                "const": "public-locked-npm-v1"
+                              }
+                            },
+                            "required": [
+                              "adapter",
+                              "sandbox",
+                              "toolchain",
+                              "dependencies"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "verification": {
+                            "type": "object",
+                            "properties": {
+                              "required": {
+                                "type": "array",
+                                "prefixItems": [
+                                  {
+                                    "type": "string",
+                                    "const": "node-typecheck"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "node-tests"
+                                  }
+                                ]
+                              },
+                              "testFiles": {
+                                "minItems": 1,
+                                "maxItems": 20,
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 180,
+                                  "pattern": "^[a-zA-Z0-9_.-]+(?:\\/[a-zA-Z0-9_.-]+)*$"
+                                }
+                              }
+                            },
+                            "required": [
+                              "required",
+                              "testFiles"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "changes": {
+                            "type": "object",
+                            "properties": {
+                              "allowed": {
+                                "minItems": 1,
+                                "maxItems": 30,
+                                "type": "array",
+                                "items": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 180,
+                                      "pattern": "^[a-zA-Z0-9_.-]+(?:\\/[a-zA-Z0-9_.-]+)*$"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "pattern": ".*\\/\\*\\*$"
+                                    }
+                                  ]
+                                }
+                              },
+                              "protected": {
+                                "maxItems": 30,
+                                "type": "array",
+                                "items": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 180,
+                                      "pattern": "^[a-zA-Z0-9_.-]+(?:\\/[a-zA-Z0-9_.-]+)*$"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "pattern": ".*\\/\\*\\*$"
+                                    }
+                                  ]
+                                }
+                              },
+                              "maximumFiles": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 6
+                              },
+                              "existingTests": {
+                                "type": "string",
+                                "const": "append-only"
+                              }
+                            },
+                            "required": [
+                              "allowed",
+                              "protected",
+                              "maximumFiles",
+                              "existingTests"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "publication": {
+                            "type": "string",
+                            "const": "draft"
                           }
                         },
                         "required": [
-                          "allowed",
-                          "protected",
-                          "maximumFiles",
-                          "existingTests"
+                          "schemaVersion",
+                          "id",
+                          "repository",
+                          "repositoryId",
+                          "baseBranch",
+                          "execution",
+                          "verification",
+                          "changes",
+                          "publication"
                         ],
                         "additionalProperties": false
-                      },
-                      "publication": {
-                        "type": "string",
-                        "const": "draft"
                       }
-                    },
-                    "required": [
-                      "schemaVersion",
-                      "id",
-                      "repository",
-                      "repositoryId",
-                      "baseBranch",
-                      "execution",
-                      "verification",
-                      "changes",
-                      "publication"
-                    ],
-                    "additionalProperties": false
+                    ]
                   },
                   "task": {
                     "type": "object",
@@ -4416,29 +4820,58 @@
                     "maxItems": 8,
                     "type": "array",
                     "items": {
-                      "oneOf": [
+                      "anyOf": [
                         {
-                          "type": "object",
-                          "properties": {
-                            "id": {
-                              "type": "string",
-                              "pattern": "^task-[a-z][a-z0-9-]{0,50}$"
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string",
+                                  "pattern": "^task-[a-z][a-z0-9-]{0,50}$"
+                                },
+                                "kind": {
+                                  "type": "string",
+                                  "const": "go-test"
+                                },
+                                "test": {
+                                  "type": "string",
+                                  "pattern": "^Test[A-Za-z0-9_]{1,100}$"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "kind",
+                                "test"
+                              ],
+                              "additionalProperties": false
                             },
-                            "kind": {
-                              "type": "string",
-                              "const": "go-test"
-                            },
-                            "test": {
-                              "type": "string",
-                              "pattern": "^Test[A-Za-z0-9_]{1,100}$"
+                            {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string",
+                                  "pattern": "^task-[a-z][a-z0-9-]{0,50}$"
+                                },
+                                "kind": {
+                                  "type": "string",
+                                  "const": "file-changed"
+                                },
+                                "path": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 180,
+                                  "pattern": "^[a-zA-Z0-9_.-]+(?:\\/[a-zA-Z0-9_.-]+)*$"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "kind",
+                                "path"
+                              ],
+                              "additionalProperties": false
                             }
-                          },
-                          "required": [
-                            "id",
-                            "kind",
-                            "test"
-                          ],
-                          "additionalProperties": false
+                          ]
                         },
                         {
                           "type": "object",
@@ -4449,19 +4882,17 @@
                             },
                             "kind": {
                               "type": "string",
-                              "const": "file-changed"
+                              "const": "node-check"
                             },
-                            "path": {
+                            "function": {
                               "type": "string",
-                              "minLength": 1,
-                              "maxLength": 180,
-                              "pattern": "^[a-zA-Z0-9_.-]+(?:\\/[a-zA-Z0-9_.-]+)*$"
+                              "pattern": "^check[A-Za-z0-9_]{1,100}$"
                             }
                           },
                           "required": [
                             "id",
                             "kind",
-                            "path"
+                            "function"
                           ],
                           "additionalProperties": false
                         }
@@ -4620,7 +5051,9 @@
                             "gofmt",
                             "bubble-default",
                             "bubble-colors",
-                            "bubble-invalid"
+                            "bubble-invalid",
+                            "node-typecheck",
+                            "node-tests"
                           ]
                         },
                         {
@@ -4743,6 +5176,13 @@
                 "beforeHash": {
                   "type": "string",
                   "pattern": "^[a-f0-9]{64}$"
+                },
+                "operation": {
+                  "type": "string",
+                  "enum": [
+                    "replace",
+                    "append"
+                  ]
                 },
                 "content": {
                   "type": "string",
@@ -4788,7 +5228,7 @@
       "inputVersion": 2,
       "resultVersion": 2,
       "runVersion": 2,
-      "promptVersion": "scoped-patch-project-v1",
+      "promptVersion": "scoped-patch-project-v2",
       "module": "src/project-change/agents.ts",
       "export": "patchProject",
       "inputSchema": {
@@ -5597,7 +6037,9 @@
                                   "gofmt",
                                   "bubble-default",
                                   "bubble-colors",
-                                  "bubble-invalid"
+                                  "bubble-invalid",
+                                  "node-typecheck",
+                                  "node-tests"
                                 ]
                               },
                               {
@@ -6463,7 +6905,9 @@
                                   "gofmt",
                                   "bubble-default",
                                   "bubble-colors",
-                                  "bubble-invalid"
+                                  "bubble-invalid",
+                                  "node-typecheck",
+                                  "node-tests"
                                 ]
                               },
                               {
@@ -6512,176 +6956,356 @@
                     "maxLength": 1500
                   },
                   "repositoryProfile": {
-                    "type": "object",
-                    "properties": {
-                      "schemaVersion": {
-                        "type": "number",
-                        "const": 1
-                      },
-                      "id": {
-                        "type": "string",
-                        "pattern": "^[a-z][a-z0-9-]{0,70}$"
-                      },
-                      "repository": {
-                        "type": "string",
-                        "pattern": "^bketelsen\\/[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}$"
-                      },
-                      "repositoryId": {
-                        "type": "integer",
-                        "exclusiveMinimum": 0,
-                        "maximum": 9007199254740991
-                      },
-                      "baseBranch": {
-                        "type": "string",
-                        "pattern": "^[\\w/-]{1,100}$"
-                      },
-                      "execution": {
+                    "anyOf": [
+                      {
                         "type": "object",
                         "properties": {
-                          "adapter": {
-                            "type": "string",
-                            "const": "go-module-v1"
+                          "schemaVersion": {
+                            "type": "number",
+                            "const": 1
                           },
-                          "sandbox": {
+                          "id": {
                             "type": "string",
-                            "const": "offline-go-v1"
+                            "pattern": "^[a-z][a-z0-9-]{0,70}$"
                           },
-                          "toolchain": {
+                          "repository": {
+                            "type": "string",
+                            "pattern": "^bketelsen\\/[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}$"
+                          },
+                          "repositoryId": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "baseBranch": {
+                            "type": "string",
+                            "pattern": "^[\\w/-]{1,100}$"
+                          },
+                          "execution": {
                             "type": "object",
                             "properties": {
-                              "version": {
+                              "adapter": {
                                 "type": "string",
-                                "pattern": "^go version go1\\.\\d+\\.\\d+ linux\\/amd64$"
+                                "const": "go-module-v1"
                               },
-                              "digest": {
+                              "sandbox": {
                                 "type": "string",
-                                "pattern": "^[a-f0-9]{64}$"
+                                "const": "offline-go-v1"
+                              },
+                              "toolchain": {
+                                "type": "object",
+                                "properties": {
+                                  "version": {
+                                    "type": "string",
+                                    "pattern": "^go version go1\\.\\d+\\.\\d+ linux\\/amd64$"
+                                  },
+                                  "digest": {
+                                    "type": "string",
+                                    "pattern": "^[a-f0-9]{64}$"
+                                  }
+                                },
+                                "required": [
+                                  "version",
+                                  "digest"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "dependencies": {
+                                "type": "string",
+                                "const": "public-checksummed-go-v1"
                               }
                             },
                             "required": [
-                              "version",
-                              "digest"
+                              "adapter",
+                              "sandbox",
+                              "toolchain",
+                              "dependencies"
                             ],
                             "additionalProperties": false
                           },
-                          "dependencies": {
-                            "type": "string",
-                            "const": "public-checksummed-go-v1"
-                          }
-                        },
-                        "required": [
-                          "adapter",
-                          "sandbox",
-                          "toolchain",
-                          "dependencies"
-                        ],
-                        "additionalProperties": false
-                      },
-                      "verification": {
-                        "type": "object",
-                        "properties": {
-                          "required": {
-                            "type": "array",
-                            "prefixItems": [
-                              {
-                                "type": "string",
-                                "const": "go-build"
-                              },
-                              {
-                                "type": "string",
-                                "const": "go-test"
-                              },
-                              {
-                                "type": "string",
-                                "const": "go-vet"
-                              },
-                              {
-                                "type": "string",
-                                "const": "gofmt"
+                          "verification": {
+                            "type": "object",
+                            "properties": {
+                              "required": {
+                                "type": "array",
+                                "prefixItems": [
+                                  {
+                                    "type": "string",
+                                    "const": "go-build"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "go-test"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "go-vet"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "gofmt"
+                                  }
+                                ]
                               }
-                            ]
+                            },
+                            "required": [
+                              "required"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "changes": {
+                            "type": "object",
+                            "properties": {
+                              "allowed": {
+                                "minItems": 1,
+                                "maxItems": 30,
+                                "type": "array",
+                                "items": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 180,
+                                      "pattern": "^[a-zA-Z0-9_.-]+(?:\\/[a-zA-Z0-9_.-]+)*$"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "pattern": ".*\\/\\*\\*$"
+                                    }
+                                  ]
+                                }
+                              },
+                              "protected": {
+                                "maxItems": 30,
+                                "type": "array",
+                                "items": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 180,
+                                      "pattern": "^[a-zA-Z0-9_.-]+(?:\\/[a-zA-Z0-9_.-]+)*$"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "pattern": ".*\\/\\*\\*$"
+                                    }
+                                  ]
+                                }
+                              },
+                              "maximumFiles": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 6
+                              },
+                              "existingTests": {
+                                "type": "string",
+                                "const": "append-only"
+                              }
+                            },
+                            "required": [
+                              "allowed",
+                              "protected",
+                              "maximumFiles",
+                              "existingTests"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "publication": {
+                            "type": "string",
+                            "const": "draft"
                           }
                         },
                         "required": [
-                          "required"
+                          "schemaVersion",
+                          "id",
+                          "repository",
+                          "repositoryId",
+                          "baseBranch",
+                          "execution",
+                          "verification",
+                          "changes",
+                          "publication"
                         ],
                         "additionalProperties": false
                       },
-                      "changes": {
+                      {
                         "type": "object",
                         "properties": {
-                          "allowed": {
-                            "minItems": 1,
-                            "maxItems": 30,
-                            "type": "array",
-                            "items": {
-                              "anyOf": [
-                                {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 180,
-                                  "pattern": "^[a-zA-Z0-9_.-]+(?:\\/[a-zA-Z0-9_.-]+)*$"
-                                },
-                                {
-                                  "type": "string",
-                                  "pattern": ".*\\/\\*\\*$"
-                                }
-                              ]
-                            }
+                          "schemaVersion": {
+                            "type": "number",
+                            "const": 1
                           },
-                          "protected": {
-                            "maxItems": 30,
-                            "type": "array",
-                            "items": {
-                              "anyOf": [
-                                {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 180,
-                                  "pattern": "^[a-zA-Z0-9_.-]+(?:\\/[a-zA-Z0-9_.-]+)*$"
-                                },
-                                {
-                                  "type": "string",
-                                  "pattern": ".*\\/\\*\\*$"
-                                }
-                              ]
-                            }
-                          },
-                          "maximumFiles": {
-                            "type": "integer",
-                            "minimum": 1,
-                            "maximum": 6
-                          },
-                          "existingTests": {
+                          "id": {
                             "type": "string",
-                            "const": "append-only"
+                            "pattern": "^[a-z][a-z0-9-]{0,70}$"
+                          },
+                          "repository": {
+                            "type": "string",
+                            "pattern": "^bketelsen\\/[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}$"
+                          },
+                          "repositoryId": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "baseBranch": {
+                            "type": "string",
+                            "pattern": "^[\\w/-]{1,100}$"
+                          },
+                          "execution": {
+                            "type": "object",
+                            "properties": {
+                              "adapter": {
+                                "type": "string",
+                                "const": "node-typescript-v1"
+                              },
+                              "sandbox": {
+                                "type": "string",
+                                "const": "offline-node-v1"
+                              },
+                              "toolchain": {
+                                "type": "object",
+                                "properties": {
+                                  "version": {
+                                    "type": "string",
+                                    "pattern": "^v24\\.\\d+\\.\\d+$"
+                                  },
+                                  "digest": {
+                                    "type": "string",
+                                    "pattern": "^[a-f0-9]{64}$"
+                                  }
+                                },
+                                "required": [
+                                  "version",
+                                  "digest"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "dependencies": {
+                                "type": "string",
+                                "const": "public-locked-npm-v1"
+                              }
+                            },
+                            "required": [
+                              "adapter",
+                              "sandbox",
+                              "toolchain",
+                              "dependencies"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "verification": {
+                            "type": "object",
+                            "properties": {
+                              "required": {
+                                "type": "array",
+                                "prefixItems": [
+                                  {
+                                    "type": "string",
+                                    "const": "node-typecheck"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "node-tests"
+                                  }
+                                ]
+                              },
+                              "testFiles": {
+                                "minItems": 1,
+                                "maxItems": 20,
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 180,
+                                  "pattern": "^[a-zA-Z0-9_.-]+(?:\\/[a-zA-Z0-9_.-]+)*$"
+                                }
+                              }
+                            },
+                            "required": [
+                              "required",
+                              "testFiles"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "changes": {
+                            "type": "object",
+                            "properties": {
+                              "allowed": {
+                                "minItems": 1,
+                                "maxItems": 30,
+                                "type": "array",
+                                "items": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 180,
+                                      "pattern": "^[a-zA-Z0-9_.-]+(?:\\/[a-zA-Z0-9_.-]+)*$"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "pattern": ".*\\/\\*\\*$"
+                                    }
+                                  ]
+                                }
+                              },
+                              "protected": {
+                                "maxItems": 30,
+                                "type": "array",
+                                "items": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 180,
+                                      "pattern": "^[a-zA-Z0-9_.-]+(?:\\/[a-zA-Z0-9_.-]+)*$"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "pattern": ".*\\/\\*\\*$"
+                                    }
+                                  ]
+                                }
+                              },
+                              "maximumFiles": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 6
+                              },
+                              "existingTests": {
+                                "type": "string",
+                                "const": "append-only"
+                              }
+                            },
+                            "required": [
+                              "allowed",
+                              "protected",
+                              "maximumFiles",
+                              "existingTests"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "publication": {
+                            "type": "string",
+                            "const": "draft"
                           }
                         },
                         "required": [
-                          "allowed",
-                          "protected",
-                          "maximumFiles",
-                          "existingTests"
+                          "schemaVersion",
+                          "id",
+                          "repository",
+                          "repositoryId",
+                          "baseBranch",
+                          "execution",
+                          "verification",
+                          "changes",
+                          "publication"
                         ],
                         "additionalProperties": false
-                      },
-                      "publication": {
-                        "type": "string",
-                        "const": "draft"
                       }
-                    },
-                    "required": [
-                      "schemaVersion",
-                      "id",
-                      "repository",
-                      "repositoryId",
-                      "baseBranch",
-                      "execution",
-                      "verification",
-                      "changes",
-                      "publication"
-                    ],
-                    "additionalProperties": false
+                    ]
                   },
                   "task": {
                     "type": "object",
@@ -6806,29 +7430,58 @@
                     "maxItems": 8,
                     "type": "array",
                     "items": {
-                      "oneOf": [
+                      "anyOf": [
                         {
-                          "type": "object",
-                          "properties": {
-                            "id": {
-                              "type": "string",
-                              "pattern": "^task-[a-z][a-z0-9-]{0,50}$"
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string",
+                                  "pattern": "^task-[a-z][a-z0-9-]{0,50}$"
+                                },
+                                "kind": {
+                                  "type": "string",
+                                  "const": "go-test"
+                                },
+                                "test": {
+                                  "type": "string",
+                                  "pattern": "^Test[A-Za-z0-9_]{1,100}$"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "kind",
+                                "test"
+                              ],
+                              "additionalProperties": false
                             },
-                            "kind": {
-                              "type": "string",
-                              "const": "go-test"
-                            },
-                            "test": {
-                              "type": "string",
-                              "pattern": "^Test[A-Za-z0-9_]{1,100}$"
+                            {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string",
+                                  "pattern": "^task-[a-z][a-z0-9-]{0,50}$"
+                                },
+                                "kind": {
+                                  "type": "string",
+                                  "const": "file-changed"
+                                },
+                                "path": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 180,
+                                  "pattern": "^[a-zA-Z0-9_.-]+(?:\\/[a-zA-Z0-9_.-]+)*$"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "kind",
+                                "path"
+                              ],
+                              "additionalProperties": false
                             }
-                          },
-                          "required": [
-                            "id",
-                            "kind",
-                            "test"
-                          ],
-                          "additionalProperties": false
+                          ]
                         },
                         {
                           "type": "object",
@@ -6839,19 +7492,17 @@
                             },
                             "kind": {
                               "type": "string",
-                              "const": "file-changed"
+                              "const": "node-check"
                             },
-                            "path": {
+                            "function": {
                               "type": "string",
-                              "minLength": 1,
-                              "maxLength": 180,
-                              "pattern": "^[a-zA-Z0-9_.-]+(?:\\/[a-zA-Z0-9_.-]+)*$"
+                              "pattern": "^check[A-Za-z0-9_]{1,100}$"
                             }
                           },
                           "required": [
                             "id",
                             "kind",
-                            "path"
+                            "function"
                           ],
                           "additionalProperties": false
                         }
@@ -7010,7 +7661,9 @@
                             "gofmt",
                             "bubble-default",
                             "bubble-colors",
-                            "bubble-invalid"
+                            "bubble-invalid",
+                            "node-typecheck",
+                            "node-tests"
                           ]
                         },
                         {
@@ -7133,6 +7786,13 @@
                 "beforeHash": {
                   "type": "string",
                   "pattern": "^[a-f0-9]{64}$"
+                },
+                "operation": {
+                  "type": "string",
+                  "enum": [
+                    "replace",
+                    "append"
+                  ]
                 },
                 "content": {
                   "type": "string",
