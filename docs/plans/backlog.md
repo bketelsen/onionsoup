@@ -123,10 +123,14 @@ Evidence: [operator console trial](records/operator-console-2026-09-18.md).
 ## Phase 10 — Change proposals (planned)
 
 - Start the [investigation-to-PR plan](investigation-to-pr.md) with a read-only
-  proposal agent, following the [boundary exploration](../design/investigation-to-pr.md).
-- **Done when:** a few frozen investigation packets produce grounded change scope,
-  measurable acceptance criteria, competing hypotheses and explicit missing evidence,
+  shared proposal agent for bugs and features, following the [boundary exploration](../design/investigation-to-pr.md).
+- **Done when:** frozen bug packets and feature requirements/context briefs produce
+  grounded change scope, measurable acceptance criteria, evidence-linked rationale
+  and explicit missing information,
   giving a maintainer a concrete decision before edits or test execution.
+- Preserve current bug-only location. Define a feature preparation handoff, then
+  reuse downstream workers with bug regression or feature acceptance/compatibility
+  obligations, following [ADR-0013](../adr/0013-converge-bugs-and-features-on-a-shared-change-proposal.md).
 - Sandbox execution, patches, independent review and explicit draft publication are
   later separately gated phases. Current OSS agents retain their read-only boundary.
 

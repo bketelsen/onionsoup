@@ -155,7 +155,10 @@ including the initial date-query defect and corrected follow-up.
 ## Phase 14 — Investigation toward a change proposal (planned)
 
 - Follow the [change-workflow exploration](../design/investigation-to-pr.md) and
-  its [staged plan](investigation-to-pr.md), beginning with read-only proposals.
+  its [staged plan](investigation-to-pr.md), beginning with shared read-only proposals
+  for bugs and features under [ADR-0013](../adr/0013-converge-bugs-and-features-on-a-shared-change-proposal.md).
+  Distinct preparation paths converge on common patch, verification, review and
+  publication workers; verification obligations remain specific to each change kind.
 - **Done when:** a maintainer can assess a grounded scope and verification proposal
   before granting workspace, execution or remote-publication authority. Subsequent
   phases have their own observable gates; no repair or PR creation ships with P9.

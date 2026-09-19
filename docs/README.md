@@ -102,8 +102,9 @@ Raw run links are optional local evidence; those files are intentionally not pub
 - [Local operator console design](design/operator-console.md)
 - [Local operator console contract](specs/operator-console.md)
 - [Operator console trial](plans/records/operator-console-2026-09-18.md)
-- [Investigation-to-PR boundary exploration](design/investigation-to-pr.md)
-- [Staged investigation-to-PR plan](plans/investigation-to-pr.md)
+- [ADR-0013: shared bug and feature change proposals](adr/0013-converge-bugs-and-features-on-a-shared-change-proposal.md)
+- [Bug/feature-to-PR boundary exploration](design/investigation-to-pr.md)
+- [Staged bug/feature-to-PR plan](plans/investigation-to-pr.md)
 
 ## Related repository material
 

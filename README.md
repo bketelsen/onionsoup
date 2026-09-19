@@ -305,5 +305,7 @@ checkout using the [console contract](docs/specs/operator-console.md). Open
 `http://127.0.0.1:8765/`. Actions retain durable IDs and never broaden the existing
 agents into code execution or GitHub writes. The
 [investigation-to-PR plan](docs/plans/investigation-to-pr.md) records the proposed
-next boundaries: change proposal, isolated verification, patch/review, and explicitly
-authorized draft publication.
+next boundaries for bugs and features: distinct evidence/requirements preparation,
+a shared change proposal, isolated verification, patch/review, and explicitly
+authorized draft publication. Current feature classification still makes no project
+acceptance decision; feature-specific preparation remains planned.
