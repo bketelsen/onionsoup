@@ -32,3 +32,5 @@ export function evaluateObservations(raw:any,seeds:ReturnType<typeof seedsFrom>)
     check('detail-unchanged',['','/json','/events'].every(s=>get('/'+seeds[0].bundle.publicationId+s+'?status=bogus').status===200)),
     check('typecheck',raw.typecheck?.code===0),check('adjacent-console',raw.adjacent?.code===0&&/pass [1-9]/.test(raw.adjacent?.output??''))];
 }
+
+export function documentationSatisfied(text:string) {return /GET \/publications/.test(text)&&statuses.every(s=>text.includes(s))&&/all/i.test(text)&&/default|omitt|without|no [`\"]?status/i.test(text)&&/\b400\b/.test(text)&&/repeat|duplicate/i.test(text)&&/empty/i.test(text)&&/bounded|300/.test(text)&&/filter/i.test(text);}

@@ -45,6 +45,24 @@ changes invalidate it rather than silently carrying its authority forward.
   Installed dependency tree digest:
   `49b88bbb722fae21173b9693b42eebe1cbe5c07d16709ee377dda1253f3b84af`.
 
+## First candidate and documentation-check correction
+
+A second live proposal at `41d46359b8ea03cc5fb8942a12eeea5dbec6ddf2` produced six
+accepted criteria. The first scoped patch changed only the HTTP list route and
+specification; all eight behavioral/type/adjacent checks passed. The workflow
+stopped before review because the documentation predicate demanded literal
+`?status=` even though the candidate correctly documented `status=all` and all
+required rules. This is a host false negative, not evidence of a bad feature patch.
+The attempt remains `verification_failed` under ignored
+`runs/project-trials/publication-filter-2026-09-19/candidate/`.
+
+The host check now admits natural query prose while requiring supported states,
+default, HTTP 400, repeated/empty behavior, filtering and bounded coverage. A
+regression test covers the false negative and missing-rule failures. This remains
+a limited deterministic check; the reviewer must assess documentation meaning.
+The profile hash changes, so a new proposal/job/base is required rather than
+rewriting the first candidate's receipt or carrying its acceptance forward.
+
 ## Limitations and next step
 
 This preflight does not establish feature implementation quality. The final live

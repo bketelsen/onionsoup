@@ -16,7 +16,7 @@ import {proposeProject,acceptProject,validateParent} from '../src/project-change
 import {validateJob,validateResult,CheckId,Verification,Dependency,paths,type Job} from '../src/project-change/contracts.ts';
 import {executeProject} from '../src/project-change/recipe.ts';
 import {verifyProject} from '../src/project-change/sandbox.ts';
-import {profileHash,seedsFrom,evaluateObservations} from '../src/project-change/profile.ts';
+import {profileHash,seedsFrom,evaluateObservations,documentationSatisfied,statuses} from '../src/project-change/profile.ts';
 import {validateProject,projectInput} from '../src/project-change/record.ts';
 import {prepareProjectPublication} from '../src/project-change/publication.ts';
 import {snapshot,treeDigest} from '../src/project-change/source.ts';
@@ -73,4 +73,10 @@ test('real project sandbox baseline preserves compatibility and reports missing 
  const r=await verifyProject(process.cwd(),f.job.baseCommit,f.job,rt as any,deps,seedsFrom(f.seed),{directory:join(f.root,'real'),phase:'baseline'});
  assert.equal(r.status,'checks_failed');for(const id of ['default-history','coverage-preserved','detail-unchanged','typecheck','adjacent-console'])assert.equal(r.checks.find(c=>c.id===id)?.status,'passed',id);
  assert.equal(r.checks.find(c=>c.id==='status-filter')?.status,'failed');assert.equal(r.cleanup,'removed');
+});
+
+test('documentation check accepts query prose without requiring a literal question mark and rejects missing rules',()=>{
+ const text='GET /publications accepts '+statuses.join(', ')+'. status=all is default. Invalid or repeated status returns HTTP 400. Empty filtered results use bounded coverage.';
+ assert.equal(documentationSatisfied(text),true);
+ for(const bad of [text.replace('HTTP 400','an error'),text.replace('empty','').replace('Empty',''),text.replace('blocked',''),text.replace('bounded','partial')])assert.equal(documentationSatisfied(bad),false);
 });

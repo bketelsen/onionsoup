@@ -10,7 +10,7 @@ import {validateRuntime} from '../fixture-runner/sandbox.ts';
 import {git} from '../fixture-runner/fixture.ts';
 import {Dependency,Verification,validateJob,PROFILE_LIMITS as L,type Job} from './contracts.ts';
 import {snapshot,treeDigest,byteHash} from './source.ts';
-import {evaluateObservations,profileHash,statuses,type seedsFrom} from './profile.ts';
+import {evaluateObservations,documentationSatisfied,profileHash,statuses,type seedsFrom} from './profile.ts';
 const env=()=>Object.fromEntries(Object.entries({PATH:'/usr/bin:/bin',HOME:process.env.HOME,XDG_RUNTIME_DIR:process.env.XDG_RUNTIME_DIR,DBUS_SESSION_BUS_ADDRESS:process.env.DBUS_SESSION_BUS_ADDRESS}).filter((e):e is [string,string]=>typeof e[1]==='string'));
 const command=async(args:string[])=> (await promisify(execFile)('/usr/bin/podman',args,{timeout:15000,maxBuffer:100000,env:env()})).stdout;
 export async function verifyProject(checkout:string,commit:string,job:Job,runtime:Runtime,dependencies:Dependency,seeds:ReturnType<typeof seedsFrom>,options:{directory:string;phase:'baseline'|'candidate';signal?:AbortSignal;checkpoint?:(intent:unknown)=>Promise<void>}) {
@@ -43,7 +43,7 @@ export async function verifyProject(checkout:string,commit:string,job:Job,runtim
   let status:Verification['status']=stop??'execution_error',checks:Verification['checks']=[];
   if(!stop&&exitCode===0&&cleanup==='removed')try {
     const observed=JSON.parse(out.toString());if(observed.nonce!==nonce)throw new Error('Protocol mismatch');checks=evaluateObservations(observed,seeds);
-    const docs=await readFile(join(work,'docs/specs/draft-publication.md'),'utf8');checks.push({id:'documentation',status:docs.includes('?status=')&&/filter/i.test(docs)?'passed':'failed'});
+    const docs=await readFile(join(work,'docs/specs/draft-publication.md'),'utf8');checks.push({id:'documentation',status:documentationSatisfied(docs)?'passed':'failed'});
     status=checks.every(c=>c.status==='passed')?'passed':'checks_failed';
   }catch{status='execution_error';checks=[];}
   await atomicJson(join(directory,'observations.json'),{stdout:out.toString(),stderr:err.toString(),bytes});if(cleanup==='removed')await rm(node);
