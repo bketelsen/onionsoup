@@ -11,7 +11,7 @@ export function mock(result:unknown){return new MockLanguageModelV3({doStream:as
 const finding=(classification:string)=>({schemaVersion:1,findings:[{podId:rid(1),classification,reason:'Evidence supports this snapshot assessment.',evidenceIds:[rid(1),rid(2)],nextInvestigation:'observe_next_snapshot'}]});
 test('classification gates distinguish recovery from age, missing access and active failure',()=>{
   const at=new Date();
-  for(const [name,expected]of cases){const input=fixture(name,at),result=finding(expected);if(['missing-owner','incomplete'].includes(name))result.findings[0].evidenceIds=[rid(1)];assert.doesNotThrow(()=>validateTriageResult(result,input,at.toISOString()));
+  for(const [name,expected]of cases){const input=fixture(name,at),result=finding(expected);if(['missing-owner','incomplete','workflow-missing'].includes(name))result.findings[0].evidenceIds=[rid(1)];assert.doesNotThrow(()=>validateTriageResult(result,input,at.toISOString()));
     if(expected!=='historical')assert.throws(()=>validateTriageResult(finding('historical'),input,at.toISOString()));}
   const old=fixture('replaced',at);const owner=old.facts[1];if(owner.kind==='ReplicaSet')owner.observedGeneration=1;
   assert.equal(classificationEvidence(old,rid(1),at.toISOString()).historical,false);
@@ -56,4 +56,36 @@ test('failed rejection checkpoint stops correction before another model step',as
     await rename(join(directory,'triage.json'),join(root,'admission.json'));await mkdir(join(directory,'triage.json'));return model;
   }}),/Persistence failed/);
   assert.equal(steps,1);assert.equal(JSON.parse(await readFile(join(root,'admission.json'),'utf8')).status,'running');
+});
+
+
+test('Workflow confidence requires matching owners, valid completion timing and controller citations',()=>{
+  const at=new Date(),input=fixture('workflow-failed',at);
+  assert.throws(()=>validateTriageResult({...finding('attention_now'),findings:[{...finding('attention_now').findings[0],evidenceIds:[rid(1)]}]},input,at.toISOString()),/CURRENT_SIGNAL/);
+  for(const variant of ['missing-time','future','before-creation','pending','unknown','deleting','namespace']){
+    const changed=structuredClone(input),owner=changed.facts[1];if(owner.kind!=='Workflow')throw Error('Fixture');
+    if(variant==='missing-time')owner.finishedAt=null;
+    if(variant==='future')owner.finishedAt=new Date(at.getTime()+10000).toISOString();
+    if(variant==='before-creation')owner.finishedAt='2026-08-01T00:00:00Z';
+    if(variant==='pending')owner.phase='Pending';
+    if(variant==='unknown')owner.phase='Unknown';
+    if(variant==='deleting')owner.deletingAt=at.toISOString();
+    if(variant==='namespace')owner.namespaceId=rid(999);
+    assert.equal(classificationEvidence(changed,rid(1),at.toISOString()).attention,false,variant);
+  }
+});
+
+test('correction identifies the rejected pod and context exposes prerequisites without granting confidence',async t=>{
+  const root=await mkdtemp(join(tmpdir(),'workload-correction-'));t.after(()=>rm(root,{recursive:true,force:true}));let calls=0;
+  const invalid=finding('historical');invalid.findings[0].evidenceIds=[rid(1)];
+  const valid=finding('insufficient_evidence');valid.findings[0].evidenceIds=[rid(1)];
+  const m=mock(invalid),first=m.doStream.bind(m);
+  m.doStream=async options=>{
+    calls++;const context=JSON.stringify(options.prompt);assert.match(context,/classificationPrerequisites/);assert.match(context,/historicalAllowed/);
+    if(calls===1)return first(options);
+    assert.match(context,/RECOVERY_NOT_ESTABLISHED/);assert.ok(context.includes(rid(1)));return mock(valid).doStream(options);
+  };
+  const result=await triageWorkloads(fixture('workflow-missing'),{directory:join(root,'run'),provider:'copilot',modelId:'gpt-5.6-terra',modelFactory:async()=>m});
+  assert.equal(result.status,'completed');assert.equal(result.steps,2);assert.equal(result.promptVersion,'workload-triage-v4');
+  assert.throws(()=>TriageRun.parse({...result,promptVersion:'workload-triage-v2'}));
 });

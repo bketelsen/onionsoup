@@ -198,3 +198,11 @@ The [workload triage agent](workload-triage.md) also appears in the catalog and
 derived common event export. Its pure schema/manifest discovery needs no credentials.
 The new `agent.result_rejected` event includes a fixed `rejectionReason` code;
 resource facts and model prose remain outside the shared event surface.
+
+Workload capability version 2 publishes the union of original source v1 and
+[Workflow-aware source v2](workload-triage.md#workflow-owner-evidence-v2), with
+latest inputVersion 2, unchanged result/run versions and prompt `workload-triage-v4`.
+Consumers must handle versioned object alternatives rather than assume a single
+JSON Schema object. Prior inputs and saved assessments retain their meaning.
+The [conversational proof](homelab-delegation.md) is a bounded MCP consumer, not a
+new catalog capability or a new source of authority.

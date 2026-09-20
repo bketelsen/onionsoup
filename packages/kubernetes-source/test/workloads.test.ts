@@ -24,15 +24,15 @@ test('collector persists each query, suppresses failed diagnostics and records p
   const root=await mkdtemp(join(tmpdir(),'workload-source-'));t.after(()=>rm(root,{recursive:true,force:true}));const directory=join(root,'run');let calls=0;
   const result=await collectWorkloads(target,{directory,transport:async(_,section)=>{
     calls++;const saved=JSON.parse(await readFile(join(directory,'observation.json'),'utf8'));assert.equal(saved.queries.find((q:any)=>q.section===section).status,'running');
-    return section==='pods'?{code:0,stdout:'v1\n'+pod}:section==='jobs'?{code:1,stdout:'private-token'}:{code:0,stdout:'v1\n'};
-  }});assert.equal(calls,4);assert.equal(result.status,'partial');assert.equal(result.selected.length,1);assert.equal(result.facts.length,1);assert.ok(!JSON.stringify(result).includes('private'));
+    return section==='pods'?{code:0,stdout:'v2\n'+pod.replace(`${owner}|Failed`,`${owner}|batch/v1|Failed`)}:section==='jobs'?{code:1,stdout:'private-token'}:{code:0,stdout:'v2\n'};
+  }});assert.equal(calls,5);assert.equal(result.status,'partial');assert.equal(result.selected.length,1);assert.equal(result.facts.length,1);assert.ok(!JSON.stringify(result).includes('private'));
   assert.match(await readFile(join(directory,'resources.private.json'),'utf8'),/private-name/);
 });
 test('fixed commands cannot select logs, secrets, remote contexts or arbitrary arguments; cancellation skips later reads',async t=>{
   for(const section of ['pods','jobs','replicasets','deployments'] as const){const command=workloadCommand(target,section);assert.match(command,/sudo -n \/usr\/bin\/k3s kubectl/);assert.match(command,/--server=https:\/\/127.0.0.1:6443/);assert.ok(!command.includes('.spec.template'));assert.ok(!command.includes('.message'));}
   assert.throws(()=>workloadCommand({...target,command:'delete'},'pods'));assert.throws(()=>workloadCommand(target,'secrets' as any));
   const root=await mkdtemp(join(tmpdir(),'workload-cancel-'));t.after(()=>rm(root,{recursive:true,force:true}));const controller=new AbortController();let calls=0;
-  const result=await collectWorkloads(target,{directory:join(root,'run'),signal:controller.signal,transport:async()=>{calls++;controller.abort();return {code:0,stdout:'v1\n'};}});
+  const result=await collectWorkloads(target,{directory:join(root,'run'),signal:controller.signal,transport:async()=>{calls++;controller.abort();return {code:0,stdout:'v2\n'};}});
   assert.equal(calls,1);assert.equal(result.eligible,null);assert.ok(result.queries.slice(1).every(q=>q.status==='not_attempted'));
 });
 
@@ -41,4 +41,15 @@ test('selection reports omissions and prioritizes active findings ahead of ready
   const rows=Array.from({length:12},(_,i)=>({...structuredClone(seed),id:'r-'+i.toString(16).padStart(64,'0'),phase:'Running' as const,ready:'True' as const,containers:seed.containers.map(c=>({...c,restarts:1}))}));
   rows[11].ready='False' as any;
   const selected=selectWorkloadFacts(rows);assert.equal(selected.eligible,12);assert.equal(selected.omitted,2);assert.equal(selected.selected[0],rows[11].id);
+});
+
+test('Workflow projection joins only verified Argo owners and never includes specs or error text',()=>{
+  const v2pod=pod.replace(`Job|${owner}|`,`Workflow|${owner}|argoproj.io/v1alpha1|`);
+  const wf=`${owner}|private-namespace|private-workflow|2026-09-01T00:00:00Z|||||Succeeded|2026-09-10T00:00:00Z|\n`;
+  const p=parseWorkloadProjection('pods','v2\n'+v2pod),w=parseWorkloadProjection('workflows.argoproj.io','v2\n'+wf);
+  assert.equal(p.facts[0].ownerKind,'Workflow');assert.equal(p.facts[0].ownerId,w.facts[0].id);
+  assert.equal(parseWorkloadProjection('pods','v2\n'+v2pod.replace('argoproj.io/v1alpha1','untrusted.io/v1')).facts[0].ownerKind,'Other');
+  assert.ok(!JSON.stringify(w.facts).includes('private'));
+  const command=workloadCommand(target,'workflows.argoproj.io');assert.match(command,/get workflows.argoproj.io /);assert.ok(!command.includes('.spec'));assert.ok(!command.includes('.status.nodes'));assert.ok(!command.includes('.message'));
+  assert.throws(()=>parseWorkloadProjection('workflows.argoproj.io','v1\n'+wf));
 });

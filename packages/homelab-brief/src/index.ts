@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { open } from 'node:fs/promises';
-import { TriageRun } from '@onionsoup/workload-triage';
+import { TriageRun, findingCounts } from '@onionsoup/workload-triage';
 import { text } from '@onionsoup/runtime/text';
 import { z } from 'zod';
 import { TrueNasRun } from '@onionsoup/truenas-source';
@@ -66,7 +66,8 @@ export function renderHomelabBrief(raw: unknown): string {
         'Model assessment of this snapshot; findings suggest investigation, not service actions.', '');
       if (o.status !== 'completed' || !o.result) lines.push(`Assessment unavailable (${o.failure ?? o.status}).`);
       else if (!o.result.findings.length) lines.push('No candidate pods selected in this source snapshot. This is not an overall health assessment.');
-      else for (const f of o.result.findings) lines.push(`- **${f.classification}** — ${f.podId}: ${text(f.reason)} Next: ${f.nextInvestigation}. Evidence: ${f.evidenceIds.join(', ')}.`);
+      else {const counts=findingCounts(o.result);lines.push(`Finding counts: ${counts.attentionNow} attention, ${counts.historical} historical, ${counts.insufficientEvidence} insufficient evidence.`, '');
+      for (const f of o.result.findings) lines.push(`- **${f.classification}** — ${f.podId}: ${text(f.reason)} Next: ${f.nextInvestigation}. Evidence: ${f.evidenceIds.join(', ')}.`);}
     } else {
       lines.push('Cluster scope: host-local k3s endpoint; all visible namespaces. Resources may run on other cluster nodes.', '');
       for (const q of o.queries) {

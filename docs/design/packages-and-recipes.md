@@ -196,3 +196,17 @@ It joins saved briefs, delivery and an explicit investigation handoff in
 [backlog P9](../plans/backlog.md#phase-9--operator-console). The
 [investigation-to-PR exploration](investigation-to-pr.md) proposes later artifact
 and authority boundaries; it does not add current effects.
+
+
+### Workflow owners and model delegation
+
+[ADR-0027](../adr/0027-observe-workflow-owners-and-prove-model-delegation.md)
+adds a fixed Argo Workflow status projection to the existing source package. The
+[versioned workload contract](../specs/workload-triage.md#workflow-owner-evidence-v2)
+keeps historical evidence readable and distinguishes failed executions from outages.
+The [conversational proof](../specs/homelab-delegation.md) is a consumer in `scripts/`,
+not another service or agent package. AgentLayer selects MCP calls; host code owns
+job admission, bounded waits and answer provenance. This proves the same narrow
+capability can be delegated by a model as well as composed by deterministic recipes.
+[Roadmap phase 26](../plans/roadmap.md#phase-26--workflow-owners-and-model-delegation)
+qualifies this use before broader conversational deployment.

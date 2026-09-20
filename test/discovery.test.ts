@@ -33,6 +33,9 @@ test('published manifests are usable without credentials and identify callable i
       const variants=manifest.contracts.inputSchema.oneOf as Array<{type:string;properties:{changeKind:{const:string}}}>;
       assert.deepEqual(variants.map(v=>v.properties.changeKind.const),['bug_fix','feature']);
       assert.ok(variants.every(v=>v.type==='object'));
+    } else if(item.id==='workload-triage'){
+      const variants=manifest.contracts.inputSchema.anyOf as Array<{type:string;properties:{schemaVersion:{const:number}}}>;
+      assert.deepEqual(variants.map(v=>v.properties.schemaVersion.const),[1,2]);assert.ok(variants.every(v=>v.type==='object'));
     } else assert.equal(manifest.contracts.inputSchema.type, 'object');
     assert.equal(manifest.contracts.resultSchema.type, 'object');
   }

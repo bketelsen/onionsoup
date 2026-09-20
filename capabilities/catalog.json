@@ -50,7 +50,7 @@
     {
       "id": "workload-triage",
       "manifest": "capabilities/workload-triage.json",
-      "capabilityVersion": 1
+      "capabilityVersion": 2
     }
   ]
 }

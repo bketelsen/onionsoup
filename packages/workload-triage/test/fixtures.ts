@@ -12,6 +12,13 @@ export function fixture(name:string,now=new Date()):WorkloadObservation{
     queries:['pods','jobs','replicasets','deployments'].map(section=>({section,commandHash:'b'.repeat(64),status:'collected',startedAt:at,finishedAt:at})),eligible:1,omitted:0,selected:[rid(1)],facts:name==='missing-owner'?[pod]:[pod,owner]});
   if(name==='incomplete'){record.status='partial';record.queries[1].status='failed';record.queries[1].failure='query_failed';record.facts=[pod];}
   if(name==='stale'){record.startedAt=record.finishedAt=new Date(now.getTime()-3600000).toISOString();}
+  if(name.startsWith('workflow-')){
+    pod.ownerKind='Workflow';
+    const workflow:WorkloadFact={...base(2),kind:'Workflow',phase:name==='workflow-running'?'Running':name==='workflow-failed'?'Failed':name==='workflow-error'?'Error':'Succeeded',finishedAt:name==='workflow-running'?null:'2026-09-10T00:00:00Z'};
+    const v2={...record,schemaVersion:2,commandVersion:'k3s-workloads-v2',queries:[...record.queries,{section:'workflows.argoproj.io',commandHash:'b'.repeat(64),status:'collected'}],facts:name==='workflow-missing'?[pod]:[pod,workflow]};
+    if(name==='workflow-stale')v2.startedAt=v2.finishedAt=new Date(now.getTime()-3600000).toISOString();
+    return WorkloadObservation.parse(v2);
+  }
   return WorkloadObservation.parse(record);
 }
-export const cases=[['completed-job','historical'],['replaced','historical'],['crashloop','attention_now'],['missing-owner','insufficient_evidence'],['incomplete','insufficient_evidence'],['stale','insufficient_evidence']] as const;
+export const cases=[['completed-job','historical'],['replaced','historical'],['crashloop','attention_now'],['missing-owner','insufficient_evidence'],['incomplete','insufficient_evidence'],['stale','insufficient_evidence'],['workflow-succeeded','historical'],['workflow-failed','attention_now'],['workflow-error','attention_now'],['workflow-running','attention_now'],['workflow-missing','insufficient_evidence'],['workflow-stale','insufficient_evidence']] as const;

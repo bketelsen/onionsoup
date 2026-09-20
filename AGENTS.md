@@ -98,11 +98,14 @@ read Secrets or invoke Argo sync/refresh. Keep readiness, health and sync separa
 preserve saved-source scope, age and missing coverage in composed briefs.
 
 The [workload triage contract](docs/specs/workload-triage.md) additionally permits
-four fixed pod/Job/ReplicaSet/Deployment projections, including explicit configured
-sudo. Names belong only in the private lookup; models receive normalized facts and
-hashed IDs. Never clear failures on age alone or infer recovery from missing owners.
+five fixed pod/Job/ReplicaSet/Deployment/Argo Workflow projections, including explicit
+configured sudo. Workflow references require the reviewed API identity; phase and
+completion time establish execution outcomes, never service health. Names belong
+only in the private lookup; models receive normalized facts and hashed IDs. Never clear failures on age alone or infer recovery from missing owners.
 MCP clients select configured target/job IDs, never commands, credentials or paths.
-Triage proposes investigation only; no service mutation, logs or event prose.
+Triage proposes investigation only; no service mutation, logs or event prose. The
+[conversational proof](docs/specs/homelab-delegation.md) delegates through the same
+MCP host with one investigation, one brief and fixed aggregate bounds.
 
 ## Repository boundary
 

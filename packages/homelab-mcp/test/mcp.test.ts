@@ -11,7 +11,7 @@ import { createHomelabMcpServer } from '../src/index.ts';
 const pod='11111111-1111-4111-8111-111111111111|private-ns|private-pod|2026-09-01T00:00:00Z||Job|22222222-2222-4222-8222-222222222222|Failed|False||main,0,false,,Error,1,2026-09-10T00:00:00Z,,,;\n';
 const job='22222222-2222-4222-8222-222222222222|private-ns|private-job|2026-09-01T00:00:00Z||||True||0|1|1|\n';
 const podId=parseWorkloadProjection('pods','v1\n'+pod).facts[0].id,ownerId=parseWorkloadProjection('jobs','v1\n'+job).facts[0].id;
-const transport:WorkloadTransport=async(_,section)=>({code:0,stdout:'v1\n'+(section==='pods'?pod:section==='jobs'?job:'')});
+const transport:WorkloadTransport=async(_,section)=>({code:0,stdout:'v2\n'+(section==='pods'?pod.replace('|Failed|','|batch/v1|Failed|'):section==='jobs'?job.replace('||||True','|||||True'):'')});
 const result={schemaVersion:1,findings:[{podId,classification:'historical',reason:'The owning Job is complete.',evidenceIds:[podId,ownerId],nextInvestigation:'none'}]};
 const model=()=>new MockLanguageModelV3({doStream:async()=>({stream:simulateReadableStream({initialDelayInMs:null,chunkDelayInMs:null,chunks:[{type:'stream-start',warnings:[]},{type:'tool-call',toolCallId:'1',toolName:'submit_result',input:JSON.stringify(result)},
   {type:'finish',finishReason:{unified:'tool-calls',raw:'tool-calls'},usage:{inputTokens:{total:10,noCache:10,cacheRead:0,cacheWrite:0},outputTokens:{total:5,text:5,reasoning:0}}}]})})});
@@ -32,10 +32,10 @@ test('MCP discovers without credentials, rejects client authority changes, runs 
   assert.equal((await f.call('investigate_workload_findings',{targetId:'unknown'})).body.error,'target_not_allowed');
   assert.equal((await f.call('investigate_workload_findings',{targetId:'cluster',command:'delete'})).error,true);
   const submitted=await f.call('investigate_workload_findings',{targetId:'cluster'});const final=await finished(f.call,submitted.body.jobId);
-  assert.equal(final.resultStatus,'completed');assert.equal(final.findings[0].classification,'historical');assert.equal(f.calls(),1);
+  assert.equal(final.resultStatus,'completed');assert.equal(final.findings[0].classification,'historical');assert.deepEqual(final.findingCounts,{attentionNow:0,historical:1,insufficientEvidence:0,selected:1});assert.equal(f.calls(),1);
   assert.ok(!JSON.stringify(final).includes('private-pod'));assert.ok(!JSON.stringify(final).includes(f.root));
   const brief=await f.call('create_homelab_brief',{investigationJobIds:[submitted.body.jobId]});const rendered=await finished(f.call,brief.body.jobId);
-  assert.match(rendered.markdown,/### Attention/);assert.match(rendered.markdown,/historical/);assert.equal(f.calls(),1);
+  assert.match(rendered.markdown,/### Attention/);assert.match(rendered.markdown,/Finding counts: 0 attention, 1 historical, 0 insufficient evidence/);assert.equal(f.calls(),1);
   assert.equal((await f.call('create_homelab_brief',{observations:['/etc/passwd']})).error,true);
 });
 test('busy, lifetime budget and cancellation prevent hidden additional work',async t=>{

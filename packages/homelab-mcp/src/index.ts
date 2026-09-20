@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { KubernetesTarget } from '@onionsoup/kubernetes-source';
 import { digest, type WorkloadTransport } from '@onionsoup/kubernetes-source/workloads';
-import { investigateWorkloads, TriageRun, workloadEvents, workloadCapabilityManifest, type TriageOptions } from '@onionsoup/workload-triage';
+import { investigateWorkloads, TriageRun, findingCounts, workloadEvents, workloadCapabilityManifest, type TriageOptions } from '@onionsoup/workload-triage';
 import { composeHomelabBrief, renderHomelabBrief, readHomelabObservation, HomelabBrief } from '@onionsoup/homelab-brief';
 import { atomicJson } from '@onionsoup/runtime/storage';
 import { EVALUATION_MODEL } from '@onionsoup/providers/evaluation-policy';
@@ -74,10 +74,14 @@ export function createHomelabMcpServer(raw:unknown,options:{modelFactory:TriageO
     inputSchema:z.object({investigationJobIds:z.array(z.uuid()).max(10).default([])}).strict(),annotations:{readOnlyHint:false,destructiveHint:false,openWorldHint:false}},async({investigationJobIds})=>submit('brief',undefined,investigationJobIds));
   server.registerTool('inspect_homelab_job',{description:'Inspect a saved job and normalized result after completion or restart. Unfinished work is never resumed. No raw provider state or resource-name lookup.',
     inputSchema:z.object({jobId:z.uuid()}).strict(),annotations:{readOnlyHint:true,openWorldHint:false}},async({jobId})=>{
-      try{const job=await readJob(jobId),status=pending.has(jobId)?'running':job.status==='admitted'?'unfinished':job.status;
+      try{
+        // A job can settle while its older admission record is being read.
+        // Preserve the in-flight observation so this race cannot report a crashed job.
+        const wasPending=pending.has(jobId),job=await readJob(jobId);
+        const status=pending.has(jobId)||job.status==='admitted'&&wasPending?'running':job.status==='admitted'?'unfinished':job.status;
         let result:Record<string,unknown>={};
         if(job.status==='settled'){
-          if(job.kind==='investigation'){const triage=await readTriage(jobId);result={runId:triage.runId,resultStatus:triage.status,findings:triage.result?.findings??[],failure:triage.failure,sourceRunId:triage.input.runId,observedAt:triage.input.startedAt,assessedAt:triage.startedAt,eligible:triage.input.eligible,omitted:triage.input.omitted,events:workloadEvents(triage),tokenUsage:triage.tokenUsage??null};}
+          if(job.kind==='investigation'){const triage=await readTriage(jobId);result={runId:triage.runId,resultStatus:triage.status,findings:triage.result?.findings??[],findingCounts:triage.result?findingCounts(triage.result):null,failure:triage.failure,sourceRunId:triage.input.runId,observedAt:triage.input.startedAt,assessedAt:triage.startedAt,eligible:triage.input.eligible,omitted:triage.input.omitted,events:workloadEvents(triage),tokenUsage:triage.tokenUsage??null};}
           else{const brief=HomelabBrief.parse(await readSaved(jobId,'brief.json'));result={runId:brief.runId,markdown:renderHomelabBrief(brief)};}
         }return reply({schemaVersion:1,jobId,status,...result});
       }catch{return reply({error:'inspection_failed'},true);}

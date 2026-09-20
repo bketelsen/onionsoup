@@ -258,6 +258,17 @@ Completed. Evidence: [k3s and brief qualification](records/homelab-brief-2026-09
   unsupported controllers and sample omissions remain visible.
 Completed. Evidence: [workload triage qualification](records/workload-triage-2026-09-19.md).
 
+## Phase 24 — Workflow owners and conversational delegation qualification
+
+- Qualify [Workflow evidence](../specs/workload-triage.md#workflow-owner-evidence-v2)
+  and the [model consumer](../specs/homelab-delegation.md) under
+  [ADR-0027](../adr/0027-observe-workflow-owners-and-prove-model-delegation.md).
+- **Done when:** separate scripted-boundary, Terra fixture, live assessment and
+  actual model-delegation results record provenance, coverage and remaining unknowns;
+  old evidence remains readable and denied effects never reach the host.
+
+Completed. Evidence: [Workflow and delegation qualification](records/workflow-delegation-2026-09-20.md).
+
 ## Later / ideas
 
 Model-comparison infrastructure, new local-provider batches, broader source

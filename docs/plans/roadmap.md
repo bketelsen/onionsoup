@@ -304,6 +304,17 @@ Completed. Evidence: [k3s and brief qualification](records/homelab-brief-2026-09
   brief, and authority, missing-data, cancellation and persistence tests pass.
 Completed. Evidence: [workload triage qualification](records/workload-triage-2026-09-19.md).
 
+## Phase 26 — Workflow owners and model delegation
+
+- Extend owner evidence under [ADR-0027](../adr/0027-observe-workflow-owners-and-prove-model-delegation.md)
+  and the [workload v2 contract](../specs/workload-triage.md#workflow-owner-evidence-v2).
+- Prove model-selected composition with the [bounded conversational consumer](../specs/homelab-delegation.md).
+- **Done when:** Workflow success/failure/missing/stale cases are checked, a fresh
+  authorized live assessment uses owner evidence, and an actual model delegates
+  investigation and brief composition through stdio MCP with inspectable artifacts.
+
+Completed. Evidence: [Workflow and delegation qualification](records/workflow-delegation-2026-09-20.md).
+
 ## Later / ideas
 
 - Homelab composition: read-only inventory/health over Incus, Podman, Docker,

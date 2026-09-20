@@ -27,6 +27,7 @@ Documentation follows the owner's agentic-template, recorded in
 ## Specs — exact contracts
 
 - [Workload triage and homelab MCP](specs/workload-triage.md)
+- [Homelab conversational delegation proof](specs/homelab-delegation.md)
 
 - [k3s observations and homelab briefs](specs/homelab-brief.md)
 
@@ -68,6 +69,7 @@ Documentation follows the owner's agentic-template, recorded in
 ## Decisions — why
 
 - [0026 — Triage workload findings through bounded evidence](adr/0026-triage-workload-findings-through-bounded-evidence.md)
+- [0027 — Observe Workflow owners and prove model delegation](adr/0027-observe-workflow-owners-and-prove-model-delegation.md)
 
 - [0025 — Compose k3s and GitOps observations](adr/0025-compose-k3s-and-gitops-observations.md)
 
@@ -102,6 +104,7 @@ Documentation follows the owner's agentic-template, recorded in
 ## Historical evaluation evidence
 
 - [Workload triage — 2026-09-19](plans/records/workload-triage-2026-09-19.md)
+- [Workflow owners and model delegation — 2026-09-20](plans/records/workflow-delegation-2026-09-20.md)
 
 - [k3s and homelab brief — 2026-09-19](plans/records/homelab-brief-2026-09-19.md)
 
