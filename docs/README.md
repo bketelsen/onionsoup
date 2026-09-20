@@ -26,6 +26,8 @@ Documentation follows the owner's agentic-template, recorded in
 
 ## Specs — exact contracts
 
+- [Read-only TrueNAS evidence](specs/truenas-evidence.md)
+
 - [Spec template](specs/TEMPLATE.md)
 - [Agent capability manifests and workflow event exports](specs/agent-discovery.md)
 - [Frozen batch evaluation](specs/batch-evaluation.md)
@@ -59,6 +61,8 @@ Documentation follows the owner's agentic-template, recorded in
 
 ## Decisions — why
 
+- [0023 — Read-only TrueNAS acquisition](adr/0023-collect-read-only-truenas-evidence-through-existing-mcp.md)
+
 - [0001 — Record architecture decisions](adr/0001-record-architecture-decisions.md)
 - [0002 — Agent-portable instruction surface](adr/0002-agent-portable-instruction-surface.md)
 - [0003 — Adopt agentic-template without changing agent behavior](adr/0003-adopt-agentic-template-retroactively.md)
@@ -84,6 +88,8 @@ Documentation follows the owner's agentic-template, recorded in
 - [ADR template](adr/TEMPLATE.md)
 
 ## Historical evaluation evidence
+
+- [TrueNAS first contact — 2026-09-19](plans/records/truenas-first-contact-2026-09-19.md)
 
 Dated reports preserve their original findings; software tests do not establish model quality.
 

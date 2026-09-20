@@ -223,6 +223,15 @@ Completed. Evidence: [reusable TypeScript trial](records/typescript-profiles-202
   checks pass alongside the previously qualified execution adapters.
 Completed. Evidence: [portable package qualification](records/workspace-packages-2026-09-19.md).
 
+## Phase 20 — Read-only TrueNAS first contact
+
+- Qualify the [TrueNAS source contract](../specs/truenas-evidence.md) under
+  [ADR-0023](../adr/0023-collect-read-only-truenas-evidence-through-existing-mcp.md).
+- **Done when:** one authorized live NAS observation has complete/partial coverage
+  accurately represented, forced read-only mode is verified before collection, and
+  simulated failures cannot expose credentials or invoke unexpected tools.
+Completed. Evidence: [first-contact qualification](records/truenas-first-contact-2026-09-19.md).
+
 ## Later / ideas
 
 Model-comparison infrastructure, new local-provider batches, broader source

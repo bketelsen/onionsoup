@@ -6,15 +6,36 @@ const destination = resolve('dist/repository-brief');
 await rm(destination, { recursive: true, force: true });
 await mkdir(destination, { recursive: true });
 const root = JSON.parse(await readFile('package.json', 'utf8'));
-// Exact workspace/dependency graph matches the lock. No legacy source, tests, runs or credentials.
+// Include only these apps and their declared workspace dependencies, never unrelated hosts.
+const workspaces = new Map();
+for (const group of ['packages', 'apps']) for (const name of await readdir(group)) {
+  const directory = `${group}/${name}`;
+  const manifest = JSON.parse(await readFile(join(directory, 'package.json'), 'utf8'));
+  workspaces.set(manifest.name, { directory, manifest });
+}
+const selected = new Map();
+function select(name) {
+  if (selected.has(name)) return;
+  const workspace = workspaces.get(name);
+  if (!workspace) throw new Error(`Unknown workspace: ${name}`);
+  selected.set(name, workspace);
+  for (const dependency of Object.keys(workspace.manifest.dependencies ?? {}))
+    if (dependency.startsWith('@onionsoup/')) select(dependency);
+}
+for (const name of ['brief-cli', 'brief-worker', 'brief-mcp', 'mail-capture']) select(`@onionsoup/${name}-app`);
+root.workspaces = [...selected.values()].map(workspace => workspace.directory).sort();
 root.scripts = { brief: 'node apps/brief-cli/dist/main.js', worker: 'node apps/brief-worker/dist/main.js',
   mcp: 'node apps/brief-mcp/dist/main.js', 'mail-capture': 'node apps/mail-capture/dist/main.js', verify: 'node verify-release.mjs' };
 await writeFile(join(destination, 'package.json'), JSON.stringify(root, null, 2) + '\n');
-await cp('package-lock.json', join(destination, 'package-lock.json'));
-for (const group of ['packages', 'apps']) for (const name of await readdir(group)) {
-  const source = join(group, name), target = join(destination, source);
+const lock = JSON.parse(await readFile('package-lock.json', 'utf8'));
+lock.packages[''].workspaces = root.workspaces;
+for (const [name, workspace] of workspaces) if (!selected.has(name)) {
+  delete lock.packages[workspace.directory]; delete lock.packages[`node_modules/${name}`];
+}
+await writeFile(join(destination, 'package-lock.json'), JSON.stringify(lock, null, 2) + '\n');
+for (const { directory: source, manifest } of selected.values()) {
+  const target = join(destination, source);
   await mkdir(target, { recursive: true });
-  const manifest = JSON.parse(await readFile(join(source, 'package.json'), 'utf8'));
   for (const entry of Object.values(manifest.exports)) {
     delete entry['onionsoup-source']; entry.types = entry.default.replace(/\.js$/, '.d.ts');
   }

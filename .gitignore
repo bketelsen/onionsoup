@@ -15,3 +15,6 @@ credentials.json
 # Compiled workspaces and portable release outputs.
 dist/
 .build/
+
+# Shell-loaded local credentials must remain external.
+.envrc

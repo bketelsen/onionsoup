@@ -80,6 +80,12 @@ release install (requires dependency cache or registry access).
   See [repository brief](docs/specs/repository-brief.md) and
   [package boundaries](docs/design/packages-and-recipes.md).
 
+The [TrueNAS evidence adapter](docs/specs/truenas-evidence.md) is separately
+read-only: force write flags/environment off, invoke only the reviewed health tool,
+keep credentials external, and persist only normalized count/coverage evidence.
+Scoped self-signed TLS exceptions require explicit host configuration. No homelab
+service mutation or model-provider transfer of raw NAS data is part of this phase.
+
 ## Repository boundary
 
 Keep credentials, private keys, raw runs, local clones, and dependencies out of

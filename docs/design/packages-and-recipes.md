@@ -110,13 +110,20 @@ and narrative output cannot select credentials or invoke a different effect.
 An application can import the recipe directly or host this adapter as a process.
 Service/container boundaries are deployment choices, not agent boundaries.
 
-The next candidate domain is the owner's homelab: several Incus servers, Podman
-and Docker services, Synology and TrueNAS. Incorporate the existing working
-TrueNAS MCP server through a future host configuration rather than rebuilding it.
-Start with an explicitly scoped read-only inventory/health recipe after deciding
-resource allowlists and evidence contracts. Service changes, credentials and live
-homelab connectivity are not part of this packaging phase. See
-[roadmap phase 21](../plans/roadmap.md#phase-21--reusable-packages-and-thin-applications).
+The first homelab source is now `@onionsoup/truenas-source`, consumed by
+`apps/homelab-cli`. It uses the owner's existing TrueNAS MCP executable, forces
+read-only mode, and projects its health report into bounded count/coverage evidence.
+[ADR-0023](../adr/0023-collect-read-only-truenas-evidence-through-existing-mcp.md) and
+the [evidence contract](../specs/truenas-evidence.md) govern this integration in
+[roadmap phase 22](../plans/roadmap.md#phase-22--read-only-truenas-evidence).
+This deterministic step makes no model calls and needs no new agent judgment.
+
+Incus, Podman, Docker and Synology remain future sources. A later focused agent can
+interpret normalized evidence with provenance, without receiving management tools
+or raw service credentials. Configure resource allowlists per source before live
+access; repair or service mutation requires a separate explicit authority boundary.
+The repository-brief release selects only its own apps and workspace dependencies,
+so adding a homelab ingredient does not expand the OSS deployment.
 
 ### Deployment position
 

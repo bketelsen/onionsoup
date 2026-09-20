@@ -262,6 +262,16 @@ Completed. Evidence: [reusable TypeScript trial](records/typescript-profiles-202
 
 Completed. Evidence: [packaging proof](records/workspace-packages-2026-09-19.md).
 
+## Phase 22 — Read-only TrueNAS evidence
+
+- Reuse the owner's existing server under [ADR-0023](../adr/0023-collect-read-only-truenas-evidence-through-existing-mcp.md).
+- Implement [sanitized evidence acquisition](../specs/truenas-evidence.md) in a
+  standalone package with a thin CLI, explicit host configuration and scoped TLS.
+- **Done when:** the configured server yields a saved bounded observation with
+  forced read-only mode, unknown sections stay unknown, credentials remain external,
+  and negative authority/cancellation checks pass without regressing the OSS release.
+Completed. Evidence: [first-contact qualification](records/truenas-first-contact-2026-09-19.md).
+
 ## Later / ideas
 
 - Homelab composition: read-only inventory/health over Incus, Podman, Docker,

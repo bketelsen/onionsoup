@@ -27,9 +27,9 @@ const proposal={schemaVersion:1,status:'proposal_ready',outcome:claim('Filter pu
  verification:[{criterionIds:['AC1','AC3'],kind:'acceptance',check:claim('HTTP and docs checks.'),baselineExpectation:'capability_absent'},
  {criterionIds:['AC2'],kind:'compatibility',check:claim('Keep existing views.'),baselineExpectation:'existing_behavior'}],compatibility:claim('Keep authority.'),migration:claim('None.'),documentation:claim('Describe filter.'),questions:[],risks:[claim('Finite evidence.')]};
 const mapping:Job['mapping']=[{criterionId:'AC1',checks:['default-history','status-filter','invalid-filter','typecheck']},{criterionId:'AC2',checks:['filter-controls','coverage-preserved','detail-unchanged','adjacent-console']},{criterionId:'AC3',checks:['documentation']}];
-async function setup(t:TestContext) {
+async function setup(t:TestContext,baseCommit?:string) {
  const f=await fixture(t),w=await runFixture('bug',f.options),fc=PublicationConfig.parse({schemaVersion:1,stateDirectory:join(f.root,'fixture-publications'),targets:[{repository:'bketelsen/onionsoup-fixtures',repositoryId:42,baseBranch:'main',baseCommit:w.scope!.baseCommit}]});
- const seed=await preparePublication(fc,f.options.directory,fc.targets[0]),dir=join(f.root,'proposal'),base=(await git(process.cwd(),['rev-parse','HEAD'])).trim();
+ const seed=await preparePublication(fc,f.options.directory,fc.targets[0]),dir=join(f.root,'proposal'),base=baseCommit??(await git(process.cwd(),['rev-parse','HEAD'])).trim();
  const parent=await proposeProject(process.cwd(),base,dir,'copilot',{modelFactory:async()=>({provider:'copilot',modelId:'gpt-5.6-terra',model:model(input=>'changeKind' in input?proposal:requirements)})});
  assert.equal(parent.status,'completed');const job=await acceptProject(process.cwd(),dir,mapping,'Scripted accepted proposal for software tests.');
  const deps=Dependency.parse({schemaVersion:1,directory:'/fixture/dependencies',packageHash:job.packageHash,lockHash:job.lockHash,treeHash:'a'.repeat(64),nodeHash:runtime.nodeHash,npmHash:'b'.repeat(64),npmVersion:'fixture',scripts:'disabled',registry:'https://registry.npmjs.org/',createdAt:new Date().toISOString()});
@@ -69,7 +69,9 @@ test('dependency digest rejects escaping symlinks and snapshot excludes Git meta
  const {symlink}=await import('node:fs/promises');const d=join(f.root,'dep');await mkdir(d);await writeFile(join(d,'x'),'pinned');const before=await treeDigest(d);await writeFile(join(d,'x'),'changed');assert.notEqual(await treeDigest(d),before);await symlink('/etc/passwd',join(d,'escape'));await assert.rejects(treeDigest(d));
 });
 test('real project sandbox baseline preserves compatibility and reports missing filtering', {skip:!process.env.ONIONSOUP_PROJECT_DEPENDENCIES},async t=>{
- const f=await setup(t),rt=await readJson(process.env.ONIONSOUP_FIXTURE_RUNTIME!),deps=Dependency.parse(await readJson(process.env.ONIONSOUP_PROJECT_DEPENDENCIES!));
+ // This is the qualified historical profile and registry-only dependency snapshot.
+ // Following HEAD would silently change its source/lock identity after workspace extraction.
+ const f=await setup(t,'bf1e1bab3ac707e2756a4246e8f1545698924842'),rt=await readJson(process.env.ONIONSOUP_FIXTURE_RUNTIME!),deps=Dependency.parse(await readJson(process.env.ONIONSOUP_PROJECT_DEPENDENCIES!));
  const r=await verifyProject(process.cwd(),f.job.baseCommit,f.job,rt as any,deps,seedsFrom(f.seed),{directory:join(f.root,'real'),phase:'baseline'});
  assert.equal(r.status,'checks_failed');for(const id of ['default-history','coverage-preserved','detail-unchanged','typecheck','adjacent-console'])assert.equal(r.checks.find(c=>c.id===id)?.status,'passed',id);
  assert.equal(r.checks.find(c=>c.id==='status-filter')?.status,'failed');assert.equal(r.cleanup,'removed');

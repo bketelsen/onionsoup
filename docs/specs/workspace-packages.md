@@ -22,7 +22,8 @@ readiness, location and implementation workflows remain in the legacy applicatio
 Every package has explicit exports and declared dependencies. Source selection uses
 `--conditions=onionsoup-source --import tsx`; default exports resolve compiled ESM.
 Root npm commands select source during development. `npm run build` compiles all
-workspaces. `npm run check:packages` rejects escaping imports, undeclared runtime
+workspaces. The repository-brief release selects its four apps and their transitive
+workspace dependencies, excluding unrelated hosts such as the [homelab CLI](truenas-evidence.md). `npm run check:packages` rejects escaping imports, undeclared runtime
 dependencies, private workspace paths, application dependencies and cycles.
 
 ### Portable release
@@ -47,6 +48,11 @@ The inventory records build Node version, source revision and dirty-worktree sta
 It detects changes against that inventory; it is **not** a signed attestation and
 cannot defend against replacement of both files and inventory. Dependency versions
 and integrity are governed by `npm ci` and the lockfile, not the code inventory.
+
+The existing Node repair dependency provisioner accepts registry-only lockfiles;
+workspace-target patch execution is not yet qualified. Historical sandbox trials
+remain pinned to their original source and dependency snapshots. This package
+extraction does not extend the repair adapter's accepted dependency policy.
 
 Keep state/configuration outside the release. An external timer invokes `worker
 -- tick`; the app does not create a timer. Existing schedule, recipient, SMTP,

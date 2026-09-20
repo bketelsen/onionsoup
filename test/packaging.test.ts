@@ -31,6 +31,8 @@ test('compiled release runs CLI, delivery worker and MCP outside the source repo
   for (const app of ['brief-cli', 'brief-worker', 'brief-mcp', 'mail-capture'])
     assert.match((await command([`apps/${app}/dist/main.js`, '--help'])).stdout, /Usage|stdio/);
   await assert.rejects(readFile(join(release, 'src/providers.ts')));
+  await assert.rejects(readFile(join(release, 'apps/homelab-cli/package.json')));
+  await assert.rejects(readFile(join(release, 'packages/truenas-source/package.json')));
   const request = { schemaVersion: 1, repository: 'example/widget', since: '2026-09-17T00:00:00Z', until: '2026-09-18T00:00:00Z', maxSuggestions: 0 };
   const original = join(parent, 'original');
   const record = await createRepositoryBrief(request, { directory: original, provider: 'copilot',
