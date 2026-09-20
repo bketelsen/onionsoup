@@ -240,6 +240,15 @@ Completed. Evidence: [first-contact qualification](records/truenas-first-contact
   explicit unavailable results; no shell substitution or missing-data zeroing is admitted.
 Completed. Evidence: [SSH inventory qualification](records/container-inventory-2026-09-19.md).
 
+## Phase 22 — k3s and homelab brief qualification
+
+- Qualify the [cluster and brief contract](../specs/homelab-brief.md) under
+  [ADR-0025](../adr/0025-compose-k3s-and-gitops-observations.md).
+- **Done when:** fixed reads produce bounded cluster counts, failed or missing
+  coverage is distinct from zero, and compiled offline composition preserves
+  independent health/sync, scope, age and source provenance across all source kinds.
+Completed. Evidence: [k3s and brief qualification](records/homelab-brief-2026-09-19.md).
+
 ## Later / ideas
 
 Model-comparison infrastructure, new local-provider batches, broader source

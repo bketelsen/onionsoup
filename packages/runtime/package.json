@@ -31,6 +31,11 @@
       "onionsoup-source": "./src/text.ts",
       "types": "./dist/text.d.ts",
       "default": "./dist/text.js"
+    },
+    "./ssh": {
+      "onionsoup-source": "./src/ssh.ts",
+      "types": "./dist/ssh.d.ts",
+      "default": "./dist/ssh.js"
     }
   },
   "files": [

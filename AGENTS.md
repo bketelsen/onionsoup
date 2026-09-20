@@ -91,6 +91,12 @@ Docker/Podman/Incus inventory commands for operator-configured hosts. Preserve
 strict host-key checks, no sudo/forwarding, explicit account/socket/cluster scope,
 and unavailable-versus-empty distinctions. Never add generic model-controlled SSH.
 
+The [k3s source and saved homelab brief](docs/specs/homelab-brief.md) use fixed
+status projections. Only explicit host `access: sudo` permits noninteractive sudo
+for those three k3s reads. Never expose generic SSH/kubectl, transfer kubeconfig,
+read Secrets or invoke Argo sync/refresh. Keep readiness, health and sync separate;
+preserve saved-source scope, age and missing coverage in composed briefs.
+
 ## Repository boundary
 
 Keep credentials, private keys, raw runs, local clones, and dependencies out of

@@ -8,7 +8,7 @@ readiness, location and implementation workflows remain in the legacy applicatio
 
 | Workspace | Responsibility |
 | --- | --- |
-| `@onionsoup/runtime` | Atomic JSON storage, budget, event schemas, inert text escaping |
+| `@onionsoup/runtime` | Atomic JSON storage, budget, event schemas, inert text escaping, host-only bounded SSH |
 | `@onionsoup/providers` | Explicit Copilot/Codex selection and the Terra evaluation policy |
 | `@onionsoup/repository-analysis` | Three focused agents, schemas, collection, metrics and manifests |
 | `@onionsoup/repository-brief` | Four-stage recipe, records, rendering and its event projection |

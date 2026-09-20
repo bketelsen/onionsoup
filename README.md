@@ -391,3 +391,18 @@ Prepare and inspect a concrete bundle, record existing operator authorization, t
 ### Accepted proposal to an owned-project change
 
 `npm run project-change --` exposes the first [real-project profile](docs/specs/owned-project-changes.md): propose, accept, provision dependencies, execute a bounded candidate, and prepare its publication bundle. The initial task is publication-status filtering; source, dependencies and checks are pinned separately, and the feature is delivered as a draft PR.
+
+## Homelab observations and brief
+
+Read-only sources cover TrueNAS, Docker/Podman/Incus, and k3s/Argo CD. The
+[homelab brief contract](docs/specs/homelab-brief.md) documents private host configs,
+fixed commands, access boundaries and saved-source composition.
+
+```sh
+npm run homelab -- kubernetes .local/homelab/kubernetes.json
+npm run homelab -- brief .local/homelab/brief.json --output runs/NEW_BRIEF
+```
+
+The brief combines explicit saved observations without network or model calls.
+It shows independent cluster readiness and GitOps health/sync, with missing
+coverage, collection times and source hashes. It does not refresh or repair services.

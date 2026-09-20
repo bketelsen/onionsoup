@@ -282,6 +282,17 @@ Completed. Evidence: [first-contact qualification](records/truenas-first-contact
   unavailable rather than zero, and command/cancellation/output bounds pass tests.
 Completed. Evidence: [SSH inventory qualification](records/container-inventory-2026-09-19.md).
 
+## Phase 24 — k3s, GitOps and a homelab brief
+
+- Add fixed Kubernetes status reads under
+  [ADR-0025](../adr/0025-compose-k3s-and-gitops-observations.md).
+- Compose saved NAS, container and cluster observations under the
+  [homelab brief contract](../specs/homelab-brief.md), keeping coverage and age visible.
+- **Done when:** an authorized live cluster snapshot includes node/pod readiness
+  and independent Argo health/sync counts; a saved brief includes all three source
+  kinds; negative authority, parsing, provenance and freshness checks pass.
+Completed. Evidence: [k3s and brief qualification](records/homelab-brief-2026-09-19.md).
+
 ## Later / ideas
 
 - Homelab composition: read-only inventory/health over Incus, Podman, Docker,

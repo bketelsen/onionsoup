@@ -124,6 +124,16 @@ cluster scope. It shares `apps/homelab-cli` with TrueNAS. See
 [ADR-0024](../adr/0024-collect-container-inventory-over-bounded-ssh.md), the
 [inventory contract](../specs/container-inventory.md) and
 [roadmap phase 23](../plans/roadmap.md#phase-23--ssh-container-inventory).
+`@onionsoup/kubernetes-source` adds three fixed k3s status reads: nodes, pods and
+Argo CD Applications. Its explicit sudo option does not change container authority.
+Both SSH sources share process bounds in `@onionsoup/runtime/ssh`.
+`@onionsoup/homelab-brief` composes saved observations into a deterministic brief
+with collection coverage, generation-time freshness and source hashes. This is a
+recipe without a model; judgment can be added only for a separate demonstrated job.
+See [ADR-0025](../adr/0025-compose-k3s-and-gitops-observations.md), the
+[brief contract](../specs/homelab-brief.md) and
+[roadmap phase 24](../plans/roadmap.md#phase-24--k3s-gitops-and-a-homelab-brief).
+
 Synology remains a future source. A later focused agent can
 interpret normalized evidence with provenance, without receiving management tools
 or raw service credentials. Configure resource allowlists per source before live

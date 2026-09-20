@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { runSshProcess } from './process.ts';
+import { runSshProcess, boundedSshArguments, type QueryResult } from '@onionsoup/runtime/ssh';
+export type { QueryResult } from '@onionsoup/runtime/ssh';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
@@ -21,11 +22,7 @@ export const SCOPES = { docker: 'local-default-docker-socket', podman: 'ssh-user
 export function sshArguments(raw: unknown, engine: Engine) {
   const target = ContainerTarget.parse(raw); Engine.parse(engine);
   if (!target.engines.includes(engine)) throw new Error('Engine not selected');
-  return ['-F', '/dev/null', '-T', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'UpdateHostKeys=no',
-    '-o', 'ConnectTimeout=8', '-o', 'ConnectionAttempts=1', '-o', 'ServerAliveInterval=5', '-o', 'ServerAliveCountMax=2',
-    '-o', 'ForwardAgent=no', '-o', 'ForwardX11=no', '-o', 'ClearAllForwardings=yes', '-o', 'PermitLocalCommand=no',
-    '-o', 'ControlMaster=no', '-o', 'ControlPath=none', '-o', 'LogLevel=ERROR',
-    '-p', String(target.port), '-l', target.user, '--', target.host, COMMANDS[engine]];
+  return boundedSshArguments(target, COMMANDS[engine]);
 }
 const State = z.enum(['created','running','restarting','removing','paused','exited','dead','configured','stopped',
   'frozen','freezing','thawed','starting','stopping','aborting','error','ready','unknown']);
@@ -51,7 +48,6 @@ export function normalizeContainerStates(engine: Engine, stdout: string) {
   return Counts.parse({ total: lines.length, states: [...counts].sort(([a],[b]) => a.localeCompare(b)).map(([state,count]) => ({ state,count })) });
 }
 const Failure = z.enum(['cli_unavailable','ssh_failed','query_failed','timeout','cancelled','output_limit','invalid_output','not_started']);
-export type QueryResult = { code: number | null; stdout: string; failure?: 'ssh_failed'|'timeout'|'cancelled'|'output_limit' };
 export type InventoryTransport = (target: ContainerTarget, engine: Engine, signal: AbortSignal) => Promise<QueryResult>;
 // Client-side bounds do not turn the existing SSH identity into a server-side read-only account.
 export const queryOverSsh: InventoryTransport = (target, engine, signal) => runSshProcess(sshArguments(target, engine), signal);

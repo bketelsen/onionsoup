@@ -26,6 +26,8 @@ Documentation follows the owner's agentic-template, recorded in
 
 ## Specs — exact contracts
 
+- [k3s observations and homelab briefs](specs/homelab-brief.md)
+
 - [Container inventory over SSH](specs/container-inventory.md)
 
 - [Read-only TrueNAS evidence](specs/truenas-evidence.md)
@@ -63,6 +65,8 @@ Documentation follows the owner's agentic-template, recorded in
 
 ## Decisions — why
 
+- [0025 — Compose k3s and GitOps observations](adr/0025-compose-k3s-and-gitops-observations.md)
+
 - [0024 — Bounded SSH container inventory](adr/0024-collect-container-inventory-over-bounded-ssh.md)
 
 - [0023 — Read-only TrueNAS acquisition](adr/0023-collect-read-only-truenas-evidence-through-existing-mcp.md)
@@ -92,6 +96,8 @@ Documentation follows the owner's agentic-template, recorded in
 - [ADR template](adr/TEMPLATE.md)
 
 ## Historical evaluation evidence
+
+- [k3s and homelab brief — 2026-09-19](plans/records/homelab-brief-2026-09-19.md)
 
 - [SSH container inventory — 2026-09-19](plans/records/container-inventory-2026-09-19.md)
 

@@ -1,5 +1,5 @@
 {
-  "name": "@onionsoup/homelab-cli-app",
+  "name": "@onionsoup/homelab-brief",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -8,9 +8,9 @@
   },
   "exports": {
     ".": {
-      "onionsoup-source": "./src/main.ts",
-      "types": "./dist/main.d.ts",
-      "default": "./dist/main.js"
+      "onionsoup-source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
     }
   },
   "files": [
@@ -21,7 +21,6 @@
     "@onionsoup/truenas-source": "0.1.0",
     "@onionsoup/container-source": "0.1.0",
     "@onionsoup/kubernetes-source": "0.1.0",
-    "@onionsoup/homelab-brief": "0.1.0",
     "zod": "4.3.6"
   }
 }
