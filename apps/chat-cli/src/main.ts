@@ -10,7 +10,7 @@ import { openChatSession, closeChatSession, chatTurn, sessionUsage, hash, type C
 import { createHomelabChatProfile, HOMELAB_CHAT_VERSION, HomelabChatMemory } from '@onionsoup/homelab-chat';
 import { HomelabMcpConfig } from '@onionsoup/homelab-mcp';
 import { readJson } from '@onionsoup/runtime/storage';
-import { liveModel, providerName } from '@onionsoup/providers';
+import { liveModel, providerName, ProviderAuthError } from '@onionsoup/providers';
 import { EVALUATION_MODEL } from '@onionsoup/providers/evaluation-policy';
 
 globalThis.AI_SDK_LOG_WARNINGS=false;
@@ -50,7 +50,19 @@ async function main(){
     const ask=async(message:string)=>{
       active=new AbortController();
       try{
-        const turn=await chatTurn(handle!,message,{targetId,signal:active.signal,modelFactory:async()=>(await liveModel(EVALUATION_MODEL,provider)).model,
+        // Resolve local provider setup before spending a turn or admitting child work.
+        // Only fixed diagnostics reach the terminal; never print arbitrary auth errors.
+        let configured;
+        try{configured=await liveModel(EVALUATION_MODEL,provider);}
+        catch(error){
+          const code=error instanceof ProviderAuthError?error.code:'provider_initialization_failed';
+          const message=code==='provider_auth_missing'?`No ${provider} sign-in was found. Set ONIONSOUP_AUTH_PATH to your existing AgentLayer/OpenCode auth file, or run npm run triage -- login ${provider}.`:
+            code==='provider_auth_unreadable'?'The provider auth file could not be read. Check ONIONSOUP_AUTH_PATH, file permissions and JSON format.':`Could not initialize ${provider}. Check the provider configuration and subscription setup.`;
+          if(values.message!==undefined){process.stdout.write(JSON.stringify({error:code,message})+'\n');process.exitCode=1;}
+          else process.stderr.write(message+' No turn or child allowance was consumed.\n');
+          return;
+        }
+        const turn=await chatTurn(handle!,message,{targetId,signal:active.signal,modelFactory:async()=>configured.model,
           onProgress:values.message===undefined?e=>{if(e.stage==='intent')process.stderr.write(`Working: ${e.tool}\n`);}:undefined});
         if(values.message!==undefined)process.stdout.write(JSON.stringify({directory,sessionId:handle!.session.sessionId,turn})+'\n');
         else{process.stdout.write(`\n${(turn.answer?.text??`Turn ${turn.status}: ${turn.failure??'unavailable'}. Saved evidence remains inspectable.`).replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g,'')}\n`);if(turn.evidence)process.stdout.write(`Evidence (host-generated): ${JSON.stringify(turn.evidence)}\n`);}

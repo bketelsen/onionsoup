@@ -75,7 +75,7 @@ export function createHomelabChatProfile(options:{bindingHash:string;call:McpCal
           {name:'discover_homelab',description:'Discover configured target/source IDs and remaining allowances. No credentials or paths.',input:Empty,execute:async()=>{
             const d=z.object({schemaVersion:z.literal(1),targets:z.array(Id).max(10),refreshSources:z.array(Source).max(10).optional(),savedSources:z.number().int().min(0).max(16)}).parse(await call('discover_homelab',{}));targets=d.targets;sources=d.refreshSources??[];
             const selected=context.targetId??memory.selectedTarget??(targets.length===1?targets[0]:undefined);
-            if(selected&&!targets.includes(selected))throw Error('TARGET_NOT_CONFIGURED');memory.selectedTarget=selected;await checkpoint({kind:'target_selection',targetId:selected??null});
+            if(selected&&!targets.includes(selected))throw Error('TARGET_NOT_CONFIGURED');if(selected)memory.selectedTarget=selected;else delete memory.selectedTarget;await checkpoint({kind:'target_selection',targetId:selected??null});
             return {...d,selectedTarget:selected??null,requiresTargetSelection:targets.length>1&&!selected,remainingAdmissions:16-memory.admissions,limits:PROFILE_LIMITS};}},
           {name:'investigate_workload_findings',description:'Collect fresh fixed workload evidence and delegate triage for the selected target. One per turn; host waits.',input:Empty,execute:async()=>{
             if(!targets||!memory.selectedTarget||!targets.includes(memory.selectedTarget)||investigations>=1)throw Error('TARGET_SELECTION_OR_LIMIT');investigations++;await reserve(1);return admit('investigation','investigate_workload_findings',{targetId:memory.selectedTarget},{targetId:memory.selectedTarget});}},

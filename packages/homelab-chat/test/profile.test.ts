@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { randomUUID } from 'node:crypto';
+import { z } from 'zod';
 import { createHomelabChatProfile, evidenceAge, HomelabChatMemory, type McpCaller } from '../src/index.ts';
 const podId='r-'+'1'.repeat(64),ownerId='r-'+'2'.repeat(64),jobId=randomUUID(),sourceRunId=randomUUID();
 const finding={podId,classification:'insufficient_evidence' as const,reason:'Owner status missing; do not infer recovery.',evidenceIds:[podId],nextInvestigation:'check_owner_status' as const};
@@ -10,7 +11,7 @@ function fixture(options:{old?:boolean;multiple?:boolean;memory?:unknown}={}){
     name==='investigate_workload_findings'?{schemaVersion:1,jobId,status:'admitted'}:
     {schemaVersion:1,jobId:args.jobId,status:'settled',resultStatus:'completed',runId:randomUUID(),sourceRunId,observedAt:now,sourceFinishedAt:now,sourceStatus:'completed',assessedAt:now,findings:[finding],eligible:1,omitted:0}};};
   const profile=createHomelabChatProfile({bindingHash:'a'.repeat(64),call,pollMs:0});memory??=profile.initialMemory();
-  const turn=profile.turn({memory,at:new Date().toISOString(),signal:new AbortController().signal,checkpoint:async(m)=>{memory=structuredClone(m);}});
+  const turn=profile.turn({memory,at:new Date().toISOString(),signal:new AbortController().signal,checkpoint:async(m)=>{memory=z.json().parse(structuredClone(m));}});
   const invoke=async(name:string,args:unknown={})=>{const tool=turn.tools.find(t=>t.name===name)!;return tool.execute(tool.input.parse(args));};
   return {profile,turn,invoke,calls,memory:()=>memory};
 }
@@ -43,7 +44,7 @@ test('lost admission responses consume persisted allowance and do not create a r
     if(name==='discover_homelab')return {structuredContent:{schemaVersion:1,targets:['one'],refreshSources:[],savedSources:0}};
     admissions++;throw Error('Connection lost after remote admission');
   }});
-  const turn=profile.turn({memory:profile.initialMemory(),at:new Date().toISOString(),signal:new AbortController().signal,checkpoint:async m=>{memory=structuredClone(m);}});
+  const turn=profile.turn({memory:profile.initialMemory(),at:new Date().toISOString(),signal:new AbortController().signal,checkpoint:async m=>{memory=z.json().parse(structuredClone(m));}});
   await turn.tools.find(t=>t.name==='discover_homelab')!.execute({});await assert.rejects(turn.tools.find(t=>t.name==='investigate_workload_findings')!.execute({}));
   const saved=HomelabChatMemory.parse(memory);assert.equal(saved.admissions,1);assert.equal(saved.jobs.length,0);
   const restarted=profile.turn({memory:saved,at:new Date().toISOString(),signal:new AbortController().signal,checkpoint:async()=>{}});await restarted.cleanup();assert.equal(admissions,1);

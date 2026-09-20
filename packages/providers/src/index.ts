@@ -9,10 +9,21 @@ export function providerName(value = process.env.ONIONSOUP_PROVIDER ?? 'copilot'
   if (value !== 'copilot' && value !== 'codex') throw new Error('Provider must be copilot or codex');
   return value;
 }
+export class ProviderAuthError extends Error {
+  constructor(readonly code: 'provider_auth_missing' | 'provider_auth_unreadable') {
+    super(code === 'provider_auth_missing'
+      ? 'No provider sign-in found. Set ONIONSOUP_AUTH_PATH or run npm run triage -- login copilot (or codex).'
+      : 'Cannot read provider authentication. Check ONIONSOUP_AUTH_PATH, permissions and JSON format.');
+    this.name = 'ProviderAuthError';
+  }
+}
 export async function liveModel(modelId = process.env.ONIONSOUP_MODEL, provider = providerName()) {
   if (!modelId) throw new Error('Set ONIONSOUP_MODEL to a model available on your subscription');
   const store = authStore();
-  if (!await store.get(provider)) throw new Error(`Run npm run triage -- login ${provider} first, or set ONIONSOUP_AUTH_PATH`);
+  let configured: boolean;
+  try { configured = Boolean(await store.get(provider)); }
+  catch { throw new ProviderAuthError('provider_auth_unreadable'); }
+  if (!configured) throw new ProviderAuthError('provider_auth_missing');
   const adapter = provider === 'copilot'
     ? createCopilotProvider({ authStore: store, version: 'onionsoup/0.1.0' })
     : createCodexSseVendorProvider({ authStore: store });

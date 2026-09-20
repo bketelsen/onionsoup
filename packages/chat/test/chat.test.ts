@@ -44,7 +44,8 @@ test('pre-cancellation and provider failure remain explicit, with unknown usage 
   const root=await mkdtemp(join(tmpdir(),'chat-'));t.after(()=>rm(root,{recursive:true,force:true}));const handle=await openChatSession({directory:join(root,'session'),profile:profile(),provider:'copilot',modelId:'gpt-5.6-terra'});t.after(()=>closeChatSession(handle).catch(()=>{}));
   const controller=new AbortController();controller.abort();let models=0;
   const stopped=await chatTurn(handle,'Question',{signal:controller.signal,modelFactory:async()=>{models++;return scripted([clarify]);}});assert.equal(stopped.failure,'cancelled_or_timed_out');assert.equal(models,0);
-  const failed=await chatTurn(handle,'Question',{modelFactory:async()=>{throw Error('private diagnostic');}});assert.equal(failed.status,'failed');assert.equal(sessionUsage(handle.session).unknownTurns,1);assert.ok(!JSON.stringify(handle.session).includes('private diagnostic'));
+  const failed=await chatTurn(handle,'Question',{modelFactory:async()=>{throw Error('private diagnostic');}});assert.equal(failed.status,'failed');assert.equal(failed.failure,'provider_initialization_failed');assert.equal(failed.modelInvoked,false);assert.equal(sessionUsage(handle.session).unknownTurns,0);
+  const requestFailed=await chatTurn(handle,'Question',{modelFactory:async()=>new MockLanguageModelV3({doStream:async()=>{throw Error('private transport diagnostic');}})});assert.equal(requestFailed.failure,'provider_request_failed');assert.equal(sessionUsage(handle.session).unknownTurns,1);assert.ok(!JSON.stringify(handle.session).includes('private diagnostic'));
 });
 
 test('session turn allowance survives restart and a concurrent caller cannot create a second turn',async t=>{

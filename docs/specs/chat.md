@@ -27,6 +27,12 @@ end the turn and persist the question; the next message is a new bounded turn.
   Reservations persist before remote effects and are never refunded on failure.
 - Model/provider/profile binding is fixed at session creation. CLI pins Terra with
   an explicitly selected Copilot/Codex subscription. Credentials remain external.
+- Before each question the CLI checks local provider setup. Missing or unreadable
+  authentication produces fixed setup instructions without spending a turn or child
+  admission. Raw provider errors and credential contents are never displayed.
+  Saved runtime failures distinguish initialization, provider request failure,
+  step exhaustion and failure to submit an answer; legacy `execution_failed`
+  records remain readable. Initialization alone is not a model invocation.
 - Each session has one exclusive writer. Sessions and MCP jobs use separate private
   directories. Clean shutdown releases locks; after a crash the operator verifies
   processes have stopped before removing stale locks. Interrupted turns are recorded
@@ -69,6 +75,11 @@ npm run chat -- --config .local/homelab/chat-mcp.json --provider copilot \
 npm run chat -- --config .local/homelab/chat-mcp.json --provider copilot \
   --session runs/chat/SESSION --resume --message 'Explain the first attention finding.'
 ```
+
+Set the authentication environment variable in the same shell that launches chat.
+Without it the default is `.local/auth.json` relative to the working directory.
+Alternatively, `npm run triage -- login copilot` (or `codex`) sets up that store.
+`--status` and interactive session commands do not require provider credentials.
 
 Interactive `/status` shows session IDs, job references, admissions and parent token
 usage (unknown invocations are counted separately); `/target ID` changes the selected
