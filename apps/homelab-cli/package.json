@@ -18,6 +18,7 @@
   ],
   "dependencies": {
     "@onionsoup/runtime": "0.1.0",
-    "@onionsoup/truenas-source": "0.1.0"
+    "@onionsoup/truenas-source": "0.1.0",
+    "@onionsoup/container-source": "0.1.0"
   }
 }

@@ -86,6 +86,11 @@ keep credentials external, and persist only normalized count/coverage evidence.
 Scoped self-signed TLS exceptions require explicit host configuration. No homelab
 service mutation or model-provider transfer of raw NAS data is part of this phase.
 
+The [SSH container source](docs/specs/container-inventory.md) permits only fixed
+Docker/Podman/Incus inventory commands for operator-configured hosts. Preserve
+strict host-key checks, no sudo/forwarding, explicit account/socket/cluster scope,
+and unavailable-versus-empty distinctions. Never add generic model-controlled SSH.
+
 ## Repository boundary
 
 Keep credentials, private keys, raw runs, local clones, and dependencies out of

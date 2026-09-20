@@ -54,7 +54,7 @@ flowchart TD
 | `providers` | Subscription adapters, explicit selection, development model policy |
 | `runtime` | Small shared storage, budget, event-schema and text primitives |
 
-Four thin applications select configuration: on-demand CLI, scheduled worker,
+For repository briefs, four thin applications select configuration: on-demand CLI, scheduled worker,
 MCP stdio host and local mail capture. Packages cannot import applications or root
 source. Public export checks and a relocated compiled-release test enforce that
 boundary. Existing readiness/location and implementation workflows remain in `src/`
@@ -118,7 +118,13 @@ the [evidence contract](../specs/truenas-evidence.md) govern this integration in
 [roadmap phase 22](../plans/roadmap.md#phase-22--read-only-truenas-evidence).
 This deterministic step makes no model calls and needs no new agent judgment.
 
-Incus, Podman, Docker and Synology remain future sources. A later focused agent can
+`@onionsoup/container-source` now supplies Docker, Podman and Incus inventory over
+bounded SSH with fixed commands, standard host-key trust, and explicit account/socket/
+cluster scope. It shares `apps/homelab-cli` with TrueNAS. See
+[ADR-0024](../adr/0024-collect-container-inventory-over-bounded-ssh.md), the
+[inventory contract](../specs/container-inventory.md) and
+[roadmap phase 23](../plans/roadmap.md#phase-23--ssh-container-inventory).
+Synology remains a future source. A later focused agent can
 interpret normalized evidence with provenance, without receiving management tools
 or raw service credentials. Configure resource allowlists per source before live
 access; repair or service mutation requires a separate explicit authority boundary.

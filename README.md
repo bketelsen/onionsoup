@@ -73,6 +73,11 @@ external environment; writes are explicitly disabled. This evidence-source step
 uses no model and keeps unknown sections separate from healthy observations.
 See [the TrueNAS contract](docs/specs/truenas-evidence.md) for configuration and limits.
 
+`npm run homelab -- containers /absolute/path/to/target.json` collects Docker,
+Podman and Incus state counts through fixed SSH inspection commands. It uses existing
+keys and strict host-key trust, preserving unavailable tools separately from empty
+inventories. See [the SSH inventory contract](docs/specs/container-inventory.md).
+
 ## Use a subscription
 
 Copilot is the default provider; Codex is also supported. There is no silent

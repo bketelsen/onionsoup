@@ -232,6 +232,14 @@ Completed. Evidence: [portable package qualification](records/workspace-packages
   simulated failures cannot expose credentials or invoke unexpected tools.
 Completed. Evidence: [first-contact qualification](records/truenas-first-contact-2026-09-19.md).
 
+## Phase 21 — SSH container inventory qualification
+
+- Exercise the [SSH inventory contract](../specs/container-inventory.md) against the
+  two authorized hosts under [ADR-0024](../adr/0024-collect-container-inventory-over-bounded-ssh.md).
+- **Done when:** fixed read-only queries produce accurate scoped observations and
+  explicit unavailable results; no shell substitution or missing-data zeroing is admitted.
+Completed. Evidence: [SSH inventory qualification](records/container-inventory-2026-09-19.md).
+
 ## Later / ideas
 
 Model-comparison infrastructure, new local-provider batches, broader source

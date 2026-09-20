@@ -272,6 +272,16 @@ Completed. Evidence: [packaging proof](records/workspace-packages-2026-09-19.md)
   and negative authority/cancellation checks pass without regressing the OSS release.
 Completed. Evidence: [first-contact qualification](records/truenas-first-contact-2026-09-19.md).
 
+## Phase 23 — SSH container inventory
+
+- Implement Docker, Podman and Incus starters under
+  [ADR-0024](../adr/0024-collect-container-inventory-over-bounded-ssh.md) and the
+  [inventory contract](../specs/container-inventory.md).
+- Preserve account/socket/cluster scope, unknown coverage and strict host-key trust.
+- **Done when:** both authorized hosts yield saved observations, absent tools remain
+  unavailable rather than zero, and command/cancellation/output bounds pass tests.
+Completed. Evidence: [SSH inventory qualification](records/container-inventory-2026-09-19.md).
+
 ## Later / ideas
 
 - Homelab composition: read-only inventory/health over Incus, Podman, Docker,
