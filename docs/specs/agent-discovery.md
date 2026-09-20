@@ -193,3 +193,8 @@ The `repository-task-v1` profile carries accepted job v2 inside the existing wor
 Capability version 5 extends that profile schema with the [reusable TypeScript adapter](repository-profiles.md#typescript-adapter), alongside Go. Selected test-file coverage and named host checks are explicit; callable worker identities and effect authority are unchanged.
 
 The version-5 project edit schema also supports explicit [test appends](repository-profiles.md#test-append-edits); the patch prompt advances to `scoped-patch-project-v2`. Historical v1-prompt records and replacement edits remain readable.
+
+The [workload triage agent](workload-triage.md) also appears in the catalog and
+derived common event export. Its pure schema/manifest discovery needs no credentials.
+The new `agent.result_rejected` event includes a fixed `rejectionReason` code;
+resource facts and model prose remain outside the shared event surface.

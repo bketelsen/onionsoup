@@ -1,19 +1,25 @@
+import { liveModel, providerName } from '@onionsoup/providers';
+import { EVALUATION_MODEL } from '@onionsoup/providers/evaluation-policy';
+import { investigateWorkloads } from '@onionsoup/workload-triage';
 import { parseArgs } from 'node:util';
 import { randomUUID } from 'node:crypto';
-import { mkdir, open, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve, join, dirname } from 'node:path';
 import { z } from 'zod';
 import { collectKubernetes } from '@onionsoup/kubernetes-source';
-import { composeHomelabBrief, renderHomelabBrief } from '@onionsoup/homelab-brief';
+import { composeHomelabBrief, renderHomelabBrief, readHomelabObservation } from '@onionsoup/homelab-brief';
 import { atomicJson, readJson } from '@onionsoup/runtime/storage';
 import { collectContainerInventory } from '@onionsoup/container-source';
 import { collectTrueNasHealth } from '@onionsoup/truenas-source';
-const usage = 'Usage: npm run homelab -- truenas|containers|kubernetes|brief CONFIG_JSON [--output NEW_DIRECTORY]\nTrueNAS: TRUENAS_API_KEY in the environment. Containers: existing SSH keys/agent and trusted host keys. Kubernetes: host-local k3s kubeconfig, direct access by default.\nBrief: saved observation paths; no collection.\n';
+globalThis.AI_SDK_LOG_WARNINGS = false;
+console.error = console.warn = () => process.stderr.write('Provider diagnostic suppressed; inspect saved artifacts.\n');
+const usage = 'Usage: npm run homelab -- truenas|containers|kubernetes|investigate|brief CONFIG_JSON [--output NEW_DIRECTORY] [--provider copilot|codex (investigate)]\nTrueNAS: TRUENAS_API_KEY in the environment. Containers: existing SSH keys/agent and trusted host keys. Kubernetes: host-local k3s kubeconfig, direct access by default.\nBrief: saved observation paths; no collection.\n';
 try {
   if (process.argv.includes('--help')) process.stdout.write(usage);
   else {
-    const { values, positionals } = parseArgs({ allowPositionals: true, strict: true, options: { output: { type: 'string' } } });
-    if (positionals.length !== 2 || !['truenas', 'containers', 'kubernetes', 'brief'].includes(positionals[0])) throw new Error('Invalid arguments');
+    const { values, positionals } = parseArgs({ allowPositionals: true, strict: true, options: { output: { type: 'string' }, provider: { type: 'string' } } });
+    if (positionals.length !== 2 || !['truenas', 'containers', 'kubernetes', 'investigate', 'brief'].includes(positionals[0])) throw new Error('Invalid arguments');
+    if (positionals[0] === 'investigate' && !values.provider || positionals[0] !== 'investigate' && values.provider) throw new Error('Explicit provider required only for investigate');
     const config = await readJson(resolve(positionals[1]));
     if (!values.output) await mkdir('runs/homelab', { recursive: true, mode: 0o700 });
     const directory = resolve(values.output ?? join('runs/homelab', randomUUID()));
@@ -26,20 +32,7 @@ try {
         const inputs: unknown[] = [];
         for (const path of briefConfig.observations) {
           const file = resolve(dirname(resolve(positionals[1])), path);
-          // Bound each read before JSON parsing (including files that grow during reading).
-          const handle = await open(file, 'r');
-          try {
-            if (!(await handle.stat()).isFile()) throw new Error('Expected regular observation file');
-            const buffer = Buffer.alloc(1024 * 1024 + 1); let offset = 0;
-            while (offset < buffer.length) {
-              controller.signal.throwIfAborted();
-              const { bytesRead } = await handle.read(buffer, offset, buffer.length - offset, offset);
-              if (!bytesRead) break;
-              offset += bytesRead;
-            }
-            if (offset > 1024 * 1024) throw new Error('Observation too large');
-            inputs.push(JSON.parse(buffer.subarray(0, offset).toString('utf8')));
-          } finally { await handle.close(); }
+          inputs.push(await readHomelabObservation(file, controller.signal));
         }
         controller.signal.throwIfAborted();
         const brief = composeHomelabBrief(inputs, { maxAgeSeconds: briefConfig.maxAgeSeconds });
@@ -47,6 +40,12 @@ try {
         await atomicJson(join(directory, 'brief.json'), brief);
         await writeFile(join(directory, 'brief.md'), renderHomelabBrief(brief), { flag: 'wx', mode: 0o600 });
         process.stdout.write(JSON.stringify({ runId: brief.runId, directory, sources: brief.sources.length }, null, 2) + '\n');
+      } else if (positionals[0] === 'investigate') {
+        const provider = providerName(values.provider);
+        const result = await investigateWorkloads(config, { directory, signal: controller.signal, provider, modelId: EVALUATION_MODEL,
+          modelFactory: async () => (await liveModel(EVALUATION_MODEL, provider)).model });
+        process.stdout.write(JSON.stringify({runId:result.runId,status:result.status,directory,result:result.result,failure:result.failure},null,2)+'\n');
+        if(result.status !== 'completed') process.exitCode=1;
       } else {
         const result = positionals[0] === 'truenas'
           ? await collectTrueNasHealth(config, { apiKey: process.env.TRUENAS_API_KEY ?? '', directory, signal: controller.signal })

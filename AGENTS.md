@@ -97,6 +97,13 @@ for those three k3s reads. Never expose generic SSH/kubectl, transfer kubeconfig
 read Secrets or invoke Argo sync/refresh. Keep readiness, health and sync separate;
 preserve saved-source scope, age and missing coverage in composed briefs.
 
+The [workload triage contract](docs/specs/workload-triage.md) additionally permits
+four fixed pod/Job/ReplicaSet/Deployment projections, including explicit configured
+sudo. Names belong only in the private lookup; models receive normalized facts and
+hashed IDs. Never clear failures on age alone or infer recovery from missing owners.
+MCP clients select configured target/job IDs, never commands, credentials or paths.
+Triage proposes investigation only; no service mutation, logs or event prose.
+
 ## Repository boundary
 
 Keep credentials, private keys, raw runs, local clones, and dependencies out of

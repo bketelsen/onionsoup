@@ -1,0 +1,889 @@
+{
+  "schemaVersion": 1,
+  "id": "workload-triage",
+  "capabilityVersion": 1,
+  "promptVersion": "workload-triage-v2",
+  "purpose": "Assess current versus historical workload findings from bounded supplied facts.",
+  "invocation": {
+    "transport": "typescript-function",
+    "module": "@onionsoup/workload-triage",
+    "export": "triageWorkloads",
+    "signature": "(observation, options) => Promise<TriageRun>",
+    "requiredOptions": [
+      "directory",
+      "provider",
+      "modelId",
+      "modelFactory"
+    ],
+    "optionalOptions": [
+      "signal"
+    ],
+    "modelDependency": "Caller supplies a configured subscription model; CLI/MCP pin Terra.",
+    "checkpoint": "Admission, semantic rejections and terminal record. Persistence failure aborts; no automatic resume."
+  },
+  "contracts": {
+    "inputVersion": 1,
+    "resultVersion": 1,
+    "runVersion": 1,
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "number",
+          "const": 1
+        },
+        "kind": {
+          "type": "string",
+          "const": "workload-observation"
+        },
+        "runId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "assetId": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+        },
+        "targetHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "commandVersion": {
+          "type": "string",
+          "const": "k3s-workloads-v1"
+        },
+        "startedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+        },
+        "finishedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "running",
+            "completed",
+            "partial",
+            "failed"
+          ]
+        },
+        "queries": {
+          "minItems": 4,
+          "maxItems": 4,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "section": {
+                "type": "string",
+                "enum": [
+                  "pods",
+                  "jobs",
+                  "replicasets",
+                  "deployments"
+                ]
+              },
+              "commandHash": {
+                "type": "string",
+                "minLength": 64,
+                "maxLength": 64
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "pending",
+                  "running",
+                  "collected",
+                  "failed",
+                  "not_attempted"
+                ]
+              },
+              "startedAt": {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+              },
+              "finishedAt": {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+              },
+              "failure": {
+                "type": "string",
+                "enum": [
+                  "cli_unavailable",
+                  "ssh_failed",
+                  "query_failed",
+                  "timeout",
+                  "cancelled",
+                  "output_limit",
+                  "invalid_output"
+                ]
+              }
+            },
+            "required": [
+              "section",
+              "commandHash",
+              "status"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "eligible": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "omitted": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "selected": {
+          "maxItems": 10,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^r-[a-f0-9]{64}$"
+          }
+        },
+        "facts": {
+          "maxItems": 40,
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^r-[a-f0-9]{64}$"
+                  },
+                  "namespaceId": {
+                    "type": "string",
+                    "pattern": "^r-[a-f0-9]{64}$"
+                  },
+                  "createdAt": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "date-time",
+                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "deletingAt": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "date-time",
+                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "ownerId": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^r-[a-f0-9]{64}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "ownerKind": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "Job",
+                          "ReplicaSet",
+                          "Deployment",
+                          "StatefulSet",
+                          "DaemonSet",
+                          "CronJob",
+                          "Other"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "kind": {
+                    "type": "string",
+                    "const": "Pod"
+                  },
+                  "phase": {
+                    "type": "string",
+                    "enum": [
+                      "Pending",
+                      "Running",
+                      "Succeeded",
+                      "Failed",
+                      "Unknown"
+                    ]
+                  },
+                  "ready": {
+                    "type": "string",
+                    "enum": [
+                      "True",
+                      "False",
+                      "Unknown"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string",
+                    "enum": [
+                      "Completed",
+                      "Error",
+                      "OOMKilled",
+                      "ContainerCannotRun",
+                      "DeadlineExceeded",
+                      "Evicted",
+                      "NodeLost",
+                      "Shutdown",
+                      "CrashLoopBackOff",
+                      "ImagePullBackOff",
+                      "ErrImagePull",
+                      "CreateContainerConfigError",
+                      "ContainerCreating",
+                      "PodInitializing",
+                      "Other",
+                      "None"
+                    ]
+                  },
+                  "containers": {
+                    "maxItems": 32,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "init",
+                            "main"
+                          ]
+                        },
+                        "restarts": {
+                          "anyOf": [
+                            {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 1000000
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "ready": {
+                          "anyOf": [
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "waiting": {
+                          "type": "string",
+                          "enum": [
+                            "Completed",
+                            "Error",
+                            "OOMKilled",
+                            "ContainerCannotRun",
+                            "DeadlineExceeded",
+                            "Evicted",
+                            "NodeLost",
+                            "Shutdown",
+                            "CrashLoopBackOff",
+                            "ImagePullBackOff",
+                            "ErrImagePull",
+                            "CreateContainerConfigError",
+                            "ContainerCreating",
+                            "PodInitializing",
+                            "Other",
+                            "None"
+                          ]
+                        },
+                        "terminated": {
+                          "type": "string",
+                          "enum": [
+                            "Completed",
+                            "Error",
+                            "OOMKilled",
+                            "ContainerCannotRun",
+                            "DeadlineExceeded",
+                            "Evicted",
+                            "NodeLost",
+                            "Shutdown",
+                            "CrashLoopBackOff",
+                            "ImagePullBackOff",
+                            "ErrImagePull",
+                            "CreateContainerConfigError",
+                            "ContainerCreating",
+                            "PodInitializing",
+                            "Other",
+                            "None"
+                          ]
+                        },
+                        "exitCode": {
+                          "anyOf": [
+                            {
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "finishedAt": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "format": "date-time",
+                              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "lastTerminated": {
+                          "type": "string",
+                          "enum": [
+                            "Completed",
+                            "Error",
+                            "OOMKilled",
+                            "ContainerCannotRun",
+                            "DeadlineExceeded",
+                            "Evicted",
+                            "NodeLost",
+                            "Shutdown",
+                            "CrashLoopBackOff",
+                            "ImagePullBackOff",
+                            "ErrImagePull",
+                            "CreateContainerConfigError",
+                            "ContainerCreating",
+                            "PodInitializing",
+                            "Other",
+                            "None"
+                          ]
+                        },
+                        "lastExitCode": {
+                          "anyOf": [
+                            {
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "lastFinishedAt": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "format": "date-time",
+                              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "restarts",
+                        "ready",
+                        "waiting",
+                        "terminated",
+                        "exitCode",
+                        "finishedAt",
+                        "lastTerminated",
+                        "lastExitCode",
+                        "lastFinishedAt"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "id",
+                  "namespaceId",
+                  "createdAt",
+                  "deletingAt",
+                  "ownerId",
+                  "ownerKind",
+                  "kind",
+                  "phase",
+                  "ready",
+                  "reason",
+                  "containers"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^r-[a-f0-9]{64}$"
+                  },
+                  "namespaceId": {
+                    "type": "string",
+                    "pattern": "^r-[a-f0-9]{64}$"
+                  },
+                  "createdAt": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "date-time",
+                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "deletingAt": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "date-time",
+                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "ownerId": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^r-[a-f0-9]{64}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "ownerKind": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "Job",
+                          "ReplicaSet",
+                          "Deployment",
+                          "StatefulSet",
+                          "DaemonSet",
+                          "CronJob",
+                          "Other"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "kind": {
+                    "type": "string",
+                    "const": "Job"
+                  },
+                  "complete": {
+                    "type": "string",
+                    "enum": [
+                      "True",
+                      "False",
+                      "Unknown"
+                    ]
+                  },
+                  "failed": {
+                    "type": "string",
+                    "enum": [
+                      "True",
+                      "False",
+                      "Unknown"
+                    ]
+                  },
+                  "active": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 1000000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "succeeded": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 1000000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "failures": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 1000000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "id",
+                  "namespaceId",
+                  "createdAt",
+                  "deletingAt",
+                  "ownerId",
+                  "ownerKind",
+                  "kind",
+                  "complete",
+                  "failed",
+                  "active",
+                  "succeeded",
+                  "failures"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^r-[a-f0-9]{64}$"
+                  },
+                  "namespaceId": {
+                    "type": "string",
+                    "pattern": "^r-[a-f0-9]{64}$"
+                  },
+                  "createdAt": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "date-time",
+                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "deletingAt": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "date-time",
+                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "ownerId": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^r-[a-f0-9]{64}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "ownerKind": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "Job",
+                          "ReplicaSet",
+                          "Deployment",
+                          "StatefulSet",
+                          "DaemonSet",
+                          "CronJob",
+                          "Other"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "ReplicaSet",
+                      "Deployment"
+                    ]
+                  },
+                  "generation": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 1000000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "observedGeneration": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 1000000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "desired": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 1000000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "ready": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 1000000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "available": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 1000000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "updated": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 1000000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "id",
+                  "namespaceId",
+                  "createdAt",
+                  "deletingAt",
+                  "ownerId",
+                  "ownerKind",
+                  "kind",
+                  "generation",
+                  "observedGeneration",
+                  "desired",
+                  "ready",
+                  "available",
+                  "updated"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "kind",
+        "runId",
+        "assetId",
+        "targetHash",
+        "commandVersion",
+        "startedAt",
+        "status",
+        "queries",
+        "eligible",
+        "omitted",
+        "selected",
+        "facts"
+      ],
+      "additionalProperties": false
+    },
+    "resultSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "number",
+          "const": 1
+        },
+        "findings": {
+          "maxItems": 10,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "podId": {
+                "type": "string",
+                "pattern": "^r-[a-f0-9]{64}$"
+              },
+              "classification": {
+                "type": "string",
+                "enum": [
+                  "attention_now",
+                  "historical",
+                  "insufficient_evidence"
+                ]
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 700
+              },
+              "evidenceIds": {
+                "minItems": 1,
+                "maxItems": 3,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^r-[a-f0-9]{64}$"
+                }
+              },
+              "nextInvestigation": {
+                "type": "string",
+                "enum": [
+                  "review_current_status",
+                  "check_owner_status",
+                  "review_job_history",
+                  "observe_next_snapshot",
+                  "none"
+                ]
+              }
+            },
+            "required": [
+              "podId",
+              "classification",
+              "reason",
+              "evidenceIds",
+              "nextInvestigation"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "findings"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "limits": {
+    "steps": 3,
+    "timeoutMs": 90000,
+    "inputBytes": 60000,
+    "maxAgeMs": 900000
+  },
+  "effects": {
+    "githubWrites": false,
+    "targetCodeExecution": false,
+    "modelCalls": true,
+    "localArtifacts": true,
+    "infrastructureReads": false,
+    "infrastructureWrites": false
+  },
+  "lifecycle": {
+    "statuses": [
+      "running",
+      "completed",
+      "failed"
+    ],
+    "durableResume": false,
+    "cancellation": "Cooperative AbortSignal"
+  },
+  "failures": {
+    "recorded": [
+      "provider_error",
+      "no_valid_result",
+      "cancelled_or_timed_out",
+      "source_unavailable"
+    ],
+    "beforeAdmission": [
+      "invalid_input",
+      "persistence_failure"
+    ],
+    "automaticTaskRetry": false
+  },
+  "resultMeaning": "Completed means a validated snapshot assessment, not independently verified task accuracy or repair authority.",
+  "semanticValidation": "validateTriageResult enforces candidate partition, owner-chain citations, freshness and conservative recovery/current-state prerequisites. Prose accuracy remains model-assessed."
+}

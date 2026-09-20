@@ -66,6 +66,7 @@
               "delivery.rejected",
               "delivery.unknown",
               "delivery.reconciled",
+              "agent.result_rejected",
               "agent.step_started",
               "agent.step_finished",
               "agent.tool_requested",
@@ -189,6 +190,7 @@
           "agent": {
             "type": "string",
             "enum": [
+              "workload-triage",
               "bug-readiness",
               "code-location",
               "repository-themes",
@@ -252,6 +254,18 @@
               "read_repository",
               "submit_brief",
               "submit_result"
+            ]
+          },
+          "rejectionReason": {
+            "type": "string",
+            "enum": [
+              "FINDING_PARTITION",
+              "INVALID_EVIDENCE",
+              "RECOVERY_NOT_ESTABLISHED",
+              "CURRENT_SIGNAL_NOT_ESTABLISHED",
+              "NEXT_INVESTIGATION_REQUIRED",
+              "UNSAFE_PROSE",
+              "INVALID_SCHEMA"
             ]
           },
           "failure": {

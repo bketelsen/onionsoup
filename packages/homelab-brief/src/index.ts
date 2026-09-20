@@ -1,10 +1,13 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { open } from 'node:fs/promises';
+import { TriageRun } from '@onionsoup/workload-triage';
+import { text } from '@onionsoup/runtime/text';
 import { z } from 'zod';
 import { TrueNasRun } from '@onionsoup/truenas-source';
 import { ContainerRun } from '@onionsoup/container-source';
 import { KubernetesRun } from '@onionsoup/kubernetes-source';
 
-export const HomelabObservation = z.union([TrueNasRun, ContainerRun, KubernetesRun]);
+export const HomelabObservation = z.union([TrueNasRun, ContainerRun, KubernetesRun, TriageRun]);
 export type HomelabObservation = z.infer<typeof HomelabObservation>;
 const Source = z.object({ digest: z.string().regex(/^[a-f0-9]{64}$/),
   freshness: z.enum(['fresh','stale','unknown']), observation: HomelabObservation }).strict();
@@ -14,7 +17,7 @@ export const HomelabBrief = z.object({ schemaVersion: z.literal(1), kind: z.lite
 export type HomelabBrief = z.infer<typeof HomelabBrief>;
 const hash = (raw: unknown) => createHash('sha256').update(JSON.stringify(raw)).digest('hex');
 function freshness(observation: HomelabObservation, generatedAt: string, maxAgeSeconds: number): 'fresh'|'stale'|'unknown' {
-  const start = Date.parse(observation.startedAt), end = observation.finishedAt ? Date.parse(observation.finishedAt) : NaN;
+  const start = Date.parse(observation.kind === 'workload-triage' ? observation.input.startedAt : observation.startedAt), end = observation.finishedAt ? Date.parse(observation.finishedAt) : NaN;
   const now = Date.parse(generatedAt);
   if (observation.status === 'running' || !Number.isFinite(end) || end < start || end > now) return 'unknown';
   // Age begins at the oldest read, not when the last query completed.
@@ -56,6 +59,14 @@ export function renderHomelabBrief(raw: unknown): string {
         ? `${q.counts.total} containers/instances; ${q.counts.states.map(s => `${s.count} ${s.state}`).join(', ') || 'none'}`
         : `coverage ${q.status} (${q.failure ?? 'no completed query'})`}.`);
       lines.push('', 'Podman covers the SSH user only; Docker covers its configured socket. Incus may span a cluster. Do not sum these inventories as distinct machines.');
+    } else if (o.kind === 'workload-triage') {
+      lines.push('### Attention', '', `Source run: ${o.input.runId}; observed ${o.input.startedAt} to ${o.input.finishedAt ?? 'unfinished'}.`,
+        `Source coverage: ${o.input.queries.map(q => `${q.section}=${q.status}`).join(', ')}.`,
+        `Selected ${o.input.selected.length} of ${o.input.eligible ?? 'unknown'} eligible pods; omitted ${o.input.omitted ?? 'unknown'}.`,
+        'Model assessment of this snapshot; findings suggest investigation, not service actions.', '');
+      if (o.status !== 'completed' || !o.result) lines.push(`Assessment unavailable (${o.failure ?? o.status}).`);
+      else if (!o.result.findings.length) lines.push('No candidate pods selected in this source snapshot. This is not an overall health assessment.');
+      else for (const f of o.result.findings) lines.push(`- **${f.classification}** — ${f.podId}: ${text(f.reason)} Next: ${f.nextInvestigation}. Evidence: ${f.evidenceIds.join(', ')}.`);
     } else {
       lines.push('Cluster scope: host-local k3s endpoint; all visible namespaces. Resources may run on other cluster nodes.', '');
       for (const q of o.queries) {
@@ -70,4 +81,16 @@ export function renderHomelabBrief(raw: unknown): string {
     lines.push('');
   }
   return lines.join('\n') + '\n';
+}
+
+// Operator-configured files only; MCP clients never supply paths.
+export async function readHomelabObservation(file:string,signal?:AbortSignal):Promise<HomelabObservation>{
+  const handle=await open(file,'r');
+  try{
+    if(!(await handle.stat()).isFile())throw new Error('Expected observation file');
+    const buffer=Buffer.alloc(1024*1024+1);let offset=0;
+    while(offset<buffer.length){signal?.throwIfAborted();const {bytesRead}=await handle.read(buffer,offset,buffer.length-offset,offset);if(!bytesRead)break;offset+=bytesRead;}
+    if(offset>1024*1024)throw new Error('Observation too large');
+    return HomelabObservation.parse(JSON.parse(buffer.subarray(0,offset).toString('utf8')));
+  }finally{await handle.close();}
 }

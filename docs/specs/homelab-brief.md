@@ -103,7 +103,10 @@ A brief is a frozen snapshot; replay does not update its generation-time freshne
 The CLI writes private `brief.json` then `brief.md` to a new directory. Existing
 output is never overwritten. An interrupted second write can leave just the JSON;
 the exported renderer can reconstruct Markdown from it. This is an on-demand saved
-brief, not a scheduled collector, homelab MCP host or delivery service.
+brief, not a scheduled collector or delivery service. The separately implemented
+[workload triage and homelab MCP host](workload-triage.md) composes this same function
+and adds an Attention section from version 1 workload-triage observations. Existing
+source and brief versions remain readable. Triage freshness uses its source time.
 
 ## References
 

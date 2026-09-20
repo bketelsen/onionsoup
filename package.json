@@ -37,7 +37,8 @@
     "release:brief": "npm run build && node scripts/release-brief.mjs",
     "pretest": "npm run build",
     "mcp:brief": "node --conditions=onionsoup-source --import tsx apps/brief-mcp/src/main.ts",
-    "homelab": "node --conditions=onionsoup-source --import tsx apps/homelab-cli/src/main.ts"
+    "homelab": "node --conditions=onionsoup-source --import tsx apps/homelab-cli/src/main.ts",
+    "mcp:homelab": "node --conditions=onionsoup-source --import tsx apps/homelab-mcp/src/main.ts"
   },
   "dependencies": {
     "@humanlayer/agentlayer-core": "0.0.36",

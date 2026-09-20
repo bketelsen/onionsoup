@@ -293,6 +293,17 @@ Completed. Evidence: [SSH inventory qualification](records/container-inventory-2
   kinds; negative authority, parsing, provenance and freshness checks pass.
 Completed. Evidence: [k3s and brief qualification](records/homelab-brief-2026-09-19.md).
 
+## Phase 25 — Workload triage and homelab MCP
+
+- Implement bounded owner-linked evidence and a single workload triage agent under
+  [ADR-0026](../adr/0026-triage-workload-findings-through-bounded-evidence.md).
+- Add Attention findings to saved briefs and expose configured jobs through the
+  [triage/MCP contract](../specs/workload-triage.md).
+- **Done when:** representative fixtures and an authorized live snapshot preserve
+  current/historical/unknown distinctions, an external stdio client composes the
+  brief, and authority, missing-data, cancellation and persistence tests pass.
+Completed. Evidence: [workload triage qualification](records/workload-triage-2026-09-19.md).
+
 ## Later / ideas
 
 - Homelab composition: read-only inventory/health over Incus, Podman, Docker,

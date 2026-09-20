@@ -134,6 +134,15 @@ See [ADR-0025](../adr/0025-compose-k3s-and-gitops-observations.md), the
 [brief contract](../specs/homelab-brief.md) and
 [roadmap phase 24](../plans/roadmap.md#phase-24--k3s-gitops-and-a-homelab-brief).
 
+`@onionsoup/workload-triage` is the first focused homelab judgment: current versus
+historical workload findings, or insufficient evidence. The separate workload
+projection export in `@onionsoup/kubernetes-source/workloads` gathers deterministic
+facts and keeps names in a local lookup. `@onionsoup/homelab-mcp` and
+`apps/homelab-mcp` expose configured investigations and saved-source briefs to a chat
+orchestrator. See [ADR-0026](../adr/0026-triage-workload-findings-through-bounded-evidence.md),
+the [triage/MCP contract](../specs/workload-triage.md), and
+[roadmap phase 25](../plans/roadmap.md#phase-25--workload-triage-and-homelab-mcp).
+
 Synology remains a future source. A later focused agent can
 interpret normalized evidence with provenance, without receiving management tools
 or raw service credentials. Configure resource allowlists per source before live

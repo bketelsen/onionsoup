@@ -11,6 +11,11 @@
       "onionsoup-source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./workloads": {
+      "onionsoup-source": "./src/workloads.ts",
+      "types": "./dist/workloads.d.ts",
+      "default": "./dist/workloads.js"
     }
   },
   "files": [

@@ -249,6 +249,15 @@ Completed. Evidence: [SSH inventory qualification](records/container-inventory-2
   independent health/sync, scope, age and source provenance across all source kinds.
 Completed. Evidence: [k3s and brief qualification](records/homelab-brief-2026-09-19.md).
 
+## Phase 23 — Workload triage qualification
+
+- Qualify [workload triage and MCP](../specs/workload-triage.md) under
+  [ADR-0026](../adr/0026-triage-workload-findings-through-bounded-evidence.md).
+- **Done when:** scripted boundary tests, a Terra fixture batch, an assistant-reviewed
+  live snapshot and actual compiled stdio composition have separate evidence;
+  unsupported controllers and sample omissions remain visible.
+Completed. Evidence: [workload triage qualification](records/workload-triage-2026-09-19.md).
+
 ## Later / ideas
 
 Model-comparison infrastructure, new local-provider batches, broader source

@@ -26,6 +26,8 @@ Documentation follows the owner's agentic-template, recorded in
 
 ## Specs — exact contracts
 
+- [Workload triage and homelab MCP](specs/workload-triage.md)
+
 - [k3s observations and homelab briefs](specs/homelab-brief.md)
 
 - [Container inventory over SSH](specs/container-inventory.md)
@@ -65,6 +67,8 @@ Documentation follows the owner's agentic-template, recorded in
 
 ## Decisions — why
 
+- [0026 — Triage workload findings through bounded evidence](adr/0026-triage-workload-findings-through-bounded-evidence.md)
+
 - [0025 — Compose k3s and GitOps observations](adr/0025-compose-k3s-and-gitops-observations.md)
 
 - [0024 — Bounded SSH container inventory](adr/0024-collect-container-inventory-over-bounded-ssh.md)
@@ -96,6 +100,8 @@ Documentation follows the owner's agentic-template, recorded in
 - [ADR template](adr/TEMPLATE.md)
 
 ## Historical evaluation evidence
+
+- [Workload triage — 2026-09-19](plans/records/workload-triage-2026-09-19.md)
 
 - [k3s and homelab brief — 2026-09-19](plans/records/homelab-brief-2026-09-19.md)
 

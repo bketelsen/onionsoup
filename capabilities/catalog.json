@@ -46,6 +46,11 @@
       "id": "change-review",
       "manifest": "capabilities/change-review.json",
       "capabilityVersion": 5
+    },
+    {
+      "id": "workload-triage",
+      "manifest": "capabilities/workload-triage.json",
+      "capabilityVersion": 1
     }
   ]
 }

@@ -1,3 +1,4 @@
+import { workloadCapabilityManifest } from '@onionsoup/workload-triage';
 import {FixtureAgentId} from './fixture-runner/contracts.ts';
 import {fixtureCapabilityManifest} from './fixture-runner/capabilities.ts';
 import { ProposalAgentId } from './change-proposal/contracts.ts';
@@ -11,12 +12,13 @@ import { LocationInput, CurrentLocationBrief, LOCATION_LIMITS } from './location
 import { PROMPT_VERSION } from './prompt.ts';
 import { LOCATION_PROMPT_VERSION } from './location-prompt.ts';
 
-export const AgentId = z.enum(['bug-readiness', 'code-location', ...RepoAgentId.options, ...ProposalAgentId.options, ...FixtureAgentId.options]);
+export const AgentId = z.enum(['bug-readiness', 'code-location', ...RepoAgentId.options, ...ProposalAgentId.options, ...FixtureAgentId.options, 'workload-triage']);
 export type AgentId = z.infer<typeof AgentId>;
 const schema = (value: z.ZodType) => z.toJSONSchema(value, { target: 'draft-2020-12' });
 // Descriptions never grant capabilities. The existing host validators enforce semantics.
 export function capabilityManifest(id: AgentId) {
   AgentId.parse(id);
+  if (id === 'workload-triage') return workloadCapabilityManifest();
   if (RepoAgentId.safeParse(id).success) return repositoryCapabilityManifest(id as RepoAgentId);
   if (ProposalAgentId.safeParse(id).success) return proposalCapabilityManifest(id as ProposalAgentId);
   if(FixtureAgentId.safeParse(id).success) return fixtureCapabilityManifest(id as FixtureAgentId);

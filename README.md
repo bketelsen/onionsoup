@@ -406,3 +406,15 @@ npm run homelab -- brief .local/homelab/brief.json --output runs/NEW_BRIEF
 The brief combines explicit saved observations without network or model calls.
 It shows independent cluster readiness and GitOps health/sync, with missing
 coverage, collection times and source hashes. It does not refresh or repair services.
+
+The [workload triage agent](docs/specs/workload-triage.md) adds evidence-linked
+Attention findings and can be called by a homelab chat agent through local MCP:
+
+```sh
+npm run homelab -- investigate .local/homelab/kubernetes.json --provider copilot
+ONIONSOUP_HOMELAB_CONFIG=.local/homelab/mcp.json npm run mcp:homelab
+```
+
+Set subscription auth through `ONIONSOUP_AUTH_PATH`. The MCP host exposes discovery,
+configured workload investigation, saved-source brief creation, inspection and
+cancellation; it has no repair tools.

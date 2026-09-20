@@ -1,3 +1,4 @@
+import { workloadEvents } from '@onionsoup/workload-triage';
 import {validateProject} from './project-change/record.ts';
 import {validateProjectAgentRun} from './project-change/agents.ts';
 import {FixtureAgentId} from './fixture-runner/contracts.ts';
@@ -26,6 +27,7 @@ import { workflowEvents as deliveryEvents } from '@onionsoup/brief-delivery/even
 // The original records remain the truth. No provider calls, new timestamps, or raw content.
 export function workflowEvents(raw: unknown): z.infer<typeof WorkflowEventExport> {
   const candidate = raw as Record<string, unknown>;
+  if (candidate?.kind === 'workload-triage') return workloadEvents(raw);
   if(candidate?.kind==='project-change'||candidate?.schemaVersion===2&&FixtureAgentId.safeParse(candidate?.agent).success) {
     const w=candidate.kind==='project-change'?validateProject(raw):undefined;
     const standalone=w?undefined:validateProjectAgentRun(raw),workflowId=w?.workflowId??standalone!.runId,events:WorkflowEvent[]=[];
