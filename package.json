@@ -39,7 +39,8 @@
     "mcp:brief": "node --conditions=onionsoup-source --import tsx apps/brief-mcp/src/main.ts",
     "homelab": "node --conditions=onionsoup-source --import tsx apps/homelab-cli/src/main.ts",
     "mcp:homelab": "node --conditions=onionsoup-source --import tsx apps/homelab-mcp/src/main.ts",
-    "prove:homelab": "npm run build && node --conditions=onionsoup-source --import tsx scripts/prove-homelab-mcp.ts"
+    "prove:homelab": "npm run build && node --conditions=onionsoup-source --import tsx scripts/prove-homelab-mcp.ts",
+    "chat": "npm run build && node apps/chat-cli/dist/main.js"
   },
   "dependencies": {
     "@humanlayer/agentlayer-core": "0.0.36",

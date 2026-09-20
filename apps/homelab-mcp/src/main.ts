@@ -17,7 +17,7 @@ try {
     config.runsDirectory=resolve(dirname(path),config.runsDirectory);
     config.observations=config.observations.map(p=>resolve(dirname(path),p));
     const root=config.runsDirectory;
-    const host=createHomelabMcpServer(config,{modelFactory:async()=>(await liveModel(EVALUATION_MODEL,config.provider)).model});
+    const host=createHomelabMcpServer(config,{apiKey:process.env.TRUENAS_API_KEY,modelFactory:async()=>(await liveModel(EVALUATION_MODEL,config.provider)).model});
     await mkdir(root, { recursive: true, mode: 0o700 });
     const lock = join(root, '.host-lock');
     await mkdir(lock, { mode: 0o700 });

@@ -28,6 +28,7 @@ Documentation follows the owner's agentic-template, recorded in
 
 - [Workload triage and homelab MCP](specs/workload-triage.md)
 - [Homelab conversational delegation proof](specs/homelab-delegation.md)
+- [Persistent chat and homelab profile](specs/chat.md)
 
 - [k3s observations and homelab briefs](specs/homelab-brief.md)
 
@@ -70,6 +71,7 @@ Documentation follows the owner's agentic-template, recorded in
 
 - [0026 — Triage workload findings through bounded evidence](adr/0026-triage-workload-findings-through-bounded-evidence.md)
 - [0027 — Observe Workflow owners and prove model delegation](adr/0027-observe-workflow-owners-and-prove-model-delegation.md)
+- [0028 — Separate chat sessions from domain capabilities](adr/0028-separate-chat-sessions-from-domain-capabilities.md)
 
 - [0025 — Compose k3s and GitOps observations](adr/0025-compose-k3s-and-gitops-observations.md)
 
@@ -103,6 +105,7 @@ Documentation follows the owner's agentic-template, recorded in
 
 ## Historical evaluation evidence
 
+- [Persistent homelab chat — 2026-09-20](plans/records/chat-2026-09-20.md)
 - [Workload triage — 2026-09-19](plans/records/workload-triage-2026-09-19.md)
 - [Workflow owners and model delegation — 2026-09-20](plans/records/workflow-delegation-2026-09-20.md)
 

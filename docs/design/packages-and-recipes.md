@@ -210,3 +210,15 @@ job admission, bounded waits and answer provenance. This proves the same narrow
 capability can be delegated by a model as well as composed by deterministic recipes.
 [Roadmap phase 26](../plans/roadmap.md#phase-26--workflow-owners-and-model-delegation)
 qualifies this use before broader conversational deployment.
+
+
+### Persistent conversational consumer
+
+[ADR-0028](../adr/0028-separate-chat-sessions-from-domain-capabilities.md) separates
+`@onionsoup/chat` (conversation lifecycle) from `@onionsoup/homelab-chat` (reviewed
+capabilities/evidence policy) and `apps/chat-cli` (terminal and stdio transport).
+The [chat contract](../specs/chat.md) allows another domain to supply a profile
+without modifying the core or granting discovered tools automatic authority.
+[Roadmap phase 27](../plans/roadmap.md#phase-27--persistent-chat-and-homelab-profile)
+qualifies restart, follow-up evidence and refresh. This is a consumer/orchestrator;
+it delegates the focused triage judgment and deterministic collection/composition.

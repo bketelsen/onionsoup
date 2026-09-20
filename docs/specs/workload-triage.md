@@ -204,3 +204,33 @@ These gates constrain confidence; they do not establish the truth of model prose
 
 The [model delegation proof](homelab-delegation.md) consumes these jobs; implementation
 and qualification belong to [phase 26](../plans/roadmap.md#phase-26--workflow-owners-and-model-delegation).
+
+## Persistent chat extensions
+
+[ADR-0028](../adr/0028-separate-chat-sessions-from-domain-capabilities.md) adds two
+reviewed MCP tools for the [persistent chat profile](chat.md):
+
+| Tool | Strict arguments | Behavior |
+| --- | --- | --- |
+| `refresh_homelab_source` | `{sourceId}` | One fixed existing collector; persisted refresh job, no model call |
+| `inspect_workload_finding` | `{jobId,podId}` | One selected finding plus its normalized cited facts; no names or logs |
+
+Optional operator config `refreshSources` contains up to ten unique
+`{sourceId,kind,target}` entries. Kind is `truenas`, `containers` or `kubernetes`;
+target uses that collector's existing strict schema. IDs and `(kind,assetId)` pairs
+must be unique. Credentials stay external; only the host receives `TRUENAS_API_KEY`.
+Omitted refresh configuration preserves the old normalized config/hash and jobs.
+Changing configured sources creates a different binding and requires a new session.
+
+Discovery projects source IDs, kinds and asset IDs only. A refresh uses its existing
+45/65-second collector bound and the host's normal job allowance, cancellation,
+private persistence and conservative failure semantics. Partial/failed observations
+retain their actual coverage. Missing keys or unavailable tools never mean healthy.
+
+`create_homelab_brief` additionally accepts `refreshJobIds` (at most ten). Settled,
+provenance-validated refresh observations replace matching `(kind,assetId)` baseline
+observations only when explicitly selected. Duplicate replacement sources are
+rejected; no silent newest-record selection occurs. The original source artifacts
+remain intact. Inspection adds source times/status and brief source metadata so a
+chat consumer can recompute age at the current answer time instead of trusting
+freshness frozen at brief generation. Existing five tool argument forms still work.

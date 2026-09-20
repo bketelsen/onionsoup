@@ -1,5 +1,5 @@
 {
-  "name": "@onionsoup/homelab-mcp",
+  "name": "@onionsoup/homelab-chat",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -17,14 +17,11 @@
     "dist"
   ],
   "dependencies": {
-    "@onionsoup/homelab-brief": "0.1.0",
+    "@onionsoup/chat": "0.1.0",
     "@onionsoup/workload-triage": "0.1.0",
-    "@onionsoup/kubernetes-source": "0.1.0",
-    "@onionsoup/providers": "0.1.0",
     "@onionsoup/runtime": "0.1.0",
-    "@modelcontextprotocol/sdk": "1.30.0",
     "zod": "4.3.6",
-    "@onionsoup/truenas-source": "0.1.0",
-    "@onionsoup/container-source": "0.1.0"
+    "@onionsoup/homelab-brief": "0.1.0",
+    "@onionsoup/kubernetes-source": "0.1.0"
   }
 }

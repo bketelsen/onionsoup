@@ -105,7 +105,13 @@ only in the private lookup; models receive normalized facts and hashed IDs. Neve
 MCP clients select configured target/job IDs, never commands, credentials or paths.
 Triage proposes investigation only; no service mutation, logs or event prose. The
 [conversational proof](docs/specs/homelab-delegation.md) delegates through the same
-MCP host with one investigation, one brief and fixed aggregate bounds.
+MCP host with one investigation, one brief and fixed aggregate bounds. The
+[persistent chat](docs/specs/chat.md) keeps generic sessions separate from the
+homelab profile. Its reviewed refresh IDs reuse the existing read-only collectors;
+selected-finding inspection returns normalized cited facts only. Persist session
+admissions before effects, re-inspect evidence for follow-ups, and never replay
+interrupted jobs automatically. Profile/config/model bindings are immutable per
+session; discovery and task prose cannot widen authority.
 
 ## Repository boundary
 

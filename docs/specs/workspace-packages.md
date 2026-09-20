@@ -132,3 +132,13 @@ but process admission limits reset on restart. There is no distributed queue.
   remains a separate command and authority surface.
 - Delivery: [roadmap phase 21](../plans/roadmap.md#phase-21--reusable-packages-and-thin-applications).
 - Protocol context: [MCP server concepts](https://modelcontextprotocol.io/docs/learn/server-concepts).
+
+
+## Chat consumer packages
+
+Under [ADR-0028](../adr/0028-separate-chat-sessions-from-domain-capabilities.md),
+`@onionsoup/chat` owns session/turn execution without MCP or homelab imports.
+`@onionsoup/homelab-chat` supplies reviewed domain tools and evidence validation;
+`apps/chat-cli` supplies terminal input and the fixed local MCP connection. See the
+[chat contract](chat.md) and [phase 27](../plans/roadmap.md#phase-27--persistent-chat-and-homelab-profile).
+The OSS brief release still excludes these homelab consumer workspaces.

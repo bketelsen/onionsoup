@@ -39,6 +39,7 @@ test('compiled release runs CLI, delivery worker and MCP outside the source repo
   await assert.rejects(readFile(join(release, 'packages/workload-triage/package.json')));
   await assert.rejects(readFile(join(release, 'packages/homelab-mcp/package.json')));
   await assert.rejects(readFile(join(release, 'apps/homelab-mcp/package.json')));
+  for(const path of ['packages/chat','packages/homelab-chat','apps/chat-cli'])await assert.rejects(readFile(join(release,path,'package.json')));
   const request = { schemaVersion: 1, repository: 'example/widget', since: '2026-09-17T00:00:00Z', until: '2026-09-18T00:00:00Z', maxSuggestions: 0 };
   const original = join(parent, 'original');
   const record = await createRepositoryBrief(request, { directory: original, provider: 'copilot',

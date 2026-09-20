@@ -315,6 +315,19 @@ Completed. Evidence: [workload triage qualification](records/workload-triage-202
 
 Completed. Evidence: [Workflow and delegation qualification](records/workflow-delegation-2026-09-20.md).
 
+## Phase 27 — Persistent chat and homelab profile
+
+- Implement [persistent chat](../specs/chat.md) under
+  [ADR-0028](../adr/0028-separate-chat-sessions-from-domain-capabilities.md), with
+  separate core, domain profile and interactive CLI packages.
+- Extend [MCP](../specs/workload-triage.md) with configured source refresh and
+  selected-finding inspection using existing deterministic collectors.
+- **Done when:** a multi-turn session investigates, explains cited evidence, refreshes
+  and composes a brief; restart preserves references and budgets without replay;
+  ambiguous, stale, failed and unauthorized cases have explicit outcomes.
+
+Completed. Evidence: [persistent chat qualification](records/chat-2026-09-20.md).
+
 ## Later / ideas
 
 - Homelab composition: read-only inventory/health over Incus, Podman, Docker,

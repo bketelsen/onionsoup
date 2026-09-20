@@ -13,7 +13,7 @@ test('compiled stdio host discovers and creates a saved-source brief without cre
   const client=new Client({name:'external-homelab-chat',version:'1'}),transport=new StdioClientTransport({command:process.execPath,args:[resolve('apps/homelab-mcp/dist/main.js')],cwd:tmpdir(),env:{ONIONSOUP_HOMELAB_CONFIG:config,PATH:'/nonexistent'},stderr:'pipe'});
   t.after(()=>client.close());await client.connect(transport);
   const call=async(name:string,args:Record<string,unknown>={})=>(await client.callTool({name,arguments:args})).structuredContent as any;
-  assert.equal((await client.listTools()).tools.length,5);assert.deepEqual((await call('discover_homelab')).targets,[]);
+  assert.equal((await client.listTools()).tools.length,7);assert.deepEqual((await call('discover_homelab')).targets,[]);
   const job=await call('create_homelab_brief');let final;
   for(let i=0;i<100;i++){final=await call('inspect_homelab_job',{jobId:job.jobId});if(final.status!=='running')break;await new Promise(r=>setTimeout(r,5));}
   assert.equal(final.status,'settled');assert.match(final.markdown,/TrueNAS coverage unavailable/);assert.match(final.markdown,/\*\*stale\*\*/);

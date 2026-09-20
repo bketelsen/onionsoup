@@ -1,3 +1,4 @@
+import { RefreshSource, collectRefresh, validateRefresh, type RefreshOptions } from './refresh.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdir, realpath, open, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -10,16 +11,17 @@ import { composeHomelabBrief, renderHomelabBrief, readHomelabObservation, Homela
 import { atomicJson } from '@onionsoup/runtime/storage';
 import { EVALUATION_MODEL } from '@onionsoup/providers/evaluation-policy';
 export const HomelabMcpConfig=z.object({schemaVersion:z.literal(1),provider:z.enum(['copilot','codex']),runsDirectory:z.string().min(1),
-  observations:z.array(z.string().min(1)).max(16),targets:z.array(KubernetesTarget).max(10),maxJobs:z.number().int().min(1).max(10).default(4)}).strict()
-  .refine(c=>new Set(c.targets.map(t=>t.assetId)).size===c.targets.length,'Duplicate targets');
+  observations:z.array(z.string().min(1)).max(16),targets:z.array(KubernetesTarget).max(10),refreshSources:z.array(RefreshSource).max(10).optional(),maxJobs:z.number().int().min(1).max(10).default(4)}).strict()
+  .refine(c=>new Set(c.targets.map(t=>t.assetId)).size===c.targets.length,'Duplicate targets')
+  .refine(c=>new Set((c.refreshSources??[]).map(s=>s.sourceId)).size===(c.refreshSources??[]).length&&new Set((c.refreshSources??[]).map(s=>s.kind+':'+s.target.assetId)).size===(c.refreshSources??[]).length,'Duplicate refresh sources');
 export type HomelabMcpConfig=z.infer<typeof HomelabMcpConfig>;
-const Job=z.object({schemaVersion:z.literal(1),jobId:z.uuid(),configHash:z.string().length(64),kind:z.enum(['brief','investigation']),targetId:z.string().optional(),
+const Job=z.object({schemaVersion:z.literal(1),jobId:z.uuid(),configHash:z.string().length(64),kind:z.enum(['brief','investigation','refresh']),targetId:z.string().optional(),sourceId:z.string().optional(),refreshJobIds:z.array(z.uuid()).max(10).optional(),
   investigationJobIds:z.array(z.uuid()).max(10),createdAt:z.iso.datetime(),status:z.enum(['admitted','settled','execution_failed']),finishedAt:z.iso.datetime().optional()}).strict();
 type Job=z.infer<typeof Job>;
 const reply=(body:Record<string,unknown>,isError=false)=>({isError,content:[{type:'text' as const,text:JSON.stringify(body)}],structuredContent:body});
-export function createHomelabMcpServer(raw:unknown,options:{modelFactory:TriageOptions['modelFactory'];transport?:WorkloadTransport}){
+export function createHomelabMcpServer(raw:unknown,options:{modelFactory:TriageOptions['modelFactory'];transport?:WorkloadTransport;apiKey?:string;refresh?:(source:RefreshSource,options:RefreshOptions)=>Promise<unknown>}){
   const config=HomelabMcpConfig.parse(raw),root=resolve(config.runsDirectory),configHash=digest(config);
-  const targets=new Map(config.targets.map(t=>[t.assetId,t]));
+  const targets=new Map(config.targets.map(t=>[t.assetId,t])),refreshSources=new Map((config.refreshSources??[]).map(s=>[s.sourceId,s]));
   let active=false,admitted=0,stopped=false;
   const pending=new Map<string,{controller:AbortController;promise:Promise<void>}>();
   const home=(id:string)=>join(root,z.uuid().parse(id));
@@ -40,24 +42,34 @@ export function createHomelabMcpServer(raw:unknown,options:{modelFactory:TriageO
     if(!target||triage.input.targetHash!==digest(target)||triage.assetId!==job.targetId||triage.provider!==config.provider||triage.model!==EVALUATION_MODEL)throw new Error('Target mismatch');
     return triage;
   }
+  async function readRefresh(id:string){const job=await readJob(id),source=refreshSources.get(job.sourceId!);
+    if(job.kind!=='refresh'||job.status!=='settled'||!source)throw Error('Refresh unavailable');
+    return validateRefresh(source,await readSaved(id,'source/observation.json'));}
   const server=new McpServer({name:'onionsoup-homelab',version:'0.1.0'});
-  server.registerTool('discover_homelab',{description:'Discover configured target IDs, saved-source brief and bounded workload investigation. No credentials or paths are returned.',inputSchema:z.object({}).strict(),annotations:{readOnlyHint:true,openWorldHint:false}},async()=>reply({schemaVersion:1,targets:[...targets.keys()],savedSources:config.observations.length,
+  server.registerTool('discover_homelab',{description:'Discover configured target IDs, saved-source brief and bounded workload investigation. No credentials or paths are returned.',inputSchema:z.object({}).strict(),annotations:{readOnlyHint:true,openWorldHint:false}},async()=>reply({schemaVersion:1,targets:[...targets.keys()],refreshSources:[...refreshSources.values()].map(s=>({sourceId:s.sourceId,kind:s.kind,assetId:s.target.assetId})),savedSources:config.observations.length,
     capability:workloadCapabilityManifest(),limits:{maxJobs:config.maxJobs,admitted,concurrentJobs:1,active,maxInvestigationsPerBrief:10},
     effects:{configuredSshReads:true,modelCalls:true,localArtifacts:true,serviceWrites:false},lifecycle:{durableInspection:true,resume:false,admissionAllowance:'per-process; restart resets allowance'}}));
-  async function submit(kind:Job['kind'],targetId?:string,investigationJobIds:string[]=[]){
+  async function submit(kind:Job['kind'],targetId?:string,investigationJobIds:string[]=[],sourceId?:string,refreshJobIds:string[]=[]){
     if(stopped)return reply({error:'host_stopping'},true);if(active)return reply({error:'busy'},true);if(admitted>=config.maxJobs)return reply({error:'job_limit'},true);
     if(kind==='investigation'&&!targets.has(targetId!))return reply({error:'target_not_allowed'},true);
+    if(kind==='refresh'&&!refreshSources.has(sourceId!))return reply({error:'source_not_allowed'},true);
+    if(new Set(refreshJobIds).size!==refreshJobIds.length)return reply({error:'duplicate_refresh'},true);
     if(new Set(investigationJobIds).size!==investigationJobIds.length)return reply({error:'duplicate_investigation'},true);
-    active=true;admitted++;const job:Job={schemaVersion:1,jobId:randomUUID(),configHash,kind,...(targetId?{targetId}:{}),investigationJobIds,createdAt:new Date().toISOString(),status:'admitted'};
+    active=true;admitted++;const job:Job={schemaVersion:1,jobId:randomUUID(),configHash,kind,...(targetId?{targetId}:{}),...(sourceId?{sourceId}:{}),...(refreshJobIds.length?{refreshJobIds}:{}),investigationJobIds,createdAt:new Date().toISOString(),status:'admitted'};
     try{await mkdir(root,{recursive:true,mode:0o700});await mkdir(home(job.jobId),{mode:0o700});await atomicJson(join(home(job.jobId),'job.json'),job);}catch{active=false;return reply({error:'admission_storage_failed'},true);}
     const controller=new AbortController();if(stopped)controller.abort();
     const promise=Promise.resolve().then(async()=>{
       try{
         controller.signal.throwIfAborted();
         if(kind==='investigation')await investigateWorkloads(targets.get(targetId!)!,{directory:join(home(job.jobId),'investigation'),provider:config.provider,modelId:EVALUATION_MODEL,modelFactory:options.modelFactory,transport:options.transport,signal:controller.signal});
-        else{
-          const sources=[];
+        else if(kind==='refresh'){const source=refreshSources.get(sourceId!)!;const result=await(options.refresh??collectRefresh)(source,{directory:join(home(job.jobId),'source'),signal:controller.signal,apiKey:options.apiKey});
+          validateRefresh(source,result);
+        }else{
+          let sources=[];
           for(const path of config.observations)sources.push(await readHomelabObservation(resolve(path),controller.signal));
+          const refreshed=[];for(const id of refreshJobIds){controller.signal.throwIfAborted();refreshed.push(await readRefresh(id));}
+          const keys=refreshed.map(o=>o.kind+':'+o.assetId);if(new Set(keys).size!==keys.length)throw Error('Duplicate source replacements');
+          sources=sources.filter(o=>!keys.includes(o.kind+':'+o.assetId));sources.push(...refreshed);
           for(const id of investigationJobIds){controller.signal.throwIfAborted();sources.push(await readTriage(id));}
           controller.signal.throwIfAborted();const brief=composeHomelabBrief(sources);
           await atomicJson(join(home(job.jobId),'brief.json'),brief);await writeFile(join(home(job.jobId),'brief.md'),renderHomelabBrief(brief),{flag:'wx',mode:0o600});
@@ -71,7 +83,7 @@ export function createHomelabMcpServer(raw:unknown,options:{modelFactory:TriageO
   server.registerTool('investigate_workload_findings',{description:'Collect fixed read-only evidence and assess at most ten candidate pods for one configured target. Returns a job ID; no repair or logs.',
     inputSchema:z.object({targetId:KubernetesTarget.shape.assetId}).strict(),annotations:{readOnlyHint:false,destructiveHint:false,openWorldHint:true}},async({targetId})=>submit('investigation',targetId));
   server.registerTool('create_homelab_brief',{description:'Compose configured saved observations plus optional settled investigation jobs. No live refresh or model calls. Returns a job ID.',
-    inputSchema:z.object({investigationJobIds:z.array(z.uuid()).max(10).default([])}).strict(),annotations:{readOnlyHint:false,destructiveHint:false,openWorldHint:false}},async({investigationJobIds})=>submit('brief',undefined,investigationJobIds));
+    inputSchema:z.object({investigationJobIds:z.array(z.uuid()).max(10).default([]),refreshJobIds:z.array(z.uuid()).max(10).default([])}).strict(),annotations:{readOnlyHint:false,destructiveHint:false,openWorldHint:false}},async({investigationJobIds,refreshJobIds})=>submit('brief',undefined,investigationJobIds,undefined,refreshJobIds));
   server.registerTool('inspect_homelab_job',{description:'Inspect a saved job and normalized result after completion or restart. Unfinished work is never resumed. No raw provider state or resource-name lookup.',
     inputSchema:z.object({jobId:z.uuid()}).strict(),annotations:{readOnlyHint:true,openWorldHint:false}},async({jobId})=>{
       try{
@@ -81,10 +93,19 @@ export function createHomelabMcpServer(raw:unknown,options:{modelFactory:TriageO
         const status=pending.has(jobId)||job.status==='admitted'&&wasPending?'running':job.status==='admitted'?'unfinished':job.status;
         let result:Record<string,unknown>={};
         if(job.status==='settled'){
-          if(job.kind==='investigation'){const triage=await readTriage(jobId);result={runId:triage.runId,resultStatus:triage.status,findings:triage.result?.findings??[],findingCounts:triage.result?findingCounts(triage.result):null,failure:triage.failure,sourceRunId:triage.input.runId,observedAt:triage.input.startedAt,assessedAt:triage.startedAt,eligible:triage.input.eligible,omitted:triage.input.omitted,events:workloadEvents(triage),tokenUsage:triage.tokenUsage??null};}
-          else{const brief=HomelabBrief.parse(await readSaved(jobId,'brief.json'));result={runId:brief.runId,markdown:renderHomelabBrief(brief)};}
+          if(job.kind==='investigation'){const triage=await readTriage(jobId);result={runId:triage.runId,resultStatus:triage.status,findings:triage.result?.findings??[],findingCounts:triage.result?findingCounts(triage.result):null,failure:triage.failure,sourceRunId:triage.input.runId,observedAt:triage.input.startedAt,sourceFinishedAt:triage.input.finishedAt,sourceStatus:triage.input.status,assessedAt:triage.startedAt,eligible:triage.input.eligible,omitted:triage.input.omitted,events:workloadEvents(triage),tokenUsage:triage.tokenUsage??null};}
+          else if(job.kind==='refresh'){const source=await readRefresh(jobId);result={runId:source.runId,resultStatus:source.status,observation:source};}
+          else{const brief=HomelabBrief.parse(await readSaved(jobId,'brief.json'));result={runId:brief.runId,markdown:renderHomelabBrief(brief),sources:brief.sources.map(s=>({assetId:s.observation.assetId,kind:s.observation.kind,runId:s.observation.runId,status:s.observation.status,observedAt:s.observation.kind==='workload-triage'?s.observation.input.startedAt:s.observation.startedAt,finishedAt:(s.observation.kind==='workload-triage'?s.observation.input.finishedAt:s.observation.finishedAt)??null,freshnessAtGeneration:s.freshness})),generatedAt:brief.generatedAt};}
         }return reply({schemaVersion:1,jobId,status,...result});
       }catch{return reply({error:'inspection_failed'},true);}
+    });
+  server.registerTool('refresh_homelab_source',{description:'Refresh one configured source ID using its existing fixed read-only collector. No paths, commands or credentials accepted.',
+    inputSchema:z.object({sourceId:z.string().regex(/^[a-z][a-z0-9-]{0,63}$/)}).strict(),annotations:{readOnlyHint:false,destructiveHint:false,openWorldHint:true}},async({sourceId})=>submit('refresh',undefined,[],sourceId));
+  server.registerTool('inspect_workload_finding',{description:'Inspect one selected pod finding and normalized cited facts. No logs, resource names or private lookup.',
+    inputSchema:z.object({jobId:z.uuid(),podId:z.string().regex(/^r-[a-f0-9]{64}$/)}).strict(),annotations:{readOnlyHint:true,openWorldHint:false}},async({jobId,podId})=>{
+      try{const run=await readTriage(jobId),finding=run.result?.findings.find(f=>f.podId===podId);if(!finding)throw Error('Finding missing');
+        return reply({schemaVersion:1,jobId,runId:run.runId,sourceRunId:run.input.runId,observedAt:run.input.startedAt,sourceFinishedAt:run.input.finishedAt,sourceStatus:run.input.status,assessedAt:run.startedAt,finding,facts:run.input.facts.filter(f=>finding.evidenceIds.includes(f.id)),eligible:run.input.eligible,omitted:run.input.omitted});
+      }catch{return reply({error:'finding_unavailable'},true);}
     });
   server.registerTool('cancel_homelab_job',{description:'Request cooperative cancellation; retain saved evidence and consumed admission.',inputSchema:z.object({jobId:z.uuid()}).strict(),annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false}},async({jobId})=>{
     const running=pending.get(jobId);if(!running)return reply({error:'job_not_active'},true);running.controller.abort();return reply({jobId,status:'cancellation_requested'});

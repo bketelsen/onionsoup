@@ -27,14 +27,17 @@ async function setup(t:TestContext,overrides:{transport?:WorkloadTransport;maxJo
 }
 async function finished(call:Awaited<ReturnType<typeof setup>>['call'],jobId:string){for(let n=0;n<200;n++){const r=await call('inspect_homelab_job',{jobId});if(r.body.status!=='running')return r.body;await new Promise(r=>setTimeout(r,5));}throw new Error('Timeout');}
 test('MCP discovers without credentials, rejects client authority changes, runs shared recipe and composes Attention',async t=>{
-  const f=await setup(t);assert.equal((await f.client.listTools()).tools.length,5);const discovery=(await f.call('discover_homelab')).body;
+  const f=await setup(t);assert.equal((await f.client.listTools()).tools.length,7);const discovery=(await f.call('discover_homelab')).body;
   assert.deepEqual(discovery.targets,['cluster']);assert.equal(f.calls(),0);assert.ok(!JSON.stringify(discovery).includes('example.invalid'));
   assert.equal((await f.call('investigate_workload_findings',{targetId:'unknown'})).body.error,'target_not_allowed');
   assert.equal((await f.call('investigate_workload_findings',{targetId:'cluster',command:'delete'})).error,true);
   const submitted=await f.call('investigate_workload_findings',{targetId:'cluster'});const final=await finished(f.call,submitted.body.jobId);
   assert.equal(final.resultStatus,'completed');assert.equal(final.findings[0].classification,'historical');assert.deepEqual(final.findingCounts,{attentionNow:0,historical:1,insufficientEvidence:0,selected:1});assert.equal(f.calls(),1);
+  const explained=(await f.call('inspect_workload_finding',{jobId:submitted.body.jobId,podId})).body;assert.equal(explained.finding.podId,podId);assert.equal(explained.facts.length,2);assert.ok(!JSON.stringify(explained).includes('private'));
+  assert.equal((await f.call('inspect_workload_finding',{jobId:submitted.body.jobId,podId:'r-'+'0'.repeat(64)})).error,true);
   assert.ok(!JSON.stringify(final).includes('private-pod'));assert.ok(!JSON.stringify(final).includes(f.root));
   const brief=await f.call('create_homelab_brief',{investigationJobIds:[submitted.body.jobId]});const rendered=await finished(f.call,brief.body.jobId);
+  assert.equal(rendered.sources[0].observedAt,final.observedAt);assert.equal(rendered.sources[0].finishedAt,final.sourceFinishedAt);
   assert.match(rendered.markdown,/### Attention/);assert.match(rendered.markdown,/Finding counts: 0 attention, 1 historical, 0 insufficient evidence/);assert.equal(f.calls(),1);
   assert.equal((await f.call('create_homelab_brief',{observations:['/etc/passwd']})).error,true);
 });

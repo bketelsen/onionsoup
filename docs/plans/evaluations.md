@@ -269,6 +269,16 @@ Completed. Evidence: [workload triage qualification](records/workload-triage-202
 
 Completed. Evidence: [Workflow and delegation qualification](records/workflow-delegation-2026-09-20.md).
 
+## Phase 25 — Persistent chat qualification
+
+- Qualify the [chat/profile contract](../specs/chat.md) under
+  [ADR-0028](../adr/0028-separate-chat-sessions-from-domain-capabilities.md).
+- **Done when:** separate runtime, compiled CLI and live Terra conversations show
+  restart-safe references, bounded effects, freshness-aware answers and explicit
+  limitations; no new write or arbitrary command authority is admitted.
+
+Completed. Evidence: [persistent chat qualification](records/chat-2026-09-20.md).
+
 ## Later / ideas
 
 Model-comparison infrastructure, new local-provider batches, broader source
