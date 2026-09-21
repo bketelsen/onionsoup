@@ -7,7 +7,6 @@ import {validateFixtureAgentRun} from './fixture-runner/agents.ts';
 import { ProposalAgentId } from './change-proposal/contracts.ts';
 import { validateChangeWorkflow } from './change-proposal/record.ts';
 import { validateProposalAgentRun } from './change-proposal/agents.ts';
-import { OperatorRecord } from './console/contracts.ts';
 import { RepoAgentId, hash } from './repository-brief/contracts.ts';
 import { z } from 'zod';
 import { validateBriefing } from './briefing-record.ts';
@@ -102,16 +101,6 @@ export function workflowEvents(raw: unknown): z.infer<typeof WorkflowEventExport
     const record=w??standalone!;
     add({type:record.status==='running'?'workflow.unfinished':`workflow.${record.status}`,at:record.finishedAt??record.startedAt,...(w?{budget:w.budget}:{})});
     return WorkflowEventExport.parse({schemaVersion:1,kind:'workflow-events',mode:'derived-snapshot',workflowId,events});
-  }
-  if (candidate?.kind === 'operator-action') {
-    const r=OperatorRecord.parse(raw), q=r.request;
-    const base={ schemaVersion:1 as const,workflowId:r.workflowId,operatorAction:q.action,inputHash:r.inputHash,
-      ...(q.action==='investigate'?{ parentWorkflowId:q.briefId,issueNumber:q.number }:q.action==='propose'?{parentWorkflowId:q.packetId}:{}),repositoryCommit:r.commit };
-    return WorkflowEventExport.parse({ schemaVersion:1,kind:'workflow-events',mode:'derived-snapshot',workflowId:r.workflowId,events:[
-      { ...base,sequence:0,type:'operator.requested',at:r.startedAt },
-      { ...base,sequence:1,type:r.status==='running'?'operator.unfinished':`operator.${r.status}`,at:r.finishedAt??r.startedAt,
-        ...(r.result && 'workflowId' in r.result?{ childWorkflowId:r.result.workflowId }:{}) },
-    ] });
   }
   if (candidate?.kind === 'brief-delivery') return deliveryEvents(raw);
   if (candidate?.kind === 'repository-brief' || RepoAgentId.safeParse(candidate?.agent).success) return repositoryBriefEvents(raw);

@@ -279,17 +279,7 @@ checkout and commit selection. See `npm run prove:codex -- --handoff ONE_ISSUE.j
 and the spec for the three source settings.
 
 
-The local operator console brings brief history, delivery status, scheduling
-controls and selected-issue investigation into the inbox:
-
-```sh
-npm run inbox -- serve --config .local/console/config.json --port 8765
-```
-
-Configure explicit artifact roots, delivery settings and an optional pinned source
-checkout using the [console contract](docs/specs/operator-console.md). Open
-`http://127.0.0.1:8765/`. Actions retain durable IDs and never broaden the existing
-agents into code execution or GitHub writes. The
+The [web operator surface](docs/design/web.md) replaced the former loopback console. The
 [investigation-to-PR plan](docs/plans/investigation-to-pr.md) records the proposed
 next boundaries for bugs and features: distinct evidence/requirements preparation,
 a shared change proposal, isolated verification, patch/review, and explicitly

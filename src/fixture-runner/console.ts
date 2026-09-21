@@ -1,6 +1,6 @@
 import {readdir} from 'node:fs/promises';
 import {z} from 'zod';
-import {scopedJson} from '../console/history.ts';
+import {scopedJson} from '../scoped-read.ts';
 import {validateFixtureWorkflow,type FixtureWorkflow} from './record.ts';
 export async function fixtureHistory(roots:string[]) {
   const entries:Array<{record:FixtureWorkflow;root:string;directory:string}>=[];let invalid=0,truncated=false;

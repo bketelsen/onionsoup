@@ -39,8 +39,13 @@ GitHub reads use the authenticated `gh` CLI.
    `code.location`, `investigation.packet` and `change.proposal`. Root `src/`
    files forward to the package for the remaining legacy consumers. The
    `locate`, `packet`, `proposal` and `briefing` CLIs are gone. *(done 2026-09-21)*
-3. Evidence views for briefs, packets, proposals, events, citations, deliveries
-   and fixtures. Retire `src/console`.
+3. Job results render as evidence: readiness assessments with quoted evidence
+   and questions, location citations linked to the pinned commit on GitHub,
+   packets and briefs as Markdown, related jobs by ID, and next-step links
+   (locate code for a ready bug, draft a proposal from a packet). The loopback
+   console under `src/console` is deleted. Scheduled-delivery pause/resume and
+   publication approval are CLI-only until they get a web equivalent.
+   *(done 2026-09-21)*
 4. Recipes: a saved document of steps, bindings and budgets; the host runs it as
    a parent job with child jobs; a Svelte Flow canvas edits it.
 5. Web chat over `@onionsoup/chat` with tools that are host capabilities and

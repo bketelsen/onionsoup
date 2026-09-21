@@ -2,10 +2,10 @@
   import SchemaForm from './SchemaForm.svelte';
   import { store, ApiError } from './store.svelte.ts';
 
-  let { id }: { id: string } = $props();
+  let { id, prefill = {} }: { id: string; prefill?: Record<string, string> } = $props();
   const capability = $derived(store.capability(id));
 
-  let input = $state<unknown>(undefined);
+  let input = $state<unknown>(Object.keys(prefill).length ? { ...prefill } : undefined);
   let submitting = $state(false);
   let error = $state<string | null>(null);
   let showSchema = $state(false);

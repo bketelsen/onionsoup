@@ -44,7 +44,13 @@
   const kind = $derived(kindOf(schema));
   const required = $derived(new Set(schema.required ?? []));
 
-  untrack(() => { if (value === undefined) value = initial(schema); });
+  untrack(() => {
+    if (value === undefined) value = initial(schema);
+    else if (kindOf(schema) === 'object' && value && typeof value === 'object') {
+      const current = value as Record<string, unknown>;
+      for (const [key, child] of Object.entries(schema.properties!)) if (current[key] === undefined) current[key] = initial(child);
+    }
+  });
 
   let jsonText = $state(value === undefined ? '' : JSON.stringify(value, null, 2));
   let jsonError = $state('');

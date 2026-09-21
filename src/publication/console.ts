@@ -2,7 +2,7 @@ import {readdir} from 'node:fs/promises';
 import {z} from 'zod';
 import {escapeHtml as e} from '../batch-report.ts';
 import {hash} from '../repository-brief/contracts.ts';
-import {scopedJson} from '../console/history.ts';
+import {scopedJson} from '../scoped-read.ts';
 import {Digest} from '../fixture-runner/contracts.ts';
 import {validateBundle,validateState,type PublicationConfig} from './contracts.ts';
 import {loadPublicationConfig,loadBundle,loadState} from './bundle.ts';

@@ -2,7 +2,7 @@
 
 This contract governs the loopback inbox server, its operator actions and links
 between aggregate briefs and investigations. It wraps existing recipes without
-changing agent capabilities. [Implementation](../../src/console/server.ts).
+changing agent capabilities. Implementation (removed 2026-09-21; see the web design page).
 
 ## Interface
 
@@ -10,7 +10,7 @@ changing agent capabilities. [Implementation](../../src/console/server.ts).
 npm run inbox -- serve --config .local/console/config.json --port 8765
 ```
 
-Copy [the example](../../examples/console/config.json) into `.local/console/`
+Copy the former example configuration (removed 2026-09-21) into `.local/console/`
 and adjust its paths to existing operator-owned artifacts. Add `source` only
 after selecting a matching local checkout and full commit.
 

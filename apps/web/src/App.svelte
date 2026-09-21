@@ -9,11 +9,13 @@
   window.addEventListener('hashchange', () => { hash = location.hash || '#/'; });
 
   const route = $derived.by(() => {
-    const parts = hash.replace(/^#\/?/, '').split('/').filter(Boolean);
-    if (parts[0] === 'run' && parts[1]) return { page: 'run', id: decodeURIComponent(parts.slice(1).join('/')) };
-    if (parts[0] === 'jobs' && parts[1]) return { page: 'job', id: parts[1] };
-    if (parts[0] === 'jobs') return { page: 'jobs', id: '' };
-    return { page: 'capabilities', id: '' };
+    const [pathPart, queryPart] = hash.replace(/^#\/?/, '').split('?');
+    const parts = pathPart.split('/').filter(Boolean);
+    const prefill = Object.fromEntries(new URLSearchParams(queryPart ?? ''));
+    if (parts[0] === 'run' && parts[1]) return { page: 'run', id: decodeURIComponent(parts.slice(1).join('/')), prefill };
+    if (parts[0] === 'jobs' && parts[1]) return { page: 'job', id: parts[1], prefill };
+    if (parts[0] === 'jobs') return { page: 'jobs', id: '', prefill };
+    return { page: 'capabilities', id: '', prefill };
   });
 
   store.load();
@@ -30,7 +32,7 @@
 
 <main>
   {#if route.page === 'run'}
-    <RunCapability id={route.id} />
+    <RunCapability id={route.id} prefill={route.prefill} />
   {:else if route.page === 'job'}
     <JobDetail id={route.id} />
   {:else if route.page === 'jobs'}

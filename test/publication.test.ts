@@ -12,10 +12,6 @@ import {publicationEvents} from '../src/publication/events.ts';
 import {type PublisherTransport,type Remote} from '../src/publication/github.ts';
 import {atomicJson} from '../src/batch-store.ts';
 import {hash} from '../src/repository-brief/contracts.ts';
-import {ConsoleConfig} from '../src/console/config.ts';
-import {Operator} from '../src/console/actions.ts';
-import {consoleServer} from '../src/console/server.ts';
-import {PublicationOperator} from '../src/publication/console.ts';
 function transport(b:Bundle) {
   const view:Remote={repositoryId:b.target.repositoryId,baseCommit:b.target.baseCommit,pulls:[]};let pushes=0,creates=0;
   const pr=():Pull=>({number:1,url:`https://github.com/${b.target.repository}/pull/1`,repositoryId:b.target.repositoryId,headRepositoryId:b.target.repositoryId,baseRepositoryId:b.target.repositoryId,
@@ -102,22 +98,6 @@ test('exclusive lock prevents concurrent consumers and a stale lock is never sto
   const pending=f.send();await ready;await assert.rejects(f.send());release();await pending;
   await mkdir(join(f.c.stateDirectory,'.publication.lock'));await assert.rejects(f.send());assert.equal(f.remote.counts().creates,1);
 });
-test('console binds approval to saved bundle, rejects forged inputs, publishes asynchronously and escapes content',async t=>{
-  const f=await setup(t),file=join(f.root,'publication-config.json');await atomicJson(file,f.c);
-  const c=ConsoleConfig.parse({schemaVersion:1,stateDirectory:join(f.root,'console'),publicationConfig:file,jobs:[{id:'fixture',deliveryConfig:'unused',deliveryState:'unused'}]});
-  const publisher=new PublicationOperator(file,f.remote.api),server=consoleServer(new Operator(c),publisher);
-  await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));t.after(()=>{server.closeAllConnections();server.close();});
-  const origin=`http://127.0.0.1:${(server.address() as any).port}`,page=await(await fetch(origin+'/publications/'+f.b.publicationId)).text();
-  const csrf=page.match(/name="csrf" value="([a-f0-9]+)"/)![1];assert.match(page,/Exact draft PR body/);assert.match(page,/Approve this exact bundle/);
-  assert.ok(!page.includes('<!-- onionsoup-publication:'));assert.match(page,/&lt;!-- onionsoup/);
-  const post=(raw:Record<string,string>,headers={})=>fetch(origin+'/publication-actions',{method:'POST',redirect:'manual',headers:{Origin:origin,'Content-Type':'application/x-www-form-urlencoded',...headers},body:new URLSearchParams({csrf,id:f.b.publicationId,bundleHash:hash(f.b),...raw})});
-  for(const raw of [{action:'approve',repository:'get-bb/bb'},{action:'approve',bundleHash:'a'.repeat(64)},{action:'approve',csrf:'bad'},{action:'publish'}] as Record<string,string>[]) assert.equal((await post(raw)).status,409);
-  assert.equal((await post({action:'approve'},{Origin:'https://evil.invalid'})).status,409);
-  assert.equal((await post({action:'approve'})).status,303);assert.equal((await post({action:'publish'})).status,303);await publisher.idle();
-  assert.equal((await loadState(f.c,f.b)).status,'published');assert.equal((await fetch(origin+'/publications/'+f.b.publicationId+'/events')).status,200);
-  assert.deepEqual(f.remote.counts(),{pushes:1,creates:1});
-});
-
 test('approval expiring during push cannot authorize a subsequent PR creation',async t=>{
   const f=await setup(t);await f.approve();let now=new Date(),push=f.remote.api.push;
   f.remote.api.push=async(...args)=>{await push(...args);now=new Date('2100-01-01T00:00:00Z');};

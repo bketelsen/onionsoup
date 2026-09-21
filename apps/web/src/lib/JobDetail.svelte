@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { store } from './store.svelte.ts';
+  import { store, type Job } from './store.svelte.ts';
+  import Result from './results/Result.svelte';
 
   let { id }: { id: string } = $props();
   const job = $derived(store.jobs[id]);
@@ -26,15 +27,29 @@
     URL.revokeObjectURL(url);
   }
 
-  function markdownOf(result: unknown): string | undefined {
-    if (!result || typeof result !== 'object') return undefined;
-    const r = result as Record<string, unknown>;
-    for (const key of ['markdown', 'text', 'summary']) if (typeof r[key] === 'string') return r[key] as string;
-    const brief = r.brief as Record<string, unknown> | undefined;
-    if (brief && typeof brief.markdown === 'string') return brief.markdown;
-    return undefined;
+  // Jobs reference each other by ID inside their input (readinessJobId, packetJobId, …) or as parentJobId.
+  function references(j: Job): string[] {
+    const found: string[] = [];
+    const walk = (v: unknown) => {
+      if (typeof v === 'string' && /^[0-9a-f-]{36}$/.test(v) && store.jobs[v]) found.push(v);
+      else if (Array.isArray(v)) v.forEach(walk);
+      else if (v && typeof v === 'object') Object.values(v).forEach(walk);
+    };
+    walk(j.input);
+    if (j.parentJobId) found.push(j.parentJobId);
+    return [...new Set(found)];
   }
-  const markdown = $derived(job?.result !== undefined ? markdownOf(job.result) : undefined);
+  const parents = $derived(job ? references(job) : []);
+  const children = $derived(store.jobList.filter((j) => j.jobId !== id && references(j).includes(id)));
+
+  const next = $derived.by(() => {
+    if (!job || job.status !== 'completed') return [];
+    const r = job.result as { run?: { assessment?: { kind?: string; bug_readiness?: string } } } | undefined;
+    if (job.capability === 'issue.readiness' && r?.run?.assessment?.kind === 'bug_report' && r.run.assessment.bug_readiness === 'ready')
+      return [{ label: 'Locate code', href: `#/run/code.location?readinessJobId=${job.jobId}` }];
+    if (job.capability === 'investigation.packet') return [{ label: 'Draft proposal', href: `#/run/change.proposal?packetJobId=${job.jobId}` }];
+    return [];
+  });
 </script>
 
 {#if !job}
@@ -43,11 +58,25 @@
   <p class="crumbs"><a href="#/jobs">Jobs</a> / {job.jobId}</p>
   <h1><span class={`status ${job.status}`}>{job.status}</span> <a href={`#/run/${job.capability}`}>{job.capability}</a> <span class="muted">{job.version}</span></h1>
 
-  {#if job.status === 'queued' || job.status === 'running'}
-    <p><button class="secondary" onclick={() => store.cancel(job.jobId)}>Cancel</button></p>
-  {/if}
+  <p class="actions">
+    {#if job.status === 'queued' || job.status === 'running'}
+      <button class="secondary" onclick={() => store.cancel(job.jobId)}>Cancel</button>
+    {/if}
+    {#each next as n}<a class="button" href={n.href}>{n.label}</a>{/each}
+    {#if job.result !== undefined}<button class="secondary small" onclick={download}>Download JSON</button>{/if}
+  </p>
   {#if job.error}
     <p class="error">{job.error}</p>
+  {/if}
+
+  {#if job.status === 'completed'}
+    <section class="panel">
+      {#if job.result === undefined}
+        <p>Loading result…</p>
+      {:else}
+        <Result capability={job.capability} result={job.result} />
+      {/if}
+    </section>
   {/if}
 
   <h2>Timeline</h2>
@@ -57,35 +86,38 @@
     {/each}
   </ol>
 
-  <h2>Input</h2>
-  <pre>{JSON.stringify(job.input, null, 2)}</pre>
-
-  {#if job.status === 'completed'}
-    <h2>Result {#if job.result !== undefined}<button class="secondary small" onclick={download}>Download JSON</button>{/if}</h2>
-    {#if job.result === undefined}
-      <p>Loading result…</p>
-    {:else}
-      {#if markdown}
-        <pre class="markdown">{markdown}</pre>
-        <details><summary>Raw JSON</summary><pre>{JSON.stringify(job.result, null, 2)}</pre></details>
-      {:else}
-        <pre>{JSON.stringify(job.result, null, 2)}</pre>
-      {/if}
-    {/if}
-  {/if}
-
-  {#if job.parentJobId || job.correlationId}
-    <h2>Provenance</h2>
+  {#if parents.length || children.length}
+    <h2>Related jobs</h2>
     <ul>
-      {#if job.parentJobId}<li>Parent <a href={`#/jobs/${job.parentJobId}`}>{job.parentJobId}</a></li>{/if}
-      {#if job.correlationId}<li>Correlation <code>{job.correlationId}</code></li>{/if}
-      <li>Idempotency key <code>{job.idempotencyKey}</code></li>
+      {#each parents as p}<li>Uses <a href={`#/jobs/${p}`}>{store.jobs[p].capability}</a> <span class={`status ${store.jobs[p].status}`}>{store.jobs[p].status}</span></li>{/each}
+      {#each children as c}<li>Used by <a href={`#/jobs/${c.jobId}`}>{c.capability}</a> <span class={`status ${c.status}`}>{c.status}</span></li>{/each}
     </ul>
   {/if}
+
+  <details>
+    <summary>Input</summary>
+    <pre>{JSON.stringify(job.input, null, 2)}</pre>
+  </details>
+  {#if job.result !== undefined}
+    <details>
+      <summary>Raw result JSON</summary>
+      <pre>{JSON.stringify(job.result, null, 2)}</pre>
+    </details>
+  {/if}
+  <details>
+    <summary>Provenance</summary>
+    <ul>
+      <li>Idempotency key <code>{job.idempotencyKey}</code></li>
+      {#if job.correlationId}<li>Correlation <code>{job.correlationId}</code></li>{/if}
+      {#if job.parentJobId}<li>Parent <a href={`#/jobs/${job.parentJobId}`}>{job.parentJobId}</a></li>{/if}
+    </ul>
+  </details>
 {/if}
 
 <style>
   .crumbs { color: var(--muted); }
+  .actions { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+  a.button { background: var(--accent); color: #fff; border-radius: 6px; padding: 0.45rem 0.9rem; text-decoration: none; }
   .timeline { padding-left: 1.2rem; }
-  pre.markdown { white-space: pre-wrap; font-family: inherit; line-height: 1.5; }
+  section.panel { margin-top: 1rem; }
 </style>
