@@ -1,9 +1,13 @@
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
-import { mkdir, open, realpath, rm, readFile, stat } from 'node:fs/promises';
+import { mkdir, open, realpath, rm, readFile, readdir, stat, unlink } from 'node:fs/promises';
 import { extname, join, normalize, resolve } from 'node:path';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { z } from 'zod';
 import { atomicJson } from '@onionsoup/runtime/storage';
+import { HostError } from './errors.ts';
+import { Recipe, validateRecipe, inferParams, paramSchema, resolveInput, type StepOutcome } from './recipes.ts';
+export { HostError } from './errors.ts';
+export { Recipe, Step, Binding, bindings, inferParams, paramSchema, type StepOutcome } from './recipes.ts';
 
 /** Defaults. Every one of these is a knob, not a contract. */
 export const HOST_LIMITS = {
@@ -81,12 +85,6 @@ export type Capability = {
   execute: (input: any, context: CapabilityContext) => Promise<unknown>;
 };
 
-export class HostError extends Error {
-  constructor(readonly code: string, readonly status = 400) {
-    super(code);
-  }
-}
-
 const canonical = (value: any): any =>
   Array.isArray(value)
     ? value.map(canonical)
@@ -129,6 +127,8 @@ export type HostOptions = {
   invokers: Invoker[];
   persist?: typeof atomicJson;
   limits?: Partial<typeof HOST_LIMITS>;
+  /** Recipes available at launch. Saved recipes under <directory>/recipes are loaded too. */
+  recipes?: unknown[];
 };
 
 export async function openJobHost(options: HostOptions) {
@@ -157,6 +157,26 @@ export async function openJobHost(options: HostOptions) {
     timeoutMs: c.timeoutMs,
   });
   const binding = digest({ protocol: 'job-host-v1', configuration: options.binding, capabilities: [...capabilities.values()].map(describe) });
+  const described = new Map([...capabilities.values()].map((c) => [c.id, describe(c)]));
+  const recipes = new Map<string, Recipe>();
+  const recipeDir = join(resolve(options.directory), 'recipes');
+  const RECIPE_PREFIX = 'recipe.';
+  const recipeOf = (capabilityId: string) => (capabilityId.startsWith(RECIPE_PREFIX) ? recipes.get(capabilityId.slice(RECIPE_PREFIX.length)) : undefined);
+  const describeRecipe = (r: Recipe) => {
+    const params = inferParams(r, described);
+    const steps = r.steps.map((s) => capabilities.get(s.capability)!);
+    return {
+      id: RECIPE_PREFIX + r.id,
+      version: 'v1',
+      description: r.description || r.title,
+      inputSchema: paramSchema(params),
+      outputSchema: { type: 'object', properties: { recipe: { type: 'string' }, params: { type: 'object' }, steps: { type: 'array' } } },
+      metadata: { kind: 'recipe', recipe: r, params },
+      effects: [...new Set(steps.flatMap((c) => c.effects))],
+      timeoutMs: steps.reduce((total, c) => total + c.timeoutMs, 0),
+    };
+  };
+  const recipeAllowed = (r: Recipe, invoker: Invoker) => r.steps.every((s) => invoker.capabilities.includes(s.capability));
   const Ledger = z.object({ schemaVersion: z.literal(1), jobs: z.array(Job).max(limits.jobs) }).strict();
 
   await mkdir(root, { recursive: true, mode: 0o700 });
@@ -216,11 +236,24 @@ export async function openJobHost(options: HostOptions) {
       if (j.status === 'running' || j.status === 'queued') transition(j, 'interrupted', 'Host restarted before the job finished');
     }
     await save();
+    for (const raw of options.recipes ?? []) { const r = validateRecipe(raw, described); recipes.set(r.id, r); }
+    await mkdir(recipeDir, { recursive: true, mode: 0o700 });
+    for (const file of (await readdir(recipeDir)).filter((f) => f.endsWith('.json')).sort()) {
+      try { const r = validateRecipe(await boundedJson(recipeDir, file, 256 * 1024), described); recipes.set(r.id, r); }
+      catch { /* an invalid saved recipe is skipped, not fatal */ }
+    }
   } catch (e) {
     await rm(lock, { recursive: true, force: true });
     throw e;
   }
 
+  function recipeParams(recipe: Recipe, raw: unknown) {
+    const params = inferParams(recipe, described);
+    const input = z.record(z.string(), z.json()).parse(raw ?? {});
+    for (const name of Object.keys(params)) if (!(name in input)) throw new HostError(`missing_param:${name}`);
+    for (const name of Object.keys(input)) if (!(name in params)) throw new HostError(`unknown_param:${name}`);
+    return input;
+  }
   const owner = (id: string) => {
     const p = invokers.find((i) => i.id === id);
     if (!p) throw new HostError('unauthorized', 401);
@@ -292,6 +325,90 @@ export async function openJobHost(options: HostOptions) {
     });
   }
 
+  const terminal = (status: JobStatus) => status !== 'queued' && status !== 'running';
+  function waitFor(jobId: string, signal: AbortSignal): Promise<Job> {
+    return new Promise((resolveWait, reject) => {
+      const current = ledger.jobs.find((j) => j.jobId === jobId);
+      if (!current) return reject(new HostError('job_not_found', 404));
+      if (terminal(current.status)) return resolveWait(structuredClone(current));
+      const listener: JobListener = (job) => { if (job.jobId === jobId && terminal(job.status)) { cleanup(); resolveWait(job); } };
+      const onAbort = () => { cleanup(); reject(new HostError('cancelled')); };
+      const cleanup = () => { listeners.delete(listener); signal.removeEventListener('abort', onAbort); };
+      listeners.add(listener);
+      signal.addEventListener('abort', onAbort, { once: true });
+    });
+  }
+
+  /** Recipes run outside the capability lane: each step is an ordinary child job, submitted in order. */
+  async function runRecipe(parent: Job, recipe: Recipe) {
+    const controller = new AbortController();
+    controllers.set(parent.jobId, controller);
+    const signal = controller.signal;
+    const params = parent.input as Record<string, unknown>;
+    const done = new Map<string, { jobId: string; result?: unknown }>();
+    const outcomes: StepOutcome[] = [];
+    let status: JobStatus = 'completed';
+    let error: string | undefined;
+    let current: string | undefined;
+    const onAbort = () => { if (current) void host.cancel(parent.owner, current).catch(() => {}); };
+    signal.addEventListener('abort', onAbort, { once: true });
+    try {
+      await mkdir(join(root, parent.jobId), { mode: 0o700 });
+      for (const step of recipe.steps) {
+        signal.throwIfAborted();
+        const outcome: StepOutcome = { id: step.id, capability: step.capability, status: 'queued' };
+        outcomes.push(outcome);
+        let child: Job;
+        try {
+          const input = resolveInput(step.input, { params, jobs: done });
+          const submitted = await host.submit(parent.owner, { capability: step.capability, input, idempotencyKey: `${parent.idempotencyKey}--${step.id}`.slice(0, 128), parentJobId: parent.jobId });
+          outcome.jobId = submitted.jobId;
+          current = submitted.jobId;
+          child = await waitFor(submitted.jobId, signal);
+          current = undefined;
+        } catch (e) {
+          outcome.status = 'failed';
+          outcome.error = e instanceof HostError ? e.code : e instanceof Error ? e.message : 'failed';
+          if (signal.aborted) throw e;
+          if (!step.continueOnFailure) { status = 'failed'; error = `step ${step.id}: ${outcome.error}`; break; }
+          continue;
+        }
+        outcome.status = child.status;
+        outcome.error = child.error;
+        if (child.status === 'completed') {
+          const view = await inspect(parent.owner, child.jobId);
+          done.set(step.id, { jobId: child.jobId, result: view.result });
+        } else if (!step.continueOnFailure) {
+          status = 'failed';
+          error = `step ${step.id}: ${child.error ?? child.status}`;
+          break;
+        }
+      }
+    } catch (e) {
+      status = signal.aborted ? 'cancelled' : 'failed';
+      error = e instanceof HostError ? e.code : e instanceof Error ? e.message : 'failed';
+    }
+    signal.removeEventListener('abort', onAbort);
+    let resultHash: string | undefined;
+    if (status === 'completed') {
+      const result = { recipe: recipe.id, params, steps: outcomes };
+      try {
+        await (options.persist ?? atomicJson)(join(root, parent.jobId, 'result.json'), result);
+        resultHash = digest(result);
+      } catch {
+        broken = true;
+        status = 'failed';
+        error = 'persistence_failed';
+      }
+    }
+    controllers.delete(parent.jobId);
+    await exclusive(async () => {
+      if (resultHash) parent.resultHash = resultHash;
+      transition(parent, status, error ?? (outcomes.length ? undefined : 'no steps'));
+      await save();
+    });
+  }
+
   function start() {
     if (draining || stopped || broken) return;
     draining = (async () => {
@@ -316,9 +433,12 @@ export async function openJobHost(options: HostOptions) {
       });
   }
 
-  const host = {
+  type Host = ReturnType<typeof build>;
+  let host: Host;
+  function build() { return {
     binding,
     limits,
+    recipeOf,
     authenticate(token: string) {
       const h = Buffer.from(tokenHash(token), 'hex');
       const found = invokers.find((i) => i.tokenHash && timingSafeEqual(h, Buffer.from(i.tokenHash, 'hex')));
@@ -335,10 +455,33 @@ export async function openJobHost(options: HostOptions) {
         binding,
         invoker: p.id,
         remainingAdmissions: p.maxJobs === undefined ? null : p.maxJobs - ownedJobs(p.id).length,
-        capabilities: [...capabilities.values()].filter((c) => p.capabilities.includes(c.id)).map(describe),
+        capabilities: [
+          ...[...capabilities.values()].filter((c) => p.capabilities.includes(c.id)).map(describe),
+          ...[...recipes.values()].filter((r) => recipeAllowed(r, p)).map(describeRecipe),
+        ],
         limits,
         lifecycle: { automaticReplay: false, concurrency: 1 },
       };
+    },
+    listRecipes(principal: string) {
+      const p = owner(principal);
+      return [...recipes.values()].filter((r) => recipeAllowed(r, p)).map((r) => ({ ...r, paramSchema: inferParams(r, described) }));
+    },
+    async saveRecipe(principal: string, raw: unknown) {
+      const p = owner(principal);
+      const allowed = new Map([...described].filter(([id]) => p.capabilities.includes(id)));
+      const recipe = validateRecipe(raw, allowed);
+      await atomicJson(join(recipeDir, `${recipe.id}.json`), recipe);
+      recipes.set(recipe.id, recipe);
+      return { ...recipe, paramSchema: inferParams(recipe, described) };
+    },
+    async deleteRecipe(principal: string, id: string) {
+      const p = owner(principal);
+      const recipe = recipes.get(id);
+      if (!recipe || !recipeAllowed(recipe, p)) throw new HostError('recipe_not_found', 404);
+      recipes.delete(id);
+      await unlink(join(recipeDir, `${id}.json`)).catch(() => {});
+      return { id };
     },
     list(principal: string): Job[] {
       owner(principal);
@@ -355,9 +498,10 @@ export async function openJobHost(options: HostOptions) {
         if (stopped || broken) throw new HostError('host_unavailable', 503);
         const p = owner(principal);
         const r = JobRequest.parse(raw);
+        const recipe = recipeOf(r.capability);
         const c = capabilities.get(r.capability);
-        if (!c || !p.capabilities.includes(r.capability)) throw new HostError('capability_not_allowed', 403);
-        const input = z.json().parse(c.input.parse(r.input));
+        if (recipe ? !recipeAllowed(recipe, p) : !c || !p.capabilities.includes(r.capability)) throw new HostError('capability_not_allowed', 403);
+        const input = recipe ? recipeParams(recipe, r.input) : z.json().parse(c!.input.parse(r.input));
         if (Buffer.byteLength(JSON.stringify(input)) > limits.inputBytes) throw new HostError('input_too_large', 413);
         const prior = ledger.jobs.find((j) => j.owner === principal && j.idempotencyKey === r.idempotencyKey);
         if (prior) {
@@ -374,8 +518,8 @@ export async function openJobHost(options: HostOptions) {
           schemaVersion: 1,
           jobId: randomUUID(),
           owner: principal,
-          capability: c.id,
-          version: c.version,
+          capability: r.capability,
+          version: recipe ? 'v1' : c!.version,
           binding,
           input,
           inputHash: digest(input),
@@ -387,9 +531,10 @@ export async function openJobHost(options: HostOptions) {
           events: [{ sequence: 1, at: stamp(), status: 'queued' }],
         };
         ledger.jobs.push(job);
+        if (recipe) transition(job, 'running');
         await save();
-        notify(job);
-        queueMicrotask(start);
+        if (recipe) queueMicrotask(() => { void runRecipe(job, recipe); });
+        else { notify(job); queueMicrotask(start); }
         return { jobId: job.jobId, reused: false };
       });
     },
@@ -421,12 +566,13 @@ export async function openJobHost(options: HostOptions) {
       closed = true;
       await rm(lock, { recursive: true });
     },
-  };
+  }; }
+  host = build();
   return host;
 }
 export type JobHost = Awaited<ReturnType<typeof openJobHost>>;
 
-async function body(req: IncomingMessage, limit: number) {
+async function requestBody(req: IncomingMessage, limit: number) {
   let n = 0;
   const chunks: Buffer[] = [];
   for await (const chunk of req) {
@@ -517,6 +663,14 @@ export async function listenJobHost(host: JobHost, options: ListenOptions | numb
       const principal = principalFor(host, req, opts.web);
       if (req.method === 'GET' && url === '/v1/capabilities') return json(res, 200, host.discover(principal));
       if (req.method === 'GET' && url === '/v1/jobs') return json(res, 200, { jobs: host.list(principal) });
+      if (req.method === 'GET' && url === '/v1/recipes') return json(res, 200, { recipes: host.listRecipes(principal) });
+      const recipeMatch = /^\/v1\/recipes\/([a-z][a-z0-9-]{0,63})$/.exec(url);
+      if (recipeMatch && req.method === 'PUT') {
+        const body = await requestBody(req, limits.inputBytes);
+        if (body?.id !== recipeMatch[1]) throw new HostError('recipe_id_mismatch');
+        return json(res, 200, await host.saveRecipe(principal, body));
+      }
+      if (recipeMatch && req.method === 'DELETE') return json(res, 200, await host.deleteRecipe(principal, recipeMatch[1]));
       if (req.method === 'GET' && url === '/v1/events') {
         res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive' });
         res.write(': connected\n\n');
@@ -528,7 +682,7 @@ export async function listenJobHost(host: JobHost, options: ListenOptions | numb
       }
       if (req.method === 'POST' && url === '/v1/jobs') {
         if (!(req.headers['content-type'] ?? '').startsWith('application/json')) throw new HostError('json_required', 415);
-        return json(res, 202, await host.submit(principal, await body(req, limits.inputBytes)));
+        return json(res, 202, await host.submit(principal, await requestBody(req, limits.inputBytes)));
       }
       const match = /^\/v1\/jobs\/([a-f0-9-]{36})(\/cancel)?$/.exec(url);
       if (!match) throw new HostError('not_found', 404);

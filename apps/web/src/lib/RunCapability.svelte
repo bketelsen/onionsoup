@@ -1,11 +1,12 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import SchemaForm from './SchemaForm.svelte';
   import { store, ApiError } from './store.svelte.ts';
 
   let { id, prefill = {} }: { id: string; prefill?: Record<string, string> } = $props();
   const capability = $derived(store.capability(id));
 
-  let input = $state<unknown>(Object.keys(prefill).length ? { ...prefill } : undefined);
+  let input = $state<unknown>(untrack(() => (Object.keys(prefill).length ? { ...prefill } : undefined)));
   let submitting = $state(false);
   let error = $state<string | null>(null);
   let showSchema = $state(false);

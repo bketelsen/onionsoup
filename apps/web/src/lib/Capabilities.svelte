@@ -20,7 +20,7 @@
   <div class="grid">
     {#each store.capabilities as c (c.id)}
       <a class="card" href={`#/run/${c.id}`}>
-        <h2>{c.id} <span class="version">{c.version}</span></h2>
+        <h2>{c.id} <span class="version">{c.version}</span>{#if c.id.startsWith('recipe.')} <span class="tag">recipe</span>{/if}</h2>
         <p>{c.description}</p>
         <p class="effects">{#each c.effects as effect}<span class="tag">{effect.replaceAll('_', ' ')}</span>{/each}</p>
       </a>

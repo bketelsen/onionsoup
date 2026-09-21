@@ -47,6 +47,19 @@ export type JsonSchema = {
   [key: string]: unknown;
 };
 
+export type Binding = { $param: string } | { $job: string } | { $result: [string, string] };
+export type Step = { id: string; capability: string; input: Record<string, unknown>; continueOnFailure?: boolean };
+export type Recipe = {
+  schemaVersion: 1;
+  id: string;
+  title: string;
+  description?: string;
+  steps: Step[];
+  params?: Record<string, JsonSchema>;
+  layout?: Record<string, { x: number; y: number }>;
+  paramSchema?: Record<string, JsonSchema>;
+};
+
 export type Discovery = {
   invoker: string;
   remainingAdmissions: number | null;
@@ -71,6 +84,7 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 class Store {
   discovery = $state<Discovery | null>(null);
   jobs = $state<Record<string, Job>>({});
+  recipes = $state<Recipe[]>([]);
   connected = $state(false);
   error = $state<string | null>(null);
   private source: EventSource | null = null;
@@ -87,6 +101,30 @@ class Store {
     return this.capabilities.find((c) => c.id === id);
   }
 
+  /** Capabilities a recipe step may use: everything granted that is not itself a recipe. */
+  get stepCapabilities() {
+    return this.capabilities.filter((c) => !c.id.startsWith('recipe.'));
+  }
+
+  async loadRecipes() {
+    const { recipes } = await api<{ recipes: Recipe[] }>('/v1/recipes');
+    this.recipes = recipes;
+  }
+
+  async saveRecipe(recipe: Recipe) {
+    const { paramSchema: _ignored, ...body } = recipe;
+    const saved = await api<Recipe>(`/v1/recipes/${recipe.id}`, { method: 'PUT', body: JSON.stringify(body) });
+    this.recipes = [...this.recipes.filter((r) => r.id !== saved.id), saved].sort((a, b) => a.id.localeCompare(b.id));
+    await this.load();
+    return saved;
+  }
+
+  async deleteRecipe(id: string) {
+    await api(`/v1/recipes/${id}`, { method: 'DELETE' });
+    this.recipes = this.recipes.filter((r) => r.id !== id);
+    await this.load();
+  }
+
   async load() {
     try {
       const [discovery, list] = await Promise.all([api<Discovery>('/v1/capabilities'), api<{ jobs: Job[] }>('/v1/jobs')]);
@@ -95,6 +133,7 @@ class Store {
       for (const job of list.jobs) next[job.jobId] = job;
       this.jobs = next;
       this.error = null;
+      await this.loadRecipes().catch(() => {});
     } catch (e) {
       this.error = e instanceof Error ? e.message : String(e);
     }

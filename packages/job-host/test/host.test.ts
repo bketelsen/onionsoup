@@ -216,3 +216,61 @@ test('invalid results fail with a recorded reason; foreign parents and modified 
   await writeFile(join(directory, good.jobId, 'result.json'), JSON.stringify({ value: 2 }));
   await assert.rejects(host.inspect('chat', good.jobId), /result_mismatch/);
 });
+
+test('recipes chain granted capabilities as child jobs, bind results by ID, and stop on failure', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'job-recipe-'));
+  const calls: unknown[] = [];
+  const double: Capability = {
+    id: 'fixture.double', version: 'v1', description: 'Double a value', metadata: {}, effects: ['local_artifacts'], timeoutMs: 10000,
+    input: z.object({ value: z.number().int(), parent: z.uuid().optional() }).strict(),
+    output: z.object({ value: z.number().int() }).strict(),
+    execute: async (input) => { calls.push(input); if (input.value > 100) throw new Error('too big'); return { value: input.value * 2 }; },
+  };
+  const recipe = {
+    schemaVersion: 1, id: 'quadruple', title: 'Quadruple', steps: [
+      { id: 'first', capability: 'fixture.double', input: { value: { $param: 'start' } } },
+      { id: 'second', capability: 'fixture.double', input: { value: { $result: ['first', 'value'] }, parent: { $job: 'first' } } },
+    ],
+  };
+  const host = await openJobHost({ directory, binding: {}, capabilities: [double], recipes: [recipe],
+    invokers: [{ id: 'web', capabilities: ['fixture.double'] }, { id: 'limited', tokenHash: tokenHash(token), capabilities: ['fixture.double'], maxJobs: 1 }] });
+  const server = await listenJobHost(host, { web: { directory, invoker: 'web' } });
+  t.after(async () => { await server.close(); await rm(directory, { recursive: true, force: true }); });
+
+  const discovery = host.discover('web');
+  const listed = discovery.capabilities.find((c) => c.id === 'recipe.quadruple')!;
+  assert.deepEqual(Object.keys((listed.inputSchema as any).properties), ['start']);
+  assert.equal((listed.inputSchema as any).properties.start.type, 'integer');
+
+  await assert.rejects(host.submit('web', { capability: 'recipe.quadruple', idempotencyKey: 'missing-param', input: {} }), /missing_param:start/);
+  const run = await host.submit('web', { capability: 'recipe.quadruple', idempotencyKey: 'recipe-run-1', input: { start: 3 } });
+  const done = await settled(host, 'web', run.jobId);
+  assert.equal(done.status, 'completed', done.error);
+  const result = done.result as { steps: { id: string; jobId: string; status: string }[] };
+  assert.deepEqual(result.steps.map((s) => [s.id, s.status]), [['first', 'completed'], ['second', 'completed']]);
+  const second = await host.inspect('web', result.steps[1].jobId);
+  assert.deepEqual(second.result, { value: 12 });
+  assert.equal(second.parentJobId, run.jobId);
+  assert.deepEqual(calls[1], { value: 6, parent: result.steps[0].jobId });
+
+  const failing = await host.submit('web', { capability: 'recipe.quadruple', idempotencyKey: 'recipe-run-2', input: { start: 60 } });
+  const failed = await settled(host, 'web', failing.jobId);
+  assert.equal(failed.status, 'failed');
+  assert.match(failed.error ?? '', /step second/);
+  assert.equal(calls.length, 4);
+
+  // Saving a recipe over HTTP is operator content bound to granted capabilities.
+  const origin = server.url;
+  const saved = await fetch(`${origin}/v1/recipes/echo`, { method: 'PUT', headers: { Origin: origin, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ schemaVersion: 1, id: 'echo', title: 'Echo', steps: [{ id: 'one', capability: 'fixture.double', input: { value: 1 } }] }) });
+  assert.equal(saved.status, 200);
+  const rejected = await fetch(`${origin}/v1/recipes/bad`, { method: 'PUT', headers: { Origin: origin, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ schemaVersion: 1, id: 'bad', title: 'Bad', steps: [{ id: 'one', capability: 'fixture.other', input: {} }] }) });
+  assert.equal(rejected.status, 400);
+  const list = await (await fetch(`${origin}/v1/recipes`, { headers: { Origin: origin } })).json() as { recipes: { id: string }[] };
+  assert.deepEqual(list.recipes.map((r) => r.id).sort(), ['echo', 'quadruple']);
+  assert.ok(await readFile(join(directory, 'recipes', 'echo.json'), 'utf8'));
+
+  // A recipe consumes one admission per child on top of its own; the limited invoker cannot run it.
+  await assert.rejects(host.submit('limited', { capability: 'recipe.quadruple', idempotencyKey: 'limited-run', input: { start: 1 } }).then((r) => settled(host, 'limited', r.jobId)).then((j) => { if (j.status !== 'failed') throw new Error('expected failure'); return Promise.reject(new Error(j.error)); }), /admission_limit/);
+});

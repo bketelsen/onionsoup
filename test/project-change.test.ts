@@ -20,6 +20,8 @@ import {profileHash,seedsFrom,evaluateObservations,documentationSatisfied,status
 import {validateProject,projectInput} from '../src/project-change/record.ts';
 import {prepareProjectPublication} from '../src/project-change/publication.ts';
 import {snapshot,treeDigest} from '../src/project-change/source.ts';
+// The publication-filter profile targets src/console, removed on 2026-09-21; it applies to the repository as of this commit.
+const PROFILE_COMMIT='f61df6700dfe9a7377e009ef9d3886bc1005f3c8';
 const claim=(text:string,refs=['issue:body'])=>({text,basis:'proposed',evidenceIds:refs});
 const requirements={schemaVersion:1,status:'sufficient_for_proposal',userNeed:claim('Filter history.'),scenarios:[claim('Select status.')],constraints:[],nonGoals:[],questions:[]};
 const proposal={schemaVersion:1,status:'proposal_ready',outcome:claim('Filter publication history.'),changes:[claim('Add a bounded view.', ['source:1'])],nonGoals:[],
@@ -29,7 +31,7 @@ const proposal={schemaVersion:1,status:'proposal_ready',outcome:claim('Filter pu
 const mapping:Job['mapping']=[{criterionId:'AC1',checks:['default-history','status-filter','invalid-filter','typecheck']},{criterionId:'AC2',checks:['filter-controls','coverage-preserved','detail-unchanged','adjacent-console']},{criterionId:'AC3',checks:['documentation']}];
 async function setup(t:TestContext,baseCommit?:string) {
  const f=await fixture(t),w=await runFixture('bug',f.options),fc=PublicationConfig.parse({schemaVersion:1,stateDirectory:join(f.root,'fixture-publications'),targets:[{repository:'bketelsen/onionsoup-fixtures',repositoryId:42,baseBranch:'main',baseCommit:w.scope!.baseCommit}]});
- const seed=await preparePublication(fc,f.options.directory,fc.targets[0]),dir=join(f.root,'proposal'),base=baseCommit??(await git(process.cwd(),['rev-parse','HEAD'])).trim();
+ const seed=await preparePublication(fc,f.options.directory,fc.targets[0]),dir=join(f.root,'proposal'),base=baseCommit??PROFILE_COMMIT;
  const parent=await proposeProject(process.cwd(),base,dir,'copilot',{modelFactory:async()=>({provider:'copilot',modelId:'gpt-5.6-terra',model:model(input=>'changeKind' in input?proposal:requirements)})});
  assert.equal(parent.status,'completed');const job=await acceptProject(process.cwd(),dir,mapping,'Scripted accepted proposal for software tests.');
  const deps=Dependency.parse({schemaVersion:1,directory:'/fixture/dependencies',packageHash:job.packageHash,lockHash:job.lockHash,treeHash:'a'.repeat(64),nodeHash:runtime.nodeHash,npmHash:'b'.repeat(64),npmVersion:'fixture',scripts:'disabled',registry:'https://registry.npmjs.org/',createdAt:new Date().toISOString()});

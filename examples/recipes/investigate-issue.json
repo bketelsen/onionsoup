@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "id": "investigate-issue",
+  "title": "Investigate an issue",
+  "description": "Assess readiness, then locate code and tests when the report is a ready bug.",
+  "steps": [
+    { "id": "readiness", "capability": "issue.readiness", "input": { "repository": { "$param": "repository" }, "issue": { "$param": "issue" } } },
+    { "id": "locate", "capability": "code.location", "input": { "readinessJobId": { "$job": "readiness" } } }
+  ],
+  "layout": { "readiness": { "x": 80, "y": 80 }, "locate": { "x": 420, "y": 80 } }
+}

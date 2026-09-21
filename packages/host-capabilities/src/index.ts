@@ -30,6 +30,8 @@ export const HostConfig = z.object({
   capabilities: CapabilityConfig,
   /** Serve a built web app and let same-origin browsers act as this invoker. */
   web: z.object({ directory: z.string().min(1), invoker: Id }).strict().optional(),
+  /** Recipe JSON files loaded at launch; recipes saved from the web live in the state directory. */
+  recipes: z.array(z.string().min(1)).max(100).default([]),
   invokers: z.array(z.object({
     id: Id,
     /** Required for remote clients; omit for the web invoker. */

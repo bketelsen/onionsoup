@@ -46,8 +46,9 @@ GitHub reads use the authenticated `gh` CLI.
    console under `src/console` is deleted. Scheduled-delivery pause/resume and
    publication approval are CLI-only until they get a web equivalent.
    *(done 2026-09-21)*
-4. Recipes: a saved document of steps, bindings and budgets; the host runs it as
-   a parent job with child jobs; a Svelte Flow canvas edits it.
+4. Recipes: a saved document of steps with bindings; the host runs one as a
+   parent job whose steps are ordinary child jobs; a Svelte Flow canvas edits
+   it. *(done 2026-09-21)*
 5. Web chat over `@onionsoup/chat` with tools that are host capabilities and
    saved recipes. Retire the chat CLI.
 6. Tailnet hosting with Tailscale identity; homelab capabilities in the same
@@ -68,6 +69,44 @@ CLIs until the read-only surface is done; they carry real effects.
 
 The host resolves the checkout's current `HEAD` as the pinned commit at job time
 and records it in the result.
+
+## Recipes
+
+A recipe is operator content, not code. It can only name capabilities the
+invoker is already granted, and each step is validated by that capability's
+own input schema when it runs.
+
+```json
+{
+  "schemaVersion": 1,
+  "id": "investigate-issue",
+  "title": "Investigate an issue",
+  "steps": [
+    { "id": "readiness", "capability": "issue.readiness",
+      "input": { "repository": { "$param": "repository" }, "issue": { "$param": "issue" } } },
+    { "id": "locate", "capability": "code.location",
+      "input": { "readinessJobId": { "$job": "readiness" } } }
+  ],
+  "layout": { "readiness": { "x": 80, "y": 80 }, "locate": { "x": 420, "y": 80 } }
+}
+```
+
+- A step input field is a literal, `{"$param": name}`, `{"$job": stepId}` (that
+  step's job ID) or `{"$result": [stepId, "dotted.path"]}` (a value from its
+  result). Bindings may only point at earlier steps.
+- Parameters are inferred from what they bind to, so the run form for
+  `recipe.<id>` shows the same dropdowns and limits as the underlying
+  capability. Explicit `params` override the inference.
+- The host exposes a recipe as capability `recipe.<id>` to any invoker granted
+  every step's capability. Submitting it creates a parent job; the orchestrator
+  submits each child with `parentJobId` set and an idempotency key derived from
+  the parent's, waits for it, then resolves the next step's bindings. A failed
+  step fails the recipe unless `continueOnFailure` is set. Cancelling the
+  parent cancels the running child. Restart marks an unfinished recipe
+  interrupted and never replays it.
+- Recipes load from files named in the host config (`recipes`) and from
+  `<state>/recipes/*.json`, where the web app saves them. Nested recipes are
+  not supported.
 
 ## Rules kept from the proving phase
 

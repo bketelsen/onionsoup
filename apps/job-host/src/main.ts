@@ -31,11 +31,13 @@ async function main() {
     }
     invokers.push(invoker);
   }
+  const recipes = await Promise.all(config.recipes.map((file) => readJson(resolve(dirname(path), file))));
   const host = await openJobHost({
     directory: resolve(dirname(path), config.directory),
     binding: capabilities,
     capabilities: registeredCapabilities(capabilities, { apiKey: process.env.TRUENAS_API_KEY }),
     invokers,
+    recipes,
   });
   let listener;
   try {

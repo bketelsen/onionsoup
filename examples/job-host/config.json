@@ -35,5 +35,9 @@
       ],
       "maxJobs": 64
     }
+  ],
+  "recipes": [
+    "../../examples/recipes/investigate-issue.json",
+    "../../examples/recipes/issue-to-proposal.json"
   ]
 }

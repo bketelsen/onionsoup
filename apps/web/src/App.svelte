@@ -3,6 +3,8 @@
   import RunCapability from './lib/RunCapability.svelte';
   import Jobs from './lib/Jobs.svelte';
   import JobDetail from './lib/JobDetail.svelte';
+  import Recipes from './lib/recipes/Recipes.svelte';
+  import RecipeEditor from './lib/recipes/RecipeEditor.svelte';
   import { store } from './lib/store.svelte.ts';
 
   let hash = $state(location.hash || '#/');
@@ -15,6 +17,8 @@
     if (parts[0] === 'run' && parts[1]) return { page: 'run', id: decodeURIComponent(parts.slice(1).join('/')), prefill };
     if (parts[0] === 'jobs' && parts[1]) return { page: 'job', id: parts[1], prefill };
     if (parts[0] === 'jobs') return { page: 'jobs', id: '', prefill };
+    if (parts[0] === 'recipes' && parts[1]) return { page: 'recipe', id: parts[1], prefill };
+    if (parts[0] === 'recipes') return { page: 'recipes', id: '', prefill };
     return { page: 'capabilities', id: '', prefill };
   });
 
@@ -26,17 +30,22 @@
   <a href="#/" class="brand">Onionsoup</a>
   <a href="#/" class:current={route.page === 'capabilities' || route.page === 'run'}>Capabilities</a>
   <a href="#/jobs" class:current={route.page === 'jobs' || route.page === 'job'}>Jobs{#if active} <span class="badge">{active}</span>{/if}</a>
+  <a href="#/recipes" class:current={route.page === 'recipes' || route.page === 'recipe'}>Recipes</a>
   <span class="spacer"></span>
   <span class="dot" class:on={store.connected} title={store.connected ? 'Live updates connected' : 'Live updates disconnected'}></span>
 </nav>
 
-<main>
+<main class:wide={route.page === 'recipe'}>
   {#if route.page === 'run'}
     <RunCapability id={route.id} prefill={route.prefill} />
   {:else if route.page === 'job'}
     <JobDetail id={route.id} />
   {:else if route.page === 'jobs'}
     <Jobs />
+  {:else if route.page === 'recipes'}
+    <Recipes />
+  {:else if route.page === 'recipe'}
+    {#key route.id}<RecipeEditor id={route.id} />{/key}
   {:else}
     <Capabilities />
   {/if}
@@ -52,4 +61,5 @@
   .dot { width: 0.6rem; height: 0.6rem; border-radius: 50%; background: var(--danger); }
   .dot.on { background: var(--ok); }
   main { max-width: 1100px; margin: 0 auto; padding: 1.2rem; }
+  main.wide { max-width: none; }
 </style>
