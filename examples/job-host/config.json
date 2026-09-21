@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "directory": "state",
+  "port": 8787,
+  "web": { "directory": "../../apps/web/dist", "invoker": "web" },
+  "capabilities": {
+    "schemaVersion": 1,
+    "provider": "copilot",
+    "repositories": ["bketelsen/onionsoup"]
+  },
+  "invokers": [
+    { "id": "web", "capabilities": ["repository.brief"] },
+    { "id": "schedule", "tokenFile": "schedule.token", "capabilities": ["repository.brief"], "maxJobs": 64 }
+  ]
+}

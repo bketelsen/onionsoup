@@ -288,7 +288,7 @@ contracts are the starting point for a future team; there is no team runtime yet
 The [twenty-factor follow-through backlog](docs/plans/backlog.md) adds eight focused
 authoring skills for discovery, observability, budgets, releases, authority,
 durability, automated quality review, and repository knowledge. The canonical
-[skill routing](AGENTS.md#skills-follow-these-for-common-tasks) lists when to use each.
+[skill routing](AGENTS.md) lists when to use each.
 
 ## Discover agents and inspect workflows
 

@@ -1,0 +1,41 @@
+:root {
+  --bg: #f7f7f5;
+  --panel: #ffffff;
+  --text: #1c1c1a;
+  --muted: #6b6b66;
+  --line: #dcdcd7;
+  --accent: #c2410c;
+  --ok: #15803d;
+  --danger: #b91c1c;
+  --warn: #a16207;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #161615; --panel: #1f1f1d; --text: #ecece8; --muted: #9c9c95; --line: #33332f; --accent: #fb923c; --ok: #4ade80; --danger: #f87171; --warn: #facc15; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, -apple-system, 'Segoe UI', sans-serif; }
+h1 { font-size: 1.5rem; margin: 0.5rem 0 1rem; }
+h2 { font-size: 1.1rem; margin: 1.5rem 0 0.6rem; }
+a { color: var(--accent); }
+code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; }
+pre { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 0.8rem; overflow: auto; max-height: 60vh; }
+.muted { color: var(--muted); }
+.error { color: var(--danger); }
+.tag { display: inline-block; background: var(--bg); border: 1px solid var(--line); border-radius: 999px; padding: 0 0.5rem; font-size: 0.75rem; color: var(--muted); }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 1rem; }
+input, select, textarea { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 0.4rem 0.55rem; max-width: 100%; }
+input[type='text'], input[type='number'], input[type='search'], input[type='datetime-local'], select, textarea { width: min(100%, 32rem); }
+textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+button { font: inherit; background: var(--accent); color: white; border: 0; border-radius: 6px; padding: 0.45rem 0.9rem; cursor: pointer; }
+button.secondary { background: transparent; color: var(--text); border: 1px solid var(--line); }
+button.small { padding: 0.15rem 0.5rem; font-size: 0.8rem; }
+button:disabled { opacity: 0.6; cursor: default; }
+details { margin: 0.5rem 0; }
+summary { cursor: pointer; color: var(--muted); }
+.status { display: inline-block; border-radius: 4px; padding: 0 0.4rem; font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
+.status.queued { background: var(--line); color: var(--text); }
+.status.running { background: var(--warn); color: #111; }
+.status.completed { background: var(--ok); color: #fff; }
+.status.failed, .status.interrupted { background: var(--danger); color: #fff; }
+.status.cancelled { background: var(--muted); color: #fff; }

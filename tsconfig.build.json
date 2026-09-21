@@ -10,5 +10,8 @@
   "include": [
     "packages/*/src/**/*.ts",
     "apps/*/src/**/*.ts"
+  ],
+  "exclude": [
+    "apps/web/**"
   ]
 }

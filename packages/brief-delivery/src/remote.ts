@@ -6,7 +6,7 @@ import type { JobClient } from '@onionsoup/job-host/client';
 import { createRepositoryBrief, validateRepositoryBrief } from '@onionsoup/repository-brief';
 import { atomicJson, readJson } from '@onionsoup/runtime/storage';
 import { DeliveryRecord } from './contracts.ts';
-const RepoBrief=z.object({brief:z.json()}).strict();
+const RepoBrief=z.object({brief:z.json(),markdown:z.string().optional()}).strict();
 export function remoteBriefGenerator(client:JobClient):typeof createRepositoryBrief {
   return async(request,options)=>{
     const catalog=await client.discover(options.signal),capability=catalog.capabilities.find((c:any)=>c.id==='repository.brief');

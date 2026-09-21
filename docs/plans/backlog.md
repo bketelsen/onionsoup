@@ -28,7 +28,7 @@ Onionsoup implementation mandate. This backlog complements the [roadmap](roadmap
 Phases 1–2 implementation and the trial limitations are recorded in the
 [status report](records/relevance-and-discovery-2026-09-18.md). Eight new authoring
 skills make the twenty-factor recommendations reusable; see
-[skill routing](../../AGENTS.md#skills-follow-these-for-common-tasks).
+[skill routing](../../AGENTS.md).
 
 ## Phase 3 — Prove external composition (implemented)
 

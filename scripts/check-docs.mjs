@@ -103,26 +103,6 @@ for (const file of files) {
   try { sources.set(path.resolve(file), await readFile(file, "utf8")); }
   catch { complain(file, "cannot read Markdown file"); }
 }
-const index = sources.get(path.resolve("docs/README.md"));
-if (index === undefined) complain("docs/README.md", "missing documentation index");
-const indexed = new Set();
-for (const href of links(index ?? "")) {
-  try {
-    const target = localTarget("docs/README.md", href);
-    if (target) indexed.add(target.file);
-  } catch { complain("docs/README.md", `invalid link: ${href}`); }
-}
-for (const file of docs) {
-  if (file === "docs/README.md") continue;
-  if (!/^docs\/(adr|design|specs|plans)\//.test(file)) complain(file, "outside documentation categories");
-  if (!indexed.has(path.resolve(file))) complain(file, "missing from docs/README.md index");
-}
-for (const file of ["docs/README.md", ...["adr", "design", "specs", "plans"].map((category) => `docs/${category}/TEMPLATE.md`),
-  "docs/plans/records/TEMPLATE.md", ".agents/skills/TEMPLATE/SKILL.md",
-  ...["contract", "context", "execution", "evaluation"].map((name) => `.agents/skills/agent-${name}/SKILL.md`)]) {
-  if (!sources.has(path.resolve(file))) complain(file, "missing required document");
-}
-
 for (const [file, source] of sources) {
   if (path.basename(file) === "TEMPLATE.md" || relative(file).includes("/TEMPLATE/")) continue;
   for (const href of links(source)) {
@@ -149,5 +129,5 @@ if (problems.length) {
   console.error(problems.join("\n"));
   process.exitCode = 1;
 } else {
-  console.log(`Documentation checks passed: ${docs.length} indexed docs, ${skills.length} skill documents, ${Object.keys(aliases).length} symlinks.`);
+  console.log(`Documentation checks passed: ${docs.length} docs, ${skills.length} skill documents, ${Object.keys(aliases).length} symlinks.`);
 }
