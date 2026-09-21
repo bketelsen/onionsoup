@@ -33,9 +33,12 @@ GitHub reads use the authenticated `gh` CLI.
 ## Phases
 
 1. Host serves the SPA; capability list, schema forms, job list and detail, live
-   status. Run `repository.brief` end to end. *(in progress)*
-2. Move readiness, code-location, packet and change-proposal from `src/` into
-   packages and register them as capabilities. Retire their CLIs.
+   status. Run `repository.brief` end to end. *(done 2026-09-21)*
+2. Readiness, code-location, packet and change-proposal live in
+   `@onionsoup/maintenance` and are registered as `issue.readiness`,
+   `code.location`, `investigation.packet` and `change.proposal`. Root `src/`
+   files forward to the package for the remaining legacy consumers. The
+   `locate`, `packet`, `proposal` and `briefing` CLIs are gone. *(done 2026-09-21)*
 3. Evidence views for briefs, packets, proposals, events, citations, deliveries
    and fixtures. Retire `src/console`.
 4. Recipes: a saved document of steps, bindings and budgets; the host runs it as
@@ -47,6 +50,19 @@ GitHub reads use the authenticated `gh` CLI.
 
 Fixture execution, draft publication and owned-project changes stay on their
 CLIs until the read-only surface is done; they carry real effects.
+
+## Capability inputs
+
+| Capability | Input | Needs |
+| --- | --- | --- |
+| `repository.brief` | configured repository, time window | `gh` |
+| `issue.readiness` | configured repository, issue number | `gh` |
+| `code.location` | a completed ready `issue.readiness` job | checkout configured for that repository |
+| `investigation.packet` | configured repository, issue number | checkout |
+| `change.proposal` | a completed `investigation.packet` job, query for features | checkout |
+
+The host resolves the checkout's current `HEAD` as the pinned commit at job time
+and records it in the result.
 
 ## Rules kept from the proving phase
 

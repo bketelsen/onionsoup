@@ -2,14 +2,38 @@
   "schemaVersion": 1,
   "directory": "state",
   "port": 8787,
-  "web": { "directory": "../../apps/web/dist", "invoker": "web" },
+  "web": {
+    "directory": "../../apps/web/dist",
+    "invoker": "web"
+  },
   "capabilities": {
     "schemaVersion": 1,
     "provider": "copilot",
-    "repositories": ["bketelsen/onionsoup"]
+    "repositories": [
+      {
+        "name": "bketelsen/onionsoup",
+        "checkout": "/path/to/onionsoup/checkout"
+      }
+    ]
   },
   "invokers": [
-    { "id": "web", "capabilities": ["repository.brief"] },
-    { "id": "schedule", "tokenFile": "schedule.token", "capabilities": ["repository.brief"], "maxJobs": 64 }
+    {
+      "id": "web",
+      "capabilities": [
+        "repository.brief",
+        "issue.readiness",
+        "code.location",
+        "investigation.packet",
+        "change.proposal"
+      ]
+    },
+    {
+      "id": "schedule",
+      "tokenFile": "schedule.token",
+      "capabilities": [
+        "repository.brief"
+      ],
+      "maxJobs": 64
+    }
   ]
 }

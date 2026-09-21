@@ -40,6 +40,22 @@ The demo runs the real AgentLayer loop against a **scripted model response**. It
 needs no credentials and does not establish model quality. It saves a run record
 under `runs/` and prints JSON. All inputs and outputs are local synthetic examples.
 
+## Web operator surface
+
+The job host serves a web app for running and inspecting every registered
+capability: repository briefs, issue readiness, code location, investigation
+packets and change proposals, plus the homelab capabilities when configured.
+
+```sh
+cp examples/job-host/config.json .local/job-host/config.json   # edit repositories and checkouts
+npm run build
+npm run jobs -- --config .local/job-host/config.json           # open http://127.0.0.1:8787
+```
+
+Browser input only picks configured repositories and prior jobs by ID. Checkout
+paths, credentials, providers and models come from the configuration file.
+See [the web design page](docs/design/web.md).
+
 ## Compose or deploy a repository brief
 
 The first portable slice uses private workspaces in `packages/` and thin hosts in
@@ -159,22 +175,6 @@ missing data and metric definitions stay visible. Copilot/Terra is the default;
 [package/recipe/adapter design](docs/design/packages-and-recipes.md). Scheduled
 email, webhooks and MQTT adapters are documented future work.
 
-## Produce a maintenance briefing
-
-```sh
-npm run briefing -- get-bb/bb --checkout .local/repos/get-bb--bb
-npm run briefing -- render runs/briefings/DIRECTORY
-```
-
-Supply an existing Git checkout and configured subscription. The command pins its
-revision, captures up to five open issue snapshots, assesses readiness, and locates
-code/tests for the first two ready reports under one seven-invocation allowance.
-Use `--issues 3886,3337` for explicit selection, `--commit FULL_SHA` for a specific
-revision, and `--provider copilot|codex` for provider selection. Terra is fixed.
-It writes private `briefing.md`, `briefing.json`, and `events.json` beneath `runs/`.
-The report includes questions, citations, failures and capacity skips; rendering
-requires no model calls or grading. See the [briefing contract](docs/specs/maintenance-briefing.md).
-
 ## Use the maintenance inbox
 
 ```sh
@@ -188,58 +188,6 @@ waiting reports, and failures. There are no grading forms or GitHub writes.
 Unchanged title/body content is reused; explicit retries preserve earlier attempts.
 See [the inbox guide](docs/specs/inbox.md) for bounds, freshness, recovery, and commands,
 and [the live pilot record](docs/plans/records/inbox-pilot-2026-09-18.md) for operational results.
-
-## Locate investigation starting points
-
-Choose one to three ready bug reports already in the inbox and an exact commit
-in a local clone (bare clones work). With the same subscription configured:
-
-```sh
-npm run locate -- runs/inbox/get-bb--bb \
-  --checkout .local/repos/get-bb--bb \
-  --commit 3a4288bd0f34f888a5eb43f1099f7b60fe86eea4 \
-  --issues 3773,3607,3899
-```
-
-This uses Terra, saves each brief and its inspected evidence, and attaches it to
-the matching inbox card. Repeat the command to reuse completed results without
-model calls. Fetching source and selecting its commit happen outside the agent.
-See [the code-location contract and operating guide](docs/specs/code-location.md).
-The [three-report development pilot](docs/plans/records/code-location-pilot-2026-09-18.md)
-records both useful pointers and search-quality limitations.
-The [search/test-selection follow-up](docs/plans/records/code-location-search-2026-09-18.md)
-records the v4 improvements, retained failures, and remaining relevance limits.
-The [v5 follow-up](docs/plans/records/test-selection-2026-09-18.md) adds fixture-to-assertion
-navigation and records both its gains and remaining selection/summary failures.
-The [bounded reliability pass](docs/plans/records/reliability-2026-09-18.md) reserves test reads,
-uses host-generated v2 overviews, and reports indexed citation errors together.
-`npm run eval:location` runs nine small Terra-only search regression cases,
-including misleading paths, embedded instructions, distant fixture consumers,
-behavior assertions versus lifecycle tests, and keyboard reload versus navigation,
-using the configured
-subscription. Source navigation and submission reserves are documented in the
-code-location guide.
-
-## Export a portable investigation packet
-
-```sh
-npm run packet -- issue.json --checkout .local/repos/get-bb--bb \
-  --commit 3a4288bd0f34f888a5eb43f1099f7b60fe86eea4 --provider copilot
-```
-
-This invokes readiness and, for ready bug reports, code-location on Terra. It
-writes `packet.md` and a self-contained `packet.json` under a new `runs/packets/`
-directory. `--readiness RUN.json` reuses an exactly matching completed readiness
-record from the selected subscription and current prompt; pass the raw run record,
-not an inbox wrapper. `--output NEW_DIRECTORY` chooses the destination (its parent
-must already exist). Existing directories are never overwritten or retried.
-
-`npm run packet -- render DIRECTORY` regenerates Markdown from JSON without model
-calls or credentials. Non-bug and incomplete reports retain their classification
-or questions; failed location attempts yield a partial packet. See the
-[packet contract](docs/specs/investigation-packet.md) for lifecycle and portability.
-The [five-report Terra pilot](docs/plans/records/packet-pilot-2026-09-18.md) includes two repeats
-and an assistant review of code/test relevance and consistency.
 
 ## Evaluate and inspect
 
@@ -347,24 +295,6 @@ next boundaries for bugs and features: distinct evidence/requirements preparatio
 a shared change proposal, isolated verification, patch/review, and explicitly
 authorized draft publication. Current feature classification still makes no project
 acceptance decision. Read-only feature preparation and shared proposals are now implemented; owned-fixture execution is implemented; real-project execution and publication remain planned.
-
-## Read-only bug and feature proposals
-
-The [proposal recipe](docs/specs/change-proposal.md) turns a saved investigation
-packet into scope, acceptance criteria, planned checks and open questions. Features
-first get a requirements brief and bounded Git source context; bugs reuse inspected
-packet evidence. Both use one shared proposal worker. Ready means ready for scope
-review, not accepted, tested or implemented.
-
-```sh
-npm run proposal -- PATH/packet.json --provider copilot --output NEW_DIRECTORY
-# For a feature packet, also supply --checkout PATH --query A_SPECIFIC_SYMBOL.
-npm run proposal -- render DIRECTORY
-```
-
-The local console offers **Draft change proposal** on eligible investigation
-pages. [Trial evidence and limitations](docs/plans/records/change-proposal-2026-09-18.md)
-include real bugs/features and explicit synthetic cases.
 
 ## Isolated fixture runner and patch agent
 

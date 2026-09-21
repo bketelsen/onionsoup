@@ -10,13 +10,8 @@ import { PROMPT_VERSION, SYSTEM_PROMPT } from './prompt.ts';
 import { EVALUATION_MODEL } from './evaluation-policy.ts';
 
 export { atomicJson };
-export const Repository = z.string().regex(/^[\w.-]+\/[\w.-]+$/);
-export const Observation = z.object({
-  number: z.number().int().positive(), title: z.string().max(500), state: z.enum(['open', 'closed']),
-  updatedAt: z.iso.datetime(), observedAt: z.iso.datetime(), commentsExcluded: z.number().int().nonnegative(),
-  snapshot: IssueSnapshot.optional(), rejection: z.literal('invalid_snapshot').optional(),
-}).strict().refine(x => Boolean(x.snapshot) !== Boolean(x.rejection), 'Snapshot or rejection required');
-export type Observation = z.infer<typeof Observation>;
+export { Repository, Observation } from '@onionsoup/maintenance/issues';
+import { Repository, Observation } from '@onionsoup/maintenance/issues';
 export const Config = z.object({ schemaVersion: z.literal(1), repository: Repository,
   provider: z.enum(['copilot', 'codex']), model: z.literal(EVALUATION_MODEL),
   createdAt: z.iso.datetime(), promptVersion: z.string(), runtimeHash: z.string(), promptText: z.string(),
@@ -37,8 +32,8 @@ export function contentHash(input: IssueSnapshot) {
   return createHash('sha256').update(JSON.stringify([input.repository, input.number, input.title, input.body])).digest('hex');
 }
 export async function runtimeHash() {
-  const files = ['src/contracts.ts', 'src/prompt.ts', 'src/triage.ts', 'src/providers.ts', 'packages/providers/src/index.ts', 'packages/providers/src/evaluation-policy.ts',
-    'src/inbox-store.ts', 'src/inbox-source.ts', 'src/inbox.ts', 'src/evaluation-policy.ts', 'package-lock.json'];
+  const files = ['packages/maintenance/src/contracts.ts', 'packages/maintenance/src/prompt.ts', 'packages/maintenance/src/triage.ts', 'packages/providers/src/index.ts', 'packages/providers/src/evaluation-policy.ts',
+    'src/inbox-store.ts', 'packages/maintenance/src/github-issues.ts', 'src/inbox.ts', 'package-lock.json'];
   const contents = await Promise.all(files.map(file => readFile(join(projectRoot, file))));
   const hash = createHash('sha256');
   contents.forEach((bytes, i) => hash.update(files[i]).update('\0').update(bytes).update('\0'));
