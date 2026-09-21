@@ -3,6 +3,7 @@ import test from 'node:test';
 import { mkdtemp, mkdir, rm, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { request as httpRequest } from 'node:http';
 import { z } from 'zod';
 import { atomicJson } from '@onionsoup/runtime/storage';
 import { openJobHost, listenJobHost, tokenHash, type Capability, type JobHost } from '../src/index.ts';
@@ -273,4 +274,42 @@ test('recipes chain granted capabilities as child jobs, bind results by ID, and 
 
   // A recipe consumes one admission per child on top of its own; the limited invoker cannot run it.
   await assert.rejects(host.submit('limited', { capability: 'recipe.quadruple', idempotencyKey: 'limited-run', input: { start: 1 } }).then((r) => settled(host, 'limited', r.jobId)).then((j) => { if (j.status !== 'failed') throw new Error('expected failure'); return Promise.reject(new Error(j.error)); }), /admission_limit/);
+});
+
+test('tailnet users are identified by the local proxy header and mapped to invokers; funnel and spoofed hosts are refused', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'job-tailscale-'));
+  const site = join(directory, 'site');
+  await mkdir(site);
+  await writeFile(join(site, 'index.html'), '<h1>app</h1>');
+  const host = await openJobHost({
+    directory: join(directory, 'state'), binding: {},
+    invokers: [{ id: 'web', capabilities: ['fixture.read'] }, { id: 'brian', capabilities: ['fixture.read'] }],
+    capabilities: [capability(async (input) => input)],
+  });
+  const server = await listenJobHost(host, { web: { directory: site, invoker: 'web' }, tailscale: { users: { 'brian@github': 'brian' } } });
+  t.after(async () => { await server.close(); await rm(directory, { recursive: true, force: true }); });
+  const port = Number(new URL(server.url).port);
+  const tailnet = 'onionsoup.tail1234.ts.net';
+  // fetch() will not send a custom Host header, so speak raw HTTP the way the tailscaled proxy would.
+  const discover = (headers: Record<string, string>) => new Promise<{ status: number; body: any }>((resolveRequest, reject) => {
+    const request = httpRequest({ host: '127.0.0.1', port, path: '/v1/capabilities', method: 'GET', headers }, (response) => {
+      let text = '';
+      response.on('data', (chunk) => { text += chunk; });
+      response.on('end', () => resolveRequest({ status: response.statusCode ?? 0, body: text ? JSON.parse(text) : undefined }));
+    });
+    request.on('error', reject);
+    request.end();
+  });
+
+  // Local operator on loopback keeps working without any identity header.
+  assert.equal((await discover({ Host: `127.0.0.1:${port}`, Origin: server.url })).body.invoker, 'web');
+  // Through tailscale serve: the proxy is on loopback and adds the login header.
+  const viaProxy = await discover({ Host: tailnet, Origin: `https://${tailnet}`, 'Tailscale-User-Login': 'brian@github' });
+  assert.equal(viaProxy.status, 200);
+  assert.equal(viaProxy.body.invoker, 'brian');
+  assert.equal(viaProxy.body.login, 'brian@github');
+  // Funnel or an unknown tailnet user: no mapping, no access.
+  assert.equal((await discover({ Host: tailnet, Origin: `https://${tailnet}` })).status, 401);
+  assert.equal((await discover({ Host: tailnet, Origin: `https://${tailnet}`, 'Tailscale-User-Login': 'stranger@github' })).status, 403);
+  await assert.rejects(listenJobHost(host, { web: { directory: site, invoker: 'web' }, tailscale: { users: { 'x@github': 'nobody' } } }), /unknown_tailscale_invoker/);
 });

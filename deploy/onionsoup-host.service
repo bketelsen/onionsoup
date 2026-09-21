@@ -1,0 +1,22 @@
+# User service for the Onionsoup job host. Install with:
+#   mkdir -p ~/.config/systemd/user && cp deploy/onionsoup-host.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user enable --now onionsoup-host
+#   loginctl enable-linger $USER          # keep it running when logged out
+# Then expose it on your tailnet over HTTPS with identity headers:
+#   tailscale serve --bg 8787
+[Unit]
+Description=Onionsoup job host and web app
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/projects/onionsoup
+Environment=NODE_ENV=production
+# Provider sign-in file; keep it out of Git.
+Environment=ONIONSOUP_AUTH_PATH=%h/.local/share/opencode/auth.json
+ExecStart=/usr/bin/env node apps/job-host/dist/main.js --config %h/projects/onionsoup/.local/job-host/config.json
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

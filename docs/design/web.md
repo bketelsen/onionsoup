@@ -16,8 +16,9 @@ Living document. Supersedes the CLI-per-recipe and loopback-console approach.
   stream. Results render as structured views where a renderer exists and as
   JSON otherwise.
 - **Access:** on loopback the browser is the configured `web` invoker without a
-  token; same-origin requests only. Remote invokers (chat, scheduler) keep bearer
-  tokens. Tailscale identity is the planned remote-access path.
+  token; same-origin requests only. Remote invokers (the scheduler) keep bearer
+  tokens. Over the tailnet, `tailscale serve` terminates HTTPS and adds
+  `Tailscale-User-Login`, which the host maps to an invoker.
 
 ## Running it
 
@@ -30,6 +31,17 @@ npm run web:dev                                                # optional: Vite 
 
 Provider sign-in comes from `ONIONSOUP_AUTH_PATH` (default `.local/auth.json`);
 GitHub reads use the authenticated `gh` CLI.
+
+To run it as a service on the tailnet:
+
+```sh
+cp deploy/onionsoup-host.service ~/.config/systemd/user/
+systemctl --user daemon-reload && systemctl --user enable --now onionsoup-host
+tailscale serve --bg 8787        # https://<machine>.<tailnet>.ts.net
+```
+
+Add `"tailscale": { "users": [{ "login": "you@github", "invoker": "web" }] }`
+to the host config so your login maps to an invoker.
 
 ## Phases
 
@@ -63,8 +75,14 @@ GitHub reads use the authenticated `gh` CLI.
    inspected in the turn. Sessions persist under `<state>/chat/<id>` with an
    owner sidecar and are served at `/v1/chat/sessions`. The chat CLI is gone.
    *(done 2026-09-21)*
-7. Tailnet hosting with Tailscale identity; homelab capabilities in the same
-   catalog.
+7. Tailnet hosting. The host stays on loopback; `tailscale serve --bg 8787`
+   puts HTTPS and identity in front of it. A `tailscale.users` list in the host
+   config maps each Tailscale login to an invoker, so people get separate
+   grants and job ownership. Requests through the tailnet hostname without the
+   proxy's identity header (Funnel, or anything spoofed) are refused; loopback
+   access without the header stays the local operator. A systemd user unit is
+   in `deploy/`. Homelab capabilities join the same catalog through the
+   existing `capabilities.homelab` block. *(done 2026-09-21)*
 
 Fixture execution, draft publication and owned-project changes stay on their
 CLIs until the read-only surface is done; they carry real effects.

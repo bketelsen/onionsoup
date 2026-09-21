@@ -35,6 +35,7 @@
   <a href="#/recipes" class:current={route.page === 'recipes' || route.page === 'recipe'}>Recipes</a>
   <a href="#/chat" class:current={route.page === 'chat'}>Chat</a>
   <span class="spacer"></span>
+  {#if store.discovery?.login}<span class="muted">{store.discovery.login}</span>{/if}
   <span class="dot" class:on={store.connected} title={store.connected ? 'Live updates connected' : 'Live updates disconnected'}></span>
 </nav>
 

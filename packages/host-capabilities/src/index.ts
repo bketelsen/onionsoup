@@ -31,6 +31,8 @@ export const HostConfig = z.object({
   capabilities: CapabilityConfig,
   /** Serve a built web app and let same-origin browsers act as this invoker. */
   web: z.object({ directory: z.string().min(1), invoker: Id }).strict().optional(),
+  /** Trust identity from a local `tailscale serve` proxy: login to invoker. */
+  tailscale: z.object({ users: z.array(z.object({ login: z.string().min(3).max(200), invoker: Id }).strict()).min(1).max(100) }).strict().optional(),
   /** Recipe JSON files loaded at launch; recipes saved from the web live in the state directory. */
   recipes: z.array(z.string().min(1)).max(100).default([]),
   invokers: z.array(z.object({

@@ -47,6 +47,7 @@ async function main() {
       port: values.port ? Number(values.port) : config.port,
       address: config.address,
       routes: [chat.routes],
+      ...(config.tailscale ? { tailscale: { users: Object.fromEntries(config.tailscale.users.map((user) => [user.login, user.invoker])) } } : {}),
       ...(config.web ? { web: { directory: resolve(dirname(path), config.web.directory), invoker: config.web.invoker } } : {}),
     });
   } catch (e) {

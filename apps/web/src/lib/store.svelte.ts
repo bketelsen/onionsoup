@@ -79,6 +79,7 @@ export type ChatSession = { sessionId: string; createdAt: string; turns: ChatTur
 
 export type Discovery = {
   invoker: string;
+  login?: string;
   remainingAdmissions: number | null;
   capabilities: Capability[];
   limits: Record<string, number>;

@@ -609,10 +609,18 @@ export type RouteContext = { req: IncomingMessage; res: ServerResponse; principa
 /** Return true when the route was handled. */
 export type RouteHandler = (context: RouteContext) => Promise<boolean>;
 
+/** Identity supplied by a Tailscale serve proxy in front of the loopback listener. */
+export type TailscaleIdentity = {
+  /** Tailscale login (for example `someone@github`) to invoker ID. Unlisted logins are refused. */
+  users: Record<string, string>;
+};
+
 export type ListenOptions = {
   port?: number;
   /** Additional authenticated routes under /v1, consulted before the built-in ones. */
   routes?: RouteHandler[];
+  /** Trust `Tailscale-User-Login` on requests that arrive through the local tailscaled proxy. */
+  tailscale?: TailscaleIdentity;
   /** Bind address. Loopback by default. */
   address?: string;
   /** Serve a built web app from this directory and let same-origin browsers act as `invoker`. */
@@ -628,13 +636,35 @@ function sameOrigin(req: IncomingMessage) {
   return origin === `http://${host}` || origin === `https://${host}`;
 }
 
-function principalFor(host: JobHost, req: IncomingMessage, web: ListenOptions['web']) {
+const LOOPBACK_HOST = /^(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?$/i;
+const LOOPBACK_ADDRESS = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+
+export type Principal = { invoker: string; login?: string };
+
+/**
+ * Who is calling. Bearer tokens win. Otherwise a same-origin browser is the web invoker, either as the local
+ * operator (loopback Host header) or as a tailnet user identified by tailscaled, which only proxies from loopback.
+ */
+function principalFor(host: JobHost, req: IncomingMessage, web: ListenOptions['web'], tailscale?: TailscaleIdentity): Principal {
   const authorization = req.headers.authorization;
   if (authorization) {
     if (!/^Bearer [A-Za-z0-9_-]{32,256}$/.test(authorization)) throw new HostError('unauthorized', 401);
-    return host.authenticate(authorization.slice(7));
+    return { invoker: host.authenticate(authorization.slice(7)) };
   }
-  if (web && sameOrigin(req)) return web.invoker;
+  if (!web || !sameOrigin(req)) throw new HostError('unauthorized', 401);
+  const localHost = LOOPBACK_HOST.test(req.headers.host ?? '');
+  if (!tailscale) {
+    if (!localHost) throw new HostError('unauthorized', 401);
+    return { invoker: web.invoker };
+  }
+  const login = req.headers['tailscale-user-login'];
+  if (typeof login === 'string' && login) {
+    if (!LOOPBACK_ADDRESS.has(req.socket.remoteAddress ?? '')) throw new HostError('unauthorized', 401);
+    const invoker = tailscale.users[login];
+    if (!invoker || !host.hasInvoker(invoker)) throw new HostError('user_not_allowed', 403);
+    return { invoker, login };
+  }
+  if (localHost) return { invoker: web.invoker };
   throw new HostError('unauthorized', 401);
 }
 
@@ -659,6 +689,7 @@ async function serveStatic(directory: string, url: string, res: ServerResponse) 
 export async function listenJobHost(host: JobHost, options: ListenOptions | number = {}) {
   const opts: ListenOptions = typeof options === 'number' ? { port: options } : options;
   if (opts.web && !host.hasInvoker(opts.web.invoker)) throw new HostError('unknown_web_invoker');
+  for (const invoker of Object.values(opts.tailscale?.users ?? {})) if (!host.hasInvoker(invoker)) throw new HostError(`unknown_tailscale_invoker:${invoker}`);
   const limits = host.limits;
   const streams = new Set<ServerResponse>();
 
@@ -671,11 +702,12 @@ export async function listenJobHost(host: JobHost, options: ListenOptions | numb
         if (opts.web && req.method === 'GET') return await serveStatic(opts.web.directory, url, res);
         throw new HostError('not_found', 404);
       }
-      const principal = principalFor(host, req, opts.web);
+      const identity = principalFor(host, req, opts.web, opts.tailscale);
+      const principal = identity.invoker;
       for (const route of opts.routes ?? []) {
         if (await route({ req, res, principal, url, body: () => requestBody(req, limits.inputBytes) })) return;
       }
-      if (req.method === 'GET' && url === '/v1/capabilities') return json(res, 200, host.discover(principal));
+      if (req.method === 'GET' && url === '/v1/capabilities') return json(res, 200, { ...host.discover(principal), ...(identity.login ? { login: identity.login } : {}) });
       if (req.method === 'GET' && url === '/v1/jobs') return json(res, 200, { jobs: host.list(principal) });
       if (req.method === 'GET' && url === '/v1/recipes') return json(res, 200, { recipes: host.listRecipes(principal) });
       const recipeMatch = /^\/v1\/recipes\/([a-z][a-z0-9-]{0,63})$/.exec(url);
