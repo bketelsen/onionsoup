@@ -91,10 +91,11 @@ export function paramSchema(params: Record<string, JsonSchema>): JsonSchema {
 }
 
 /** Check a recipe against the capabilities an invoker may use. */
-export function validateRecipe(raw: unknown, allowed: Map<string, { inputSchema: JsonSchema }>): Recipe {
+export function validateRecipe(raw: unknown, allowed: Map<string, { inputSchema: JsonSchema; interactive?: boolean }>): Recipe {
   const recipe = Recipe.parse(raw);
   for (const step of recipe.steps) {
     if (!allowed.has(step.capability)) throw new HostError(`unknown_capability:${step.capability}`);
+    if (allowed.get(step.capability)?.interactive) throw new HostError(`interactive_capability:${step.capability}`);
     if (step.capability.startsWith('recipe.')) throw new HostError('nested_recipes_not_supported');
   }
   return recipe;

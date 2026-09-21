@@ -10,15 +10,16 @@ import { createRepositoryBrief, validateRepositoryBrief, repositoryBriefMarkdown
 import { EVALUATION_MODEL } from '@onionsoup/providers/evaluation-policy';
 import { liveModel } from '@onionsoup/providers';
 import { maintenanceCapabilities, type MaintenanceRepository } from './maintenance.ts';
+import { implementationCapabilities, ImplementationConfig, type ImplementationRepository } from './implementation.ts';
 
 const Id=z.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
 const RepositoryName = BriefRequest.shape.repository;
 /** A bare name allows briefs and issue reads; a checkout additionally allows bounded source reads. */
-const RepositoryConfig = z.union([RepositoryName, z.object({ name: RepositoryName, checkout: z.string().min(1).optional() }).strict()]);
+const RepositoryConfig = z.union([RepositoryName, z.object({ name: RepositoryName, checkout: z.string().min(1).optional(), implementation: ImplementationConfig.optional() }).strict()]);
 export const CapabilityConfig=z.object({schemaVersion:z.literal(1),provider:z.enum(['copilot','codex']),
   homelab:HomelabMcpConfig.optional(),repositories:z.array(RepositoryConfig).max(100).default([])}).strict()
   .refine(c=>!c.homelab||c.homelab.provider===c.provider,'Provider mismatch');
-export const repositoryEntries = (config: CapabilityConfig): MaintenanceRepository[] =>
+export const repositoryEntries = (config: CapabilityConfig): (MaintenanceRepository & ImplementationRepository)[] =>
   config.repositories.map((r) => (typeof r === 'string' ? { name: r } : r));
 export type CapabilityConfig=z.infer<typeof CapabilityConfig>;
 export const HostConfig = z.object({
@@ -48,12 +49,19 @@ export const RepoBrief=z.object({brief:z.json(),markdown:z.string().optional()})
 export function resolveCapabilityConfig(raw:unknown,file:string){
   const c=CapabilityConfig.parse(raw);
   if(c.homelab){c.homelab.runsDirectory=resolve(dirname(file),c.homelab.runsDirectory);c.homelab.observations=c.homelab.observations.map(p=>resolve(dirname(file),p));}
-  c.repositories=c.repositories.map((r)=>typeof r==='string'||!r.checkout?r:{...r,checkout:resolve(dirname(file),r.checkout)});
+  const base=dirname(file);
+  c.repositories=c.repositories.map((r)=>{
+    if(typeof r==='string')return r;
+    const checkout=r.checkout?resolve(base,r.checkout):undefined;
+    const implementation=r.implementation?{...r.implementation,profile:resolve(base,r.implementation.profile),runtime:resolve(base,r.implementation.runtime),publication:resolve(base,r.implementation.publication)}:undefined;
+    return {...r,...(checkout?{checkout}:{}),...(implementation?{implementation}:{})};
+  });
   return c;
 }
 export function registeredCapabilities(raw:unknown,options:{apiKey?:string; modelFactory?:typeof liveModel;
   investigate?:typeof investigateWorkloads; refresh?:typeof collectRefresh; repositoryBrief?:typeof createRepositoryBrief;
-  maintenance?:Omit<Parameters<typeof maintenanceCapabilities>[0],'provider'|'repositories'|'modelFactory'>}={}):Capability[]{
+  maintenance?:Omit<Parameters<typeof maintenanceCapabilities>[0],'provider'|'repositories'|'modelFactory'>;
+  implementation?:Omit<Parameters<typeof implementationCapabilities>[0],'provider'|'repositories'|'modelFactory'>}={}):Capability[]{
   const config=CapabilityConfig.parse(raw),modelFactory=options.modelFactory??liveModel,result:Capability[]=[];
   const common={version:'v1',timeoutMs:600000};
   if(config.homelab){const h=config.homelab,targets=new Map(h.targets.map(t=>[t.assetId,t])),sources=new Map((h.refreshSources??[]).map(s=>[s.sourceId,s]));
@@ -82,5 +90,6 @@ export function registeredCapabilities(raw:unknown,options:{apiKey?:string; mode
     metadata:{provider:config.provider,model:EVALUATION_MODEL,repositories,maxModelCalls:4,resultContract:'repository-brief-v1',agents:RepoAgentId.options.map(repositoryCapabilityManifest)},effects:['github_reads','model_calls','local_artifacts'],
     execute:async(input,ctx)=>{const brief=await(options.repositoryBrief??createRepositoryBrief)(input,{directory:join(ctx.directory,'analysis'),provider:config.provider,modelFactory,signal:ctx.signal});return {brief,markdown:repositoryBriefMarkdown(brief)};} });}
   result.push(...maintenanceCapabilities({provider:config.provider,repositories:entries,modelFactory,...options.maintenance}));
+  result.push(...implementationCapabilities({provider:config.provider,repositories:entries,modelFactory,...options.implementation}));
   return result;
 }

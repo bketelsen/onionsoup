@@ -1,0 +1,213 @@
+{
+  "name": "@onionsoup/implementation",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "exports": {
+    "./escape": {
+      "onionsoup-source": "./src/escape.ts",
+      "types": "./dist/escape.d.ts",
+      "default": "./dist/escape.js"
+    },
+    "./fixture/agents": {
+      "onionsoup-source": "./src/fixture/agents.ts",
+      "types": "./dist/fixture/agents.d.ts",
+      "default": "./dist/fixture/agents.js"
+    },
+    "./fixture/capabilities": {
+      "onionsoup-source": "./src/fixture/capabilities.ts",
+      "types": "./dist/fixture/capabilities.d.ts",
+      "default": "./dist/fixture/capabilities.js"
+    },
+    "./fixture/cli": {
+      "onionsoup-source": "./src/fixture/cli.ts",
+      "types": "./dist/fixture/cli.d.ts",
+      "default": "./dist/fixture/cli.js"
+    },
+    "./fixture/console": {
+      "onionsoup-source": "./src/fixture/console.ts",
+      "types": "./dist/fixture/console.d.ts",
+      "default": "./dist/fixture/console.js"
+    },
+    "./fixture/contracts": {
+      "onionsoup-source": "./src/fixture/contracts.ts",
+      "types": "./dist/fixture/contracts.d.ts",
+      "default": "./dist/fixture/contracts.js"
+    },
+    "./fixture/fixture": {
+      "onionsoup-source": "./src/fixture/fixture.ts",
+      "types": "./dist/fixture/fixture.d.ts",
+      "default": "./dist/fixture/fixture.js"
+    },
+    "./fixture/recipe": {
+      "onionsoup-source": "./src/fixture/recipe.ts",
+      "types": "./dist/fixture/recipe.d.ts",
+      "default": "./dist/fixture/recipe.js"
+    },
+    "./fixture/record": {
+      "onionsoup-source": "./src/fixture/record.ts",
+      "types": "./dist/fixture/record.d.ts",
+      "default": "./dist/fixture/record.js"
+    },
+    "./fixture/render": {
+      "onionsoup-source": "./src/fixture/render.ts",
+      "types": "./dist/fixture/render.d.ts",
+      "default": "./dist/fixture/render.js"
+    },
+    "./fixture/sandbox": {
+      "onionsoup-source": "./src/fixture/sandbox.ts",
+      "types": "./dist/fixture/sandbox.d.ts",
+      "default": "./dist/fixture/sandbox.js"
+    },
+    "./project/agents": {
+      "onionsoup-source": "./src/project/agents.ts",
+      "types": "./dist/project/agents.d.ts",
+      "default": "./dist/project/agents.js"
+    },
+    "./project/cli": {
+      "onionsoup-source": "./src/project/cli.ts",
+      "types": "./dist/project/cli.d.ts",
+      "default": "./dist/project/cli.js"
+    },
+    "./project/container": {
+      "onionsoup-source": "./src/project/container.ts",
+      "types": "./dist/project/container.d.ts",
+      "default": "./dist/project/container.js"
+    },
+    "./project/contracts": {
+      "onionsoup-source": "./src/project/contracts.ts",
+      "types": "./dist/project/contracts.d.ts",
+      "default": "./dist/project/contracts.js"
+    },
+    "./project/dependencies": {
+      "onionsoup-source": "./src/project/dependencies.ts",
+      "types": "./dist/project/dependencies.d.ts",
+      "default": "./dist/project/dependencies.js"
+    },
+    "./project/go-dependencies": {
+      "onionsoup-source": "./src/project/go-dependencies.ts",
+      "types": "./dist/project/go-dependencies.d.ts",
+      "default": "./dist/project/go-dependencies.js"
+    },
+    "./project/go-profile": {
+      "onionsoup-source": "./src/project/go-profile.ts",
+      "types": "./dist/project/go-profile.d.ts",
+      "default": "./dist/project/go-profile.js"
+    },
+    "./project/go-sandbox": {
+      "onionsoup-source": "./src/project/go-sandbox.ts",
+      "types": "./dist/project/go-sandbox.d.ts",
+      "default": "./dist/project/go-sandbox.js"
+    },
+    "./project/node-task-verification": {
+      "onionsoup-source": "./src/project/node-task-verification.ts",
+      "types": "./dist/project/node-task-verification.d.ts",
+      "default": "./dist/project/node-task-verification.js"
+    },
+    "./project/profile": {
+      "onionsoup-source": "./src/project/profile.ts",
+      "types": "./dist/project/profile.d.ts",
+      "default": "./dist/project/profile.js"
+    },
+    "./project/profiles": {
+      "onionsoup-source": "./src/project/profiles.ts",
+      "types": "./dist/project/profiles.d.ts",
+      "default": "./dist/project/profiles.js"
+    },
+    "./project/proposal": {
+      "onionsoup-source": "./src/project/proposal.ts",
+      "types": "./dist/project/proposal.d.ts",
+      "default": "./dist/project/proposal.js"
+    },
+    "./project/publication": {
+      "onionsoup-source": "./src/project/publication.ts",
+      "types": "./dist/project/publication.d.ts",
+      "default": "./dist/project/publication.js"
+    },
+    "./project/recipe": {
+      "onionsoup-source": "./src/project/recipe.ts",
+      "types": "./dist/project/recipe.d.ts",
+      "default": "./dist/project/recipe.js"
+    },
+    "./project/record": {
+      "onionsoup-source": "./src/project/record.ts",
+      "types": "./dist/project/record.d.ts",
+      "default": "./dist/project/record.js"
+    },
+    "./project/repository-profile": {
+      "onionsoup-source": "./src/project/repository-profile.ts",
+      "types": "./dist/project/repository-profile.d.ts",
+      "default": "./dist/project/repository-profile.js"
+    },
+    "./project/sandbox": {
+      "onionsoup-source": "./src/project/sandbox.ts",
+      "types": "./dist/project/sandbox.d.ts",
+      "default": "./dist/project/sandbox.js"
+    },
+    "./project/source": {
+      "onionsoup-source": "./src/project/source.ts",
+      "types": "./dist/project/source.d.ts",
+      "default": "./dist/project/source.js"
+    },
+    "./project/task-verification": {
+      "onionsoup-source": "./src/project/task-verification.ts",
+      "types": "./dist/project/task-verification.d.ts",
+      "default": "./dist/project/task-verification.js"
+    },
+    "./publication/bundle": {
+      "onionsoup-source": "./src/publication/bundle.ts",
+      "types": "./dist/publication/bundle.d.ts",
+      "default": "./dist/publication/bundle.js"
+    },
+    "./publication/cli": {
+      "onionsoup-source": "./src/publication/cli.ts",
+      "types": "./dist/publication/cli.d.ts",
+      "default": "./dist/publication/cli.js"
+    },
+    "./publication/console": {
+      "onionsoup-source": "./src/publication/console.ts",
+      "types": "./dist/publication/console.d.ts",
+      "default": "./dist/publication/console.js"
+    },
+    "./publication/contracts": {
+      "onionsoup-source": "./src/publication/contracts.ts",
+      "types": "./dist/publication/contracts.d.ts",
+      "default": "./dist/publication/contracts.js"
+    },
+    "./publication/events": {
+      "onionsoup-source": "./src/publication/events.ts",
+      "types": "./dist/publication/events.d.ts",
+      "default": "./dist/publication/events.js"
+    },
+    "./publication/github": {
+      "onionsoup-source": "./src/publication/github.ts",
+      "types": "./dist/publication/github.d.ts",
+      "default": "./dist/publication/github.js"
+    },
+    "./publication/runtime": {
+      "onionsoup-source": "./src/publication/runtime.ts",
+      "types": "./dist/publication/runtime.d.ts",
+      "default": "./dist/publication/runtime.js"
+    },
+    "./scoped-read": {
+      "onionsoup-source": "./src/scoped-read.ts",
+      "types": "./dist/scoped-read.d.ts",
+      "default": "./dist/scoped-read.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "@humanlayer/agentlayer-core": "0.0.36",
+    "@onionsoup/maintenance": "0.1.0",
+    "@onionsoup/providers": "0.1.0",
+    "@onionsoup/repository-analysis": "0.1.0",
+    "@onionsoup/runtime": "0.1.0",
+    "ai": "6.0.191",
+    "zod": "4.3.6"
+  }
+}

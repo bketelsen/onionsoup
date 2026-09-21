@@ -49,9 +49,16 @@ GitHub reads use the authenticated `gh` CLI.
 4. Recipes: a saved document of steps with bindings; the host runs one as a
    parent job whose steps are ordinary child jobs; a Svelte Flow canvas edits
    it. *(done 2026-09-21)*
-5. Web chat over `@onionsoup/chat` with tools that are host capabilities and
+5. Implementation behind approval: `change.approve` (a person fixes the task
+   and files from a completed proposal), `change.implement` (project proposal,
+   acceptance, pinned dependencies, patch and review agents, sandbox checks),
+   `change.publish` (a person opens the draft PR). The pipeline modules live in
+   `@onionsoup/implementation`. Approve and publish are interactive: the host
+   refuses them as recipe steps. *(done 2026-09-21; live sandbox run pending
+   an operator-pinned runtime)*
+6. Web chat over `@onionsoup/chat` with tools that are host capabilities and
    saved recipes. Retire the chat CLI.
-6. Tailnet hosting with Tailscale identity; homelab capabilities in the same
+7. Tailnet hosting with Tailscale identity; homelab capabilities in the same
    catalog.
 
 Fixture execution, draft publication and owned-project changes stay on their
@@ -66,6 +73,17 @@ CLIs until the read-only surface is done; they carry real effects.
 | `code.location` | a completed ready `issue.readiness` job | checkout configured for that repository |
 | `investigation.packet` | configured repository, issue number | checkout |
 | `change.proposal` | a completed `investigation.packet` job, query for features | checkout |
+| `change.approve` | a completed `change.proposal` job, reason, optional file override | `implementation` config for the repository |
+| `change.implement` | a completed `change.approve` job | pinned runtime, sandbox (podman), provider |
+| `change.publish` | a verified `change.implement` job, reason | publication config with the draft-PR target |
+
+A repository's `implementation` block names the repository profile, the pinned
+runtime and the publication configuration files. The approval records the
+task the person authorized: title, request text built from the proposal,
+the files the agents may edit (cited sources within the profile's allowed
+paths, or an explicit override), and source context. Implementation checks
+the profile hash against the approval before any model call and fails with
+a reason if the environment changed.
 
 The host resolves the checkout's current `HEAD` as the pinned commit at job time
 and records it in the result.

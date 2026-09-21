@@ -25,6 +25,7 @@ export type Capability = {
   metadata: unknown;
   effects: string[];
   timeoutMs: number;
+  interactive?: boolean;
 };
 
 export type JsonSchema = {
@@ -103,7 +104,7 @@ class Store {
 
   /** Capabilities a recipe step may use: everything granted that is not itself a recipe. */
   get stepCapabilities() {
-    return this.capabilities.filter((c) => !c.id.startsWith('recipe.'));
+    return this.capabilities.filter((c) => !c.id.startsWith('recipe.') && !c.interactive);
   }
 
   async loadRecipes() {

@@ -32,6 +32,7 @@
     "@onionsoup/runtime": "0.1.0",
     "@onionsoup/providers": "0.1.0",
     "zod": "4.3.6",
-    "@onionsoup/maintenance": "0.1.0"
+    "@onionsoup/maintenance": "0.1.0",
+    "@onionsoup/implementation": "0.1.0"
   }
 }

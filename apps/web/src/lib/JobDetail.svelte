@@ -42,14 +42,23 @@
   const parents = $derived(job ? references(job) : []);
   const children = $derived(store.jobList.filter((j) => j.jobId !== id && references(j).includes(id)));
 
-  const next = $derived.by(() => {
-    if (!job || job.status !== 'completed') return [];
+  type NextStep = { label: string; href: string };
+  type NextRule = (job: Job) => NextStep[];
+  const readyBug = (job: Job) => {
     const r = job.result as { run?: { assessment?: { kind?: string; bug_readiness?: string } } } | undefined;
-    if (job.capability === 'issue.readiness' && r?.run?.assessment?.kind === 'bug_report' && r.run.assessment.bug_readiness === 'ready')
-      return [{ label: 'Locate code', href: `#/run/code.location?readinessJobId=${job.jobId}` }];
-    if (job.capability === 'investigation.packet') return [{ label: 'Draft proposal', href: `#/run/change.proposal?packetJobId=${job.jobId}` }];
-    return [];
-  });
+    return r?.run?.assessment?.kind === 'bug_report' && r.run.assessment.bug_readiness === 'ready';
+  };
+  const verified = (job: Job) => (job.result as { outcome?: string } | undefined)?.outcome === 'candidate_verified';
+  const has = (id: string) => Boolean(store.capability(id));
+  /** What a person can do with a completed job, keyed by the capability that produced it. */
+  const nextSteps: Record<string, NextRule> = {
+    'issue.readiness': (job) => (readyBug(job) && has('code.location') ? [{ label: 'Locate code', href: `#/run/code.location?readinessJobId=${job.jobId}` }] : []),
+    'investigation.packet': (job) => (has('change.proposal') ? [{ label: 'Draft proposal', href: `#/run/change.proposal?packetJobId=${job.jobId}` }] : []),
+    'change.proposal': (job) => (has('change.approve') ? [{ label: 'Approve for implementation', href: `#/run/change.approve?proposalJobId=${job.jobId}` }] : []),
+    'change.approve': (job) => (has('change.implement') ? [{ label: 'Implement', href: `#/run/change.implement?approvalJobId=${job.jobId}` }] : []),
+    'change.implement': (job) => (verified(job) && has('change.publish') ? [{ label: 'Publish draft PR', href: `#/run/change.publish?implementJobId=${job.jobId}` }] : []),
+  };
+  const next = $derived(job?.status === 'completed' ? (nextSteps[job.capability] ?? (() => []))(job) : []);
 </script>
 
 {#if !job}

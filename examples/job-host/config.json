@@ -12,7 +12,13 @@
     "repositories": [
       {
         "name": "bketelsen/onionsoup",
-        "checkout": "/path/to/onionsoup/checkout"
+        "checkout": "/path/to/onionsoup/checkout",
+        "implementation": {
+          "profile": "../repository-profiles/onionsoup-delivery.json",
+          "runtime": "/private/onionsoup-runtime.json",
+          "publication": "/private/publication.json",
+          "target": 0
+        }
       }
     ]
   },
@@ -24,7 +30,10 @@
         "issue.readiness",
         "code.location",
         "investigation.packet",
-        "change.proposal"
+        "change.proposal",
+        "change.approve",
+        "change.implement",
+        "change.publish"
       ]
     },
     {

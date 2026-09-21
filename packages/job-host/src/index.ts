@@ -82,6 +82,8 @@ export type Capability = {
   metadata: unknown;
   effects: string[];
   timeoutMs: number;
+  /** Needs a person to submit it deliberately; recipes may not include it as a step. */
+  interactive?: boolean;
   execute: (input: any, context: CapabilityContext) => Promise<unknown>;
 };
 
@@ -155,6 +157,7 @@ export async function openJobHost(options: HostOptions) {
     metadata: c.metadata,
     effects: c.effects,
     timeoutMs: c.timeoutMs,
+    interactive: Boolean(c.interactive),
   });
   const binding = digest({ protocol: 'job-host-v1', configuration: options.binding, capabilities: [...capabilities.values()].map(describe) });
   const described = new Map([...capabilities.values()].map((c) => [c.id, describe(c)]));
@@ -564,7 +567,7 @@ export async function openJobHost(options: HostOptions) {
         if (!broken) await save();
       });
       closed = true;
-      await rm(lock, { recursive: true });
+      await rm(lock, { recursive: true, force: true });
     },
   }; }
   host = build();

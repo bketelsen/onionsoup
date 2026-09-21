@@ -13,6 +13,8 @@ for (const group of ['packages', 'apps']) {
       continue;
     }
     await cp(join('.build', group, name, 'src'), destination, { recursive: true });
+    // Harness scripts and other non-TypeScript assets ship next to the compiled modules.
+    await cp(join(directory, 'src'), destination, { recursive: true, filter: (source) => !/\.ts$/.test(source) });
   }
 }
 await rm('.build', { recursive: true, force: true });
