@@ -1,5 +1,5 @@
 {
-  "name": "@onionsoup/chat-cli-app",
+  "name": "@onionsoup/job-host-app",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -17,14 +17,9 @@
     "dist"
   ],
   "dependencies": {
-    "@onionsoup/chat": "0.1.0",
-    "@onionsoup/homelab-chat": "0.1.0",
-    "@onionsoup/homelab-mcp": "0.1.0",
-    "@onionsoup/providers": "0.1.0",
-    "@onionsoup/runtime": "0.1.0",
-    "@modelcontextprotocol/sdk": "1.30.0",
-    "zod": "4.3.6",
     "@onionsoup/job-host": "0.1.0",
-    "@onionsoup/host-capabilities": "0.1.0"
+    "@onionsoup/host-capabilities": "0.1.0",
+    "@onionsoup/runtime": "0.1.0",
+    "@onionsoup/providers": "0.1.0"
   }
 }

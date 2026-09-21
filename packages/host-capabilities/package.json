@@ -1,5 +1,5 @@
 {
-  "name": "@onionsoup/homelab-mcp",
+  "name": "@onionsoup/host-capabilities",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -12,24 +12,25 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
-    "./refresh": {
-      "onionsoup-source": "./src/refresh.ts",
-      "types": "./dist/refresh.d.ts",
-      "default": "./dist/refresh.js"
+    "./consumers": {
+      "onionsoup-source": "./src/consumers.ts",
+      "types": "./dist/consumers.d.ts",
+      "default": "./dist/consumers.js"
     }
   },
   "files": [
     "dist"
   ],
   "dependencies": {
+    "@onionsoup/job-host": "0.1.0",
+    "@onionsoup/homelab-mcp": "0.1.0",
     "@onionsoup/homelab-brief": "0.1.0",
     "@onionsoup/workload-triage": "0.1.0",
     "@onionsoup/kubernetes-source": "0.1.0",
-    "@onionsoup/providers": "0.1.0",
+    "@onionsoup/repository-analysis": "0.1.0",
+    "@onionsoup/repository-brief": "0.1.0",
     "@onionsoup/runtime": "0.1.0",
-    "@modelcontextprotocol/sdk": "1.30.0",
-    "zod": "4.3.6",
-    "@onionsoup/truenas-source": "0.1.0",
-    "@onionsoup/container-source": "0.1.0"
+    "@onionsoup/providers": "0.1.0",
+    "zod": "4.3.6"
   }
 }

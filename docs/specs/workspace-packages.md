@@ -142,3 +142,12 @@ Under [ADR-0028](../adr/0028-separate-chat-sessions-from-domain-capabilities.md)
 `apps/chat-cli` supplies terminal input and the fixed local MCP connection. See the
 [chat contract](chat.md) and [phase 27](../plans/roadmap.md#phase-27--persistent-chat-and-homelab-profile).
 The OSS brief release still excludes these homelab consumer workspaces.
+
+### Shared job service
+
+The [job-host contract](job-host.md) adds a generic host/client package, a reviewed
+`host-capabilities` registry, and `apps/job-host`. The remote delivery adapter adds
+only the generic job-host dependency to the portable repository-brief release;
+homelab implementations and the service application remain excluded. Chat supports
+either its original local MCP host or the shared HTTP service. Rationale:
+[ADR-0029](../adr/0029-host-reviewed-capabilities-through-a-shared-job-api.md).

@@ -18,6 +18,7 @@
   ],
   "dependencies": {
     "@onionsoup/brief-delivery": "0.1.0",
-    "@onionsoup/runtime": "0.1.0"
+    "@onionsoup/runtime": "0.1.0",
+    "@onionsoup/job-host": "0.1.0"
   }
 }

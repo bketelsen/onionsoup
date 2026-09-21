@@ -328,6 +328,17 @@ Completed. Evidence: [Workflow and delegation qualification](records/workflow-de
 
 Completed. Evidence: [persistent chat qualification](records/chat-2026-09-20.md).
 
+## Phase 28 — Shared capability job host
+
+- Implement the [shared job API](../specs/job-host.md) under
+  [ADR-0029](../adr/0029-host-reviewed-capabilities-through-a-shared-job-api.md).
+- Connect chat and scheduled repository-brief delivery to the same fixed registry.
+- **Done when:** both consumers produce inspectable results through one host;
+  schema, ownership, idempotency, persistent budgets, interruption and cancellation
+  checks pass; domain contracts and delivery effects retain their existing bounds.
+
+Completed. Evidence: [shared-host qualification](records/shared-host-2026-09-21.md).
+
 ## Later / ideas
 
 - Homelab composition: read-only inventory/health over Incus, Podman, Docker,

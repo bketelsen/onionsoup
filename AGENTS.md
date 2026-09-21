@@ -113,6 +113,12 @@ admissions before effects, re-inspect evidence for follow-ups, and never replay
 interrupted jobs automatically. Profile/config/model bindings are immutable per
 session; discovery and task prose cannot widen authority.
 
+The [shared job host](docs/specs/job-host.md) admits only operator-registered
+capabilities over authenticated loopback HTTP. Preserve per-invoker ownership,
+persisted quotas, exact idempotency binding and interrupted-without-replay semantics.
+Clients cannot enroll code, widen grants, select host paths or request publication.
+The scheduled consumer retains its separate SMTP effect ledger and local relay.
+
 ## Repository boundary
 
 Keep credentials, private keys, raw runs, local clones, and dependencies out of

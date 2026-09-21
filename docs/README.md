@@ -26,6 +26,8 @@ Documentation follows the owner's agentic-template, recorded in
 
 ## Specs — exact contracts
 
+- [Shared local job host](specs/job-host.md)
+
 - [Workload triage and homelab MCP](specs/workload-triage.md)
 - [Homelab conversational delegation proof](specs/homelab-delegation.md)
 - [Persistent chat and homelab profile](specs/chat.md)
@@ -69,6 +71,8 @@ Documentation follows the owner's agentic-template, recorded in
 
 ## Decisions — why
 
+- [0029 — Host reviewed capabilities through a shared job API](adr/0029-host-reviewed-capabilities-through-a-shared-job-api.md)
+
 - [0026 — Triage workload findings through bounded evidence](adr/0026-triage-workload-findings-through-bounded-evidence.md)
 - [0027 — Observe Workflow owners and prove model delegation](adr/0027-observe-workflow-owners-and-prove-model-delegation.md)
 - [0028 — Separate chat sessions from domain capabilities](adr/0028-separate-chat-sessions-from-domain-capabilities.md)
@@ -104,6 +108,8 @@ Documentation follows the owner's agentic-template, recorded in
 - [ADR template](adr/TEMPLATE.md)
 
 ## Historical evaluation evidence
+
+- [Shared capability host — 2026-09-21](plans/records/shared-host-2026-09-21.md)
 
 - [Persistent homelab chat — 2026-09-20](plans/records/chat-2026-09-20.md)
 - [Workload triage — 2026-09-19](plans/records/workload-triage-2026-09-19.md)

@@ -222,3 +222,14 @@ without modifying the core or granting discovered tools automatic authority.
 [Roadmap phase 27](../plans/roadmap.md#phase-27--persistent-chat-and-homelab-profile)
 qualifies restart, follow-up evidence and refresh. This is a consumer/orchestrator;
 it delegates the focused triage judgment and deterministic collection/composition.
+
+### Shared local job service
+
+[ADR-0029](../adr/0029-host-reviewed-capabilities-through-a-shared-job-api.md) adds
+`@onionsoup/job-host` (generic lifecycle and HTTP client), `@onionsoup/host-capabilities`
+(reviewed domain registry and homelab compatibility projection), and `apps/job-host`.
+The [service contract](../specs/job-host.md) is consumed by chat and the scheduled
+brief worker. The delivery package owns its remote-generation adapter so a portable
+OSS brief release does not acquire homelab dependencies. Existing standalone MCP
+hosts remain available. [Roadmap phase 28](../plans/roadmap.md#phase-28--shared-capability-job-host)
+tracks the two-consumer proof.

@@ -1,10 +1,13 @@
 import { parseArgs } from 'node:util';
 import { resolve } from 'node:path';
 import { readJson } from '@onionsoup/runtime/storage';
+import { readFile } from 'node:fs/promises';
+import { createJobClient } from '@onionsoup/job-host/client';
+import { remoteBriefGenerator } from '@onionsoup/brief-delivery/remote';
 import { tick, prepareSaved, deliver, inspect, reconcile } from '@onionsoup/brief-delivery/runtime';
 globalThis.AI_SDK_LOG_WARNINGS=false;
 console.error=console.warn=()=>process.stderr.write('Diagnostic suppressed; inspect saved delivery status.\n');
-const usage=`Usage: npm run delivery -- tick CONFIG [--state DIRECTORY]
+const usage=`Usage: npm run delivery -- tick CONFIG [--state DIRECTORY] [--host URL --token-file FILE]
        npm run delivery -- prepare CONFIG BRIEF_JSON [--state DIRECTORY]
        npm run delivery -- send CONFIG OCCURRENCE [--state DIRECTORY]
        npm run delivery -- inspect CONFIG OCCURRENCE [--state DIRECTORY]
@@ -14,12 +17,14 @@ try {
   const args=process.argv.slice(2);
   if (args.includes('--help')) process.stdout.write(usage);
   else {
-    const { values,positionals:p }=parseArgs({ args,allowPositionals:true,strict:true,options:{ state:{ type:'string' },evidence:{ type:'string' } } });
+    const { values,positionals:p }=parseArgs({ args,allowPositionals:true,strict:true,options:{ state:{ type:'string' },evidence:{ type:'string' },host:{type:'string'},'token-file':{type:'string'} } });
     const [command,file,key,outcome]=p;
     if (!file || !['tick','prepare','send','inspect','reconcile'].includes(command) ||
       p.length!==(command==='tick'?2:command==='reconcile'?4:3) ||
       (command==='reconcile' ? !values.evidence || !['accepted','not_accepted'].includes(outcome):!!values.evidence)) throw new Error('Invalid arguments');
-    const config=await readJson(resolve(file)), options={ stateDirectory:resolve(values.state??'runs/deliveries') };
+    if(Boolean(values.host)!==Boolean(values['token-file'])||values.host&&command!=='tick')throw Error('Remote generation requires tick and both host options');
+    const generate=values.host?remoteBriefGenerator(createJobClient({url:values.host,token:(await readFile(resolve(values['token-file']!),'utf8')).trim()})):undefined;
+    const config=await readJson(resolve(file)), options={ stateDirectory:resolve(values.state??'runs/deliveries'),generate };
     const result=command==='tick'?await tick(config,options):command==='prepare'?await prepareSaved(config,await readJson(resolve(key)),options):
       command==='send'?await deliver(config,key,options):command==='inspect'?await inspect(config,key,options.stateDirectory):
       await reconcile(config,key,outcome as 'accepted'|'not_accepted',values.evidence!,options);

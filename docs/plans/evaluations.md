@@ -279,6 +279,16 @@ Completed. Evidence: [Workflow and delegation qualification](records/workflow-de
 
 Completed. Evidence: [persistent chat qualification](records/chat-2026-09-20.md).
 
+## Phase 26 — Shared host qualification
+
+- Qualify the [job host](../specs/job-host.md) under
+  [ADR-0029](../adr/0029-host-reviewed-capabilities-through-a-shared-job-api.md).
+- **Done when:** scripted lifecycle/authority tests and separate live chat/scheduled
+  brief trials preserve provenance, partial results and no-replay recovery, with
+  explicit remaining deployment and quality limits.
+
+Completed. Evidence: [shared-host qualification](records/shared-host-2026-09-21.md).
+
 ## Later / ideas
 
 Model-comparison infrastructure, new local-provider batches, broader source

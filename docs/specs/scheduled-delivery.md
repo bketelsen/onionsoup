@@ -130,6 +130,16 @@ hash. Ordering follows persisted attempt history; an unfinished attempt exports
 unknown at its original start time. The ledger remains authoritative if writing
 its derived event projection fails; `inspect` regenerates events without effects.
 
+## Shared execution host
+
+The worker's optional `tick --host URL --token-file FILE` invokes repository analysis
+through the [shared job service](job-host.md), under
+[ADR-0029](../adr/0029-host-reviewed-capabilities-through-a-shared-job-api.md).
+Occurrence identity, provider/request validation, frozen mail, SMTP intent and
+reconciliation retain this contract. The service receives no mail capability.
+The remote job receipt correlates to the delivery workflow; missing results remain
+analysis unfinished and are not automatically regenerated on the next tick.
+
 ## References
 
 - Rationale: [ADR-0011](../adr/0011-separate-scheduled-analysis-from-mail-delivery.md).

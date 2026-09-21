@@ -46,6 +46,11 @@
       "onionsoup-source": "./src/schedule.ts",
       "types": "./dist/schedule.d.ts",
       "default": "./dist/schedule.js"
+    },
+    "./remote": {
+      "onionsoup-source": "./src/remote.ts",
+      "types": "./dist/remote.d.ts",
+      "default": "./dist/remote.js"
     }
   },
   "files": [
@@ -57,6 +62,7 @@
     "@onionsoup/runtime": "0.1.0",
     "nodemailer": "10.0.10",
     "smtp-server": "3.19.13",
-    "zod": "4.3.6"
+    "zod": "4.3.6",
+    "@onionsoup/job-host": "0.1.0"
   }
 }

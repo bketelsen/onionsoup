@@ -62,6 +62,8 @@ end the turn and persist the question; the next message is a new bounded turn.
 - Delegation: [homelab MCP](workload-triage.md), [previous proof](homelab-delegation.md).
 - Work: [roadmap phase 27](../plans/roadmap.md#phase-27--persistent-chat-and-homelab-profile).
 - Evidence: [chat qualification](../plans/records/chat-2026-09-20.md).
+- Optional hosting: [shared job service](job-host.md), following
+  [ADR-0029](../adr/0029-host-reviewed-capabilities-through-a-shared-job-api.md).
 
 ## CLI examples and recovery
 
