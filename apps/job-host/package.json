@@ -20,6 +20,10 @@
     "@onionsoup/job-host": "0.1.0",
     "@onionsoup/host-capabilities": "0.1.0",
     "@onionsoup/runtime": "0.1.0",
-    "@onionsoup/providers": "0.1.0"
+    "@onionsoup/providers": "0.1.0",
+    "@onionsoup/chat": "0.1.0",
+    "@onionsoup/host-chat": "0.1.0",
+    "zod": "4.3.6",
+    "ai": "6.0.191"
   }
 }

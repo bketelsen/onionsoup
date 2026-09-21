@@ -586,6 +586,13 @@ async function requestBody(req: IncomingMessage, limit: number) {
   return JSON.parse(Buffer.concat(chunks).toString());
 }
 
+export function respondJson(res: ServerResponse, status: number, value: unknown) {
+  res.statusCode = status;
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Cache-Control', 'no-store');
+  res.end(JSON.stringify(value));
+}
+
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -598,8 +605,14 @@ const MIME: Record<string, string> = {
   '.map': 'application/json',
 };
 
+export type RouteContext = { req: IncomingMessage; res: ServerResponse; principal: string; url: string; body: () => Promise<any> };
+/** Return true when the route was handled. */
+export type RouteHandler = (context: RouteContext) => Promise<boolean>;
+
 export type ListenOptions = {
   port?: number;
+  /** Additional authenticated routes under /v1, consulted before the built-in ones. */
+  routes?: RouteHandler[];
   /** Bind address. Loopback by default. */
   address?: string;
   /** Serve a built web app from this directory and let same-origin browsers act as `invoker`. */
@@ -649,12 +662,7 @@ export async function listenJobHost(host: JobHost, options: ListenOptions | numb
   const limits = host.limits;
   const streams = new Set<ServerResponse>();
 
-  const json = (res: ServerResponse, status: number, value: unknown) => {
-    res.statusCode = status;
-    res.setHeader('Content-Type', 'application/json');
-    res.setHeader('Cache-Control', 'no-store');
-    res.end(JSON.stringify(value));
-  };
+  const json = respondJson;
 
   const server = createServer(async (req, res) => {
     const url = req.url ?? '/';
@@ -664,6 +672,9 @@ export async function listenJobHost(host: JobHost, options: ListenOptions | numb
         throw new HostError('not_found', 404);
       }
       const principal = principalFor(host, req, opts.web);
+      for (const route of opts.routes ?? []) {
+        if (await route({ req, res, principal, url, body: () => requestBody(req, limits.inputBytes) })) return;
+      }
       if (req.method === 'GET' && url === '/v1/capabilities') return json(res, 200, host.discover(principal));
       if (req.method === 'GET' && url === '/v1/jobs') return json(res, 200, { jobs: host.list(principal) });
       if (req.method === 'GET' && url === '/v1/recipes') return json(res, 200, { recipes: host.listRecipes(principal) });

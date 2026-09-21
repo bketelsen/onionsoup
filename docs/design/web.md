@@ -7,7 +7,8 @@ Living document. Supersedes the CLI-per-recipe and loopback-console approach.
 - **API:** `@onionsoup/job-host` (`apps/job-host`). Capabilities are registered at
   launch from operator configuration. Endpoints:
   `GET /v1/capabilities`, `GET /v1/jobs`, `POST /v1/jobs`, `GET /v1/jobs/:id`,
-  `POST /v1/jobs/:id/cancel`, `GET /v1/events` (server-sent job transitions).
+  `POST /v1/jobs/:id/cancel`, `GET /v1/events` (server-sent job transitions),
+  `GET|PUT|DELETE /v1/recipes[/:id]`, and `/v1/chat/sessions[/:id[/turns]]`.
   The host also serves the built web app from a configured directory on the
   same origin.
 - **Web app:** `apps/web`, Svelte + Vite. Forms are generated from each
@@ -56,8 +57,12 @@ GitHub reads use the authenticated `gh` CLI.
    `@onionsoup/implementation`. Approve and publish are interactive: the host
    refuses them as recipe steps. *(done 2026-09-21; live sandbox run pending
    an operator-pinned runtime)*
-6. Web chat over `@onionsoup/chat` with tools that are host capabilities and
-   saved recipes. Retire the chat CLI.
+6. Web chat: `@onionsoup/host-chat` is a chat profile whose tools are the
+   host catalog (discover, list jobs, run a capability or recipe, inspect a
+   job). Interactive capabilities are refused; answers must cite jobs
+   inspected in the turn. Sessions persist under `<state>/chat/<id>` with an
+   owner sidecar and are served at `/v1/chat/sessions`. The chat CLI is gone.
+   *(done 2026-09-21)*
 7. Tailnet hosting with Tailscale identity; homelab capabilities in the same
    catalog.
 

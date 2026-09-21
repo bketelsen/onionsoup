@@ -61,6 +61,22 @@ export type Recipe = {
   paramSchema?: Record<string, JsonSchema>;
 };
 
+export type ChatReference = { id: string; findingId?: string };
+export type ChatTurn = {
+  turnId: string;
+  message: string;
+  startedAt: string;
+  finishedAt?: string;
+  status: 'running' | 'completed' | 'failed' | 'interrupted';
+  answer?: { kind: 'answer' | 'clarification' | 'unsupported'; text: string; basis: string; references: ChatReference[] };
+  failure?: string;
+  steps: number;
+  toolCalls: number;
+  events: { at: string; tool: string; stage: string; details: unknown }[];
+};
+export type ChatSessionSummary = { sessionId: string; createdAt: string; turns: number; title: string; lastAt: string };
+export type ChatSession = { sessionId: string; createdAt: string; turns: ChatTurn[] };
+
 export type Discovery = {
   invoker: string;
   remainingAdmissions: number | null;
@@ -86,6 +102,9 @@ class Store {
   discovery = $state<Discovery | null>(null);
   jobs = $state<Record<string, Job>>({});
   recipes = $state<Recipe[]>([]);
+  chatSessions = $state<ChatSessionSummary[]>([]);
+  chatSession = $state<ChatSession | null>(null);
+  chatBusy = $state(false);
   connected = $state(false);
   error = $state<string | null>(null);
   private source: EventSource | null = null;
@@ -105,6 +124,43 @@ class Store {
   /** Capabilities a recipe step may use: everything granted that is not itself a recipe. */
   get stepCapabilities() {
     return this.capabilities.filter((c) => !c.id.startsWith('recipe.') && !c.interactive);
+  }
+
+  async loadChatSessions() {
+    const { sessions } = await api<{ sessions: ChatSessionSummary[] }>('/v1/chat/sessions');
+    this.chatSessions = sessions;
+  }
+
+  async openChatSession(sessionId: string) {
+    const { session } = await api<{ session: ChatSession }>(`/v1/chat/sessions/${sessionId}`);
+    this.chatSession = { ...session, sessionId };
+  }
+
+  async createChatSession() {
+    const created = await api<{ sessionId: string; session: ChatSession }>('/v1/chat/sessions', { method: 'POST', body: '{}' });
+    this.chatSession = { ...created.session, sessionId: created.sessionId };
+    await this.loadChatSessions();
+    return created.sessionId;
+  }
+
+  async sendChat(message: string) {
+    if (!this.chatSession) throw new Error('No session');
+    const sessionId = this.chatSession.sessionId;
+    this.chatBusy = true;
+    const pending: ChatTurn = { turnId: 'pending', message, startedAt: new Date().toISOString(), status: 'running', steps: 0, toolCalls: 0, events: [] };
+    this.chatSession.turns.push(pending);
+    try {
+      const { turn } = await api<{ turn: ChatTurn }>(`/v1/chat/sessions/${sessionId}/turns`, { method: 'POST', body: JSON.stringify({ message }) });
+      if (this.chatSession?.sessionId === sessionId) this.chatSession.turns.splice(this.chatSession.turns.indexOf(pending), 1, turn);
+      await this.load();
+      await this.loadChatSessions();
+      return turn;
+    } catch (e) {
+      if (this.chatSession?.sessionId === sessionId) this.chatSession.turns.splice(this.chatSession.turns.indexOf(pending), 1);
+      throw e;
+    } finally {
+      this.chatBusy = false;
+    }
   }
 
   async loadRecipes() {

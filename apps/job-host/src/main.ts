@@ -4,6 +4,7 @@ import { parseArgs } from 'node:util';
 import { openJobHost, listenJobHost, tokenHash, type Invoker } from '@onionsoup/job-host';
 import { HostConfig, registeredCapabilities, resolveCapabilityConfig } from '@onionsoup/host-capabilities';
 import { readJson } from '@onionsoup/runtime/storage';
+import { createChatService } from './chat.ts';
 
 globalThis.AI_SDK_LOG_WARNINGS = false;
 
@@ -39,11 +40,13 @@ async function main() {
     invokers,
     recipes,
   });
+  const chat = createChatService({ host, directory: resolve(dirname(path), config.directory, 'chat'), provider: config.capabilities.provider });
   let listener;
   try {
     listener = await listenJobHost(host, {
       port: values.port ? Number(values.port) : config.port,
       address: config.address,
+      routes: [chat.routes],
       ...(config.web ? { web: { directory: resolve(dirname(path), config.web.directory), invoker: config.web.invoker } } : {}),
     });
   } catch (e) {
@@ -55,7 +58,7 @@ async function main() {
   const close = () => {
     if (closing) return;
     closing = true;
-    void listener.close();
+    void chat.close().finally(() => listener.close());
   };
   process.once('SIGINT', close);
   process.once('SIGTERM', close);

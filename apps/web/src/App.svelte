@@ -5,6 +5,7 @@
   import JobDetail from './lib/JobDetail.svelte';
   import Recipes from './lib/recipes/Recipes.svelte';
   import RecipeEditor from './lib/recipes/RecipeEditor.svelte';
+  import Chat from './lib/Chat.svelte';
   import { store } from './lib/store.svelte.ts';
 
   let hash = $state(location.hash || '#/');
@@ -19,6 +20,7 @@
     if (parts[0] === 'jobs') return { page: 'jobs', id: '', prefill };
     if (parts[0] === 'recipes' && parts[1]) return { page: 'recipe', id: parts[1], prefill };
     if (parts[0] === 'recipes') return { page: 'recipes', id: '', prefill };
+    if (parts[0] === 'chat') return { page: 'chat', id: parts[1] ?? '', prefill };
     return { page: 'capabilities', id: '', prefill };
   });
 
@@ -31,11 +33,12 @@
   <a href="#/" class:current={route.page === 'capabilities' || route.page === 'run'}>Capabilities</a>
   <a href="#/jobs" class:current={route.page === 'jobs' || route.page === 'job'}>Jobs{#if active} <span class="badge">{active}</span>{/if}</a>
   <a href="#/recipes" class:current={route.page === 'recipes' || route.page === 'recipe'}>Recipes</a>
+  <a href="#/chat" class:current={route.page === 'chat'}>Chat</a>
   <span class="spacer"></span>
   <span class="dot" class:on={store.connected} title={store.connected ? 'Live updates connected' : 'Live updates disconnected'}></span>
 </nav>
 
-<main class:wide={route.page === 'recipe'}>
+<main class:wide={route.page === 'recipe' || route.page === 'chat'}>
   {#if route.page === 'run'}
     <RunCapability id={route.id} prefill={route.prefill} />
   {:else if route.page === 'job'}
@@ -44,6 +47,8 @@
     <Jobs />
   {:else if route.page === 'recipes'}
     <Recipes />
+  {:else if route.page === 'chat'}
+    <Chat id={route.id} />
   {:else if route.page === 'recipe'}
     {#key route.id}<RecipeEditor id={route.id} />{/key}
   {:else}
