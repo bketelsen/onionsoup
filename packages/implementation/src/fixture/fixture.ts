@@ -7,7 +7,7 @@ import {randomUUID} from 'node:crypto';
 import {hash} from '@onionsoup/repository-analysis/contracts';
 import {Files,Scope,type FixtureCase} from './contracts.ts';
 export const git=async(directory:string,args:string[])=> (await promisify(execFile)('/usr/bin/git',['-C',directory,'-c','core.hooksPath=/dev/null','-c','commit.gpgSign=false',...args],
-  {timeout:10000,maxBuffer:200000,env:{PATH:'/usr/bin:/bin',GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null'}})).stdout;
+  {timeout:10000,maxBuffer:8000000,env:{PATH:'/usr/bin:/bin',GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null'}})).stdout;
 export async function createFixture(directory:string) {
   await mkdir(directory,{mode:0o700});
   const files=Files.parse(Object.fromEntries(await Promise.all(['tasks.mjs','README.md'].map(async path=>[path,await readFile(fileURLToPath(new URL('../../../../examples/fixture-project/'+path,import.meta.url)),'utf8')]))));

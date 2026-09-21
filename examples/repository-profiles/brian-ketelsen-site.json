@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "id": "brian-ketelsen-site-v1",
+  "repository": "bketelsen/brian-ketelsen-site",
+  "repositoryId": 1284572102,
+  "baseBranch": "main",
+  "execution": {
+    "adapter": "node-typescript-v1",
+    "sandbox": "offline-node-v1",
+    "toolchain": {
+      "version": "v24.19.0",
+      "digest": "bc17c508ffeed0ec622934f9b7fa72f8e78da65350e63c3eceb56fa688aa5e12"
+    },
+    "dependencies": "public-locked-npm-v1"
+  },
+  "verification": {
+    "required": [
+      "node-build"
+    ],
+    "build": {
+      "bin": "astro",
+      "args": [
+        "build"
+      ],
+      "timeoutMs": 300000,
+      "maxSourceBytes": 64000000
+    }
+  },
+  "changes": {
+    "allowed": [
+      "src/content/**",
+      "src/pages/**",
+      "src/components/**",
+      "src/layouts/**",
+      "src/styles/**",
+      "src/data/**",
+      "src/lib/**",
+      "public/**"
+    ],
+    "protected": [
+      "src/content.config.ts",
+      "astro.config.mjs",
+      "wrangler.jsonc",
+      "DEPLOYMENT.md"
+    ],
+    "maximumFiles": 6,
+    "existingTests": "append-only"
+  },
+  "publication": "draft"
+}

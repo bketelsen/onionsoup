@@ -819,7 +819,8 @@
                                   "bubble-colors",
                                   "bubble-invalid",
                                   "node-typecheck",
-                                  "node-tests"
+                                  "node-tests",
+                                  "node-build"
                                 ]
                               },
                               {
@@ -1687,7 +1688,8 @@
                                   "bubble-colors",
                                   "bubble-invalid",
                                   "node-typecheck",
-                                  "node-tests"
+                                  "node-tests",
+                                  "node-build"
                                 ]
                               },
                               {
@@ -1976,38 +1978,98 @@
                             "additionalProperties": false
                           },
                           "verification": {
-                            "type": "object",
-                            "properties": {
-                              "required": {
-                                "type": "array",
-                                "prefixItems": [
-                                  {
-                                    "type": "string",
-                                    "const": "node-typecheck"
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "required": {
+                                    "type": "array",
+                                    "prefixItems": [
+                                      {
+                                        "type": "string",
+                                        "const": "node-typecheck"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "node-tests"
+                                      }
+                                    ]
                                   },
-                                  {
-                                    "type": "string",
-                                    "const": "node-tests"
+                                  "testFiles": {
+                                    "minItems": 1,
+                                    "maxItems": 20,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 180,
+                                      "pattern": "^[a-zA-Z0-9_.-]+(?:\\/[a-zA-Z0-9_.-]+)*$"
+                                    }
                                   }
-                                ]
+                                },
+                                "required": [
+                                  "required",
+                                  "testFiles"
+                                ],
+                                "additionalProperties": false
                               },
-                              "testFiles": {
-                                "minItems": 1,
-                                "maxItems": 20,
-                                "type": "array",
-                                "items": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 180,
-                                  "pattern": "^[a-zA-Z0-9_.-]+(?:\\/[a-zA-Z0-9_.-]+)*$"
-                                }
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "required": {
+                                    "type": "array",
+                                    "prefixItems": [
+                                      {
+                                        "type": "string",
+                                        "const": "node-build"
+                                      }
+                                    ]
+                                  },
+                                  "build": {
+                                    "type": "object",
+                                    "properties": {
+                                      "bin": {
+                                        "type": "string",
+                                        "pattern": "^[a-z0-9@._-]{1,80}$"
+                                      },
+                                      "args": {
+                                        "default": [],
+                                        "maxItems": 8,
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string",
+                                          "pattern": "^[A-Za-z0-9_.=/-]{1,80}$"
+                                        }
+                                      },
+                                      "timeoutMs": {
+                                        "default": 300000,
+                                        "type": "integer",
+                                        "minimum": 10000,
+                                        "maximum": 600000
+                                      },
+                                      "maxSourceBytes": {
+                                        "default": 64000000,
+                                        "type": "integer",
+                                        "minimum": 1000000,
+                                        "maximum": 200000000
+                                      }
+                                    },
+                                    "required": [
+                                      "bin",
+                                      "args",
+                                      "timeoutMs",
+                                      "maxSourceBytes"
+                                    ],
+                                    "additionalProperties": false
+                                  }
+                                },
+                                "required": [
+                                  "required",
+                                  "build"
+                                ],
+                                "additionalProperties": false
                               }
-                            },
-                            "required": [
-                              "required",
-                              "testFiles"
-                            ],
-                            "additionalProperties": false
+                            ]
                           },
                           "changes": {
                             "type": "object",
@@ -2443,7 +2505,8 @@
                             "bubble-colors",
                             "bubble-invalid",
                             "node-typecheck",
-                            "node-tests"
+                            "node-tests",
+                            "node-build"
                           ]
                         },
                         {
@@ -3429,7 +3492,8 @@
                                   "bubble-colors",
                                   "bubble-invalid",
                                   "node-typecheck",
-                                  "node-tests"
+                                  "node-tests",
+                                  "node-build"
                                 ]
                               },
                               {
@@ -4297,7 +4361,8 @@
                                   "bubble-colors",
                                   "bubble-invalid",
                                   "node-typecheck",
-                                  "node-tests"
+                                  "node-tests",
+                                  "node-build"
                                 ]
                               },
                               {
@@ -4586,38 +4651,98 @@
                             "additionalProperties": false
                           },
                           "verification": {
-                            "type": "object",
-                            "properties": {
-                              "required": {
-                                "type": "array",
-                                "prefixItems": [
-                                  {
-                                    "type": "string",
-                                    "const": "node-typecheck"
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "required": {
+                                    "type": "array",
+                                    "prefixItems": [
+                                      {
+                                        "type": "string",
+                                        "const": "node-typecheck"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "node-tests"
+                                      }
+                                    ]
                                   },
-                                  {
-                                    "type": "string",
-                                    "const": "node-tests"
+                                  "testFiles": {
+                                    "minItems": 1,
+                                    "maxItems": 20,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 180,
+                                      "pattern": "^[a-zA-Z0-9_.-]+(?:\\/[a-zA-Z0-9_.-]+)*$"
+                                    }
                                   }
-                                ]
+                                },
+                                "required": [
+                                  "required",
+                                  "testFiles"
+                                ],
+                                "additionalProperties": false
                               },
-                              "testFiles": {
-                                "minItems": 1,
-                                "maxItems": 20,
-                                "type": "array",
-                                "items": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 180,
-                                  "pattern": "^[a-zA-Z0-9_.-]+(?:\\/[a-zA-Z0-9_.-]+)*$"
-                                }
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "required": {
+                                    "type": "array",
+                                    "prefixItems": [
+                                      {
+                                        "type": "string",
+                                        "const": "node-build"
+                                      }
+                                    ]
+                                  },
+                                  "build": {
+                                    "type": "object",
+                                    "properties": {
+                                      "bin": {
+                                        "type": "string",
+                                        "pattern": "^[a-z0-9@._-]{1,80}$"
+                                      },
+                                      "args": {
+                                        "default": [],
+                                        "maxItems": 8,
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string",
+                                          "pattern": "^[A-Za-z0-9_.=/-]{1,80}$"
+                                        }
+                                      },
+                                      "timeoutMs": {
+                                        "default": 300000,
+                                        "type": "integer",
+                                        "minimum": 10000,
+                                        "maximum": 600000
+                                      },
+                                      "maxSourceBytes": {
+                                        "default": 64000000,
+                                        "type": "integer",
+                                        "minimum": 1000000,
+                                        "maximum": 200000000
+                                      }
+                                    },
+                                    "required": [
+                                      "bin",
+                                      "args",
+                                      "timeoutMs",
+                                      "maxSourceBytes"
+                                    ],
+                                    "additionalProperties": false
+                                  }
+                                },
+                                "required": [
+                                  "required",
+                                  "build"
+                                ],
+                                "additionalProperties": false
                               }
-                            },
-                            "required": [
-                              "required",
-                              "testFiles"
-                            ],
-                            "additionalProperties": false
+                            ]
                           },
                           "changes": {
                             "type": "object",
@@ -5053,7 +5178,8 @@
                             "bubble-colors",
                             "bubble-invalid",
                             "node-typecheck",
-                            "node-tests"
+                            "node-tests",
+                            "node-build"
                           ]
                         },
                         {
@@ -6039,7 +6165,8 @@
                                   "bubble-colors",
                                   "bubble-invalid",
                                   "node-typecheck",
-                                  "node-tests"
+                                  "node-tests",
+                                  "node-build"
                                 ]
                               },
                               {
@@ -6907,7 +7034,8 @@
                                   "bubble-colors",
                                   "bubble-invalid",
                                   "node-typecheck",
-                                  "node-tests"
+                                  "node-tests",
+                                  "node-build"
                                 ]
                               },
                               {
@@ -7196,38 +7324,98 @@
                             "additionalProperties": false
                           },
                           "verification": {
-                            "type": "object",
-                            "properties": {
-                              "required": {
-                                "type": "array",
-                                "prefixItems": [
-                                  {
-                                    "type": "string",
-                                    "const": "node-typecheck"
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "required": {
+                                    "type": "array",
+                                    "prefixItems": [
+                                      {
+                                        "type": "string",
+                                        "const": "node-typecheck"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "node-tests"
+                                      }
+                                    ]
                                   },
-                                  {
-                                    "type": "string",
-                                    "const": "node-tests"
+                                  "testFiles": {
+                                    "minItems": 1,
+                                    "maxItems": 20,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 180,
+                                      "pattern": "^[a-zA-Z0-9_.-]+(?:\\/[a-zA-Z0-9_.-]+)*$"
+                                    }
                                   }
-                                ]
+                                },
+                                "required": [
+                                  "required",
+                                  "testFiles"
+                                ],
+                                "additionalProperties": false
                               },
-                              "testFiles": {
-                                "minItems": 1,
-                                "maxItems": 20,
-                                "type": "array",
-                                "items": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 180,
-                                  "pattern": "^[a-zA-Z0-9_.-]+(?:\\/[a-zA-Z0-9_.-]+)*$"
-                                }
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "required": {
+                                    "type": "array",
+                                    "prefixItems": [
+                                      {
+                                        "type": "string",
+                                        "const": "node-build"
+                                      }
+                                    ]
+                                  },
+                                  "build": {
+                                    "type": "object",
+                                    "properties": {
+                                      "bin": {
+                                        "type": "string",
+                                        "pattern": "^[a-z0-9@._-]{1,80}$"
+                                      },
+                                      "args": {
+                                        "default": [],
+                                        "maxItems": 8,
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string",
+                                          "pattern": "^[A-Za-z0-9_.=/-]{1,80}$"
+                                        }
+                                      },
+                                      "timeoutMs": {
+                                        "default": 300000,
+                                        "type": "integer",
+                                        "minimum": 10000,
+                                        "maximum": 600000
+                                      },
+                                      "maxSourceBytes": {
+                                        "default": 64000000,
+                                        "type": "integer",
+                                        "minimum": 1000000,
+                                        "maximum": 200000000
+                                      }
+                                    },
+                                    "required": [
+                                      "bin",
+                                      "args",
+                                      "timeoutMs",
+                                      "maxSourceBytes"
+                                    ],
+                                    "additionalProperties": false
+                                  }
+                                },
+                                "required": [
+                                  "required",
+                                  "build"
+                                ],
+                                "additionalProperties": false
                               }
-                            },
-                            "required": [
-                              "required",
-                              "testFiles"
-                            ],
-                            "additionalProperties": false
+                            ]
                           },
                           "changes": {
                             "type": "object",
@@ -7663,7 +7851,8 @@
                             "bubble-colors",
                             "bubble-invalid",
                             "node-typecheck",
-                            "node-tests"
+                            "node-tests",
+                            "node-build"
                           ]
                         },
                         {

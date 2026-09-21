@@ -11,9 +11,18 @@ const ProfileBase=z.object({schemaVersion:z.literal(1),id:z.string().regex(/^[a-
  changes:z.object({allowed:z.array(Pattern).min(1).max(30),protected:z.array(Pattern).max(30),maximumFiles:z.number().int().min(1).max(6),existingTests:z.literal('append-only')}).strict(),publication:z.literal('draft')}).strict();
 export const GoRepositoryProfile=ProfileBase;
 export const standardNodeChecks=['node-typecheck','node-tests'] as const;
+/** Selected original test files run under tsc and node --test. */
+export const NodeTestVerification=z.object({required:z.tuple([z.literal('node-typecheck'),z.literal('node-tests')]),testFiles:z.array(SafePath.refine(p=>/\.test\.(?:ts|mjs|js)$/.test(p))).min(1).max(20)}).strict();
+/** A project with no test suite is verified by running one installed package binary, such as a static-site build. */
+export const NodeBuildVerification=z.object({required:z.tuple([z.literal('node-build')]),build:z.object({
+ bin:z.string().regex(/^[a-z0-9@._-]{1,80}$/),
+ args:z.array(z.string().regex(/^[A-Za-z0-9_.=/-]{1,80}$/)).max(8).default([]),
+ timeoutMs:z.number().int().min(10000).max(600000).default(300000),
+ maxSourceBytes:z.number().int().min(1000000).max(200000000).default(64000000),
+}).strict()}).strict();
 export const NodeRepositoryProfile=ProfileBase.extend({
  execution:z.object({adapter:z.literal('node-typescript-v1'),sandbox:z.literal('offline-node-v1'),toolchain:z.object({version:z.string().regex(/^v24\.\d+\.\d+$/),digest:Digest}).strict(),dependencies:z.literal('public-locked-npm-v1')}).strict(),
- verification:z.object({required:z.tuple([z.literal('node-typecheck'),z.literal('node-tests')]),testFiles:z.array(SafePath.refine(p=>/\.test\.(?:ts|mjs|js)$/.test(p))).min(1).max(20)}).strict(),
+ verification:z.union([NodeTestVerification,NodeBuildVerification]),
 }).strict();
 export const RepositoryProfile=z.union([GoRepositoryProfile,NodeRepositoryProfile]);
 export type RepositoryProfile=z.infer<typeof RepositoryProfile>;

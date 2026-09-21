@@ -101,7 +101,12 @@ CLIs until the read-only surface is done; they carry real effects.
 | `change.publish` | a verified `change.implement` job, reason | publication config with the draft-PR target |
 
 A repository's `implementation` block names the repository profile, the pinned
-runtime and the publication configuration files. The approval records the
+runtime and the publication configuration files. A Node profile verifies either
+by running selected original tests under `tsc` and `node --test`, or, for a
+project without a suite such as a static site, by running one installed package
+binary (`verification.build`, for example `astro build`) inside the sandbox on an
+overlay of the source snapshot. `examples/repository-profiles/brian-ketelsen-site.json`
+is the build-mode example. The approval records the
 task the person authorized: title, request text built from the proposal,
 the files the agents may edit (cited sources within the profile's allowed
 paths, or an explicit override), and source context. Implementation checks
