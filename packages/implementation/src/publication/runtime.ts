@@ -1,7 +1,7 @@
 import {join} from 'node:path';
 import {atomicJson} from '@onionsoup/runtime/storage';
 import {hash} from '@onionsoup/repository-analysis/contracts';
-import {Approval,validateState,type PublicationConfig,type Bundle,type State,type Pull} from './contracts.ts';
+import {Approval,validateState,pinnedBase,type PublicationConfig,type Bundle,type State,type Pull} from './contracts.ts';
 import {locked,loadBundle,loadState,directory,assertConfig,validateCommit} from './bundle.ts';
 import {githubTransport,type PublisherTransport,type Remote} from './github.ts';
 type Dependencies={transport?:PublisherTransport;persist?:typeof atomicJson;now?:()=>Date};
@@ -18,16 +18,16 @@ export async function approvePublication(c:PublicationConfig,id:string,expectedH
     transition(s,'approved',at,'operator_authorized');await(d.persist??atomicJson)(join(directory(c,id),'state.json'),validateState(s,b));return s;
   });
 }
-function exactPull(p:Pull,b:Bundle) {
+function exactPull(p:Pull,b:Bundle,pinned:boolean) {
   return p.repositoryId===b.target.repositoryId&&p.headRepositoryId===b.target.repositoryId&&p.baseRepositoryId===b.target.repositoryId&&
     p.url===`https://github.com/${b.target.repository}/pull/${p.number}`&&p.head===b.branch&&p.headCommit===b.headCommit&&p.base===b.target.baseBranch&&
-    p.baseCommit===b.target.baseCommit&&p.title===b.title&&p.body===b.body&&p.draft&&p.state==='open'&&!p.merged;
+    (!pinned||p.baseCommit===b.target.baseCommit)&&p.title===b.title&&p.body===b.body&&p.draft&&p.state==='open'&&!p.merged;
 }
 export async function publish(c:PublicationConfig,id:string,expectedHash:string,d:Dependencies={}) {
   return locked(c,async()=>{
     const b=await loadBundle(c,id),s=await loadState(c,b);assertConfig(c,b);
     if(hash(b)!==expectedHash||!s.approval||s.status==='prepared') throw new Error('Exact bundle approval required');
-    const repo=await validateCommit(c,b),remote=d.transport??githubTransport;
+    const repo=await validateCommit(c,b),remote=d.transport??githubTransport,pinned=pinnedBase(c,b.target);
     const save=async(status:State['status'],reason:State['events'][number]['reason'])=>{
       transition(s,status,time(d),reason);await(d.persist??atomicJson)(join(directory(c,id),'state.json'),validateState(s,b));return s;
     };
@@ -38,13 +38,13 @@ export async function publish(c:PublicationConfig,id:string,expectedHash:string,
       if(r.repositoryId!==b.target.repositoryId||r.headCommit!==undefined&&r.headCommit!==b.headCommit||r.pulls.length>1) return save('blocked','remote_conflict');
       if(r.pulls.length) {
         s.pull=r.pulls[0];
-        if(!attempted()||r.headCommit!==b.headCommit||!exactPull(s.pull,b)) return save('blocked','remote_conflict');
-        if(r.baseCommit!==b.target.baseCommit) return save('blocked','stale_base');
+        if(!attempted()||r.headCommit!==b.headCommit||!exactPull(s.pull,b,pinned)) return save('blocked','remote_conflict');
+        if(pinned&&r.baseCommit!==b.target.baseCommit) return save('blocked','stale_base');
         if(s.status==='published') return s;
         return save('published','remote_observed');
       }
       if(s.pull||s.status==='published') return save('blocked','remote_conflict');
-      if(r.baseCommit!==b.target.baseCommit) return save('blocked','stale_base');
+      if(pinned&&r.baseCommit!==b.target.baseCommit) return save('blocked','stale_base');
       return undefined;
     };
     let r=await inspect();if(!r) return save('unknown','remote_uncertain');
@@ -69,7 +69,7 @@ export async function publish(c:PublicationConfig,id:string,expectedHash:string,
     await save('pr_intent','effect_intent');
     let created:Pull|undefined;
     try {created=await remote.create(b);}catch {/* Never blindly repeat this POST. */}
-    if(created) {s.pull=created;if(!exactPull(created,b))return save('blocked','remote_conflict');}
+    if(created) {s.pull=created;if(!exactPull(created,b,pinned))return save('blocked','remote_conflict');}
     r=await inspect();if(!r)return save('unknown','remote_uncertain');
     return await reconcile(r)??save('unknown','remote_uncertain');
   });

@@ -4,14 +4,16 @@ import {randomUUID} from 'node:crypto';
 import {readJson,atomicJson,optionalJson} from '@onionsoup/runtime/storage';
 import {hash} from '@onionsoup/repository-analysis/contracts';
 import {git} from '../fixture/fixture.ts';
-import {PublicationConfig,Target,identity,validateBundle,validateState,type ProjectBundle,type State} from '../publication/contracts.ts';
+import {PublicationConfig,identity,validateBundle,validateState,resolveTarget,type ProjectBundle,type State} from '../publication/contracts.ts';
 import {locked,directory,loadState,assertConfig,validateCommit} from '../publication/bundle.ts';
 import {validateProject} from './record.ts';
 import {projectProfile} from './profiles.ts';
 import {ReviewResult,jobPolicy} from './contracts.ts';
 export async function prepareProjectPublication(c:PublicationConfig,projectDirectory:string,rawTarget:unknown):Promise<ProjectBundle> {
-  PublicationConfig.parse(c);const target=Target.parse(rawTarget),w=validateProject(await readJson(join(projectDirectory,'project.json')));
-  if(w.outcome!=='candidate_verified'||target.repository!==w.job.repository||target.baseCommit!==w.job.baseCommit||!c.targets.some(t=>hash(t)===hash(target)))throw new Error('Approved target and verified project required');
+  PublicationConfig.parse(c);const w=validateProject(await readJson(join(projectDirectory,'project.json')));
+  if(w.outcome!=='candidate_verified')throw new Error('Approved target and verified project required');
+  const target=resolveTarget(c,rawTarget,w.job.baseCommit);
+  if(target.repository!==w.job.repository)throw new Error('Approved target and verified project required');
   if(w.job.schemaVersion===2&&(target.repositoryId!==w.job.repositoryProfile.repositoryId||target.baseBranch!==w.job.repositoryProfile.baseBranch))throw new Error('Profile publication target changed');
   const id=identity(target,hash(w));
   return locked(c,async()=>{

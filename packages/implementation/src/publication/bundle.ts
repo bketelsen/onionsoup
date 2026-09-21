@@ -5,7 +5,7 @@ import {hash} from '@onionsoup/repository-analysis/contracts';
 import {atomicJson,readJson,optionalJson} from '@onionsoup/runtime/storage';
 import {git} from '../fixture/fixture.ts';
 import {validateFixtureWorkflow} from '../fixture/record.ts';
-import {PublicationConfig,Target,identity,validateBundle,validateState,type Bundle,type FixtureBundle,type State} from './contracts.ts';
+import {PublicationConfig,identity,validateBundle,validateState,configuredTarget,resolveTarget,type Bundle,type FixtureBundle,type State} from './contracts.ts';
 export async function loadPublicationConfig(file:string) {
   const c=PublicationConfig.parse(await readJson(file));return {...c,stateDirectory:resolve(dirname(resolve(file)),c.stateDirectory)};
 }
@@ -24,7 +24,7 @@ export async function loadState(config:PublicationConfig,b:Bundle) {
 }
 export function assertConfig(c:PublicationConfig,b:Bundle) {
   PublicationConfig.parse(c);
-  if(hash(c)!==b.configHash||!c.targets.some(t=>hash(t)===hash(b.target))) throw new Error('Publication configuration changed');
+  if(hash(c)!==b.configHash||!configuredTarget(c,b.target)) throw new Error('Publication configuration changed');
 }
 export function bodyFor(w:ReturnType<typeof validateFixtureWorkflow>,id:string) {
   const review=w.stages[1].run!.result as {findings:Array<{severity:string;path:string;line:number;explanation:string}>;limitations:string[]};
@@ -38,10 +38,10 @@ export function bodyFor(w:ReturnType<typeof validateFixtureWorkflow>,id:string) 
     `<!-- onionsoup-publication:${id} -->`].join('\n\n');
 }
 export async function preparePublication(config:PublicationConfig,fixtureDirectory:string,rawTarget:unknown):Promise<FixtureBundle> {
-  PublicationConfig.parse(config);const target=Target.parse(rawTarget);
-  if(!config.targets.some(t=>hash(t)===hash(target))) throw new Error('Target not configured');
+  PublicationConfig.parse(config);
   const w=validateFixtureWorkflow(await readJson(join(fixtureDirectory,'fixture.json')));
-  if(w.outcome!=='candidate_verified'||w.status!=='completed'||target.baseCommit!==w.scope?.baseCommit) throw new Error('Verified exact-base candidate required');
+  if(w.outcome!=='candidate_verified'||w.status!=='completed'||!w.scope) throw new Error('Verified exact-base candidate required');
+  const target=resolveTarget(config,rawTarget,w.scope.baseCommit);
   const id=identity(target,hash(w));
   return locked(config,async()=>{
     const dir=directory(config,id),prior=await optionalJson(join(dir,'bundle.json'));

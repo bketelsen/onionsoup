@@ -6,10 +6,26 @@ import {validateFixtureWorkflow,type FixtureWorkflow} from '../fixture/record.ts
 const Commit=z.string().regex(/^[a-f0-9]{40}$/);
 export const Repository=z.string().regex(/^bketelsen\/[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}$/);
 export const Branch=z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_/-]{0,99}$/).refine(s=>!s.endsWith('/')&&!s.includes('//'));
+/** A bundle's target always names the exact base commit the candidate was built on. */
 export const Target=z.object({repository:Repository,repositoryId:z.number().int().positive(),baseBranch:Branch,baseCommit:Commit}).strict();
+/** An operator target may leave the base commit open: the candidate's own base is used and a moved branch does not block a draft PR. */
+export const ConfiguredTarget=Target.extend({baseCommit:Commit.optional()}).strict();
+export type ConfiguredTarget=z.infer<typeof ConfiguredTarget>;
 export const PublicationConfig=z.object({schemaVersion:z.literal(1),stateDirectory:z.string().min(1),
-  targets:z.array(Target).min(1).max(10)}).strict().refine(c=>new Set(c.targets.map(t=>t.repository+':'+t.baseBranch)).size===c.targets.length,'Duplicate target');
+  targets:z.array(ConfiguredTarget).min(1).max(10)}).strict().refine(c=>new Set(c.targets.map(t=>t.repository+':'+t.baseBranch)).size===c.targets.length,'Duplicate target');
 export type PublicationConfig=z.infer<typeof PublicationConfig>;
+const sameTarget=(configured:ConfiguredTarget,target:z.infer<typeof Target>)=>configured.repository===target.repository&&configured.repositoryId===target.repositoryId&&configured.baseBranch===target.baseBranch&&(configured.baseCommit===undefined||configured.baseCommit===target.baseCommit);
+/** The configured target that covers a bundle target, if any. */
+export function configuredTarget(c:PublicationConfig,target:z.infer<typeof Target>){return c.targets.find(t=>sameTarget(t,target));}
+/** Whether the operator pinned this target's base commit, which makes a moved base block publication. */
+export function pinnedBase(c:PublicationConfig,target:z.infer<typeof Target>){return configuredTarget(c,target)?.baseCommit!==undefined;}
+/** Turn an operator target into a bundle target for a candidate built on `baseCommit`. */
+export function resolveTarget(c:PublicationConfig,rawTarget:unknown,baseCommit:string):z.infer<typeof Target>{
+  const requested=ConfiguredTarget.parse(rawTarget),target=Target.parse({...requested,baseCommit:requested.baseCommit??baseCommit});
+  if(!configuredTarget(c,target))throw new Error('Target not configured');
+  if(target.baseCommit!==baseCommit)throw new Error('Approved target and verified project required');
+  return target;
+}
 export const FixtureBundle=z.object({schemaVersion:z.literal(1),kind:z.literal('fixture-publication'),workflowId:z.uuid(),publicationId:Digest,createdAt:z.iso.datetime(),
   target:Target,configHash:Digest,fixtureHash:Digest,fixture:z.unknown(),headCommit:Commit,headTree:Commit,
   branch:z.string().regex(/^codex\/onionsoup-[a-f0-9]{32}$/),diff:z.string().min(1).max(40000),diffHash:Digest,

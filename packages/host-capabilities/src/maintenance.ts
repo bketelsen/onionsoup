@@ -43,11 +43,23 @@ export const LocationResult = z.object({ handoff: z.json() }).strict();
 export const PacketResult = z.object({ packet: z.json(), markdown: z.string() }).strict();
 export const ProposalResult = z.object({ proposal: z.json(), markdown: z.string() }).strict();
 
+/** The commit work is pinned to: the remote default branch after a fetch, falling back to the local HEAD when offline. */
 async function gitHead(checkout: string, signal: AbortSignal) {
-  const { stdout } = await execute('git', ['-C', checkout, 'rev-parse', '--verify', 'HEAD^{commit}'], { signal, timeout: 10000 });
-  const commit = stdout.trim();
-  if (!/^[a-f0-9]{40}$/.test(commit)) throw new Error('checkout_head_unresolved');
-  return commit;
+  try {
+    await execute('git', ['-C', checkout, 'fetch', '--quiet', 'origin'], { signal, timeout: 60000 });
+  } catch {
+    /* offline or no remote: the checkout's own history is still a valid pin */
+  }
+  for (const ref of ['refs/remotes/origin/HEAD', 'HEAD']) {
+    try {
+      const { stdout } = await execute('git', ['-C', checkout, 'rev-parse', '--verify', `${ref}^{commit}`], { signal, timeout: 10000 });
+      const commit = stdout.trim();
+      if (/^[a-f0-9]{40}$/.test(commit)) return commit;
+    } catch {
+      /* try the next ref */
+    }
+  }
+  throw new Error('checkout_head_unresolved');
 }
 
 export function maintenanceCapabilities(options: MaintenanceOptions): Capability[] {

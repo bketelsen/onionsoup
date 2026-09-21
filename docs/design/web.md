@@ -111,7 +111,12 @@ task the person authorized: title, request text built from the proposal,
 the files the agents may edit (cited sources within the profile's allowed
 paths, or an explicit override), and source context. Implementation checks
 the profile hash against the approval before any model call and fails with
-a reason if the environment changed.
+a reason if the environment changed. Publication targets need only the
+repository, its ID and the base branch; the candidate's own base commit is
+used, and a base branch that moved since does not block the draft PR. Pinning
+`baseCommit` in a target is optional and turns that into a hard check. The
+host pins new work to the remote default branch head after a fetch, so a
+local checkout never needs a manual pull.
 
 The host resolves the checkout's current `HEAD` as the pinned commit at job time
 and records it in the result.

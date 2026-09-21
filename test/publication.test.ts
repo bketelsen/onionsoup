@@ -26,6 +26,15 @@ async function setup(t:TestContext,which:'bug'|'feature'='bug') {
   const approve=()=>approvePublication(c,b.publicationId,hash(b),{authority:'explicit_user_session',reason:'Authorized owned-fixture trial in test.'});
   return {...f,w,c,b,remote,approve,send:(deps={})=>publish(c,b.publicationId,hash(b),{transport:remote.api,...deps})};
 }
+test('an unpinned target takes the candidate base and still publishes after the branch moved',async t=>{
+  const f=await fixture(t),w=await runFixture('bug',f.options),target={repository:'bketelsen/onionsoup-fixtures',repositoryId:42,baseBranch:'bug-base'};
+  const c=PublicationConfig.parse({schemaVersion:1,stateDirectory:join(f.root,'publications'),targets:[target]});
+  const b=await preparePublication(c,f.options.directory,target);assert.equal(b.target.baseCommit,w.scope!.baseCommit);
+  const remote=transport(b);remote.view.baseCommit='c'.repeat(40);
+  await approvePublication(c,b.publicationId,hash(b),{authority:'explicit_user_session',reason:'Unpinned trial.'});
+  const s=await publish(c,b.publicationId,hash(b),{transport:remote.api});
+  assert.equal(s.status,'published');assert.deepEqual(remote.counts(),{pushes:1,creates:1});
+});
 test('bug and feature bundles preserve exact base, diff, commit and evidence; duplicate preparation reuses bundle',async t=>{
   for(const which of ['bug','feature'] as const) {
     const f=await setup(t,which);assert.equal(f.b.diff,f.w.diff);assert.equal(f.b.fixtureHash,hash(f.w));
