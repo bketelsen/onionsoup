@@ -193,7 +193,7 @@ export async function describeSource(registry: HomelabRegistry, entry: SourceEnt
   const summary = (run: HomelabInvestigation) => run.kind === 'truenas-assessment' ? run.classification.replaceAll('_', ' ') : !run.result ? run.failure ?? run.status : (() => { const c = run.kind === 'container-triage' ? containerCounts(run.result) : workloadCounts(run.result); return `${c.attentionNow} attention, ${c.historical} historical`; })();
   return SourceView.parse({
     sourceId: entry.sourceId, kind: entry.kind, origin: entry.origin, host: entry.target.host, detail,
-    latestObservation: observation ? { at: observation.startedAt, status: observation.status } : null,
+    latestObservation: observation ? { at: observation.startedAt, status: observation.status } : investigation && 'input' in investigation ? { at: investigation.input.startedAt, status: investigation.input.status } : null,
     latestInvestigation: investigation ? { at: investigation.kind === 'truenas-assessment' ? investigation.observedAt : investigation.startedAt, status: investigation.kind === 'truenas-assessment' ? 'completed' : investigation.status, summary: summary(investigation) } : null,
   });
 }
