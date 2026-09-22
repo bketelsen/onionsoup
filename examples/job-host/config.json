@@ -31,6 +31,7 @@
         "code.location",
         "investigation.packet",
         "change.proposal",
+        "change.request",
         "change.approve",
         "change.implement",
         "change.publish"
