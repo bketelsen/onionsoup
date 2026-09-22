@@ -12,7 +12,8 @@ Documentation follows the owner's agentic-template, recorded in
 ## Design — how
 
 - [Design template](design/TEMPLATE.md)
-- [Web operator surface](design/web.md) — current direction; start here
+- [Owners and freelancers](design/owners.md) — proposed rewrite on the `owners` branch; start here
+- [Web operator surface](design/web.md) — current implementation
 - [Focused agents and artifact handoffs](design/agents.md)
 - [“Taco-bell orchestration”: reusable agents, different recipes](design/composable-agents.md)
 - [Owned-fixture draft publication](design/draft-publication.md)
