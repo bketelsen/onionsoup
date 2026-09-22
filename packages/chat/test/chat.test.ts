@@ -19,7 +19,9 @@ test('session persists clarifications and compact history, resumes without model
   await assert.rejects(openChatSession({directory,resume:true,profile:p,provider:'copilot',modelId:'gpt-5.6-terra'}),{code:'EEXIST'});
   const first=await chatTurn(handle,'Inspect my workload',{modelFactory:async()=>scripted([clarify])});assert.equal(first.status,'completed');assert.equal(first.answer?.kind,'clarification');
   await closeChatSession(handle);
-  await assert.rejects(openChatSession({directory,resume:true,profile:{...p,bindingHash:'b'.repeat(64)},provider:'copilot',modelId:'gpt-5.6-terra'}),/binding/);
+  // A changed catalog, provider or model follows the host; only a different profile is refused.
+  await assert.rejects(openChatSession({directory,resume:true,profile:{...p,id:'other'},provider:'copilot',modelId:'gpt-5.6-terra'}),/profile/);
+  const rebound=await openChatSession({directory,resume:true,profile:{...p,bindingHash:'b'.repeat(64)},provider:'codex',modelId:'other-model'});assert.equal(rebound.session.bindingHash,'b'.repeat(64));assert.equal(rebound.session.model,'other-model');await closeChatSession(rebound);
   handle=await openChatSession({directory,resume:true,profile:p,provider:'copilot',modelId:'gpt-5.6-terra'});
   const second=await chatTurn(handle,'Use the allowed target',{modelFactory:async()=>scripted([{tool:'observe_fixture',args:{id:'allowed'}},clarify],context=>assert.match(context,/Inspect my workload/))});
   assert.equal(second.status,'completed');assert.deepEqual(handle.session.memory,{calls:1});assert.deepEqual(sessionUsage(handle.session),{input:30,output:15,unknownTurns:0});await closeChatSession(handle);

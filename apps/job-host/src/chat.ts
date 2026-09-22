@@ -36,7 +36,7 @@ export function createChatService(options: ChatServiceOptions) {
     list: () => host.list(principal),
     cancel: (jobId) => host.cancel(principal, jobId),
   });
-  const profileFor = (principal: string) => createHostChatProfile({ bindingHash: hash({ host: host.binding, principal }), host: caller(principal), allowInteractive: options.allowInteractive });
+  const profileFor = (principal: string) => createHostChatProfile({ bindingHash: hash({ profile: 'host', principal }), host: caller(principal), allowInteractive: options.allowInteractive });
 
   async function ownerOf(sessionId: string) {
     try {

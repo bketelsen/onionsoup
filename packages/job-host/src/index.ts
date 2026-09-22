@@ -764,7 +764,7 @@ export async function listenJobHost(host: JobHost, options: ListenOptions | numb
     } catch (e) {
       const status = e instanceof HostError ? e.status : e instanceof z.ZodError ? 400 : 400;
       const error = e instanceof HostError ? e.code : e instanceof z.ZodError ? 'invalid_input' : 'invalid_request';
-      const detail = e instanceof z.ZodError ? e.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`) : undefined;
+      const detail = e instanceof z.ZodError ? e.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`) : e instanceof HostError ? undefined : [e instanceof Error ? e.message.slice(0, 300) : String(e)];
       json(res, status, detail ? { error, detail } : { error });
     }
   });

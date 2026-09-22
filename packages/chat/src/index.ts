@@ -44,7 +44,9 @@ export async function openChatSession(options:{directory:string;profile:ChatProf
     await atomicJson(join(lock,'owner.json'),{pid:process.pid,openedAt:new Date().toISOString()});
     const session=options.resume?await readSession(join(directory,'session.json')):ChatSession.parse({schemaVersion:1,kind:'chat-session',sessionId:randomUUID(),profileId:options.profile.id,bindingHash:options.profile.bindingHash,
       provider:options.provider,model:options.modelId,promptVersion:CHAT_PROMPT_VERSION,createdAt:new Date().toISOString(),memory:options.profile.initialMemory(),turns:[]});
-    if(session.profileId!==options.profile.id||session.bindingHash!==options.profile.bindingHash||session.provider!==options.provider||session.model!==options.modelId)throw Error('Session binding mismatch');
+    // A session belongs to a profile. Catalog, provider and model may change between host runs; the session follows the host.
+    if(session.profileId!==options.profile.id)throw Error('Session profile mismatch');
+    session.bindingHash=options.profile.bindingHash;session.provider=options.provider;session.model=options.modelId;
     session.memory=json(options.profile.parseMemory(session.memory));
     for(const turn of session.turns)if(turn.status==='running'){turn.status='interrupted';turn.failure='interrupted';turn.finishedAt=new Date().toISOString();delete turn.answer;delete turn.evidence;}
     const handle:ChatHandle={directory,session,profile:options.profile,busy:false,closed:false,broken:false,save:async()=>{
