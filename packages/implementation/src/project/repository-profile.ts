@@ -2,7 +2,7 @@ import {z} from 'zod';
 import {hash} from '@onionsoup/repository-analysis/contracts';
 export const REPOSITORY_TASK='repository-task-v1' as const;
 export const SafePath=z.string().min(1).max(180).regex(/^[a-zA-Z0-9_.-]+(?:\/[a-zA-Z0-9_.-]+)*$/).refine(p=>!p.split('/').some(s=>['.','..','.git','node_modules'].includes(s)));
-const Pattern=z.union([SafePath,z.string().endsWith('/**').refine(p=>SafePath.safeParse(p.slice(0,-3)).success)]);
+const Pattern=z.union([z.literal('**'),SafePath,z.string().endsWith('/**').refine(p=>SafePath.safeParse(p.slice(0,-3)).success)]);
 const Digest=z.string().regex(/^[a-f0-9]{64}$/),Commit=z.string().regex(/^[a-f0-9]{40}$/);
 export const standardGoChecks=['go-build','go-test','go-vet','gofmt'] as const;
 const ProfileBase=z.object({schemaVersion:z.literal(1),id:z.string().regex(/^[a-z][a-z0-9-]{0,70}$/),repository:z.string().regex(/^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}$/),repositoryId:z.number().int().positive(),baseBranch:z.string().regex(/^[\w/-]{1,100}$/),
@@ -43,7 +43,7 @@ export const VerificationSummary=z.array(VerificationCheck).min(1).max(8);
 export const NodeVerificationPlan=z.object({schemaVersion:z.literal(1),adapter:z.literal('node-typescript-v1'),source:z.string().min(1).max(30000),checks:z.array(z.union([NodeCheck,z.object({id:TaskCheckId,kind:z.literal('file-changed'),path:SafePath}).strict()])).min(1).max(8)}).strict();
 export const VerificationPlan=z.discriminatedUnion('adapter',[GoVerificationPlan,NodeVerificationPlan]);
 export type VerificationPlan=z.infer<typeof VerificationPlan>;
-const matches=(pattern:string,path:string)=>pattern.endsWith('/**')?path.startsWith(pattern.slice(0,-2)):pattern===path;
+const matches=(pattern:string,path:string)=>pattern==='**'?true:pattern.endsWith('/**')?path.startsWith(pattern.slice(0,-2)):pattern===path;
 export function validateTask(rawProfile:unknown,rawTask:unknown,rawPlan?:unknown) {
  const profile=RepositoryProfile.parse(rawProfile),task=Task.parse(rawTask);
  const denied=['.github/**','.onionsoup/**','go.mod','go.sum','package.json','package-lock.json','tsconfig.json','.npmrc','resources/**',...profile.changes.protected];

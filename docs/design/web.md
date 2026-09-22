@@ -160,6 +160,22 @@ own input schema when it runs.
   `<state>/recipes/*.json`, where the web app saves them. Nested recipes are
   not supported.
 
+## Repositories
+
+The host works on a registry of repositories: the entries in its config, which
+are fixed, plus any onboarded through `repository.onboard`, which persist under
+`<state>/repositories/`. Onboarding clones the repository with the operator's
+`gh` credentials, looks up its ID and default branch, and detects how to verify
+it: a Node project with test files and `typescript` plus `tsx` verifies by
+tests; one with a plain build script such as `astro build` verifies by build;
+anything else registers for reads only, with the reason in the outcome. The
+detected profile allows every path except the package manifests and workflow
+files, thirty files per change, and editable tests. `repository.update` changes
+those choices; `repository.list` shows the registry. Every repository input in
+the catalog reads the registry live, so a newly onboarded name appears in the
+dropdowns and in chat without a restart. `sandbox.nodeRuntime` in the host
+config names the pinned Node runtime onboarded Node repositories share.
+
 ## Limits
 
 Limits are configuration with generous defaults, not contracts. The host runs

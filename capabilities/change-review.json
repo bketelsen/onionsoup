@@ -1846,6 +1846,10 @@
                                   "anyOf": [
                                     {
                                       "type": "string",
+                                      "const": "**"
+                                    },
+                                    {
+                                      "type": "string",
                                       "minLength": 1,
                                       "maxLength": 180,
                                       "pattern": "^[a-zA-Z0-9_.-]+(?:\\/[a-zA-Z0-9_.-]+)*$"
@@ -1862,6 +1866,10 @@
                                 "type": "array",
                                 "items": {
                                   "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "const": "**"
+                                    },
                                     {
                                       "type": "string",
                                       "minLength": 1,
@@ -2113,6 +2121,10 @@
                                   "anyOf": [
                                     {
                                       "type": "string",
+                                      "const": "**"
+                                    },
+                                    {
+                                      "type": "string",
                                       "minLength": 1,
                                       "maxLength": 180,
                                       "pattern": "^[a-zA-Z0-9_.-]+(?:\\/[a-zA-Z0-9_.-]+)*$"
@@ -2129,6 +2141,10 @@
                                 "type": "array",
                                 "items": {
                                   "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "const": "**"
+                                    },
                                     {
                                       "type": "string",
                                       "minLength": 1,
@@ -4752,6 +4768,10 @@
                                   "anyOf": [
                                     {
                                       "type": "string",
+                                      "const": "**"
+                                    },
+                                    {
+                                      "type": "string",
                                       "minLength": 1,
                                       "maxLength": 180,
                                       "pattern": "^[a-zA-Z0-9_.-]+(?:\\/[a-zA-Z0-9_.-]+)*$"
@@ -4768,6 +4788,10 @@
                                 "type": "array",
                                 "items": {
                                   "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "const": "**"
+                                    },
                                     {
                                       "type": "string",
                                       "minLength": 1,
@@ -5019,6 +5043,10 @@
                                   "anyOf": [
                                     {
                                       "type": "string",
+                                      "const": "**"
+                                    },
+                                    {
+                                      "type": "string",
                                       "minLength": 1,
                                       "maxLength": 180,
                                       "pattern": "^[a-zA-Z0-9_.-]+(?:\\/[a-zA-Z0-9_.-]+)*$"
@@ -5035,6 +5063,10 @@
                                 "type": "array",
                                 "items": {
                                   "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "const": "**"
+                                    },
                                     {
                                       "type": "string",
                                       "minLength": 1,
@@ -7658,6 +7690,10 @@
                                   "anyOf": [
                                     {
                                       "type": "string",
+                                      "const": "**"
+                                    },
+                                    {
+                                      "type": "string",
                                       "minLength": 1,
                                       "maxLength": 180,
                                       "pattern": "^[a-zA-Z0-9_.-]+(?:\\/[a-zA-Z0-9_.-]+)*$"
@@ -7674,6 +7710,10 @@
                                 "type": "array",
                                 "items": {
                                   "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "const": "**"
+                                    },
                                     {
                                       "type": "string",
                                       "minLength": 1,
@@ -7925,6 +7965,10 @@
                                   "anyOf": [
                                     {
                                       "type": "string",
+                                      "const": "**"
+                                    },
+                                    {
+                                      "type": "string",
                                       "minLength": 1,
                                       "maxLength": 180,
                                       "pattern": "^[a-zA-Z0-9_.-]+(?:\\/[a-zA-Z0-9_.-]+)*$"
@@ -7941,6 +7985,10 @@
                                 "type": "array",
                                 "items": {
                                   "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "const": "**"
+                                    },
                                     {
                                       "type": "string",
                                       "minLength": 1,

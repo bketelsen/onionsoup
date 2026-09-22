@@ -22,12 +22,14 @@ import { proposalMarkdown } from '@onionsoup/maintenance/proposal/render';
 
 const execute = promisify(execFile);
 
+import type { RepositoryRegistry } from './registry.ts';
+
 /** A repository the host may read issues from, with an optional local checkout for source reads. */
 export type MaintenanceRepository = { name: string; checkout?: string };
 
 export type MaintenanceOptions = {
   provider: 'copilot' | 'codex';
-  repositories: MaintenanceRepository[];
+  registry: RepositoryRegistry;
   modelFactory?: typeof liveModel;
   source?: Source;
   triage?: typeof triage;
@@ -66,10 +68,7 @@ export async function gitHead(checkout: string, signal: AbortSignal) {
 }
 
 export function maintenanceCapabilities(options: MaintenanceOptions): Capability[] {
-  if (!options.repositories.length) return [];
-  const names = options.repositories.map((r) => r.name);
-  const Repository = z.enum(names as [string, ...string[]]);
-  const byName = new Map(options.repositories.map((r) => [r.name, r]));
+  const { registry } = options;
   const source = options.source ?? githubSource;
   const modelFactory = options.modelFactory ?? liveModel;
   const head = options.head ?? gitHead;
@@ -79,7 +78,7 @@ export function maintenanceCapabilities(options: MaintenanceOptions): Capability
     return a;
   };
   const checkoutFor = (repository: string) => {
-    const configured = byName.get(repository)?.checkout;
+    const configured = registry.get(repository)?.checkout;
     if (!configured) throw new Error(`no_checkout_configured:${repository}`);
     return configured;
   };
@@ -87,7 +86,7 @@ export function maintenanceCapabilities(options: MaintenanceOptions): Capability
   const metadata = {
     provider: options.provider,
     model: EVALUATION_MODEL,
-    repositories: options.repositories.map((r) => ({ name: r.name, sourceReads: Boolean(r.checkout) })),
+    get repositories() { return registry.list().map((r) => ({ name: r.name, sourceReads: Boolean(r.checkout) })); },
   };
 
   const readiness: Capability = {
@@ -95,7 +94,7 @@ export function maintenanceCapabilities(options: MaintenanceOptions): Capability
     id: 'issue.readiness',
     lane: (input) => `repository:${input.repository}`,
     description: 'Fetch one issue and assess whether it is a bug report ready to investigate. Classification, not acceptance.',
-    input: z.object({ repository: Repository, issue: z.number().int().positive() }).strict(),
+    get input() { return z.object({ repository: registry.schema(), issue: z.number().int().positive() }).strict(); },
     output: ReadinessResult,
     outcome: (result) => { const a = result.run?.assessment; return a ? { status: 'ok', label: `${String(a.kind).replaceAll('_', ' ')} · ${String(a.bug_readiness).replaceAll('_', ' ')}` } : { status: 'failed', label: result.run?.failure ?? 'no assessment' }; },
     validateOutput: (raw) => { const r = ReadinessResult.parse(raw); validateReadinessRun(r.run); return r; },
@@ -148,7 +147,7 @@ export function maintenanceCapabilities(options: MaintenanceOptions): Capability
     id: 'investigation.packet',
     lane: (input) => `repository:${input.repository}`,
     description: 'Readiness plus code location for one issue in a single run, rendered as an investigation packet.',
-    input: z.object({ repository: Repository, issue: z.number().int().positive() }).strict(),
+    get input() { return z.object({ repository: registry.schema(), issue: z.number().int().positive() }).strict(); },
     output: PacketResult,
     outcome: (result) => ({ status: result.packet.status === 'completed' ? 'ok' : result.packet.status === 'partial' ? 'partial' : 'failed', label: `${result.packet.status} · location ${String(result.packet.locationDisposition).replaceAll('_', ' ')}` }),
     validateOutput: (raw) => { const r = PacketResult.parse(raw); validatePacket(r.packet); return r; },
@@ -181,7 +180,7 @@ export function maintenanceCapabilities(options: MaintenanceOptions): Capability
       if (parent.capability !== 'investigation.packet') throw new Error('dependency_not_packet');
       const p = validatePacket(PacketResult.parse(parent.result).packet);
       const workflow = await (options.proposal ?? createChangeProposal)(p, {
-        directory: join(ctx.directory, 'proposal'), provider: options.provider, checkout: byName.get(p.repository.name)?.checkout,
+        directory: join(ctx.directory, 'proposal'), provider: options.provider, checkout: registry.get(p.repository.name)?.checkout,
         query, signal: ctx.signal, modelFactory,
       });
       return { proposal: workflow, markdown: proposalMarkdown(workflow) };
@@ -199,11 +198,11 @@ export function maintenanceCapabilities(options: MaintenanceOptions): Capability
     timeoutMs: 60000,
     id: 'repository.search',
     description: 'Find where a literal phrase appears in a configured checkout at its current base commit. Paths and matching lines only; no model.',
-    input: z.object({
-      repository: Repository,
+    get input() { return z.object({
+      repository: registry.schema(),
       query: z.string().min(1).max(200),
       maxResults: z.number().int().min(1).max(SEARCH_LIMITS.results).default(40),
-    }).strict(),
+    }).strict(); },
     output: SearchResult,
     outcome: (result) => ({ status: result.matches.length ? 'ok' : 'partial', label: `${result.matches.length} match(es)${result.truncated ? ', truncated' : ''}` }),
     metadata,

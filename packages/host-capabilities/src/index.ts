@@ -11,6 +11,9 @@ import { EVALUATION_MODEL } from '@onionsoup/providers/evaluation-policy';
 import { liveModel } from '@onionsoup/providers';
 import { maintenanceCapabilities, type MaintenanceRepository } from './maintenance.ts';
 import { implementationCapabilities, ImplementationConfig, type ImplementationRepository } from './implementation.ts';
+import { RepositoryRegistry } from './registry.ts';
+import { onboardingCapabilities } from './onboarding.ts';
+export { RepositoryRegistry, onboardRepository, updateRepository, detectProfile } from './registry.ts';
 
 const Id=z.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
 const RepositoryName = BriefRequest.shape.repository;
@@ -33,6 +36,8 @@ export const HostConfig = z.object({
   web: z.object({ directory: z.string().min(1), invoker: Id }).strict().optional(),
   /** Trust identity from a local `tailscale serve` proxy: login to invoker. */
   tailscale: z.object({ users: z.array(z.object({ login: z.string().min(3).max(200), invoker: Id }).strict()).min(1).max(100) }).strict().optional(),
+  /** Sandbox runtimes shared by onboarded repositories. */
+  sandbox: z.object({ nodeRuntime: z.string().min(1).optional() }).strict().optional(),
   /** Chat policy: whether chat may run interactive capabilities (request, approve, publish) on request. */
   chat: z.object({ interactive: z.boolean().default(true) }).strict().optional(),
   /** Overrides for the host's runtime limits (concurrency, queue, jobs, ...). */
@@ -66,8 +71,10 @@ export function resolveCapabilityConfig(raw:unknown,file:string){
 }
 export function registeredCapabilities(raw:unknown,options:{apiKey?:string; modelFactory?:typeof liveModel;
   investigate?:typeof investigateWorkloads; refresh?:typeof collectRefresh; repositoryBrief?:typeof createRepositoryBrief;
-  maintenance?:Omit<Parameters<typeof maintenanceCapabilities>[0],'provider'|'repositories'|'modelFactory'>;
-  implementation?:Omit<Parameters<typeof implementationCapabilities>[0],'provider'|'repositories'|'modelFactory'>}={}):Capability[]{
+  maintenance?:Omit<Parameters<typeof maintenanceCapabilities>[0],'provider'|'registry'|'modelFactory'>;
+  implementation?:Omit<Parameters<typeof implementationCapabilities>[0],'provider'|'registry'|'modelFactory'>;
+  /** Live repository registry; when absent, a fixed in-memory registry is built from the configuration. */
+  registry?:RepositoryRegistry; onboarding?:Parameters<typeof onboardingCapabilities>[1]}={}):Capability[]{
   const config=CapabilityConfig.parse(raw),modelFactory=options.modelFactory??liveModel,result:Capability[]=[];
   const common={version:'v1',timeoutMs:600000};
   if(config.homelab){const h=config.homelab,targets=new Map(h.targets.map(t=>[t.assetId,t])),sources=new Map((h.refreshSources??[]).map(s=>[s.sourceId,s]));
@@ -90,12 +97,15 @@ export function registeredCapabilities(raw:unknown,options:{apiKey?:string; mode
         ctx.signal.throwIfAborted();return {brief:composeHomelabBrief(observations)};} });
   }
   const entries=repositoryEntries(config);
-  if(entries.length){const repositories=entries.map(r=>r.name.toLowerCase());result.push({...common,id:'repository.brief',description:'Collect bounded repository evidence and compose a maintainer brief.',
-    input:BriefRequest.refine(r=>repositories.includes(r.repository.toLowerCase())&&Date.parse(r.until)<=Date.now(),'Repository or time window not allowed'),
+  const registry=options.registry??RepositoryRegistry.fixed(entries);
+  const repositoriesNow=()=>registry.names().map(r=>r.toLowerCase());
+  {result.push({...common,id:'repository.brief',description:'Collect bounded repository evidence and compose a maintainer brief.',
+    get input(){return BriefRequest.safeExtend({repository:registry.schema()}).refine(r=>repositoriesNow().includes(r.repository.toLowerCase())&&Date.parse(r.until)<=Date.now(),'Repository or time window not allowed');},
     output:RepoBrief,outcome:(result)=>{const status=String((result.brief as {status?:string})?.status??'unknown');return {status:status==='completed'?'ok':status==='partial'?'partial':'failed',label:status};},validateOutput:raw=>{const r=RepoBrief.parse(raw);validateRepositoryBrief(r.brief);return r;},
-    metadata:{provider:config.provider,model:EVALUATION_MODEL,repositories,maxModelCalls:4,resultContract:'repository-brief-v1',agents:RepoAgentId.options.map(repositoryCapabilityManifest)},effects:['github_reads','model_calls','local_artifacts'],
+    metadata:{provider:config.provider,model:EVALUATION_MODEL,get repositories(){return repositoriesNow();},maxModelCalls:4,resultContract:'repository-brief-v1',agents:RepoAgentId.options.map(repositoryCapabilityManifest)},effects:['github_reads','model_calls','local_artifacts'],
     execute:async(input,ctx)=>{const brief=await(options.repositoryBrief??createRepositoryBrief)(input,{directory:join(ctx.directory,'analysis'),provider:config.provider,modelFactory,signal:ctx.signal});return {brief,markdown:repositoryBriefMarkdown(brief)};} });}
-  result.push(...maintenanceCapabilities({provider:config.provider,repositories:entries,modelFactory,...options.maintenance}));
-  result.push(...implementationCapabilities({provider:config.provider,repositories:entries,modelFactory,...options.implementation}));
+  result.push(...maintenanceCapabilities({provider:config.provider,registry,modelFactory,...options.maintenance}));
+  result.push(...implementationCapabilities({provider:config.provider,registry,modelFactory,...options.implementation}));
+  if(options.registry)result.push(...onboardingCapabilities(registry,options.onboarding));
   return result;
 }

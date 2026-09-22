@@ -170,13 +170,13 @@ export async function openJobHost(options: HostOptions) {
     interactive: Boolean(c.interactive),
   });
   const binding = digest({ protocol: 'job-host-v1', configuration: options.binding, capabilities: [...capabilities.values()].map(describe) });
-  const described = new Map([...capabilities.values()].map((c) => [c.id, describe(c)]));
+  const described = () => new Map([...capabilities.values()].map((c) => [c.id, describe(c)]));
   const recipes = new Map<string, Recipe>();
   const recipeDir = join(resolve(options.directory), 'recipes');
   const RECIPE_PREFIX = 'recipe.';
   const recipeOf = (capabilityId: string) => (capabilityId.startsWith(RECIPE_PREFIX) ? recipes.get(capabilityId.slice(RECIPE_PREFIX.length)) : undefined);
   const describeRecipe = (r: Recipe) => {
-    const params = inferParams(r, described);
+    const params = inferParams(r, described());
     const steps = r.steps.map((s) => capabilities.get(s.capability)!);
     return {
       id: RECIPE_PREFIX + r.id,
@@ -251,10 +251,10 @@ export async function openJobHost(options: HostOptions) {
       if (j.status === 'running' || j.status === 'queued') transition(j, 'interrupted', 'Host restarted before the job finished');
     }
     await save();
-    for (const raw of options.recipes ?? []) { const r = validateRecipe(raw, described); recipes.set(r.id, r); }
+    for (const raw of options.recipes ?? []) { const r = validateRecipe(raw, described()); recipes.set(r.id, r); }
     await mkdir(recipeDir, { recursive: true, mode: 0o700 });
     for (const file of (await readdir(recipeDir)).filter((f) => f.endsWith('.json')).sort()) {
-      try { const r = validateRecipe(await boundedJson(recipeDir, file, 256 * 1024), described); recipes.set(r.id, r); }
+      try { const r = validateRecipe(await boundedJson(recipeDir, file, 256 * 1024), described()); recipes.set(r.id, r); }
       catch { /* an invalid saved recipe is skipped, not fatal */ }
     }
   } catch (e) {
@@ -263,7 +263,7 @@ export async function openJobHost(options: HostOptions) {
   }
 
   function recipeParams(recipe: Recipe, raw: unknown) {
-    const params = inferParams(recipe, described);
+    const params = inferParams(recipe, described());
     const input = z.record(z.string(), z.json()).parse(raw ?? {});
     for (const name of Object.keys(params)) if (!(name in input)) throw new HostError(`missing_param:${name}`);
     for (const name of Object.keys(input)) if (!(name in params)) throw new HostError(`unknown_param:${name}`);
@@ -504,15 +504,15 @@ export async function openJobHost(options: HostOptions) {
     },
     listRecipes(principal: string) {
       const p = owner(principal);
-      return [...recipes.values()].filter((r) => recipeAllowed(r, p)).map((r) => ({ ...r, paramSchema: inferParams(r, described) }));
+      return [...recipes.values()].filter((r) => recipeAllowed(r, p)).map((r) => ({ ...r, paramSchema: inferParams(r, described()) }));
     },
     async saveRecipe(principal: string, raw: unknown) {
       const p = owner(principal);
-      const allowed = new Map([...described].filter(([id]) => p.capabilities.includes(id)));
+      const allowed = new Map([...described()].filter(([id]) => p.capabilities.includes(id)));
       const recipe = validateRecipe(raw, allowed);
       await atomicJson(join(recipeDir, `${recipe.id}.json`), recipe);
       recipes.set(recipe.id, recipe);
-      return { ...recipe, paramSchema: inferParams(recipe, described) };
+      return { ...recipe, paramSchema: inferParams(recipe, described()) };
     },
     async deleteRecipe(principal: string, id: string) {
       const p = owner(principal);

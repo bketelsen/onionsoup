@@ -20,6 +20,7 @@ import { prepareProjectPublication } from '@onionsoup/implementation/project/pub
 import { loadPublicationConfig } from '@onionsoup/implementation/publication/bundle';
 import { approvePublication, publish } from '@onionsoup/implementation/publication/runtime';
 import { ProposalResult, gitHead } from './maintenance.ts';
+import type { RepositoryRegistry } from './registry.ts';
 
 const execute = promisify(execFile);
 
@@ -40,7 +41,7 @@ export type ImplementationRepository = { name: string; checkout?: string; implem
 
 export type ImplementationOptions = {
   provider: 'copilot' | 'codex';
-  repositories: ImplementationRepository[];
+  registry: RepositoryRegistry;
   modelFactory?: typeof liveModel;
   pipeline?: Partial<Pipeline>;
 };
@@ -89,7 +90,7 @@ export const ImplementResult = z.object({
 }).strict();
 export const PublishResult = z.object({ publicationId: z.string(), status: z.string(), pull: z.json().optional() }).strict();
 
-const matches = (pattern: string, path: string) => (pattern.endsWith('/**') ? path.startsWith(pattern.slice(0, -2)) : pattern === path);
+const matches = (pattern: string, path: string) => (pattern === '**' ? true : pattern.endsWith('/**') ? path.startsWith(pattern.slice(0, -2)) : pattern === path);
 const DENIED = ['.github/**', '.onionsoup/**', 'go.mod', 'go.sum', 'package.json', 'package-lock.json', 'tsconfig.json', '.npmrc', 'resources/**'];
 
 function citedPaths(workflow: ChangeWorkflow): { path: string; startLine: number; endLine: number }[] {
@@ -188,9 +189,8 @@ async function fileContext(checkout: string, commit: string, files: string[], si
 }
 
 export function implementationCapabilities(options: ImplementationOptions): Capability[] {
-  const configured = options.repositories.filter((repository) => repository.implementation && repository.checkout);
-  if (!configured.length) return [];
-  const byName = new Map(configured.map((repository) => [repository.name, repository as Required<ImplementationRepository>]));
+  const { registry } = options;
+  const implementable = () => registry.list().filter((repository) => repository.implementation && repository.checkout) as Required<ImplementationRepository>[];
   const modelFactory = options.modelFactory ?? liveModel;
   const pipeline: Pipeline = {
     propose: proposeProject, accept: acceptProject, execute: executeProject,
@@ -199,12 +199,16 @@ export function implementationCapabilities(options: ImplementationOptions): Capa
     ...options.pipeline,
   };
   const common = { version: 'v1', timeoutMs: 1800000 };
-  const metadata = { provider: options.provider, model: EVALUATION_MODEL, repositories: [...byName.keys()] };
+  const metadata = { provider: options.provider, model: EVALUATION_MODEL, get repositories() { return implementable().map((r) => r.name); } };
 
   const repositoryFor = (name: string) => {
-    const repository = byName.get(name);
+    const repository = implementable().find((r) => r.name === name);
     if (!repository) throw new Error(`no_implementation_profile:${name}`);
     return repository;
+  };
+  const implementableSchema = () => {
+    const names = implementable().map((r) => r.name);
+    return names.length ? z.enum(names as [string, ...string[]]) : z.string().refine(() => false, 'No repository has an implementation profile');
   };
   const loadProfile = async (repository: Required<ImplementationRepository>) => RepositoryProfile.parse(await readJson(repository.implementation.profile));
 
@@ -249,13 +253,13 @@ export function implementationCapabilities(options: ImplementationOptions): Capa
     id: 'change.request',
     interactive: true,
     description: 'Describe a change in your own words for a configured repository. Produces the same approval an accepted proposal would, without an issue.',
-    input: z.object({
-      repository: z.enum([...byName.keys()] as [string, ...string[]]),
+    get input() { return z.object({
+      repository: implementableSchema(),
       title: Task.shape.title,
       request: Task.shape.request,
       /** The files the agents may edit. Must stay within the repository profile. */
       allowedFiles: z.array(SafePath).min(1).max(30),
-    }).strict(),
+    }).strict(); },
     output: ApprovalResult,
     outcome: (result) => ({ status: 'ok', label: `${result.approval.task.allowedFiles.length} file(s) approved` }),
     metadata,

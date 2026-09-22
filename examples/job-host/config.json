@@ -35,7 +35,10 @@
         "change.request",
         "change.approve",
         "change.implement",
-        "change.publish"
+        "change.publish",
+        "repository.list",
+        "repository.onboard",
+        "repository.update"
       ]
     },
     {
@@ -61,5 +64,8 @@
   },
   "limits": {
     "concurrency": 4
+  },
+  "sandbox": {
+    "nodeRuntime": "/private/node-runtime.json"
   }
 }

@@ -49,7 +49,7 @@ test('maintenance capabilities run readiness from the catalog and refuse ineligi
     maintenance: { source },
   });
   const ids = capabilities.map((c) => c.id);
-  assert.deepEqual(ids, ['repository.brief', 'issue.readiness', 'code.location', 'investigation.packet', 'change.proposal', 'repository.search']);
+  assert.deepEqual(ids, ['repository.brief', 'issue.readiness', 'code.location', 'investigation.packet', 'change.proposal', 'repository.search', 'change.request', 'change.approve', 'change.implement', 'change.publish']);
   const host = await openJobHost({ directory, binding: {}, capabilities, invokers: [{ id: 'web', capabilities: ids }] });
   t.after(async () => { await host.close(); await rm(directory, { recursive: true, force: true }); });
 

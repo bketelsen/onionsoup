@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { openJobHost, listenJobHost, tokenHash, type Invoker } from '@onionsoup/job-host';
-import { HostConfig, registeredCapabilities, resolveCapabilityConfig } from '@onionsoup/host-capabilities';
+import { HostConfig, registeredCapabilities, resolveCapabilityConfig, RepositoryRegistry, repositoryEntries } from '@onionsoup/host-capabilities';
 import { readJson } from '@onionsoup/runtime/storage';
 import { createChatService } from './chat.ts';
 
@@ -33,10 +33,15 @@ async function main() {
     invokers.push(invoker);
   }
   const recipes = await Promise.all(config.recipes.map((file) => readJson(resolve(dirname(path), file))));
+  const registry = await RepositoryRegistry.open({
+    directory: resolve(dirname(path), config.directory, 'repositories'),
+    entries: repositoryEntries(capabilities),
+    ...(config.sandbox?.nodeRuntime ? { nodeRuntime: resolve(dirname(path), config.sandbox.nodeRuntime) } : {}),
+  });
   const host = await openJobHost({
     directory: resolve(dirname(path), config.directory),
     binding: capabilities,
-    capabilities: registeredCapabilities(capabilities, { apiKey: process.env.TRUENAS_API_KEY }),
+    capabilities: registeredCapabilities(capabilities, { apiKey: process.env.TRUENAS_API_KEY, registry }),
     invokers,
     recipes,
     ...(config.limits ? { limits: config.limits } : {}),
