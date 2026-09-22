@@ -5,7 +5,7 @@ import type { LanguageModel } from 'ai';
 import { Assessment, IssueSnapshot, validateAssessment } from './contracts.ts';
 import { PROMPT_VERSION, SYSTEM_PROMPT } from './prompt.ts';
 
-export const LIMITS = { steps: 3, timeoutMs: 60000 } as const;
+export const LIMITS = { steps: 3, timeoutMs: 180000 } as const;
 export const SubmitAssessment: ToolInterface<Assessment, string> = defineToolInterface<Assessment, string>({
   name: 'submit_assessment',
   description: 'Submit a grounded bug-report readiness assessment. This only returns data to the caller.',

@@ -9,8 +9,9 @@ export const byteHash=(data:Buffer|string)=>createHash('sha256').update(data).di
 export async function sourceFiles(checkout:string,commit:string,allowed:readonly string[]=paths) {
   Commit.parse(commit);return Files.parse(Object.fromEntries(await Promise.all(allowed.map(async p=>{if(!/^100644 blob [a-f0-9]{40}\t/.test(await git(checkout,['ls-tree',commit,'--',p])))throw new Error('Editable paths must be regular text files');return [p,await git(checkout,['show',commit+':'+p])];}))));
 }
-export const SNAPSHOT_LIMITS={entries:2000,bytes:8000000} as const;
-export async function snapshot(checkout:string,commit:string,directory:string,binaryAssets=false,limits:{entries:number;bytes:number}=SNAPSHOT_LIMITS) {
+export const SNAPSHOT_LIMITS={entries:20000,bytes:64000000} as const;
+export async function snapshot(checkout:string,commit:string,directory:string,binaryAssets=false,limits:{entries:number;bytes:number}|undefined=SNAPSHOT_LIMITS) {
+  limits??=SNAPSHOT_LIMITS;
   Commit.parse(commit);await mkdir(directory,{mode:0o755});
   const entries=(await git(checkout,['ls-tree','-rz',commit])).split('\0').filter(Boolean);let bytes=0;
   if(entries.length>limits.entries)throw new Error('Source exceeds profile bound');

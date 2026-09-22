@@ -4,7 +4,7 @@ import {Digest} from '../fixture/contracts.ts';
 import {hash} from '@onionsoup/repository-analysis/contracts';
 import {validateFixtureWorkflow,type FixtureWorkflow} from '../fixture/record.ts';
 const Commit=z.string().regex(/^[a-f0-9]{40}$/);
-export const Repository=z.string().regex(/^bketelsen\/[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}$/);
+export const Repository=z.string().regex(/^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}$/);
 export const Branch=z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_/-]{0,99}$/).refine(s=>!s.endsWith('/')&&!s.includes('//'));
 /** A bundle's target always names the exact base commit the candidate was built on. */
 export const Target=z.object({repository:Repository,repositoryId:z.number().int().positive(),baseBranch:Branch,baseCommit:Commit}).strict();
@@ -12,7 +12,9 @@ export const Target=z.object({repository:Repository,repositoryId:z.number().int(
 export const ConfiguredTarget=Target.extend({baseCommit:Commit.optional()}).strict();
 export type ConfiguredTarget=z.infer<typeof ConfiguredTarget>;
 export const PublicationConfig=z.object({schemaVersion:z.literal(1),stateDirectory:z.string().min(1),
-  targets:z.array(ConfiguredTarget).min(1).max(10)}).strict().refine(c=>new Set(c.targets.map(t=>t.repository+':'+t.baseBranch)).size===c.targets.length,'Duplicate target');
+  /** How long an approval stays valid for publishing. */
+  approvalDays:z.number().int().min(1).max(3650).optional(),
+  targets:z.array(ConfiguredTarget).min(1).max(50)}).strict().refine(c=>new Set(c.targets.map(t=>t.repository+':'+t.baseBranch)).size===c.targets.length,'Duplicate target');
 export type PublicationConfig=z.infer<typeof PublicationConfig>;
 const sameTarget=(configured:ConfiguredTarget,target:z.infer<typeof Target>)=>configured.repository===target.repository&&configured.repositoryId===target.repositoryId&&configured.baseBranch===target.baseBranch&&(configured.baseCommit===undefined||configured.baseCommit===target.baseCommit);
 /** The configured target that covers a bundle target, if any. */
@@ -37,7 +39,7 @@ export const Bundle=z.discriminatedUnion('schemaVersion',[FixtureBundle,ProjectB
 export type Bundle=FixtureBundle|ProjectBundle;
 export const Approval=z.object({bundleHash:Digest,configHash:Digest,approvedAt:z.iso.datetime(),expiresAt:z.iso.datetime(),
   authority:z.enum(['console_operator','explicit_user_session']),reason:z.string().min(1).max(1000)}).strict();
-export const Pull=z.object({number:z.number().int().positive(),url:z.string().regex(/^https:\/\/github\.com\/bketelsen\/[a-zA-Z0-9_.-]+\/pull\/[1-9][0-9]*$/),repositoryId:z.number().int().positive(),
+export const Pull=z.object({number:z.number().int().positive(),url:z.string().regex(/^https:\/\/github\.com\/[A-Za-z0-9-]+\/[a-zA-Z0-9_.-]+\/pull\/[1-9][0-9]*$/),repositoryId:z.number().int().positive(),
   headRepositoryId:z.number().int().positive(),baseRepositoryId:z.number().int().positive(),head:z.string(),headCommit:Commit,base:z.string(),baseCommit:Commit,
   title:z.string(),body:z.string(),draft:z.boolean(),state:z.enum(['open','closed']),merged:z.boolean()}).strict();
 export type Pull=z.infer<typeof Pull>;

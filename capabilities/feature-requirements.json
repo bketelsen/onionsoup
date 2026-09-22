@@ -301,7 +301,7 @@
   },
   "limits": {
     "steps": 3,
-    "timeoutMs": 90000,
+    "timeoutMs": 300000,
     "inputCharacters": 60000
   },
   "effects": {

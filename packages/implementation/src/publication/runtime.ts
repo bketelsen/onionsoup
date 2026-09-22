@@ -5,6 +5,8 @@ import {Approval,validateState,pinnedBase,type PublicationConfig,type Bundle,typ
 import {locked,loadBundle,loadState,directory,assertConfig,validateCommit} from './bundle.ts';
 import {githubTransport,type PublisherTransport,type Remote} from './github.ts';
 type Dependencies={transport?:PublisherTransport;persist?:typeof atomicJson;now?:()=>Date};
+/** Approvals stay valid this long unless the publication config says otherwise. */
+export const DEFAULT_APPROVAL_DAYS=90;
 const time=(d:Dependencies)=> (d.now?.()??new Date()).toISOString();
 function transition(s:State,status:State['status'],at:string,reason:State['events'][number]['reason']) {
   s.status=status;s.events.push({sequence:s.events.length,at,type:status,reason});
@@ -14,7 +16,7 @@ export async function approvePublication(c:PublicationConfig,id:string,expectedH
     const b=await loadBundle(c,id),s=await loadState(c,b);assertConfig(c,b);
     if(hash(b)!==expectedHash||!['prepared','approved'].includes(s.status)) throw new Error('Stale or consumed approval');
     await validateCommit(c,b);const at=time(d);
-    s.approval=Approval.parse({bundleHash:expectedHash,configHash:hash(c),approvedAt:at,expiresAt:new Date(Date.parse(at)+86400000).toISOString(),...authorization});
+    s.approval=Approval.parse({bundleHash:expectedHash,configHash:hash(c),approvedAt:at,expiresAt:new Date(Date.parse(at)+(c.approvalDays??DEFAULT_APPROVAL_DAYS)*86400000).toISOString(),...authorization});
     transition(s,'approved',at,'operator_authorized');await(d.persist??atomicJson)(join(directory(c,id),'state.json'),validateState(s,b));return s;
   });
 }

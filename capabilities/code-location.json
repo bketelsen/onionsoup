@@ -341,7 +341,7 @@
   },
   "limits": {
     "steps": 12,
-    "timeoutMs": 180000,
+    "timeoutMs": 600000,
     "inspectionCalls": 12,
     "contextChars": 36000,
     "matches": 12,

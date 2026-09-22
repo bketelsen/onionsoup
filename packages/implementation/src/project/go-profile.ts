@@ -2,7 +2,7 @@ import {readFile} from 'node:fs/promises';
 import {hash} from '@onionsoup/repository-analysis/contracts';
 import {GO_PROFILE,projectProfile} from './profiles.ts';
 import type {Verification} from './contracts.ts';
-export const GO_LIMITS={memoryMiB:2048,pids:128,cpus:2,scratchMiB:768,wallMs:180000,outputBytes:524288} as const;
+export const GO_LIMITS={memoryMiB:4096,pids:1024,cpus:4,scratchMiB:2048,wallMs:600000,outputBytes:2097152} as const;
 export async function goProfileHash() {
  return hash({profile:projectProfile(GO_PROFILE),limits:GO_LIMITS,definitions:await Promise.all(['contracts.ts','profiles.ts','source.ts','go-profile.ts','go-sandbox.ts','go-dependencies.ts','go-harness.sh','go-checks.txt','container.ts'].map(async p=>[p,await readFile(new URL(p,import.meta.url),'utf8')]))});
 }

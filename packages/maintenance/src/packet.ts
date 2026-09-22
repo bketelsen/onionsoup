@@ -12,6 +12,7 @@ import { PROMPT_VERSION } from './prompt.ts';
 import { EVALUATION_MODEL } from '@onionsoup/providers/evaluation-policy';
 import { atomicJson } from '@onionsoup/runtime/storage';
 
+export const PACKET_TIMEOUT_MS = 900000;
 export type Packet = {
   schemaVersion: 1; packetId: string; createdAt: string; finishedAt?: string;
   status: 'running' | 'completed' | 'partial' | 'failed'; stage: 'readiness' | 'location' | 'done';
@@ -125,7 +126,7 @@ export async function createPacket(raw: unknown, options: { directory: string; c
   await mkdir(options.directory, { mode: 0o700 });
   const save = () => writePacket(options.directory, p);
   await save();
-  const signal = options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(240000)]) : AbortSignal.timeout(240000);
+  const signal = options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(PACKET_TIMEOUT_MS)]) : AbortSignal.timeout(PACKET_TIMEOUT_MS);
   let adapter: Awaited<ReturnType<typeof liveModel>> | undefined;
   const model = async () => {
     signal.throwIfAborted();

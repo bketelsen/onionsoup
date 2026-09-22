@@ -44,7 +44,7 @@ export const PacketResult = z.object({ packet: z.json(), markdown: z.string() })
 export const ProposalResult = z.object({ proposal: z.json(), markdown: z.string() }).strict();
 
 /** The commit work is pinned to: the remote default branch after a fetch, falling back to the local HEAD when offline. */
-async function gitHead(checkout: string, signal: AbortSignal) {
+export async function gitHead(checkout: string, signal: AbortSignal) {
   try {
     await execute('git', ['-C', checkout, 'fetch', '--quiet', 'origin'], { signal, timeout: 60000 });
   } catch {
@@ -80,7 +80,7 @@ export function maintenanceCapabilities(options: MaintenanceOptions): Capability
     if (!configured) throw new Error(`no_checkout_configured:${repository}`);
     return configured;
   };
-  const common = { version: 'v1', timeoutMs: 600000 };
+  const common = { version: 'v1', timeoutMs: 1200000 };
   const metadata = {
     provider: options.provider,
     model: EVALUATION_MODEL,
@@ -90,6 +90,7 @@ export function maintenanceCapabilities(options: MaintenanceOptions): Capability
   const readiness: Capability = {
     ...common,
     id: 'issue.readiness',
+    lane: (input) => `repository:${input.repository}`,
     description: 'Fetch one issue and assess whether it is a bug report ready to investigate. Classification, not acceptance.',
     input: z.object({ repository: Repository, issue: z.number().int().positive() }).strict(),
     output: ReadinessResult,
@@ -140,6 +141,7 @@ export function maintenanceCapabilities(options: MaintenanceOptions): Capability
   const packet: Capability = {
     ...common,
     id: 'investigation.packet',
+    lane: (input) => `repository:${input.repository}`,
     description: 'Readiness plus code location for one issue in a single run, rendered as an investigation packet.',
     input: z.object({ repository: Repository, issue: z.number().int().positive() }).strict(),
     output: PacketResult,

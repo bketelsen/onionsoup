@@ -1,3 +1,4 @@
+import {EVALUATION_MODEL} from '@onionsoup/providers/evaluation-policy';
 import {mkdir} from 'node:fs/promises';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
@@ -34,8 +35,8 @@ export async function proposeProject(checkout:string,commit:string,directory:str
   const save=()=>atomicJson(join(directory,'proposal.json'),p);await save();
   const issue={schemaVersion:1,repository:p.repository,number:1,title:'Operator request: '+profile.title,body:p.request,updatedAt:new Date().toISOString()};
   // The existing snapshot envelope's number is a local request ordinal, never a GitHub issue identity.
-  p.reserved++;await save();const adapter=await(options.modelFactory??liveModel)('gpt-5.6-terra',provider);
-  if(adapter.provider!==provider||adapter.modelId!=='gpt-5.6-terra')throw new Error('Provider mismatch');
+  p.reserved++;await save();const adapter=await(options.modelFactory??liveModel)(EVALUATION_MODEL,provider);
+  if(adapter.provider!==provider||adapter.modelId!==EVALUATION_MODEL)throw new Error('Provider mismatch');
   p.requirements=await extractFeatureRequirements({schemaVersion:1,issue},{...adapter,checkpoint:async r=>{p.requirements=r;await save();}});
   if(p.requirements.status!=='completed'||FeatureRequirements.parse(p.requirements.result).status!=='sufficient_for_proposal'){p.status='failed';await save();return p;}
   const sourcePaths=prepared?prepared.task.context.map(c=>c.path):[...profile.paths,...(profile.language==='go'?['main.go']:[])];

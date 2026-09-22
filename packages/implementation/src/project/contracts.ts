@@ -14,7 +14,7 @@ export const Commit=z.string().regex(/^[a-f0-9]{40}$/);
 export const CheckId=z.enum(['default-history','status-filter','invalid-filter','filter-controls','coverage-preserved','detail-unchanged','documentation','typecheck','adjacent-console']);
 const LegacyCheckId=z.enum([...CheckId.options,'go-build','go-test','go-vet','gofmt','bubble-default','bubble-colors','bubble-invalid','node-typecheck','node-tests','node-build']);
 export const AllCheckId=z.union([LegacyCheckId,TaskCheckId]);
-export const PROFILE_LIMITS={version:PROFILE,files:3,contextCharacters:180000,steps:3,agentMs:180000,workflowMs:900000,memoryMiB:1536,pids:128,cpus:2,tmpMiB:128,wallMs:90000,outputBytes:524288,invocations:2} as const;
+export const PROFILE_LIMITS={version:PROFILE,files:3,contextCharacters:180000,steps:3,agentMs:600000,workflowMs:3600000,memoryMiB:4096,pids:1024,cpus:4,tmpMiB:1024,wallMs:300000,outputBytes:2097152,invocations:2} as const;
 export const NodeDependency=z.object({schemaVersion:z.literal(1),directory:z.string(),packageHash:Digest,lockHash:Digest,treeHash:Digest,nodeHash:Digest,npmHash:Digest,npmVersion:z.string(),scripts:z.literal('disabled'),registry:z.literal('https://registry.npmjs.org/'),createdAt:z.iso.datetime()}).strict();
 export const GoRuntime=z.object({schemaVersion:z.literal(2),imageId:z.string().regex(/^sha256:[a-f0-9]{64}$/),goDirectory:z.string(),goHash:Digest,goVersion:z.string(),podmanVersion:z.string()}).strict();
 export type GoRuntime=z.infer<typeof GoRuntime>;
@@ -59,7 +59,7 @@ export function applyProjectPatch(job:Job,raw:unknown):Files {
   if(e.operation==='append'&&(job.schemaVersion!==2||!originalTest(e.path)))throw new Error('Append requires an accepted test path');
   const content=e.operation==='append'?job.files[e.path]+e.content:e.content;
   if(content===job.files[e.path])throw new Error('Unchanged edit');
-  if(job.schemaVersion===2&&originalTest(e.path)&&!content.startsWith(job.files[e.path]))throw new Error('Original tests must be preserved verbatim');
+  if(job.schemaVersion===2&&job.repositoryProfile.changes.existingTests==='append-only'&&originalTest(e.path)&&!content.startsWith(job.files[e.path]))throw new Error('Original tests must be preserved verbatim');
   after[e.path]=content;
  }
  return Files.parse(after);

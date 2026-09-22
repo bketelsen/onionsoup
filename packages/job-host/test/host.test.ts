@@ -166,7 +166,7 @@ test('queued cancellation and cooperative running cancellation preserve spent ad
   let started!: () => void;
   const entered = new Promise<void>((r) => { started = r; });
   const host = await openJobHost({
-    directory, binding: {}, invokers,
+    directory, binding: {}, invokers, limits: { concurrency: 1 },
     capabilities: [capability(async (_, ctx) => {
       started();
       await new Promise<void>((r) => { if (ctx.signal.aborted) r(); else ctx.signal.addEventListener('abort', () => r(), { once: true }); });

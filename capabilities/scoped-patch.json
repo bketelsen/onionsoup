@@ -918,7 +918,7 @@
                   },
                   "repository": {
                     "type": "string",
-                    "pattern": "^bketelsen\\/[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}$"
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9-]{0,38}\\/[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}$"
                   },
                   "baseCommit": {
                     "type": "string",
@@ -1752,7 +1752,7 @@
                           },
                           "repository": {
                             "type": "string",
-                            "pattern": "^bketelsen\\/[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}$"
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9-]{0,38}\\/[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}$"
                           },
                           "repositoryId": {
                             "type": "integer",
@@ -1840,7 +1840,7 @@
                             "properties": {
                               "allowed": {
                                 "minItems": 1,
-                                "maxItems": 30,
+                                "maxItems": 100,
                                 "type": "array",
                                 "items": {
                                   "anyOf": [
@@ -1858,7 +1858,7 @@
                                 }
                               },
                               "protected": {
-                                "maxItems": 30,
+                                "maxItems": 100,
                                 "type": "array",
                                 "items": {
                                   "anyOf": [
@@ -1878,11 +1878,14 @@
                               "maximumFiles": {
                                 "type": "integer",
                                 "minimum": 1,
-                                "maximum": 6
+                                "maximum": 30
                               },
                               "existingTests": {
                                 "type": "string",
-                                "const": "append-only"
+                                "enum": [
+                                  "append-only",
+                                  "editable"
+                                ]
                               }
                             },
                             "required": [
@@ -1924,7 +1927,7 @@
                           },
                           "repository": {
                             "type": "string",
-                            "pattern": "^bketelsen\\/[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}$"
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9-]{0,38}\\/[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}$"
                           },
                           "repositoryId": {
                             "type": "integer",
@@ -1997,7 +2000,7 @@
                                   },
                                   "testFiles": {
                                     "minItems": 1,
-                                    "maxItems": 20,
+                                    "maxItems": 50,
                                     "type": "array",
                                     "items": {
                                       "type": "string",
@@ -2005,6 +2008,27 @@
                                       "maxLength": 180,
                                       "pattern": "^[a-zA-Z0-9_.-]+(?:\\/[a-zA-Z0-9_.-]+)*$"
                                     }
+                                  },
+                                  "limits": {
+                                    "type": "object",
+                                    "properties": {
+                                      "timeoutMs": {
+                                        "type": "integer",
+                                        "minimum": 10000,
+                                        "maximum": 3600000
+                                      },
+                                      "maxSourceBytes": {
+                                        "type": "integer",
+                                        "minimum": 1000000,
+                                        "maximum": 500000000
+                                      },
+                                      "maxSourceEntries": {
+                                        "type": "integer",
+                                        "minimum": 100,
+                                        "maximum": 100000
+                                      }
+                                    },
+                                    "additionalProperties": false
                                   }
                                 },
                                 "required": [
@@ -2034,32 +2058,39 @@
                                       },
                                       "args": {
                                         "default": [],
-                                        "maxItems": 8,
+                                        "maxItems": 16,
                                         "type": "array",
                                         "items": {
                                           "type": "string",
                                           "pattern": "^[A-Za-z0-9_.=/-]{1,80}$"
                                         }
-                                      },
-                                      "timeoutMs": {
-                                        "default": 300000,
-                                        "type": "integer",
-                                        "minimum": 10000,
-                                        "maximum": 600000
-                                      },
-                                      "maxSourceBytes": {
-                                        "default": 64000000,
-                                        "type": "integer",
-                                        "minimum": 1000000,
-                                        "maximum": 200000000
                                       }
                                     },
                                     "required": [
                                       "bin",
-                                      "args",
-                                      "timeoutMs",
-                                      "maxSourceBytes"
+                                      "args"
                                     ],
+                                    "additionalProperties": false
+                                  },
+                                  "limits": {
+                                    "type": "object",
+                                    "properties": {
+                                      "timeoutMs": {
+                                        "type": "integer",
+                                        "minimum": 10000,
+                                        "maximum": 3600000
+                                      },
+                                      "maxSourceBytes": {
+                                        "type": "integer",
+                                        "minimum": 1000000,
+                                        "maximum": 500000000
+                                      },
+                                      "maxSourceEntries": {
+                                        "type": "integer",
+                                        "minimum": 100,
+                                        "maximum": 100000
+                                      }
+                                    },
                                     "additionalProperties": false
                                   }
                                 },
@@ -2076,7 +2107,7 @@
                             "properties": {
                               "allowed": {
                                 "minItems": 1,
-                                "maxItems": 30,
+                                "maxItems": 100,
                                 "type": "array",
                                 "items": {
                                   "anyOf": [
@@ -2094,7 +2125,7 @@
                                 }
                               },
                               "protected": {
-                                "maxItems": 30,
+                                "maxItems": 100,
                                 "type": "array",
                                 "items": {
                                   "anyOf": [
@@ -2114,11 +2145,14 @@
                               "maximumFiles": {
                                 "type": "integer",
                                 "minimum": 1,
-                                "maximum": 6
+                                "maximum": 30
                               },
                               "existingTests": {
                                 "type": "string",
-                                "const": "append-only"
+                                "enum": [
+                                  "append-only",
+                                  "editable"
+                                ]
                               }
                             },
                             "required": [
@@ -2176,11 +2210,11 @@
                       "request": {
                         "type": "string",
                         "minLength": 1,
-                        "maxLength": 12000
+                        "maxLength": 40000
                       },
                       "allowedFiles": {
                         "minItems": 1,
-                        "maxItems": 6,
+                        "maxItems": 30,
                         "type": "array",
                         "items": {
                           "type": "string",
@@ -2191,7 +2225,7 @@
                       },
                       "context": {
                         "minItems": 1,
-                        "maxItems": 7,
+                        "maxItems": 30,
                         "type": "array",
                         "items": {
                           "type": "object",
@@ -2672,7 +2706,7 @@
       },
       "limits": {
         "steps": 3,
-        "timeoutMs": 180000,
+        "timeoutMs": 600000,
         "inputCharacters": 180000
       }
     },
@@ -3591,7 +3625,7 @@
                   },
                   "repository": {
                     "type": "string",
-                    "pattern": "^bketelsen\\/[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}$"
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9-]{0,38}\\/[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}$"
                   },
                   "baseCommit": {
                     "type": "string",
@@ -4425,7 +4459,7 @@
                           },
                           "repository": {
                             "type": "string",
-                            "pattern": "^bketelsen\\/[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}$"
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9-]{0,38}\\/[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}$"
                           },
                           "repositoryId": {
                             "type": "integer",
@@ -4513,7 +4547,7 @@
                             "properties": {
                               "allowed": {
                                 "minItems": 1,
-                                "maxItems": 30,
+                                "maxItems": 100,
                                 "type": "array",
                                 "items": {
                                   "anyOf": [
@@ -4531,7 +4565,7 @@
                                 }
                               },
                               "protected": {
-                                "maxItems": 30,
+                                "maxItems": 100,
                                 "type": "array",
                                 "items": {
                                   "anyOf": [
@@ -4551,11 +4585,14 @@
                               "maximumFiles": {
                                 "type": "integer",
                                 "minimum": 1,
-                                "maximum": 6
+                                "maximum": 30
                               },
                               "existingTests": {
                                 "type": "string",
-                                "const": "append-only"
+                                "enum": [
+                                  "append-only",
+                                  "editable"
+                                ]
                               }
                             },
                             "required": [
@@ -4597,7 +4634,7 @@
                           },
                           "repository": {
                             "type": "string",
-                            "pattern": "^bketelsen\\/[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}$"
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9-]{0,38}\\/[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}$"
                           },
                           "repositoryId": {
                             "type": "integer",
@@ -4670,7 +4707,7 @@
                                   },
                                   "testFiles": {
                                     "minItems": 1,
-                                    "maxItems": 20,
+                                    "maxItems": 50,
                                     "type": "array",
                                     "items": {
                                       "type": "string",
@@ -4678,6 +4715,27 @@
                                       "maxLength": 180,
                                       "pattern": "^[a-zA-Z0-9_.-]+(?:\\/[a-zA-Z0-9_.-]+)*$"
                                     }
+                                  },
+                                  "limits": {
+                                    "type": "object",
+                                    "properties": {
+                                      "timeoutMs": {
+                                        "type": "integer",
+                                        "minimum": 10000,
+                                        "maximum": 3600000
+                                      },
+                                      "maxSourceBytes": {
+                                        "type": "integer",
+                                        "minimum": 1000000,
+                                        "maximum": 500000000
+                                      },
+                                      "maxSourceEntries": {
+                                        "type": "integer",
+                                        "minimum": 100,
+                                        "maximum": 100000
+                                      }
+                                    },
+                                    "additionalProperties": false
                                   }
                                 },
                                 "required": [
@@ -4707,32 +4765,39 @@
                                       },
                                       "args": {
                                         "default": [],
-                                        "maxItems": 8,
+                                        "maxItems": 16,
                                         "type": "array",
                                         "items": {
                                           "type": "string",
                                           "pattern": "^[A-Za-z0-9_.=/-]{1,80}$"
                                         }
-                                      },
-                                      "timeoutMs": {
-                                        "default": 300000,
-                                        "type": "integer",
-                                        "minimum": 10000,
-                                        "maximum": 600000
-                                      },
-                                      "maxSourceBytes": {
-                                        "default": 64000000,
-                                        "type": "integer",
-                                        "minimum": 1000000,
-                                        "maximum": 200000000
                                       }
                                     },
                                     "required": [
                                       "bin",
-                                      "args",
-                                      "timeoutMs",
-                                      "maxSourceBytes"
+                                      "args"
                                     ],
+                                    "additionalProperties": false
+                                  },
+                                  "limits": {
+                                    "type": "object",
+                                    "properties": {
+                                      "timeoutMs": {
+                                        "type": "integer",
+                                        "minimum": 10000,
+                                        "maximum": 3600000
+                                      },
+                                      "maxSourceBytes": {
+                                        "type": "integer",
+                                        "minimum": 1000000,
+                                        "maximum": 500000000
+                                      },
+                                      "maxSourceEntries": {
+                                        "type": "integer",
+                                        "minimum": 100,
+                                        "maximum": 100000
+                                      }
+                                    },
                                     "additionalProperties": false
                                   }
                                 },
@@ -4749,7 +4814,7 @@
                             "properties": {
                               "allowed": {
                                 "minItems": 1,
-                                "maxItems": 30,
+                                "maxItems": 100,
                                 "type": "array",
                                 "items": {
                                   "anyOf": [
@@ -4767,7 +4832,7 @@
                                 }
                               },
                               "protected": {
-                                "maxItems": 30,
+                                "maxItems": 100,
                                 "type": "array",
                                 "items": {
                                   "anyOf": [
@@ -4787,11 +4852,14 @@
                               "maximumFiles": {
                                 "type": "integer",
                                 "minimum": 1,
-                                "maximum": 6
+                                "maximum": 30
                               },
                               "existingTests": {
                                 "type": "string",
-                                "const": "append-only"
+                                "enum": [
+                                  "append-only",
+                                  "editable"
+                                ]
                               }
                             },
                             "required": [
@@ -4849,11 +4917,11 @@
                       "request": {
                         "type": "string",
                         "minLength": 1,
-                        "maxLength": 12000
+                        "maxLength": 40000
                       },
                       "allowedFiles": {
                         "minItems": 1,
-                        "maxItems": 6,
+                        "maxItems": 30,
                         "type": "array",
                         "items": {
                           "type": "string",
@@ -4864,7 +4932,7 @@
                       },
                       "context": {
                         "minItems": 1,
-                        "maxItems": 7,
+                        "maxItems": 30,
                         "type": "array",
                         "items": {
                           "type": "object",
@@ -5345,7 +5413,7 @@
       },
       "limits": {
         "steps": 3,
-        "timeoutMs": 180000,
+        "timeoutMs": 600000,
         "inputCharacters": 180000
       }
     },
@@ -6264,7 +6332,7 @@
                   },
                   "repository": {
                     "type": "string",
-                    "pattern": "^bketelsen\\/[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}$"
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9-]{0,38}\\/[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}$"
                   },
                   "baseCommit": {
                     "type": "string",
@@ -7098,7 +7166,7 @@
                           },
                           "repository": {
                             "type": "string",
-                            "pattern": "^bketelsen\\/[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}$"
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9-]{0,38}\\/[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}$"
                           },
                           "repositoryId": {
                             "type": "integer",
@@ -7186,7 +7254,7 @@
                             "properties": {
                               "allowed": {
                                 "minItems": 1,
-                                "maxItems": 30,
+                                "maxItems": 100,
                                 "type": "array",
                                 "items": {
                                   "anyOf": [
@@ -7204,7 +7272,7 @@
                                 }
                               },
                               "protected": {
-                                "maxItems": 30,
+                                "maxItems": 100,
                                 "type": "array",
                                 "items": {
                                   "anyOf": [
@@ -7224,11 +7292,14 @@
                               "maximumFiles": {
                                 "type": "integer",
                                 "minimum": 1,
-                                "maximum": 6
+                                "maximum": 30
                               },
                               "existingTests": {
                                 "type": "string",
-                                "const": "append-only"
+                                "enum": [
+                                  "append-only",
+                                  "editable"
+                                ]
                               }
                             },
                             "required": [
@@ -7270,7 +7341,7 @@
                           },
                           "repository": {
                             "type": "string",
-                            "pattern": "^bketelsen\\/[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}$"
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9-]{0,38}\\/[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}$"
                           },
                           "repositoryId": {
                             "type": "integer",
@@ -7343,7 +7414,7 @@
                                   },
                                   "testFiles": {
                                     "minItems": 1,
-                                    "maxItems": 20,
+                                    "maxItems": 50,
                                     "type": "array",
                                     "items": {
                                       "type": "string",
@@ -7351,6 +7422,27 @@
                                       "maxLength": 180,
                                       "pattern": "^[a-zA-Z0-9_.-]+(?:\\/[a-zA-Z0-9_.-]+)*$"
                                     }
+                                  },
+                                  "limits": {
+                                    "type": "object",
+                                    "properties": {
+                                      "timeoutMs": {
+                                        "type": "integer",
+                                        "minimum": 10000,
+                                        "maximum": 3600000
+                                      },
+                                      "maxSourceBytes": {
+                                        "type": "integer",
+                                        "minimum": 1000000,
+                                        "maximum": 500000000
+                                      },
+                                      "maxSourceEntries": {
+                                        "type": "integer",
+                                        "minimum": 100,
+                                        "maximum": 100000
+                                      }
+                                    },
+                                    "additionalProperties": false
                                   }
                                 },
                                 "required": [
@@ -7380,32 +7472,39 @@
                                       },
                                       "args": {
                                         "default": [],
-                                        "maxItems": 8,
+                                        "maxItems": 16,
                                         "type": "array",
                                         "items": {
                                           "type": "string",
                                           "pattern": "^[A-Za-z0-9_.=/-]{1,80}$"
                                         }
-                                      },
-                                      "timeoutMs": {
-                                        "default": 300000,
-                                        "type": "integer",
-                                        "minimum": 10000,
-                                        "maximum": 600000
-                                      },
-                                      "maxSourceBytes": {
-                                        "default": 64000000,
-                                        "type": "integer",
-                                        "minimum": 1000000,
-                                        "maximum": 200000000
                                       }
                                     },
                                     "required": [
                                       "bin",
-                                      "args",
-                                      "timeoutMs",
-                                      "maxSourceBytes"
+                                      "args"
                                     ],
+                                    "additionalProperties": false
+                                  },
+                                  "limits": {
+                                    "type": "object",
+                                    "properties": {
+                                      "timeoutMs": {
+                                        "type": "integer",
+                                        "minimum": 10000,
+                                        "maximum": 3600000
+                                      },
+                                      "maxSourceBytes": {
+                                        "type": "integer",
+                                        "minimum": 1000000,
+                                        "maximum": 500000000
+                                      },
+                                      "maxSourceEntries": {
+                                        "type": "integer",
+                                        "minimum": 100,
+                                        "maximum": 100000
+                                      }
+                                    },
                                     "additionalProperties": false
                                   }
                                 },
@@ -7422,7 +7521,7 @@
                             "properties": {
                               "allowed": {
                                 "minItems": 1,
-                                "maxItems": 30,
+                                "maxItems": 100,
                                 "type": "array",
                                 "items": {
                                   "anyOf": [
@@ -7440,7 +7539,7 @@
                                 }
                               },
                               "protected": {
-                                "maxItems": 30,
+                                "maxItems": 100,
                                 "type": "array",
                                 "items": {
                                   "anyOf": [
@@ -7460,11 +7559,14 @@
                               "maximumFiles": {
                                 "type": "integer",
                                 "minimum": 1,
-                                "maximum": 6
+                                "maximum": 30
                               },
                               "existingTests": {
                                 "type": "string",
-                                "const": "append-only"
+                                "enum": [
+                                  "append-only",
+                                  "editable"
+                                ]
                               }
                             },
                             "required": [
@@ -7522,11 +7624,11 @@
                       "request": {
                         "type": "string",
                         "minLength": 1,
-                        "maxLength": 12000
+                        "maxLength": 40000
                       },
                       "allowedFiles": {
                         "minItems": 1,
-                        "maxItems": 6,
+                        "maxItems": 30,
                         "type": "array",
                         "items": {
                           "type": "string",
@@ -7537,7 +7639,7 @@
                       },
                       "context": {
                         "minItems": 1,
-                        "maxItems": 7,
+                        "maxItems": 30,
                         "type": "array",
                         "items": {
                           "type": "object",
@@ -8018,7 +8120,7 @@
       },
       "limits": {
         "steps": 3,
-        "timeoutMs": 180000,
+        "timeoutMs": 600000,
         "inputCharacters": 180000
       }
     }

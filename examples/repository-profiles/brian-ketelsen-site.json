@@ -21,7 +21,9 @@
       "bin": "astro",
       "args": [
         "build"
-      ],
+      ]
+    },
+    "limits": {
       "timeoutMs": 300000,
       "maxSourceBytes": 64000000
     }

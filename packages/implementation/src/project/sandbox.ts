@@ -13,7 +13,8 @@ import {Runtime} from './contracts.ts';
 import {validateRuntime} from '../fixture/sandbox.ts';
 import {git} from '../fixture/fixture.ts';
 import {Dependency,Verification,validateJob,PROFILE_LIMITS as L,type Job} from './contracts.ts';
-import {snapshot,treeDigest,byteHash,SNAPSHOT_LIMITS} from './source.ts';
+import {snapshot,treeDigest,byteHash} from './source.ts';
+import {sandboxLimits} from './repository-profile.ts';
 import {evaluateObservations,documentationSatisfied,profileHash,statuses,type seedsFrom} from './profile.ts';
 const env=()=>Object.fromEntries(Object.entries({PATH:'/usr/bin:/bin',HOME:process.env.HOME,XDG_RUNTIME_DIR:process.env.XDG_RUNTIME_DIR,DBUS_SESSION_BUS_ADDRESS:process.env.DBUS_SESSION_BUS_ADDRESS}).filter((e):e is [string,string]=>typeof e[1]==='string'));
 const command=async(args:string[])=> (await promisify(execFile)('/usr/bin/podman',args,{timeout:15000,maxBuffer:100000,env:env()})).stdout;
@@ -24,8 +25,9 @@ export async function verifyProject(checkout:string,commit:string,job:Job,runtim
   if((task?await repositoryAdapterHash('node-typescript-v1'):await profileHash())!==job.profileHash||dependencies.lockHash!==job.lockHash||dependencies.packageHash!==job.packageHash||dependencies.nodeHash!==runtime.nodeHash||await treeDigest(dependencies.directory)!==dependencies.treeHash)throw new Error('Execution inputs changed');
   const directory=resolve(options.directory);await mkdir(directory,{mode:0o700});const work=join(directory,'work'),runner=join(directory,'harness'),node=join(directory,'node');
   // Build-mode projects (sites, apps without a suite) carry binary assets and write build output inside an overlay.
-  const build=task&&'build' in job.repositoryProfile.verification?job.repositoryProfile.verification.build:undefined;
-  await snapshot(checkout,commit,work,Boolean(build),build?{entries:SNAPSHOT_LIMITS.entries,bytes:build.maxSourceBytes}:SNAPSHOT_LIMITS);await mkdir(join(work,'node_modules'),{mode:0o755});await mkdir(runner,{mode:0o755});
+  const verification=task?job.repositoryProfile.verification:undefined,build=verification&&'build' in verification?verification.build:undefined;
+  const bounds=verification&&('testFiles' in verification||'build' in verification)?sandboxLimits(verification):undefined,sourceLimits=bounds?{entries:bounds.maxSourceEntries,bytes:bounds.maxSourceBytes}:undefined;
+  await snapshot(checkout,commit,work,Boolean(build),sourceLimits);await mkdir(join(work,'node_modules'),{mode:0o755});await mkdir(runner,{mode:0o755});
   const binary=await readFile(runtime.nodePath);if(byteHash(binary)!==runtime.nodeHash)throw new Error('Runtime changed');await writeFile(node,binary,{flag:'wx',mode:0o555});
   await writeFile(join(runner,'invoke.mjs'),await readFile(new URL(task?'node-task-harness.mjs':'profile-harness.mjs',import.meta.url)),{flag:'wx',mode:0o444});
   const nonce=randomUUID();if(task)await writeFile(join(runner,'checks.mjs'),NodeVerificationPlan.parse(options.verificationPlan).source,{flag:'wx',mode:0o444});await writeFile(join(runner,'input.json'),JSON.stringify(task?nodeTaskInput(job,options.verificationPlan,nonce):{nonce,seeds,statuses,targets:[seeds[0].bundle.target]}),{flag:'wx',mode:0o444});
@@ -40,7 +42,7 @@ export async function verifyProject(checkout:string,commit:string,job:Job,runtim
     '--entrypoint=/runtime/node',runtime.imageId,'--max-old-space-size=384',...(build?[]:['--import','/work/node_modules/tsx/dist/loader.mjs']),'/harness/invoke.mjs'];
   const intent={receiptId,phase:options.phase,containerName,startedAt,jobHash:hash(job),tree:(await git(checkout,['rev-parse',commit+'^{tree}'])).trim(),runtimeHash:hash(runtime),dependencyHash:hash(dependencies),profileHash:job.profileHash,seedHash:hash(seeds),commandHash:hash(args)};
   await atomicJson(join(directory,'execution.json'),{...intent,command:['/usr/bin/podman',...args]});await options.checkpoint?.(intent);options.signal?.throwIfAborted();
-  const {out,err,bytes,stop,exitCode,cleanup}=await runContainer(args,directory,containerName,build?{...L,wallMs:build.timeoutMs+15000}:L,options.signal);
+  const {out,err,bytes,stop,exitCode,cleanup}=await runContainer(args,directory,containerName,bounds?{...L,wallMs:bounds.timeoutMs+15000}:L,options.signal);
   let status:Verification['status']=stop??'execution_error',checks:Verification['checks']=[];
   if(!stop&&exitCode===0&&cleanup==='removed')try {
     const observed=JSON.parse(out.toString());if(observed.nonce!==nonce)throw new Error('Protocol mismatch');if(task){const files=Object.fromEntries(await Promise.all(job.allowedFiles.map(async p=>[p,await readFile(join(work,p),'utf8')])));checks=evaluateNodeTask(job,options.verificationPlan,observed,nonce,files);}

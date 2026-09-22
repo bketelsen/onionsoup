@@ -56,6 +56,7 @@
     'investigation.packet': (job) => (has('change.proposal') ? [{ label: 'Draft proposal', href: `#/run/change.proposal?packetJobId=${job.jobId}` }] : []),
     'change.proposal': (job) => (has('change.approve') ? [{ label: 'Approve for implementation', href: `#/run/change.approve?proposalJobId=${job.jobId}` }] : []),
     'change.approve': (job) => (has('change.implement') ? [{ label: 'Implement', href: `#/run/change.implement?approvalJobId=${job.jobId}` }] : []),
+    'change.request': (job) => (has('change.implement') ? [{ label: 'Implement', href: `#/run/change.implement?approvalJobId=${job.jobId}` }] : []),
     'change.implement': (job) => (verified(job) && has('change.publish') ? [{ label: 'Publish draft PR', href: `#/run/change.publish?implementJobId=${job.jobId}` }] : []),
   };
   const next = $derived(job?.status === 'completed' ? (nextSteps[job.capability] ?? (() => []))(job) : []);

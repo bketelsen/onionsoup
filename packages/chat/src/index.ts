@@ -6,15 +6,15 @@ import { Agent, defineToolInterface, maxSteps, startState, toolCompleted, type T
 import type { LanguageModel } from 'ai';
 import { atomicJson } from '@onionsoup/runtime/storage';
 
-export const CHAT_LIMITS={turns:20,steps:8,toolCalls:12,timeoutMs:600000,historyTurns:4,messageBytes:8000,memoryBytes:65536,contextBytes:60000,responseBytes:128000,sessionBytes:2*1024*1024} as const;
+export const CHAT_LIMITS={turns:500,steps:16,toolCalls:24,timeoutMs:3600000,historyTurns:8,messageBytes:32000,memoryBytes:512*1024,contextBytes:200000,responseBytes:512000,sessionBytes:32*1024*1024} as const;
 export const CHAT_PROMPT_VERSION='chat-v1';
 export const Reference=z.object({id:z.uuid(),findingId:z.string().regex(/^r-[a-f0-9]{64}$/).optional()}).strict();
-export const ChatAnswer=z.object({kind:z.enum(['answer','clarification','unsupported']),text:z.string().min(1).max(4000),
+export const ChatAnswer=z.object({kind:z.enum(['answer','clarification','unsupported']),text:z.string().min(1).max(16000),
   basis:z.enum(['current','snapshot','none']),references:z.array(Reference).max(8)}).strict().refine(a=>a.kind==='answer'||a.basis==='none'&&a.references.length===0,'Clarifications and unsupported answers have no factual evidence claim').refine(a=>new Set(a.references.map(r=>r.id+':'+(r.findingId??''))).size===a.references.length,'Duplicate references');
 export type ChatAnswer=z.infer<typeof ChatAnswer>;
 const Usage=z.object({input:z.number().nonnegative().nullable(),output:z.number().nonnegative().nullable()}).strict();
 const Event=z.object({at:z.iso.datetime(),tool:z.string().max(80),stage:z.enum(['intent','result','rejected','checkpoint']),details:z.json()}).strict();
-const Turn=z.object({turnId:z.uuid(),message:z.string().max(8000),startedAt:z.iso.datetime(),finishedAt:z.iso.datetime().optional(),
+const Turn=z.object({turnId:z.uuid(),message:z.string().max(CHAT_LIMITS.messageBytes),startedAt:z.iso.datetime(),finishedAt:z.iso.datetime().optional(),
   status:z.enum(['running','completed','failed','interrupted']),steps:z.number().int().min(0).max(CHAT_LIMITS.steps),toolCalls:z.number().int().min(0).max(CHAT_LIMITS.toolCalls),
   modelInvoked:z.boolean(),usage:Usage.optional(),events:z.array(Event).max(100),answer:ChatAnswer.optional(),evidence:z.json().optional(),failure:z.enum(['execution_failed','provider_initialization_failed','provider_request_failed','step_limit_exceeded','answer_not_submitted','cancelled_or_timed_out','interrupted']).optional()}).strict();
 export const ChatSession=z.object({schemaVersion:z.literal(1),kind:z.literal('chat-session'),sessionId:z.uuid(),profileId:z.string().regex(/^[a-z][a-z0-9-]{0,63}$/),

@@ -33,7 +33,7 @@ export const githubTransport:PublisherTransport={
     const refs=await api(`repos/${t.repository}/git/matching-refs/heads/${b.branch}`);
     if(!Array.isArray(refs)) throw new Error('Invalid remote refs');
     const head=refs.find((r:any)=>r.ref===`refs/heads/${b.branch}`);
-    const pulls=await api(`repos/${t.repository}/pulls?state=all&head=${encodeURIComponent('bketelsen:'+b.branch)}&per_page=100`);
+    const pulls=await api(`repos/${t.repository}/pulls?state=all&head=${encodeURIComponent(t.repository.split('/')[0]+':'+b.branch)}&per_page=100`);
     if(!Array.isArray(pulls)||pulls.length>=100) throw new Error('Incomplete pull request view');
     return {repositoryId:repo.id,baseCommit:z.string().regex(/^[a-f0-9]{40}$/).parse(base.object.sha),headCommit:head?.object.sha,pulls:pulls.map(p=>pull(p,repo.id))};
   },

@@ -96,7 +96,8 @@ CLIs until the read-only surface is done; they carry real effects.
 | `code.location` | a completed ready `issue.readiness` job | checkout configured for that repository |
 | `investigation.packet` | configured repository, issue number | checkout |
 | `change.proposal` | a completed `investigation.packet` job, query for features | checkout |
-| `change.approve` | a completed `change.proposal` job, reason, optional file override | `implementation` config for the repository |
+| `change.request` | configured repository, title, request text, files to edit | `implementation` config for the repository |
+| `change.approve` | a completed `change.proposal` job, reason, optional file override or override note | `implementation` config for the repository |
 | `change.implement` | a completed `change.approve` job | pinned runtime, sandbox (podman), provider |
 | `change.publish` | a verified `change.implement` job, reason | publication config with the draft-PR target |
 
@@ -158,6 +159,19 @@ own input schema when it runs.
 - Recipes load from files named in the host config (`recipes`) and from
   `<state>/recipes/*.json`, where the web app saves them. Nested recipes are
   not supported.
+
+## Limits
+
+Limits are configuration with generous defaults, not contracts. The host runs
+four jobs at once (`limits.concurrency` in the host config); jobs that declare a
+lane, such as the sandbox or one repository, run one at a time within it.
+Capabilities may take up to an hour; implement gets thirty minutes. Chat
+sessions allow hundreds of turns. Profiles set their own sandbox bounds
+(`verification.limits`: timeout, source size, file count), file counts up to
+thirty, and whether existing tests are `append-only` or `editable`. Publication
+approvals last ninety days unless `approvalDays` says otherwise. Any GitHub
+owner is accepted; the profile and publication target name the repository.
+The model is `ONIONSOUP_MODEL` in the host's environment.
 
 ## Rules kept from the proving phase
 

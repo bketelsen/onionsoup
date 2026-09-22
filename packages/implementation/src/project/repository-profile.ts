@@ -5,21 +5,23 @@ export const SafePath=z.string().min(1).max(180).regex(/^[a-zA-Z0-9_.-]+(?:\/[a-
 const Pattern=z.union([SafePath,z.string().endsWith('/**').refine(p=>SafePath.safeParse(p.slice(0,-3)).success)]);
 const Digest=z.string().regex(/^[a-f0-9]{64}$/),Commit=z.string().regex(/^[a-f0-9]{40}$/);
 export const standardGoChecks=['go-build','go-test','go-vet','gofmt'] as const;
-const ProfileBase=z.object({schemaVersion:z.literal(1),id:z.string().regex(/^[a-z][a-z0-9-]{0,70}$/),repository:z.string().regex(/^bketelsen\/[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}$/),repositoryId:z.number().int().positive(),baseBranch:z.string().regex(/^[\w/-]{1,100}$/),
+const ProfileBase=z.object({schemaVersion:z.literal(1),id:z.string().regex(/^[a-z][a-z0-9-]{0,70}$/),repository:z.string().regex(/^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}$/),repositoryId:z.number().int().positive(),baseBranch:z.string().regex(/^[\w/-]{1,100}$/),
  execution:z.object({adapter:z.literal('go-module-v1'),sandbox:z.literal('offline-go-v1'),toolchain:z.object({version:z.string().regex(/^go version go1\.\d+\.\d+ linux\/amd64$/),digest:Digest}).strict(),dependencies:z.literal('public-checksummed-go-v1')}).strict(),
  verification:z.object({required:z.tuple([z.literal('go-build'),z.literal('go-test'),z.literal('go-vet'),z.literal('gofmt')])}).strict(),
- changes:z.object({allowed:z.array(Pattern).min(1).max(30),protected:z.array(Pattern).max(30),maximumFiles:z.number().int().min(1).max(6),existingTests:z.literal('append-only')}).strict(),publication:z.literal('draft')}).strict();
+ changes:z.object({allowed:z.array(Pattern).min(1).max(100),protected:z.array(Pattern).max(100),maximumFiles:z.number().int().min(1).max(30),existingTests:z.enum(['append-only','editable'])}).strict(),publication:z.literal('draft')}).strict();
 export const GoRepositoryProfile=ProfileBase;
 export const standardNodeChecks=['node-typecheck','node-tests'] as const;
 /** Selected original test files run under tsc and node --test. */
-export const NodeTestVerification=z.object({required:z.tuple([z.literal('node-typecheck'),z.literal('node-tests')]),testFiles:z.array(SafePath.refine(p=>/\.test\.(?:ts|mjs|js)$/.test(p))).min(1).max(20)}).strict();
+/** Sandbox bounds a profile may widen for its repository. */
+export const SandboxLimits=z.object({timeoutMs:z.number().int().min(10000).max(3600000),maxSourceBytes:z.number().int().min(1000000).max(500000000),maxSourceEntries:z.number().int().min(100).max(100000)}).partial().strict();
+export const DEFAULT_SANDBOX_LIMITS={timeoutMs:300000,maxSourceBytes:64000000,maxSourceEntries:20000} as const;
+export const sandboxLimits=(verification:{limits?:z.infer<typeof SandboxLimits>})=>({...DEFAULT_SANDBOX_LIMITS,...verification.limits});
+export const NodeTestVerification=z.object({required:z.tuple([z.literal('node-typecheck'),z.literal('node-tests')]),testFiles:z.array(SafePath.refine(p=>/\.test\.(?:ts|mjs|js)$/.test(p))).min(1).max(50),limits:SandboxLimits.optional()}).strict();
 /** A project with no test suite is verified by running one installed package binary, such as a static-site build. */
 export const NodeBuildVerification=z.object({required:z.tuple([z.literal('node-build')]),build:z.object({
  bin:z.string().regex(/^[a-z0-9@._-]{1,80}$/),
- args:z.array(z.string().regex(/^[A-Za-z0-9_.=/-]{1,80}$/)).max(8).default([]),
- timeoutMs:z.number().int().min(10000).max(600000).default(300000),
- maxSourceBytes:z.number().int().min(1000000).max(200000000).default(64000000),
-}).strict()}).strict();
+ args:z.array(z.string().regex(/^[A-Za-z0-9_.=/-]{1,80}$/)).max(16).default([]),
+}).strict(),limits:SandboxLimits.optional()}).strict();
 export const NodeRepositoryProfile=ProfileBase.extend({
  execution:z.object({adapter:z.literal('node-typescript-v1'),sandbox:z.literal('offline-node-v1'),toolchain:z.object({version:z.string().regex(/^v24\.\d+\.\d+$/),digest:Digest}).strict(),dependencies:z.literal('public-locked-npm-v1')}).strict(),
  verification:z.union([NodeTestVerification,NodeBuildVerification]),
@@ -27,8 +29,8 @@ export const NodeRepositoryProfile=ProfileBase.extend({
 export const RepositoryProfile=z.union([GoRepositoryProfile,NodeRepositoryProfile]);
 export type RepositoryProfile=z.infer<typeof RepositoryProfile>;
 export const TaskCheckId=z.string().regex(/^task-[a-z][a-z0-9-]{0,50}$/);
-export const Task=z.object({schemaVersion:z.literal(1),id:z.string().regex(/^[a-z][a-z0-9-]{0,70}$/),repositoryProfileHash:Digest,baseCommit:Commit,title:z.string().min(1).max(140),request:z.string().min(1).max(12000),allowedFiles:z.array(SafePath).min(1).max(6),
- context:z.array(z.object({path:SafePath,startLine:z.number().int().positive(),endLine:z.number().int().positive()}).strict()).min(1).max(7),
+export const Task=z.object({schemaVersion:z.literal(1),id:z.string().regex(/^[a-z][a-z0-9-]{0,70}$/),repositoryProfileHash:Digest,baseCommit:Commit,title:z.string().min(1).max(140),request:z.string().min(1).max(40000),allowedFiles:z.array(SafePath).min(1).max(30),
+ context:z.array(z.object({path:SafePath,startLine:z.number().int().positive(),endLine:z.number().int().positive()}).strict()).min(1).max(30),
  verificationHash:Digest,checks:z.array(z.object({id:TaskCheckId,baseline:z.enum(['pass','fail','observe'])}).strict()).min(1).max(8)}).strict();
 export type Task=z.infer<typeof Task>;
 const GoVerificationPlan=z.object({schemaVersion:z.literal(1),adapter:z.literal('go-module-v1'),source:z.string().min(1).max(30000),checks:z.array(z.discriminatedUnion('kind',[

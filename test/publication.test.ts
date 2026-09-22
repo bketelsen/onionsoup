@@ -49,7 +49,7 @@ test('bug and feature bundles preserve exact base, diff, commit and evidence; du
   }
 });
 test('denies third-party destination, stale bundle, changed configuration, unverified work and changed Git commits',async t=>{
-  const f=await setup(t);assert.throws(()=>PublicationConfig.parse({...f.c,targets:[{...f.c.targets[0],repository:'get-bb/bb'}]}));
+  const f=await setup(t);await assert.rejects(preparePublication(f.c,f.options.directory,{...f.c.targets[0],repository:'get-bb/bb'}),/Target not configured/);
   await assert.rejects(approvePublication(f.c,f.b.publicationId,'0'.repeat(64),{authority:'console_operator',reason:'stale'}));
   await assert.rejects(approvePublication({...f.c,targets:[{...f.c.targets[0],repositoryId:99}]},f.b.publicationId,hash(f.b),{authority:'console_operator',reason:'changed'}));
   await atomicJson(join(f.options.directory,'fixture.json'),{...f.w,outcome:'review_blocked'});

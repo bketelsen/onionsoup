@@ -52,7 +52,7 @@ export const LocationBrief = z.discriminatedUnion('schemaVersion', [
 ]);
 export type LocationBrief = z.infer<typeof LocationBrief>;
 export type Excerpt = { id: string; path: string; startLine: number; endLine: number; lines: string[] };
-export const LOCATION_LIMITS = { steps: 12, timeoutMs: 180000, inspectionCalls: 12, contextChars: 36000,
+export const LOCATION_LIMITS = { steps: 12, timeoutMs: 600000, inspectionCalls: 12, contextChars: 36000,
   matches: 12, readLines: 60, readChars: 6000, citationLines: 30, fileBytes: 262144 } as const;
 export const isTestPath = (path: string) => /(?:^|\/)(?:__tests__|tests?|specs?)(?:\/|$)|(?:^|\/)test_[^/]+|(?:[._-])(?:test|spec)(?:[._-]|$)/i.test(path);
 export function resolveBrief(raw: unknown, excerpts: Excerpt[], searchedTests: boolean): LocationBrief {

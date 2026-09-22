@@ -1,3 +1,4 @@
+import { EVALUATION_MODEL } from '@onionsoup/providers/evaluation-policy';
 import { z } from 'zod';
 import { validatePacket, type Packet } from '../packet.ts';
 import { hash } from '@onionsoup/repository-analysis/contracts';
@@ -41,7 +42,7 @@ export function validateChangeWorkflow(raw:unknown):ChangeWorkflow {
   if(!w||w.schemaVersion!==1||w.kind!=='change-proposal'||!z.uuid().safeParse(w.workflowId).success||
     !z.iso.datetime().safeParse(w.startedAt).success||!['running','completed','failed'].includes(w.status)||
     w.acceptance!=='not_recorded'||w.verification!=='not_executed'||!['copilot','codex'].includes(w.execution?.provider)||
-    w.execution?.model!=='gpt-5.6-terra'||!Array.isArray(w.stages)) throw new Error('Invalid proposal workflow');
+    w.execution?.model!==EVALUATION_MODEL||!Array.isArray(w.stages)) throw new Error('Invalid proposal workflow');
   const p=eligiblePacket(w.parent);
   if(hash(p)!==w.parentHash||w.changeKind!==(p.readiness!.assessment!.kind==='bug_report'?'bug_fix':'feature')) throw new Error('Parent mismatch');
   if(w.changeKind==='feature') Query.parse(w.query); else if(w.query!==undefined) throw new Error('Unexpected query');

@@ -4,7 +4,7 @@ import { Commit, SourcePath } from '../location-contracts.ts';
 import { contextText } from '@onionsoup/repository-analysis/contracts';
 export const ProposalAgentId=z.enum(['feature-requirements','change-proposal']);
 export type ProposalAgentId=z.infer<typeof ProposalAgentId>;
-export const LIMITS={ invocations:2,steps:3,agentTimeoutMs:90000,timeoutMs:240000,inputChars:60000,sourceReads:3 } as const;
+export const LIMITS={ invocations:2,steps:3,agentTimeoutMs:300000,timeoutMs:900000,inputChars:60000,sourceReads:3 } as const;
 const text=z.string().min(1).max(800);
 const refs=z.array(z.string().min(1).max(80)).min(1).max(12);
 export const Claim=z.object({ text,basis:z.enum(['reported','proposed']),evidenceIds:refs }).strict();

@@ -17,7 +17,7 @@ import { provisionGoDependencies } from '@onionsoup/implementation/project/go-de
 import { prepareProjectPublication } from '@onionsoup/implementation/project/publication';
 import { loadPublicationConfig } from '@onionsoup/implementation/publication/bundle';
 import { approvePublication, publish } from '@onionsoup/implementation/publication/runtime';
-import { ProposalResult } from './maintenance.ts';
+import { ProposalResult, gitHead } from './maintenance.ts';
 
 /** Operator files that authorize implementation for one repository. All paths are resolved by the host, never by a request. */
 export const ImplementationConfig = z.object({
@@ -63,8 +63,10 @@ const TaskDraft = z.object({
 
 export const Approval = z.object({
   schemaVersion: z.literal(1),
-  proposalJobId: z.uuid(),
-  proposalHash: z.string().length(64),
+  /** Where the task came from: a completed proposal, or a request typed by a person. */
+  origin: z.enum(['proposal', 'request']).default('proposal'),
+  proposalJobId: z.uuid().optional(),
+  proposalHash: z.string().length(64).optional(),
   repository: z.string(),
   baseCommit: z.string().regex(/^[a-f0-9]{40}$/),
   profileHash: z.string().length(64),
@@ -114,18 +116,23 @@ function requestText(workflow: ChangeWorkflow, proposal: Proposal): string {
   return lines.join('\n').slice(0, 12000);
 }
 
-function draftTask(workflow: ChangeWorkflow, proposal: Proposal, profile: RepositoryProfile, requested?: string[]) {
+function permittedBy(profile: RepositoryProfile) {
   const denied = [...DENIED, ...profile.changes.protected];
-  const permitted = (path: string) => profile.changes.allowed.some((pattern) => matches(pattern, path)) && !denied.some((pattern) => matches(pattern, path));
+  return (path: string) => profile.changes.allowed.some((pattern) => matches(pattern, path)) && !denied.some((pattern) => matches(pattern, path));
+}
+
+function draftTask(workflow: ChangeWorkflow, proposal: Proposal, profile: RepositoryProfile, requested?: string[], override?: string) {
+  const permitted = permittedBy(profile);
   const cited = citedPaths(workflow);
   const candidates = requested ?? [...new Set(cited.map((source) => source.path))];
   const rejected = candidates.filter((path) => !permitted(path));
   if (requested && rejected.length) throw new Error(`files_outside_profile:${rejected.join(',')}`);
   const allowedFiles = candidates.filter(permitted).slice(0, profile.changes.maximumFiles);
   if (!allowedFiles.length) throw new Error('no_allowed_files');
-  let context = cited.filter((source) => allowedFiles.includes(source.path)).slice(0, 7);
+  let context = cited.filter((source) => allowedFiles.includes(source.path)).slice(0, 30);
   if (!context.length) context = [{ path: allowedFiles[0], startLine: 1, endLine: 1 }];
-  return TaskDraft.parse({ title: workflow.parent.issue.title.slice(0, 140), request: requestText(workflow, proposal), allowedFiles, context });
+  const request = override ? `${requestText(workflow, proposal)}\n\nOperator override: ${override}` : requestText(workflow, proposal);
+  return TaskDraft.parse({ title: workflow.parent.issue.title.slice(0, 140), request: request.slice(0, 40000), allowedFiles, context });
 }
 
 function verificationPlanFor(profile: RepositoryProfile, draft: z.infer<typeof TaskDraft>): VerificationPlan {
@@ -152,7 +159,7 @@ export function implementationCapabilities(options: ImplementationOptions): Capa
     prepare: prepareProjectPublication, approve: approvePublication, publish,
     ...options.pipeline,
   };
-  const common = { version: 'v1', timeoutMs: 600000 };
+  const common = { version: 'v1', timeoutMs: 1800000 };
   const metadata = { provider: options.provider, model: EVALUATION_MODEL, repositories: [...byName.keys()] };
 
   const repositoryFor = (name: string) => {
@@ -171,25 +178,58 @@ export function implementationCapabilities(options: ImplementationOptions): Capa
       proposalJobId: z.uuid(),
       reason: Approval.shape.reason,
       /** Override the files the proposal cited. Must stay within the repository profile. */
-      allowedFiles: z.array(SafePath).min(1).max(6).optional(),
+      allowedFiles: z.array(SafePath).min(1).max(30).optional(),
+      /** Proceed even when the proposal asked for more information; your note joins the request. */
+      override: z.string().min(1).max(2000).optional(),
     }).strict(),
     output: ApprovalResult,
     metadata,
     effects: ['local_artifacts'],
-    execute: async ({ proposalJobId, reason, allowedFiles }, ctx) => {
+    execute: async ({ proposalJobId, reason, allowedFiles, override }, ctx) => {
       const parent = await ctx.dependency(proposalJobId);
       if (parent.capability !== 'change.proposal') throw new Error('dependency_not_proposal');
       const workflow = validateChangeWorkflow(ProposalResult.parse(parent.result).proposal);
       if (workflow.status !== 'completed') throw new Error('proposal_not_completed');
       const proposalRun = workflow.stages.find((stage) => stage.agent === 'change-proposal')?.run;
       const proposal = Proposal.parse(proposalRun?.result);
-      if (proposal.status !== 'proposal_ready') throw new Error('proposal_not_ready');
+      if (proposal.status !== 'proposal_ready' && !override) throw new Error('proposal_not_ready');
       const repository = repositoryFor(workflow.parent.repository.name);
       const profile = await loadProfile(repository);
-      const task = draftTask(workflow, proposal, profile, allowedFiles);
+      const task = draftTask(workflow, proposal, profile, allowedFiles, override);
       const approval = Approval.parse({
-        schemaVersion: 1, proposalJobId, proposalHash: hash(workflow), repository: repository.name,
+        schemaVersion: 1, origin: 'proposal', proposalJobId, proposalHash: hash(workflow), repository: repository.name,
         baseCommit: workflow.parent.repository.commit, profileHash: hash(profile), reason, approvedAt: new Date().toISOString(), task,
+      });
+      return { approval };
+    },
+  };
+
+  const request: Capability = {
+    ...common,
+    id: 'change.request',
+    interactive: true,
+    description: 'Describe a change in your own words for a configured repository. Produces the same approval an accepted proposal would, without an issue.',
+    input: z.object({
+      repository: z.enum([...byName.keys()] as [string, ...string[]]),
+      title: Task.shape.title,
+      request: Task.shape.request,
+      /** The files the agents may edit. Must stay within the repository profile. */
+      allowedFiles: z.array(SafePath).min(1).max(30),
+    }).strict(),
+    output: ApprovalResult,
+    metadata,
+    effects: ['local_artifacts'],
+    execute: async ({ repository: name, title, request: text, allowedFiles }, ctx) => {
+      const repository = repositoryFor(name);
+      const profile = await loadProfile(repository);
+      const rejected = allowedFiles.filter((path: string) => !permittedBy(profile)(path));
+      if (rejected.length) throw new Error(`files_outside_profile:${rejected.join(',')}`);
+      if (allowedFiles.length > profile.changes.maximumFiles) throw new Error(`too_many_files:${profile.changes.maximumFiles}`);
+      const baseCommit = await gitHead(repository.checkout, ctx.signal);
+      const task = TaskDraft.parse({ title, request: text, allowedFiles, context: [{ path: allowedFiles[0], startLine: 1, endLine: 1 }] });
+      const approval = Approval.parse({
+        schemaVersion: 1, origin: 'request', repository: name, baseCommit, profileHash: hash(profile),
+        reason: 'Requested directly by the operator.', approvedAt: new Date().toISOString(), task,
       });
       return { approval };
     },
@@ -198,6 +238,7 @@ export function implementationCapabilities(options: ImplementationOptions): Capa
   const implement: Capability = {
     ...common,
     id: 'change.implement',
+    lane: () => 'sandbox',
     description: 'Run the accepted pipeline for an approval: project proposal, acceptance, pinned dependencies, patch and review agents, sandbox checks.',
     input: z.object({ approvalJobId: z.uuid() }).strict(),
     output: ImplementResult,
@@ -209,7 +250,7 @@ export function implementationCapabilities(options: ImplementationOptions): Capa
 
   async function runImplementation(approvalJobId: string, ctx: CapabilityContext) {
     const parent = await ctx.dependency(approvalJobId);
-    if (parent.capability !== 'change.approve') throw new Error('dependency_not_approval');
+    if (parent.capability !== 'change.approve' && parent.capability !== 'change.request') throw new Error('dependency_not_approval');
     const { approval } = ApprovalResult.parse(parent.result);
     const repository = repositoryFor(approval.repository);
     const profile = await loadProfile(repository);
@@ -239,6 +280,7 @@ export function implementationCapabilities(options: ImplementationOptions): Capa
     ...common,
     id: 'change.publish',
     interactive: true,
+    lane: () => 'publication',
     description: 'Open a draft pull request from a verified candidate. A person submits this; the approval is the click.',
     input: z.object({ implementJobId: z.uuid(), reason: Approval.shape.reason }).strict(),
     output: PublishResult,
@@ -263,5 +305,5 @@ export function implementationCapabilities(options: ImplementationOptions): Capa
     },
   };
 
-  return [approve, implement, publishCapability];
+  return [request, approve, implement, publishCapability];
 }

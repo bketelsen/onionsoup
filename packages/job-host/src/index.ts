@@ -17,6 +17,8 @@ export const HOST_LIMITS = {
   jobs: 5000,
   queue: 64,
   events: 10,
+  /** Jobs running at once. Jobs that declare the same lane still run one at a time. */
+  concurrency: 4,
 } as const;
 
 const Id = z.string().regex(/^[a-z][a-z0-9.-]{0,63}$/);
@@ -84,6 +86,8 @@ export type Capability = {
   timeoutMs: number;
   /** Needs a person to submit it deliberately; recipes may not include it as a step. */
   interactive?: boolean;
+  /** Jobs whose lane matches run one at a time, for example one sandbox or one repository. */
+  lane?: (input: any) => string | undefined;
   execute: (input: any, context: CapabilityContext) => Promise<unknown>;
 };
 
@@ -128,7 +132,7 @@ export type HostOptions = {
   capabilities: Capability[];
   invokers: Invoker[];
   persist?: typeof atomicJson;
-  limits?: Partial<typeof HOST_LIMITS>;
+  limits?: Partial<Record<keyof typeof HOST_LIMITS, number>>;
   /** Recipes available at launch. Saved recipes under <directory>/recipes are loaded too. */
   recipes?: unknown[];
 };
@@ -144,7 +148,7 @@ export async function openJobHost(options: HostOptions) {
   if (new Set(hashes).size !== hashes.length) throw new HostError('duplicate_registration');
   for (const c of capabilities.values()) {
     Id.parse(c.version);
-    z.number().int().min(1).max(600000).parse(c.timeoutMs);
+    z.number().int().min(1).max(3600000).parse(c.timeoutMs);
   }
   if (invokers.some((i) => i.capabilities.some((c) => !capabilities.has(c)))) throw new HostError('unknown_grant');
 
@@ -191,7 +195,9 @@ export async function openJobHost(options: HostOptions) {
   let stopped = false;
   let closed = false;
   let serial: Promise<unknown> = Promise.resolve();
-  let draining: Promise<void> | undefined;
+  let scheduling = false;
+  const running = new Map<string, Promise<void>>();
+  const busyLanes = new Set<string>();
   const controllers = new Map<string, AbortController>();
   const listeners = new Set<JobListener>();
 
@@ -412,28 +418,48 @@ export async function openJobHost(options: HostOptions) {
     });
   }
 
+  const laneOf = (job: Job) => {
+    try { return capabilities.get(job.capability)?.lane?.(job.input); } catch { return undefined; }
+  };
+  const runnable = (job: Job) => {
+    if (job.status !== 'queued' || recipeOf(job.capability)) return false;
+    const lane = laneOf(job);
+    return lane === undefined || !busyLanes.has(lane);
+  };
+
+  /** Fill free slots with runnable queued jobs; each finished job re-enters here. */
   function start() {
-    if (draining || stopped || broken) return;
-    draining = (async () => {
-      while (!stopped && !broken) {
-        const job = await exclusive(async () => {
-          if (stopped || broken) return;
-          const next = ledger.jobs.find((j) => j.status === 'queued');
-          if (!next) return;
-          controllers.set(next.jobId, new AbortController());
-          transition(next, 'running');
-          await save();
-          return next;
-        });
-        if (!job) break;
-        await runOne(job);
+    if (scheduling || stopped || broken) return;
+    scheduling = true;
+    void (async () => {
+      try {
+        while (!stopped && !broken && running.size < limits.concurrency) {
+          const job = await exclusive(async () => {
+            if (stopped || broken) return;
+            const next = ledger.jobs.find(runnable);
+            if (!next) return;
+            const lane = laneOf(next);
+            if (lane) busyLanes.add(lane);
+            controllers.set(next.jobId, new AbortController());
+            transition(next, 'running');
+            await save();
+            return next;
+          });
+          if (!job) break;
+          const lane = laneOf(job);
+          const done = runOne(job)
+            .catch(() => { broken = true; })
+            .finally(() => {
+              running.delete(job.jobId);
+              if (lane) busyLanes.delete(lane);
+              start();
+            });
+          running.set(job.jobId, done);
+        }
+      } finally {
+        scheduling = false;
       }
-    })()
-      .catch(() => { broken = true; })
-      .finally(() => {
-        draining = undefined;
-        if (!stopped && !broken && ledger.jobs.some((j) => j.status === 'queued')) start();
-      });
+    })();
   }
 
   type Host = ReturnType<typeof build>;
@@ -463,7 +489,7 @@ export async function openJobHost(options: HostOptions) {
           ...[...recipes.values()].filter((r) => recipeAllowed(r, p)).map(describeRecipe),
         ],
         limits,
-        lifecycle: { automaticReplay: false, concurrency: 1 },
+        lifecycle: { automaticReplay: false, concurrency: limits.concurrency },
       };
     },
     listRecipes(principal: string) {
@@ -561,7 +587,7 @@ export async function openJobHost(options: HostOptions) {
       if (closed) return;
       stopped = true;
       for (const c of controllers.values()) c.abort();
-      await draining;
+      await Promise.all(running.values());
       await exclusive(async () => {
         for (const j of ledger.jobs) if (j.status === 'queued') transition(j, 'interrupted', 'Host stopped before the job started');
         if (!broken) await save();

@@ -56,5 +56,8 @@
         "invoker": "web"
       }
     ]
+  },
+  "limits": {
+    "concurrency": 4
   }
 }

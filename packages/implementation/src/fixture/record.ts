@@ -7,7 +7,7 @@ import type {ExecutionIntent} from './sandbox.ts';
 import {checks} from './fixture.ts';
 export type FixtureWorkflow={schemaVersion:1;kind:'fixture-change';workflowId:string;startedAt:string;finishedAt?:string;
   status:'running'|'completed'|'failed';mode:'baseline'|'patch';case:FixtureCase;runtime:Runtime;seed:string;
-  execution:{provider:'copilot'|'codex';model:'gpt-5.6-terra'};scope?:Scope;before?:Files;after?:Files;
+  execution:{provider:'copilot'|'codex';model:string};scope?:Scope;before?:Files;after?:Files;
   baseline?:Receipt;candidate?:Receipt;pendingExecution?:ExecutionIntent;diff?:string;diffHash?:string;diffAppliedTreeHash?:string;
   budget:InvocationBudgetSnapshot;stages:Array<{agent:'scoped-patch'|'change-review';reservedAt:string;reservation:InvocationBudgetSnapshot;run?:FixtureAgentRun}>;
   outcome?:'baseline_observed'|'candidate_verified'|'needs_information'|'verification_failed'|'review_blocked'|'execution_failed';

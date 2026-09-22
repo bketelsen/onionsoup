@@ -191,7 +191,7 @@
   },
   "limits": {
     "steps": 3,
-    "timeoutMs": 60000
+    "timeoutMs": 180000
   },
   "effects": {
     "githubWrites": false,

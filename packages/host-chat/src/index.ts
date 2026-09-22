@@ -7,9 +7,9 @@ export const HOST_CHAT_VERSION = 'host-chat-v1';
 
 /** Session-wide and per-turn allowances. Configuration with defaults, not contracts. */
 export const HOST_CHAT_LIMITS = {
-  sessionAdmissions: 16,
-  runsPerTurn: 2,
-  polls: 600,
+  sessionAdmissions: 200,
+  runsPerTurn: 6,
+  polls: 3600,
   pollMs: 1000,
   summaryChars: 6000,
   listJobs: 20,

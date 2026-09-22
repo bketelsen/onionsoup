@@ -20,7 +20,7 @@ export async function validateGoRuntime(raw:unknown) {
 }
 export function validateGoManifests(mod:string,sum:string) {
  // Deliberately narrow public dependency policy for this trial, not a general go.mod parser.
- if(!/^module github\.com\/bketelsen\/[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}\n/m.test(mod)||/^\s*(replace|exclude|toolchain|tool|godebug)\b/m.test(mod))throw new Error('Unsupported Go module policy');
+ if(!/^module github\.com\/[A-Za-z0-9-]+\/[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}\n/m.test(mod)||/^\s*(replace|exclude|toolchain|tool|godebug)\b/m.test(mod))throw new Error('Unsupported Go module policy');
  const entries=new Map<string,string>();
  for(const line of sum.trim().split('\n')){
   const m=/^((?:github\.com\/[\w.-]+\/[\w./-]+|golang\.org\/x\/[\w.-]+)) (v[\w.+-]+(?:\/go.mod)?) (h1:[A-Za-z0-9+/]{43}=)$/.exec(line);

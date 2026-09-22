@@ -39,6 +39,7 @@ async function main() {
     capabilities: registeredCapabilities(capabilities, { apiKey: process.env.TRUENAS_API_KEY }),
     invokers,
     recipes,
+    ...(config.limits ? { limits: config.limits } : {}),
   });
   const chat = createChatService({ host, directory: resolve(dirname(path), config.directory, 'chat'), provider: config.capabilities.provider });
   let listener;

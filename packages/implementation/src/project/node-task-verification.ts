@@ -1,5 +1,5 @@
 import {z} from 'zod';
-import {NodeVerificationPlan,NodeRepositoryProfile,validateTask} from './repository-profile.ts';
+import {NodeVerificationPlan,NodeRepositoryProfile,validateTask,sandboxLimits} from './repository-profile.ts';
 import type {Job,Verification} from './contracts.ts';
 const Command=z.object({code:z.number().int().nullable(),stdout:z.string().max(200000),stderr:z.string().max(200000),overflow:z.boolean()}).strict();
 const Observations=z.object({nonce:z.string(),typecheck:Command.optional(),tests:Command.optional(),build:Command.optional(),checks:z.array(z.object({id:z.string(),status:z.enum(['passed','failed'])}).strict()).max(8)}).strict();
@@ -15,7 +15,7 @@ export function nodeTaskInput(job:Job,raw:unknown,nonce:string){
  if(job.schemaVersion!==2)throw new Error('Repository task required');
  validateTask(job.repositoryProfile,job.task,raw);const profile=NodeRepositoryProfile.parse(job.repositoryProfile),plan=NodeVerificationPlan.parse(raw);
  const checks=plan.checks.filter(c=>c.kind==='node-check');
- if('build' in profile.verification)return {nonce,mode:'build' as const,build:profile.verification.build,testFiles:[] as string[],checks};
+ if('build' in profile.verification)return {nonce,mode:'build' as const,build:{...profile.verification.build,timeoutMs:sandboxLimits(profile.verification).timeoutMs},testFiles:[] as string[],checks};
  return {nonce,mode:'tests' as const,testFiles:profile.verification.testFiles,checks};
 }
 export type NodeTaskInput=ReturnType<typeof nodeTaskInput>;
