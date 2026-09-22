@@ -13,7 +13,7 @@ const RegisteredRepository = z.object({
   profile: z.json().optional(),
 }).strict();
 
-async function describeEntry(registry: RepositoryRegistry, name: string) {
+export async function describeEntry(registry: RepositoryRegistry, name: string) {
   const entry = registry.get(name)!;
   let profile: unknown;
   if (entry.implementation) {

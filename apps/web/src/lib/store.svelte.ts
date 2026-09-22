@@ -78,6 +78,8 @@ export type ChatTurn = {
 export type ChatSessionSummary = { sessionId: string; createdAt: string; turns: number; title: string; lastAt: string };
 export type ChatSession = { sessionId: string; createdAt: string; turns: ChatTurn[] };
 
+export type RegisteredRepository = { name: string; origin: 'config' | 'registry'; checkout: boolean; implementation: boolean; onboardedAt?: string; profile?: any };
+
 export type Discovery = {
   invoker: string;
   login?: string;
@@ -105,6 +107,8 @@ class Store {
   jobs = $state<Record<string, Job>>({});
   recipes = $state<Recipe[]>([]);
   chatSessions = $state<ChatSessionSummary[]>([]);
+  repositories = $state<RegisteredRepository[]>([]);
+  nodeRuntime = $state(false);
   chatSession = $state<ChatSession | null>(null);
   chatBusy = $state(false);
   connected = $state(false);
@@ -126,6 +130,12 @@ class Store {
   /** Capabilities a recipe step may use: everything granted that is not itself a recipe. */
   get stepCapabilities() {
     return this.capabilities.filter((c) => !c.id.startsWith('recipe.') && !c.interactive);
+  }
+
+  async loadRepositories() {
+    const data = await api<{ repositories: RegisteredRepository[]; nodeRuntime: boolean }>('/v1/repositories');
+    this.repositories = data.repositories;
+    this.nodeRuntime = data.nodeRuntime;
   }
 
   async loadChatSessions() {

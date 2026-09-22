@@ -13,6 +13,7 @@ import { maintenanceCapabilities, type MaintenanceRepository } from './maintenan
 import { implementationCapabilities, ImplementationConfig, type ImplementationRepository } from './implementation.ts';
 import { RepositoryRegistry } from './registry.ts';
 import { onboardingCapabilities } from './onboarding.ts';
+export { describeEntry } from './onboarding.ts';
 export { RepositoryRegistry, onboardRepository, updateRepository, detectProfile } from './registry.ts';
 
 const Id=z.string().regex(/^[a-z][a-z0-9-]{0,63}$/);

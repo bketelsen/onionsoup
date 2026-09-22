@@ -5,6 +5,7 @@ import { openJobHost, listenJobHost, tokenHash, type Invoker } from '@onionsoup/
 import { HostConfig, registeredCapabilities, resolveCapabilityConfig, RepositoryRegistry, repositoryEntries } from '@onionsoup/host-capabilities';
 import { readJson } from '@onionsoup/runtime/storage';
 import { createChatService } from './chat.ts';
+import { repositoriesRoute } from './repositories.ts';
 
 globalThis.AI_SDK_LOG_WARNINGS = false;
 
@@ -52,7 +53,7 @@ async function main() {
     listener = await listenJobHost(host, {
       port: values.port ? Number(values.port) : config.port,
       address: config.address,
-      routes: [chat.routes],
+      routes: [chat.routes, repositoriesRoute(registry)],
       ...(config.tailscale ? { tailscale: { users: Object.fromEntries(config.tailscale.users.map((user) => [user.login, user.invoker])) } } : {}),
       ...(config.web ? { web: { directory: resolve(dirname(path), config.web.directory), invoker: config.web.invoker } } : {}),
     });

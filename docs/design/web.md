@@ -11,10 +11,12 @@ Living document. Supersedes the CLI-per-recipe and loopback-console approach.
   `GET|PUT|DELETE /v1/recipes[/:id]`, and `/v1/chat/sessions[/:id[/turns]]`.
   The host also serves the built web app from a configured directory on the
   same origin.
-- **Web app:** `apps/web`, Svelte + Vite. Forms are generated from each
-  capability's JSON schema. Job history and status update live over the event
-  stream. Results render as structured views where a renderer exists and as
-  JSON otherwise.
+- **Web app:** `apps/web`, Svelte + Vite. Chat is the front door; Jobs is the
+  history; a Settings gear holds Repositories (the registry, with onboarding),
+  Capabilities (run forms generated from each capability's JSON schema) and
+  Recipes (the graph editor). Job history and status update live over the
+  event stream. Results render as structured views where a renderer exists and
+  as JSON otherwise.
 - **Access:** on loopback the browser is the configured `web` invoker without a
   token; same-origin requests only. Remote invokers (the scheduler) keep bearer
   tokens. Over the tailnet, `tailscale serve` terminates HTTPS and adds
