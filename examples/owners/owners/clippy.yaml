@@ -1,0 +1,26 @@
+id: clippy
+domain:
+  kind: git-repository
+  name: bketelsen/clippy
+  remote: https://github.com/bketelsen/clippy
+# The owner's own clone, relative to this declarations directory. It is never edited;
+# freelancers work in per-item worktrees.
+checkout: ../../.local/owners/checkouts/clippy
+baseBranch: master
+# Host-run verification after every implementation. Freelancer claims are not evidence.
+verify:
+  - [go, build, ./...]
+  - [go, vet, ./...]
+  - [go, test, ./...]
+model: github-copilot/claude-sonnet-5
+workflow: change
+maxProposals: 3
+duties:
+  - id: survey
+    every: 7d
+    instructions: |
+      Get to know the repository as its owner. Read the code, tests, README, CI and release setup.
+      Record its layout, conventions and open questions in your notebook. Then propose the most
+      valuable small or medium improvements: correctness bugs, missing tests for real behavior,
+      CLI usability, robustness of input handling, maintainability. There are no open issues, so
+      you are deciding what matters. Avoid cosmetic churn and dependency upgrades Dependabot handles.

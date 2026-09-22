@@ -1,0 +1,170 @@
+import { ImplementationReport, Plan, Verdict } from './artifacts.ts';
+import { implementBrief, planBrief, reviewBrief } from './briefs.ts';
+import { requireFreelancer, requireWorkflow, type Craft, type WorkflowDeclaration } from './declarations.ts';
+import { pickModel } from './families.ts';
+import type { WorkItem, WorkStatus } from './ledger.ts';
+import { answerQuestions, recordLearnings } from './owner.ts';
+import type { Runtime } from './runtime.ts';
+import { commitWorktree, createWorktree, diffAgainstBase, refreshCheckout, resetWorktree, verificationPassed, verify } from './workspace.ts';
+
+type Step = (runtime: Runtime, item: WorkItem, workflow: WorkflowDeclaration) => Promise<WorkItem>;
+
+async function freelancer(runtime: Runtime, craft: Craft, excludedFamilies: readonly string[] = []) {
+  const declaration = requireFreelancer(runtime.declarations, craft);
+  const choice = pickModel(runtime.declarations.families, declaration.models, excludedFamilies);
+  return { ...choice, rubric: await runtime.text(declaration.rubric) };
+}
+
+async function notebookFor(runtime: Runtime, item: WorkItem) {
+  return runtime.notebook(item.owner).orientation();
+}
+
+function transition(item: WorkItem, status: WorkStatus, reason?: string): WorkItem {
+  return { ...item, status, reason };
+}
+
+const plan: Step = async (runtime, item, workflow) => {
+  const owner = runtime.owner(item.owner);
+  await refreshCheckout(owner);
+  const hired = await freelancer(runtime, 'planning');
+  const hirePlanner = async (current: WorkItem) => runtime.hireFor(current, 'plan', 'planning', {
+    role: 'planner', model: hired.model, directory: owner.checkout, title: `${item.id}: plan`,
+    brief: planBrief(current, await notebookFor(runtime, current), hired.rubric), schema: Plan,
+  });
+  let drafted = await hirePlanner(item);
+  if (workflow.plan.consultOwner && drafted.questionsForOwner.length && !item.ownerAnswers) {
+    item.ownerAnswers = await answerQuestions(runtime, item, drafted.questionsForOwner);
+    drafted = await hirePlanner(item);
+  }
+  await runtime.notebook(item.owner).journal({ kind: 'plan', workItem: item.id, model: hired.model, note: drafted.summary });
+  return { ...transition(item, 'awaiting-plan-approval'), plan: drafted, planApproval: undefined };
+};
+
+const implement: Step = async (runtime, item, workflow) => {
+  const owner = runtime.owner(item.owner);
+  if (!item.plan || !item.planApproval) throw new Error('plan_not_approved');
+  const { path, branch } = await createWorktree(owner, runtime.worktreesRoot, item.id);
+  if (item.verdicts.at(-1)?.decision === 'replan') await resetWorktree(owner, path);
+  const hired = await freelancer(runtime, 'implementation');
+  const report = await runtime.hireFor(item, 'implement', 'implementation', {
+    role: 'implementer', model: hired.model, directory: path, title: `${item.id}: implement ${item.implementations.length + 1}`,
+    brief: implementBrief(item, item.plan, await notebookFor(runtime, item), hired.rubric), schema: ImplementationReport,
+  });
+  const diff = await diffAgainstBase(owner, path);
+  const verification = await verify(owner, path);
+  const implemented = { ...item, worktree: path, branch, implementations: [...item.implementations, { report, diffStat: diff.stat, verification }] };
+  await runtime.notebook(item.owner).journal({ kind: 'implement', workItem: item.id, model: hired.model, outcome: verificationPassed(verification) ? 'verified' : 'verification-failed', note: diff.stat.split('\n').at(-1) });
+  if (!diff.stat) return transition(implemented, 'failed', 'implementer_changed_nothing');
+  if (verificationPassed(verification)) return transition(implemented, 'reviewing');
+  if (revisionsUsed(implemented) > workflow.review.maxRevisions) return transition(implemented, 'failed', 'verification_failed_after_revisions');
+  return transition(implemented, 'implementing');
+};
+
+function revisionsUsed(item: WorkItem) {
+  return Math.max(0, item.implementations.length - 1);
+}
+
+function familiesOf(item: WorkItem, stages: readonly string[]) {
+  return stages.map(stage => item.hires.filter(hire => hire.stage === stage && hire.craft !== 'owner' && hire.outcome === 'delivered').at(-1)?.family).filter((family): family is string => Boolean(family));
+}
+
+const DECISIONS: Record<Verdict['decision'], (item: WorkItem, workflow: WorkflowDeclaration) => WorkItem> = {
+  approve: item => transition(item, 'landing'),
+  revise: (item, workflow) => revisionsUsed(item) >= workflow.review.maxRevisions
+    ? transition(item, 'failed', 'revision_limit_reached')
+    : transition(item, 'implementing'),
+  replan: (item, workflow) => item.replans >= workflow.review.maxReplans
+    ? transition(item, 'failed', 'replan_limit_reached')
+    : { ...transition(item, 'planning'), replans: item.replans + 1, planApproval: undefined },
+};
+
+const review: Step = async (runtime, item, workflow) => {
+  const owner = runtime.owner(item.owner);
+  if (!item.plan || !item.worktree) throw new Error('nothing_to_review');
+  const excluded = familiesOf(item, workflow.review.familyDiffersFrom);
+  const hired = await freelancer(runtime, 'review', excluded);
+  const diff = await diffAgainstBase(owner, item.worktree);
+  const verification = item.implementations.at(-1)?.verification ?? [];
+  const verdict = await runtime.hireFor(item, 'review', 'review', {
+    role: 'reviewer', model: hired.model, directory: item.worktree, title: `${item.id}: review ${item.verdicts.length + 1}`,
+    brief: reviewBrief(item, item.plan, diff.patch, verification, await notebookFor(runtime, item), hired.rubric), schema: Verdict,
+  });
+  await runtime.notebook(item.owner).journal({ kind: 'review', workItem: item.id, model: hired.model, outcome: verdict.decision, note: verdict.summary });
+  return DECISIONS[verdict.decision]({ ...item, verdicts: [...item.verdicts, verdict] }, workflow);
+};
+
+function commitMessage(item: WorkItem) {
+  const lastDelivered = (stage: string) => item.hires.filter(hire => hire.stage === stage && hire.craft !== 'owner' && hire.outcome === 'delivered').at(-1)?.model ?? 'unknown';
+  return [
+    item.proposal.title,
+    '',
+    item.plan?.summary ?? item.proposal.goal,
+    '',
+    `Work-item: ${item.id}`,
+    `Owner: ${item.owner}`,
+    `Planned-by: ${lastDelivered('plan')}`,
+    `Implemented-by: ${lastDelivered('implement')}`,
+    `Reviewed-by: ${lastDelivered('review')}`,
+    `Plan-approved-by: ${item.planApproval?.by ?? 'unknown'}`,
+  ].join('\n');
+}
+
+/** The owner lands locally: a commit on the work item's branch. Publishing is a separate, explicit step. */
+const land: Step = async (runtime, item) => {
+  if (!item.worktree) throw new Error('nothing_to_land');
+  const landedCommit = await commitWorktree(item.worktree, commitMessage(item));
+  await runtime.notebook(item.owner).journal({ kind: 'land', workItem: item.id, outcome: landedCommit.slice(0, 8) });
+  return { ...transition(item, 'landed'), landedCommit };
+};
+
+const STEPS: Partial<Record<WorkStatus, Step>> = {
+  proposed: plan,
+  planning: plan,
+  implementing: implement,
+  reviewing: review,
+  landing: land,
+};
+
+const TERMINAL: readonly WorkStatus[] = ['landed', 'failed'];
+
+/** Advance a work item until it reaches a human gate or ends. */
+export async function advance(runtime: Runtime, itemId: string, onProgress: (item: WorkItem) => void = () => {}) {
+  let item = await runtime.ledger.get(itemId);
+  const workflow = requireWorkflow(runtime.declarations, item.workflow);
+  if (item.status === 'interrupted') item = transition(item, item.planApproval ? 'implementing' : 'planning');
+  let step = STEPS[item.status];
+  while (step) {
+    const current = item.status === 'proposed' ? transition(item, 'planning') : item;
+    item = await runtime.ledger.save(current);
+    try {
+      item = await step(runtime, current, workflow);
+    } catch (error) {
+      item = transition(current, 'failed', error instanceof Error ? error.message : String(error));
+    }
+    item = await runtime.ledger.save(item);
+    onProgress(item);
+    step = STEPS[item.status];
+  }
+  if (TERMINAL.includes(item.status)) {
+    await recordLearnings(runtime, item).catch(error => onProgress({ ...item, reason: `${item.reason ?? ''} (learnings failed: ${error instanceof Error ? error.message : error})` }));
+    item = await runtime.ledger.save(item);
+  }
+  await runtime.notebook(item.owner).commit(`journal ${item.id}`);
+  return item;
+}
+
+/** The human gate: nothing is implemented until a person approves the plan. */
+export async function approvePlan(runtime: Runtime, itemId: string, by: string, note?: string) {
+  const item = await runtime.ledger.get(itemId);
+  if (item.status !== 'awaiting-plan-approval') throw new Error(`not_awaiting_plan_approval: ${item.status}`);
+  const approved = { ...transition(item, 'implementing'), planApproval: { by, at: new Date().toISOString(), note } };
+  await runtime.notebook(item.owner).journal({ kind: 'plan-approved', workItem: item.id, note: `${by}${note ? `: ${note}` : ''}` });
+  return runtime.ledger.save(approved);
+}
+
+export async function rejectPlan(runtime: Runtime, itemId: string, by: string, reason: string) {
+  const item = await runtime.ledger.get(itemId);
+  if (item.status !== 'awaiting-plan-approval') throw new Error(`not_awaiting_plan_approval: ${item.status}`);
+  await runtime.notebook(item.owner).journal({ kind: 'plan-rejected', workItem: item.id, note: `${by}: ${reason}` });
+  return runtime.ledger.save(transition(item, 'failed', `plan_rejected: ${reason}`));
+}

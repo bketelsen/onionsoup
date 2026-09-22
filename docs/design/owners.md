@@ -370,6 +370,45 @@ The second slice adds a virtualization owner with read-only nightly duties.
 It then exercises owner-to-owner `request.resource` for a test VM, with
 create and delete approvals.
 
+## Spike status
+
+The first slice is running as a spike in `packages/owners`, with declarations
+in `examples/owners` and state under `.local/owners/`. Run it with
+`npm run owners -- <wake|items|show|approve|reject|run|distill|notebook|recover>`.
+
+What exists:
+
+- One owner (`clippy`) with a survey duty. The owner has its own clone and
+  never edits it.
+- Planner, implementer and reviewer freelancers, each hired as a fresh
+  `opencode serve` session with structured output validated by Zod.
+- The change workflow, with plan approval, owner answers to planner
+  questions, host-run verification, a reviewer outside the implementer's
+  family, revise and replan loops with limits, and landing as a local commit
+  with `Planned-by`, `Implemented-by` and `Reviewed-by` trailers.
+- A Git-versioned notebook with a journal, a learnings step and `distill`.
+
+Findings so far:
+
+- **Bash allowlists are not a sandbox.** A "read-only" owner wrote probe
+  tests with `cat > file` and ran one that allocated about 47 GB. The
+  terminal was OOM-killed. Every hire and every verification run now runs
+  under `systemd-run --user --scope` (6 GB, no swap, 512 tasks) inside
+  `bwrap` with a read-only root. Only the implementer can write, and only
+  its worktree.
+- **Freelancer claims are not evidence.** A model reported passing tests
+  without running them. The host runs `verify` itself.
+- **Unrecorded findings are lost.** The crashed session found a real bug
+  (a huge `-font-size` exhausts memory) that the next survey did not
+  rediscover. Owners need to journal as they go, not only at the end.
+- **opencode 1.18.32 cannot list messages of a session whose prompt used
+  `format: json_schema`.** The spike takes the reply from the synchronous
+  prompt call, with timeouts disabled, and aborts the session on its own
+  deadline instead.
+- **Plans need a middle option.** Approve and reject are not enough; a
+  person often wants "approve, but also cover X".
+- **Cost is uneven.** Copilot reports per-call cost; ChatGPT OAuth reports $0.
+
 ## References
 
 - Replaces the direction of [composable agents](composable-agents.md) and

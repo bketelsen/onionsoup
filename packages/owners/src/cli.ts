@@ -1,0 +1,114 @@
+import { execFile } from 'node:child_process';
+import { userInfo } from 'node:os';
+import { promisify } from 'node:util';
+import { parseArgs } from 'node:util';
+import type { WorkItem } from './ledger.ts';
+import { distill, wake } from './owner.ts';
+import { Runtime } from './runtime.ts';
+import { advance, approvePlan, rejectPlan } from './workflow.ts';
+
+const run = promisify(execFile);
+
+const { values: options, positionals } = parseArgs({
+  allowPositionals: true,
+  options: {
+    declarations: { type: 'string', default: 'examples/owners' },
+    state: { type: 'string', default: '.local/owners/state' },
+    note: { type: 'string' },
+    reason: { type: 'string' },
+    'no-advance': { type: 'boolean', default: false },
+  },
+});
+
+function cost(item: WorkItem) {
+  return item.hires.reduce((total, hire) => total + hire.cost, 0);
+}
+
+function line(item: WorkItem) {
+  return `${item.id}  ${item.status.padEnd(22)} $${cost(item).toFixed(3).padStart(7)}  ${item.proposal.title}${item.reason ? `  (${item.reason})` : ''}`;
+}
+
+function detail(item: WorkItem) {
+  const out = [line(item), '', `Goal: ${item.proposal.goal}`, `Why: ${item.proposal.rationale}`, 'Acceptance:', ...item.proposal.acceptance.map(entry => `  - ${entry}`)];
+  if (item.ownerAnswers) out.push('', 'Owner answered the planner:', ...item.ownerAnswers.answers.map(entry => `  Q: ${entry.question}\n  A: ${entry.answer}`));
+  if (item.plan) {
+    out.push('', `Plan: ${item.plan.summary}`, ...item.plan.steps.map((step, index) => `  ${index + 1}. ${step.description} [${step.files.join(', ')}]`));
+    out.push('Tests:', ...item.plan.tests.map(entry => `  - ${entry}`), 'Risks:', ...item.plan.risks.map(entry => `  - ${entry}`), 'Out of scope:', ...item.plan.outOfScope.map(entry => `  - ${entry}`));
+  }
+  item.implementations.forEach((implementation, index) => {
+    const verified = implementation.verification.map(result => `${result.command}=${result.exitCode}`).join(' ');
+    out.push('', `Implementation ${index + 1}: ${implementation.report.summary}`, `  ${implementation.diffStat.split('\n').at(-1) ?? ''}`, `  verify: ${verified}`);
+  });
+  item.verdicts.forEach((verdict, index) => {
+    out.push('', `Review ${index + 1}: ${verdict.decision}: ${verdict.summary}`, ...verdict.findings.map(finding => `  [${finding.severity}] ${finding.file}: ${finding.issue}`));
+  });
+  out.push('', 'Hires:', ...item.hires.map(hire => `  ${hire.stage.padEnd(9)} ${hire.craft.padEnd(14)} ${hire.model.padEnd(34)} ${hire.family.padEnd(9)} ${hire.outcome} $${hire.cost.toFixed(4)}${hire.error ? ` ${hire.error}` : ''}`));
+  if (item.branch) out.push('', `Branch: ${item.branch}  Worktree: ${item.worktree}`);
+  if (item.landedCommit) out.push(`Landed: ${item.landedCommit}`);
+  return out.join('\n');
+}
+
+const progress = (item: WorkItem) => console.log(`  → ${line(item)}`);
+
+type Command = (runtime: Runtime, args: string[]) => Promise<void>;
+
+const COMMANDS: Record<string, Command> = {
+  async wake(runtime, [ownerId, dutyId = 'survey']) {
+    console.log(`waking ${ownerId} for ${dutyId} (${runtime.owner(required(ownerId, 'owner')).model})`);
+    const result = await wake(runtime, required(ownerId, 'owner'), dutyId);
+    console.log(`${ownerId} ${dutyId}: ${result.survey.summary}\nnotebook edits: ${result.survey.notebook.length}; cost $${result.cost.toFixed(4)}`);
+    for (const item of result.items) {
+      console.log(line(item));
+      if (!options['no-advance']) await advance(runtime, item.id, progress);
+    }
+  },
+  async items(runtime) {
+    for (const item of await runtime.ledger.list()) console.log(line(item));
+  },
+  async show(runtime, [itemId]) {
+    console.log(detail(await runtime.ledger.get(required(itemId, 'work item'))));
+  },
+  async approve(runtime, [itemId]) {
+    const item = await approvePlan(runtime, required(itemId, 'work item'), userInfo().username, options.note);
+    console.log(line(item));
+    if (!options['no-advance']) console.log(detail(await advance(runtime, item.id, progress)));
+  },
+  async reject(runtime, [itemId]) {
+    console.log(line(await rejectPlan(runtime, required(itemId, 'work item'), userInfo().username, required(options.reason, '--reason'))));
+  },
+  async run(runtime, [itemId]) {
+    console.log(detail(await advance(runtime, required(itemId, 'work item'), progress)));
+  },
+  async distill(runtime, [ownerId]) {
+    const result = await distill(runtime, required(ownerId, 'owner'));
+    console.log(`distilled: ${result.edits} edits, $${result.cost.toFixed(4)}`);
+  },
+  async notebook(runtime, [ownerId]) {
+    const notebook = runtime.notebook(required(ownerId, 'owner'));
+    const { stdout } = await run('git', ['-C', notebook.root, 'log', '--oneline', '-15', '--', notebook.ownerId]);
+    console.log(`${notebook.directory}\n${stdout}`);
+  },
+  async recover(runtime) {
+    console.log(`marked interrupted: ${await runtime.ledger.markInterrupted()}`);
+  },
+};
+
+function required(value: string | undefined, name: string) {
+  if (!value) throw new Error(`missing ${name}`);
+  return value;
+}
+
+const [commandName, ...args] = positionals;
+const command = COMMANDS[commandName ?? ''];
+if (!command) {
+  console.error(`usage: owners <${Object.keys(COMMANDS).join('|')}> …`);
+  process.exit(2);
+}
+const runtime = await Runtime.open({ declarations: options.declarations!, state: options.state! });
+const unlock = ['items', 'show', 'notebook'].includes(commandName!) ? async () => {} : await runtime.lock();
+try {
+  await command(runtime, args);
+} finally {
+  runtime.close();
+  await unlock();
+}
