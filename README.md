@@ -56,6 +56,15 @@ Browser input only picks configured repositories and prior jobs by ID. Checkout
 paths, credentials, providers and models come from the configuration file.
 See [the web design page](docs/design/web.md).
 
+## Homelab
+
+The same host observes your homelab. Register sources under Settings › Homelab
+sources or from chat: SSH hosts running Docker, Podman or Incus, k3s hosts, and
+TrueNAS. `homelab.investigate` collects fresh read-only evidence from one source
+and assesses what needs attention; `homelab.brief` is one page across every
+source. The TrueNAS collector reads its API key from the file named by
+`homelab.truenasApiKeyFile`. See [the web design page](docs/design/web.md#homelab).
+
 ## Compose or deploy a repository brief
 
 The first portable slice uses private workspaces in `packages/` and thin hosts in
@@ -80,19 +89,6 @@ jobs. The original `npm run mcp` command remains separate.
 See the [package/host contract](docs/specs/workspace-packages.md) for configuration,
 release checks and recovery, and [the design](docs/design/packages-and-recipes.md)
 for composition and the future homelab direction.
-
-## Read-only homelab first contact
-
-`npm run homelab -- truenas /absolute/path/to/target.json` collects a sanitized
-snapshot through an existing TrueNAS MCP executable. Credentials stay in its
-external environment; writes are explicitly disabled. This evidence-source step
-uses no model and keeps unknown sections separate from healthy observations.
-See [the TrueNAS contract](docs/specs/truenas-evidence.md) for configuration and limits.
-
-`npm run homelab -- containers /absolute/path/to/target.json` collects Docker,
-Podman and Incus state counts through fixed SSH inspection commands. It uses existing
-keys and strict host-key trust, preserving unavailable tools separately from empty
-inventories. See [the SSH inventory contract](docs/specs/container-inventory.md).
 
 ## Use a subscription
 
@@ -311,30 +307,3 @@ Prepare and inspect a concrete bundle, record existing operator authorization, t
 ### Accepted proposal to an owned-project change
 
 `npm run project-change --` exposes the first [real-project profile](docs/specs/owned-project-changes.md): propose, accept, provision dependencies, execute a bounded candidate, and prepare its publication bundle. The initial task is publication-status filtering; source, dependencies and checks are pinned separately, and the feature is delivered as a draft PR.
-
-## Homelab observations and brief
-
-Read-only sources cover TrueNAS, Docker/Podman/Incus, and k3s/Argo CD. The
-[homelab brief contract](docs/specs/homelab-brief.md) documents private host configs,
-fixed commands, access boundaries and saved-source composition.
-
-```sh
-npm run homelab -- kubernetes .local/homelab/kubernetes.json
-npm run homelab -- brief .local/homelab/brief.json --output runs/NEW_BRIEF
-```
-
-The brief combines explicit saved observations without network or model calls.
-It shows independent cluster readiness and GitOps health/sync, with missing
-coverage, collection times and source hashes. It does not refresh or repair services.
-
-The [workload triage agent](docs/specs/workload-triage.md) adds evidence-linked
-Attention findings and can be called by a homelab chat agent through local MCP:
-
-```sh
-npm run homelab -- investigate .local/homelab/kubernetes.json --provider copilot
-ONIONSOUP_HOMELAB_CONFIG=.local/homelab/mcp.json npm run mcp:homelab
-```
-
-Set subscription auth through `ONIONSOUP_AUTH_PATH`. The MCP host exposes discovery,
-configured workload investigation, saved-source brief creation, inspection and
-cancellation; it has no repair tools.

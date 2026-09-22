@@ -178,6 +178,28 @@ the catalog reads the registry live, so a newly onboarded name appears in the
 dropdowns and in chat without a restart. `sandbox.nodeRuntime` in the host
 config names the pinned Node runtime onboarded Node repositories share.
 
+## Homelab
+
+The homelab side mirrors the OSS side: a registry of sources persisted under
+`<state>/homelab/`, seeded from the host config, editable from chat and the
+Settings tab. Kinds: `containers` (an SSH host; fixed read-only `docker ps`,
+`podman ps` and `incus list` commands), `kubernetes` (k3s over SSH, optional
+sudo) and `truenas` (the operator's truenas-mcp binary; the API key is read from
+`homelab.truenasApiKeyFile` at call time and never stored).
+
+- `homelab.refresh` collects one source and keeps the result as that source's
+  latest observation.
+- `homelab.investigate` collects and assesses: workload triage for k3s pods,
+  container triage for containers and Incus instances (crashed, restarting,
+  unhealthy, or running with restarts), and a deterministic reading of the
+  TrueNAS health report. Agents see facts with hashed IDs; names are joined
+  back from a private lookup for the person's Markdown.
+- `homelab.brief` composes the latest observation and assessment of every
+  source into one page, marking each fresh or stale by `maxAgeSeconds`;
+  `refresh: true` collects first.
+
+The homelab MCP server remains for external agents; the homelab CLI is gone.
+
 ## Limits
 
 Limits are configuration with generous defaults, not contracts. The host runs

@@ -11,6 +11,11 @@
       "onionsoup-source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./containers": {
+      "onionsoup-source": "./src/containers.ts",
+      "types": "./dist/containers.d.ts",
+      "default": "./dist/containers.js"
     }
   },
   "files": [

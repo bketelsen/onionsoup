@@ -6,8 +6,10 @@ import { z } from 'zod';
 import { TrueNasRun } from '@onionsoup/truenas-source';
 import { ContainerRun } from '@onionsoup/container-source';
 import { KubernetesRun } from '@onionsoup/kubernetes-source';
+import { ContainersObservation } from '@onionsoup/container-source/containers';
+import { ContainerTriageRun, findingCounts as containerFindingCounts } from '@onionsoup/container-triage';
 
-export const HomelabObservation = z.union([TrueNasRun, ContainerRun, KubernetesRun, TriageRun]);
+export const HomelabObservation = z.union([TrueNasRun, ContainerRun, ContainersObservation, KubernetesRun, TriageRun, ContainerTriageRun]);
 export type HomelabObservation = z.infer<typeof HomelabObservation>;
 const Source = z.object({ digest: z.string().regex(/^[a-f0-9]{64}$/),
   freshness: z.enum(['fresh','stale','unknown']), observation: HomelabObservation }).strict();
@@ -17,7 +19,7 @@ export const HomelabBrief = z.object({ schemaVersion: z.literal(1), kind: z.lite
 export type HomelabBrief = z.infer<typeof HomelabBrief>;
 const hash = (raw: unknown) => createHash('sha256').update(JSON.stringify(raw)).digest('hex');
 function freshness(observation: HomelabObservation, generatedAt: string, maxAgeSeconds: number): 'fresh'|'stale'|'unknown' {
-  const start = Date.parse(observation.kind === 'workload-triage' ? observation.input.startedAt : observation.startedAt), end = observation.finishedAt ? Date.parse(observation.finishedAt) : NaN;
+  const start = Date.parse(observation.kind === 'workload-triage' || observation.kind === 'container-triage' ? observation.input.startedAt : observation.startedAt), end = observation.finishedAt ? Date.parse(observation.finishedAt) : NaN;
   const now = Date.parse(generatedAt);
   if (observation.status === 'running' || !Number.isFinite(end) || end < start || end > now) return 'unknown';
   // Age begins at the oldest read, not when the last query completed.
@@ -59,6 +61,16 @@ export function renderHomelabBrief(raw: unknown): string {
         ? `${q.counts.total} containers/instances; ${q.counts.states.map(s => `${s.count} ${s.state}`).join(', ') || 'none'}`
         : `coverage ${q.status} (${q.failure ?? 'no completed query'})`}.`);
       lines.push('', 'Podman covers the SSH user only; Docker covers its configured socket. Incus may span a cluster. Do not sum these inventories as distinct machines.');
+    } else if (o.kind === 'container-observation') {
+      for (const q of o.queries) lines.push(`- ${q.engine} (${q.scope}): ${q.status === 'collected' ? `${q.total ?? 0} containers/instances` : `coverage ${q.status} (${q.failure ?? 'no completed query'})`}.`);
+      lines.push(`Candidates needing a look: ${o.eligible ?? 'unknown'}; ${o.selected.length} selected for assessment.`);
+    } else if (o.kind === 'container-triage') {
+      lines.push('### Attention', '', `Source run: ${o.input.runId}; observed ${o.input.startedAt} to ${o.input.finishedAt ?? 'unfinished'}.`,
+        `Selected ${o.input.selected.length} of ${o.input.eligible ?? 'unknown'} candidate containers; omitted ${o.input.omitted ?? 'unknown'}.`, 'Model assessment of this snapshot; findings suggest investigation, not service actions.', '');
+      if (o.status !== 'completed' || !o.result) lines.push(`Assessment unavailable (${o.failure ?? o.status}).`);
+      else if (!o.result.findings.length) lines.push('No container showed a current problem in this snapshot. Running is not proof of service health.');
+      else {const counts=containerFindingCounts(o.result);lines.push(`Finding counts: ${counts.attentionNow} attention, ${counts.historical} historical, ${counts.insufficientEvidence} insufficient evidence.`, '');
+      for (const f of o.result.findings) lines.push(`- **${f.classification}** — ${f.containerId.slice(0, 14)}: ${text(f.reason)} Next: ${text(f.nextInvestigation)}.`);}
     } else if (o.kind === 'workload-triage') {
       lines.push('### Attention', '', `Source run: ${o.input.runId}; observed ${o.input.startedAt} to ${o.input.finishedAt ?? 'unfinished'}.`,
         `Source coverage: ${o.input.queries.map(q => `${q.section}=${q.status}`).join(', ')}.`,

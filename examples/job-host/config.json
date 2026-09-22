@@ -20,7 +20,51 @@
           "target": 0
         }
       }
-    ]
+    ],
+    "homelab": {
+      "schemaVersion": 1,
+      "sources": [
+        {
+          "sourceId": "lab-box",
+          "kind": "containers",
+          "target": {
+            "schemaVersion": 1,
+            "assetId": "lab-box",
+            "host": "10.0.1.20",
+            "user": "you",
+            "engines": [
+              "docker",
+              "podman",
+              "incus"
+            ]
+          }
+        },
+        {
+          "sourceId": "k3s",
+          "kind": "kubernetes",
+          "target": {
+            "schemaVersion": 1,
+            "assetId": "k3s",
+            "host": "10.0.1.30",
+            "user": "you",
+            "access": "sudo"
+          }
+        },
+        {
+          "sourceId": "nas",
+          "kind": "truenas",
+          "target": {
+            "schemaVersion": 1,
+            "assetId": "nas",
+            "binary": "/path/to/truenas-mcp",
+            "host": "nas.local",
+            "tlsInsecure": true
+          }
+        }
+      ],
+      "truenasApiKeyFile": "/private/truenas.envrc",
+      "maxAgeSeconds": 3600
+    }
   },
   "invokers": [
     {
@@ -38,7 +82,13 @@
         "change.publish",
         "repository.list",
         "repository.onboard",
-        "repository.update"
+        "repository.update",
+        "homelab.sources",
+        "homelab.add-source",
+        "homelab.update-source",
+        "homelab.refresh",
+        "homelab.investigate",
+        "homelab.brief"
       ]
     },
     {

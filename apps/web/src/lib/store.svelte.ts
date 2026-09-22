@@ -78,6 +78,7 @@ export type ChatTurn = {
 export type ChatSessionSummary = { sessionId: string; createdAt: string; turns: number; title: string; lastAt: string };
 export type ChatSession = { sessionId: string; createdAt: string; turns: ChatTurn[] };
 
+export type HomelabSource = { sourceId: string; kind: 'truenas' | 'containers' | 'kubernetes'; origin: 'config' | 'registry'; host: string; detail: string; latestObservation: { at: string; status: string } | null; latestInvestigation: { at: string; status: string; summary: string } | null };
 export type RegisteredRepository = { name: string; origin: 'config' | 'registry'; checkout: boolean; implementation: boolean; onboardedAt?: string; profile?: any };
 
 export type Discovery = {
@@ -108,6 +109,7 @@ class Store {
   recipes = $state<Recipe[]>([]);
   chatSessions = $state<ChatSessionSummary[]>([]);
   repositories = $state<RegisteredRepository[]>([]);
+  sources = $state<HomelabSource[]>([]);
   nodeRuntime = $state(false);
   chatSession = $state<ChatSession | null>(null);
   chatBusy = $state(false);
@@ -130,6 +132,11 @@ class Store {
   /** Capabilities a recipe step may use: everything granted that is not itself a recipe. */
   get stepCapabilities() {
     return this.capabilities.filter((c) => !c.id.startsWith('recipe.') && !c.interactive);
+  }
+
+  async loadSources() {
+    const data = await api<{ sources: HomelabSource[] }>('/v1/homelab/sources');
+    this.sources = data.sources;
   }
 
   async loadRepositories() {

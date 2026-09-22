@@ -36,23 +36,3 @@ test('duplicate assets, oversized batches and unexpected private fields fail clo
   assert.throws(()=>composeHomelabBrief([{...nas(),credential:'secret'}]));
   assert.throws(()=>composeHomelabBrief([{...container(),assetId:'<script>alert(1)</script>'}]));
 });
-test('compiled offline CLI composes all three sources with relative paths and no contact; occupied output is preserved',async t=>{
-  const root=await mkdtemp(join(tmpdir(),'onionsoup-homelab-'));t.after(()=>rm(root,{recursive:true,force:true}));
-  const cluster=await collectKubernetes({schemaVersion:1,assetId:'test-k3s',host:'example.invalid',user:'operator'},
-    {directory:join(root,'cluster'),transport:async(_,section)=>({code:0,stdout:section==='nodes'?'v1\nn|True\n':section==='pods'?'v1\np|Succeeded|False\n':'v1\na|Healthy|OutOfSync\n'})});
-  const record=composeHomelabBrief([nas(),container(),cluster]); const md=renderHomelabBrief(record);
-  assert.match(md,/health: 1 Healthy; sync: 1 OutOfSync/); assert.match(md,/Succeeded pods need not remain Ready/);
-  await writeFile(join(root,'nas.json'),JSON.stringify(nas())); await writeFile(join(root,'containers.json'),JSON.stringify(container()));
-  const config=join(root,'brief.json'); await writeFile(config,JSON.stringify({schemaVersion:1,observations:['nas.json','containers.json','cluster/observation.json']}));
-  const output=join(root,'out'), app=resolve('apps/homelab-cli/dist/main.js');
-  const args=[app,'brief',config,'--output',output]; const result=await execute(process.execPath,args,{cwd:tmpdir(),env:{PATH:'/nonexistent'}});
-  assert.equal(JSON.parse(result.stdout).sources,3);
-  const saved=JSON.parse(await readFile(join(output,'brief.json'),'utf8'));
-  assert.equal(await readFile(join(output,'brief.md'),'utf8'),renderHomelabBrief(saved));
-  await assert.rejects(execute(process.execPath,args));
-  assert.equal(await readFile(join(output,'brief.md'),'utf8'),renderHomelabBrief(saved));
-  await writeFile(join(root,'oversized.json'),' '.repeat(1024*1024+1));
-  await writeFile(config,JSON.stringify({schemaVersion:1,observations:['oversized.json']}));
-  await assert.rejects(execute(process.execPath,[app,'brief',config,'--output',join(root,'oversized-output')]));
-  await assert.rejects(readFile(join(root,'oversized-output','brief.json')));
-});

@@ -3,12 +3,14 @@
   import Capabilities from './Capabilities.svelte';
   import Recipes from './recipes/Recipes.svelte';
   import Repositories from './Repositories.svelte';
+  import Sources from './Sources.svelte';
 
   let { tab }: { tab: string } = $props();
 
   /** Settings sections, keyed by the hash segment that opens them. */
   const sections: Record<string, { label: string; view: Component }> = {
     repositories: { label: 'Repositories', view: Repositories },
+    sources: { label: 'Homelab sources', view: Sources },
     capabilities: { label: 'Capabilities', view: Capabilities },
     recipes: { label: 'Recipes', view: Recipes },
   };

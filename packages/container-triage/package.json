@@ -1,5 +1,5 @@
 {
-  "name": "@onionsoup/homelab-brief",
+  "name": "@onionsoup/container-triage",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -17,12 +17,10 @@
     "dist"
   ],
   "dependencies": {
-    "@onionsoup/runtime": "0.1.0",
-    "@onionsoup/truenas-source": "0.1.0",
+    "@humanlayer/agentlayer-core": "0.0.36",
     "@onionsoup/container-source": "0.1.0",
-    "@onionsoup/kubernetes-source": "0.1.0",
-    "zod": "4.3.6",
-    "@onionsoup/workload-triage": "0.1.0",
-    "@onionsoup/container-triage": "0.1.0"
+    "@onionsoup/runtime": "0.1.0",
+    "ai": "6.0.191",
+    "zod": "4.3.6"
   }
 }

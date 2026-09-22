@@ -2,10 +2,11 @@ import { readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { openJobHost, listenJobHost, tokenHash, type Invoker } from '@onionsoup/job-host';
-import { HostConfig, registeredCapabilities, resolveCapabilityConfig, RepositoryRegistry, repositoryEntries } from '@onionsoup/host-capabilities';
+import { HostConfig, registeredCapabilities, resolveCapabilityConfig, RepositoryRegistry, repositoryEntries, HomelabRegistry } from '@onionsoup/host-capabilities';
 import { readJson } from '@onionsoup/runtime/storage';
 import { createChatService } from './chat.ts';
 import { repositoriesRoute } from './repositories.ts';
+import { homelabRoute } from './homelab.ts';
 
 globalThis.AI_SDK_LOG_WARNINGS = false;
 
@@ -39,10 +40,16 @@ async function main() {
     entries: repositoryEntries(capabilities),
     ...(config.sandbox?.nodeRuntime ? { nodeRuntime: resolve(dirname(path), config.sandbox.nodeRuntime) } : {}),
   });
+  const homelab = await HomelabRegistry.open({
+    directory: resolve(dirname(path), config.directory, 'homelab'),
+    entries: capabilities.homelab?.sources ?? [],
+    maxAgeSeconds: capabilities.homelab?.maxAgeSeconds,
+    ...(capabilities.homelab?.truenasApiKeyFile ? { truenasApiKeyFile: capabilities.homelab.truenasApiKeyFile } : {}),
+  });
   const host = await openJobHost({
     directory: resolve(dirname(path), config.directory),
     binding: capabilities,
-    capabilities: registeredCapabilities(capabilities, { apiKey: process.env.TRUENAS_API_KEY, registry }),
+    capabilities: registeredCapabilities(capabilities, { registry, homelab }),
     invokers,
     recipes,
     ...(config.limits ? { limits: config.limits } : {}),
@@ -53,7 +60,7 @@ async function main() {
     listener = await listenJobHost(host, {
       port: values.port ? Number(values.port) : config.port,
       address: config.address,
-      routes: [chat.routes, repositoriesRoute(registry)],
+      routes: [chat.routes, repositoriesRoute(registry), homelabRoute(homelab)],
       ...(config.tailscale ? { tailscale: { users: Object.fromEntries(config.tailscale.users.map((user) => [user.login, user.invoker])) } } : {}),
       ...(config.web ? { web: { directory: resolve(dirname(path), config.web.directory), invoker: config.web.invoker } } : {}),
     });
