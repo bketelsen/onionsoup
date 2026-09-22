@@ -1,3 +1,4 @@
+import {definitionText} from '../definitions.ts';
 import {spawn,execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {createHash,randomUUID} from 'node:crypto';
@@ -61,7 +62,7 @@ export async function verifyFiles(rawFiles:unknown,scope:Scope,runtime:Runtime,o
   const args=sandboxArgs(runtime,intent.containerName,work,runner,node);
   const execution={hostWorkingDirectory:directory,command:['/usr/bin/podman',...args],containerEnvironment:{PATH:'/runtime',HOME:'/tmp',LANG:'C.UTF-8'}};
   const commandHash=hash(execution);
-  const definitionHash=hash(await Promise.all(['sandbox.ts','fixture.ts','contracts.ts'].map(async name=>[name,await readFile(new URL(name,import.meta.url),'utf8')])));
+  const definitionHash=hash(await Promise.all(['sandbox.ts','fixture.ts','contracts.ts'].map(async name=>[name,await definitionText(import.meta.url,name)])));
   await writeFile(join(directory,'execution.json'),JSON.stringify({...execution,commandHash,definitionHash},null,2),{mode:0o600,flag:'wx'});
   await options.checkpoint?.(intent);
   options.signal?.throwIfAborted();

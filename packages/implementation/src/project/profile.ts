@@ -1,3 +1,4 @@
+import {definitionText} from '../definitions.ts';
 import {readFile} from 'node:fs/promises';
 import {randomUUID} from 'node:crypto';
 import {hash} from '@onionsoup/repository-analysis/contracts';
@@ -7,7 +8,7 @@ export const statuses=State.shape.status.options;
 export async function profileHash(id:string=PROFILE) {
   if(id==='clippy-bubble-color-v1')return (await import('./go-profile.ts')).goProfileHash();
   if(id!==PROFILE)throw new Error('Unknown profile');
-  return hash({profile:PROFILE,limits:PROFILE_LIMITS,definitions:await Promise.all(['profile.ts','profile-harness.mjs','sandbox.ts','contracts.ts','profiles.ts','source.ts','container.ts'].map(async p=>[p,await readFile(new URL(p,import.meta.url),'utf8')]))});
+  return hash({profile:PROFILE,limits:PROFILE_LIMITS,definitions:await Promise.all(['profile.ts','profile-harness.mjs','sandbox.ts','contracts.ts','profiles.ts','source.ts','container.ts'].map(async p=>[p,await definitionText(import.meta.url,p)]))});
 }
 export function seedsFrom(raw:unknown) {
   const original=validateBundle(raw);if(original.schemaVersion!==1)throw new Error('Owned fixture seed required');

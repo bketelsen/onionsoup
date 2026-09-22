@@ -1,12 +1,13 @@
+import {definitionText} from '../definitions.ts';
 import {readFile} from 'node:fs/promises';
 import {hash} from '@onionsoup/repository-analysis/contracts';
 import {standardGoChecks,VerificationPlan,validateTask} from './repository-profile.ts';
 import {GO_LIMITS} from './go-profile.ts';
 import type {Job,Verification} from './contracts.ts';
 export async function repositoryAdapterHash(adapter='go-module-v1') {
- if(adapter==='node-typescript-v1')return hash({adapter,definitions:await Promise.all(['repository-profile.ts','node-task-harness.mjs','node-task-verification.ts','task-verification.ts','sandbox.ts','contracts.ts','source.ts','container.ts'].map(async p=>[p,await readFile(new URL(p,import.meta.url),'utf8')]))});
+ if(adapter==='node-typescript-v1')return hash({adapter,definitions:await Promise.all(['repository-profile.ts','node-task-harness.mjs','node-task-verification.ts','task-verification.ts','sandbox.ts','contracts.ts','source.ts','container.ts'].map(async p=>[p,await definitionText(import.meta.url,p)]))});
  if(adapter!=='go-module-v1')throw new Error('Unknown adapter');
- return hash({adapter:'go-module-v1',limits:GO_LIMITS,definitions:await Promise.all(['repository-profile.ts','task-verification.ts','contracts.ts','source.ts','go-profile.ts','go-sandbox.ts','go-dependencies.ts','container.ts'].map(async p=>[p,await readFile(new URL(p,import.meta.url),'utf8')]))});
+ return hash({adapter:'go-module-v1',limits:GO_LIMITS,definitions:await Promise.all(['repository-profile.ts','task-verification.ts','contracts.ts','source.ts','go-profile.ts','go-sandbox.ts','go-dependencies.ts','container.ts'].map(async p=>[p,await definitionText(import.meta.url,p)]))});
 }
 export function taskHarness(job:Job,raw:unknown) {
  if(job.schemaVersion!==2)throw new Error('Repository task required');validateTask(job.repositoryProfile,job.task,raw);const plan=VerificationPlan.parse(raw);if(plan.adapter!=='go-module-v1')throw new Error('Go checks required');

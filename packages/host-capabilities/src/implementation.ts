@@ -1,4 +1,6 @@
 import { dirname, join } from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { z } from 'zod';
 import type { Capability, CapabilityContext } from '@onionsoup/job-host';
 import { readJson } from '@onionsoup/runtime/storage';
@@ -18,6 +20,8 @@ import { prepareProjectPublication } from '@onionsoup/implementation/project/pub
 import { loadPublicationConfig } from '@onionsoup/implementation/publication/bundle';
 import { approvePublication, publish } from '@onionsoup/implementation/publication/runtime';
 import { ProposalResult, gitHead } from './maintenance.ts';
+
+const execute = promisify(execFile);
 
 /** Operator files that authorize implementation for one repository. All paths are resolved by the host, never by a request. */
 export const ImplementationConfig = z.object({
@@ -148,6 +152,38 @@ function mappingFor(proposal: Proposal, profile: RepositoryProfile, task: Task):
   return proposal.acceptanceCriteria.map((criterion) => ({ criterionId: criterion.id, checks }));
 }
 
+/** Excerpt bounds the project proposal agent accepts per context entry. */
+const EXCERPT_CHARS = 5000;
+const MAX_EXCERPTS = 30;
+
+/**
+ * Context for a typed request: the allowed files themselves, at the base commit, in line-based chunks
+ * small enough for the proposal agent, so it can see the code it is asked to change.
+ */
+async function fileContext(checkout: string, commit: string, files: string[], signal: AbortSignal) {
+  const context: { path: string; startLine: number; endLine: number }[] = [];
+  for (const path of files) {
+    let text: string;
+    try {
+      text = (await execute('git', ['-C', checkout, 'show', `${commit}:${path}`], { signal, timeout: 10000, maxBuffer: 8000000 })).stdout;
+    } catch {
+      throw new Error(`file_not_at_base:${path}`);
+    }
+    const lines = text.split('\n');
+    let start = 0;
+    while (start < lines.length && context.length < MAX_EXCERPTS) {
+      let end = start;
+      let size = 0;
+      while (end < lines.length && size + lines[end].length + 1 <= EXCERPT_CHARS) { size += lines[end].length + 1; end++; }
+      if (end === start) end = start + 1;
+      context.push({ path, startLine: start + 1, endLine: end });
+      start = end;
+    }
+  }
+  if (!context.length) throw new Error('no_context');
+  return context;
+}
+
 export function implementationCapabilities(options: ImplementationOptions): Capability[] {
   const configured = options.repositories.filter((repository) => repository.implementation && repository.checkout);
   if (!configured.length) return [];
@@ -226,7 +262,8 @@ export function implementationCapabilities(options: ImplementationOptions): Capa
       if (rejected.length) throw new Error(`files_outside_profile:${rejected.join(',')}`);
       if (allowedFiles.length > profile.changes.maximumFiles) throw new Error(`too_many_files:${profile.changes.maximumFiles}`);
       const baseCommit = await gitHead(repository.checkout, ctx.signal);
-      const task = TaskDraft.parse({ title, request: text, allowedFiles, context: [{ path: allowedFiles[0], startLine: 1, endLine: 1 }] });
+      const context = await fileContext(repository.checkout, baseCommit, allowedFiles, ctx.signal);
+      const task = TaskDraft.parse({ title, request: text, allowedFiles, context });
       const approval = Approval.parse({
         schemaVersion: 1, origin: 'request', repository: name, baseCommit, profileHash: hash(profile),
         reason: 'Requested directly by the operator.', approvedAt: new Date().toISOString(), task,
