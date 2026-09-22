@@ -76,7 +76,8 @@ async function continueIfFree(runtime: Runtime, item: WorkItem) {
   if (options['no-advance']) return;
   const unlock = await runtime.lock().catch(() => undefined);
   if (!unlock) {
-    console.log('  (runtime is busy, likely the daemon; it will continue this)');
+    console.log(`  recorded. The runtime is ${await runtime.lockHolder()}.`);
+    console.log('  A running daemon picks this up at its next tick; otherwise run `owners tick` once that finishes.');
     return;
   }
   try {
@@ -179,10 +180,15 @@ if (!command) {
 const runtime = await Runtime.open({ declarations: options.declarations!, state: options.state! });
 /** Commands that only read, or only record a person's decision, never take the runtime lock. */
 const LOCK_FREE = ['items', 'show', 'notebook', 'requests', 'approve', 'revise-plan', 'reject', 'approve-create', 'approve-delete', 'deny-request'];
-const unlock = LOCK_FREE.includes(commandName!) ? async () => {} : await runtime.lock();
 try {
-  await command(runtime, args);
-} finally {
-  runtime.close();
-  await unlock();
+  const unlock = LOCK_FREE.includes(commandName!) ? async () => {} : await runtime.lock();
+  try {
+    await command(runtime, args);
+  } finally {
+    runtime.close();
+    await unlock();
+  }
+} catch (error) {
+  console.error(`owners ${commandName}: ${error instanceof Error ? error.message : error}`);
+  process.exitCode = 1;
 }

@@ -11,6 +11,15 @@ import { Freelancers, HireError, type HireRequest } from './opencode.ts';
 
 export const RUNTIME_LIMITS = { findingChars: 2_000 };
 
+function isAlive(pid: number) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export interface RuntimePaths {
   declarations: string;
   state: string;
@@ -41,15 +50,30 @@ export class Runtime {
     return new Runtime(await loadDeclarations(paths.declarations), state);
   }
 
-  /** One runtime at a time owns the ledger; a stale lock means the last one died mid-work. */
+  /** One runtime at a time owns the ledger. The lock records who holds it, so "busy" can say who. */
   async lock() {
     const lockPath = join(this.stateDirectory, 'runtime.lock');
     try {
       await mkdir(lockPath);
     } catch {
-      throw new Error(`runtime_locked: another runtime holds ${lockPath}; remove it if none is running`);
+      throw new Error(`runtime_locked: ${await this.lockHolder()}`);
     }
+    const holder = { pid: process.pid, command: process.argv.slice(2).join(' '), startedAt: new Date().toISOString() };
+    await writeFile(join(lockPath, 'holder.json'), JSON.stringify(holder) + '\n');
     return async () => rm(lockPath, { recursive: true, force: true });
+  }
+
+  /** Who holds the lock, and whether that process is still alive. */
+  async lockHolder() {
+    const lockPath = join(this.stateDirectory, 'runtime.lock');
+    const text = await readFile(join(lockPath, 'holder.json'), 'utf8').catch(() => '');
+    if (!text) return `held by an unknown process (${lockPath})`;
+    const holder = JSON.parse(text) as { pid: number; command: string; startedAt: string };
+    const alive = isAlive(holder.pid);
+    const since = `since ${holder.startedAt}`;
+    return alive
+      ? `held by pid ${holder.pid} (\`owners ${holder.command}\`) ${since}`
+      : `STALE: pid ${holder.pid} (\`owners ${holder.command}\`) is gone; remove ${lockPath} and run \`owners recover\``;
   }
 
   owner(ownerId: string): OwnerDeclaration {
