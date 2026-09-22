@@ -47,6 +47,9 @@ export const ProposalResult = z.object({ proposal: z.json(), markdown: z.string(
 export async function gitHead(checkout: string, signal: AbortSignal) {
   try {
     await execute('git', ['-C', checkout, 'fetch', '--quiet', 'origin'], { signal, timeout: 60000 });
+    // Keep a clean checkout current so people and local clones see the same base.
+    const { stdout: dirty } = await execute('git', ['-C', checkout, 'status', '--porcelain'], { signal, timeout: 10000 });
+    if (!dirty.trim()) await execute('git', ['-C', checkout, 'merge', '--quiet', '--ff-only', 'refs/remotes/origin/HEAD'], { signal, timeout: 30000 }).catch(() => {});
   } catch {
     /* offline or no remote: the checkout's own history is still a valid pin */
   }
@@ -94,6 +97,7 @@ export function maintenanceCapabilities(options: MaintenanceOptions): Capability
     description: 'Fetch one issue and assess whether it is a bug report ready to investigate. Classification, not acceptance.',
     input: z.object({ repository: Repository, issue: z.number().int().positive() }).strict(),
     output: ReadinessResult,
+    outcome: (result) => { const a = result.run?.assessment; return a ? { status: 'ok', label: `${String(a.kind).replaceAll('_', ' ')} · ${String(a.bug_readiness).replaceAll('_', ' ')}` } : { status: 'failed', label: result.run?.failure ?? 'no assessment' }; },
     validateOutput: (raw) => { const r = ReadinessResult.parse(raw); validateReadinessRun(r.run); return r; },
     metadata: { ...metadata, promptVersion: READINESS_PROMPT, limits: READINESS_LIMITS },
     effects: ['github_reads', 'model_calls', 'local_artifacts'],
@@ -115,6 +119,7 @@ export function maintenanceCapabilities(options: MaintenanceOptions): Capability
     description: 'For a completed ready bug assessment, suggest code and test starting points in the configured checkout. No diagnosis.',
     input: z.object({ readinessJobId: z.uuid() }).strict(),
     output: LocationResult,
+    outcome: (result) => ({ status: result.handoff.disposition === 'located' ? 'ok' : result.handoff.disposition === 'not_located' ? 'partial' : 'failed', label: String(result.handoff.disposition).replaceAll('_', ' ') }),
     validateOutput: (raw) => { const r = LocationResult.parse(raw); validateLocationHandoff(r.handoff); return r; },
     metadata: { ...metadata, promptVersion: LOCATION_PROMPT, limits: LOCATION_LIMITS },
     effects: ['local_source_reads', 'model_calls', 'local_artifacts'],
@@ -145,6 +150,7 @@ export function maintenanceCapabilities(options: MaintenanceOptions): Capability
     description: 'Readiness plus code location for one issue in a single run, rendered as an investigation packet.',
     input: z.object({ repository: Repository, issue: z.number().int().positive() }).strict(),
     output: PacketResult,
+    outcome: (result) => ({ status: result.packet.status === 'completed' ? 'ok' : result.packet.status === 'partial' ? 'partial' : 'failed', label: `${result.packet.status} · location ${String(result.packet.locationDisposition).replaceAll('_', ' ')}` }),
     validateOutput: (raw) => { const r = PacketResult.parse(raw); validatePacket(r.packet); return r; },
     metadata,
     effects: ['github_reads', 'local_source_reads', 'model_calls', 'local_artifacts'],
@@ -166,6 +172,7 @@ export function maintenanceCapabilities(options: MaintenanceOptions): Capability
     description: 'Draft a read-only change proposal from a completed packet. Features need a literal source search query.',
     input: z.object({ packetJobId: z.uuid(), query: z.string().min(1).max(160).optional() }).strict(),
     output: ProposalResult,
+    outcome: (result) => { const stage = result.proposal.stages?.at(-1)?.run?.result; const status = stage?.status ?? result.proposal.status; return { status: status === 'proposal_ready' ? 'ok' : status === 'needs_information' ? 'partial' : 'failed', label: String(status).replaceAll('_', ' ') }; },
     validateOutput: (raw) => { const r = ProposalResult.parse(raw); validateChangeWorkflow(r.proposal); return r; },
     metadata,
     effects: ['local_source_reads', 'model_calls', 'local_artifacts'],
@@ -198,6 +205,7 @@ export function maintenanceCapabilities(options: MaintenanceOptions): Capability
       maxResults: z.number().int().min(1).max(SEARCH_LIMITS.results).default(40),
     }).strict(),
     output: SearchResult,
+    outcome: (result) => ({ status: result.matches.length ? 'ok' : 'partial', label: `${result.matches.length} match(es)${result.truncated ? ', truncated' : ''}` }),
     metadata,
     effects: ['local_source_reads'],
     execute: async ({ repository, query, maxResults }, ctx) => {

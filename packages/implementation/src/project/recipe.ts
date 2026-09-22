@@ -43,7 +43,8 @@ export async function executeProject(checkout:string,proposalDirectory:string,op
     if(patch.status==='needs_information')w.outcome='needs_information';
     else {
       w.after=applyProjectPatch(job,patch);await save();
-      const candidate=join(dir,'candidate');await git(dir,['clone','--no-local','--quiet','--no-checkout',resolve(checkout),candidate]);await git(candidate,['read-tree',job.baseCommit]);
+      // A local clone carries only local branches; the base may be a fetched remote commit, so bring it over explicitly.
+      const candidate=join(dir,'candidate');await git(dir,['clone','--no-local','--quiet','--no-checkout',resolve(checkout),candidate]);await git(candidate,['fetch','--quiet',resolve(checkout),job.baseCommit]);await git(candidate,['read-tree',job.baseCommit]);
       for(const path of job.allowedFiles){await mkdir(join(candidate,path,'..'),{recursive:true});await writeFile(join(candidate,path),w.after[path],{flag:'wx',mode:0o600});}
       await git(candidate,['add','--',...job.allowedFiles]);
       w.diff=await git(candidate,['diff','--cached','--no-ext-diff','--no-textconv',job.baseCommit]);w.diffHash=hash(w.diff);w.headTree=(await git(candidate,['write-tree'])).trim();
@@ -57,6 +58,6 @@ export async function executeProject(checkout:string,proposalDirectory:string,op
       else {const review=ReviewResult.parse(await agent('change-review'));w.outcome=review.verdict==='no_blocking_findings'?'candidate_verified':'review_blocked';}
     }
     w.status='completed';
-  }catch{if(broken)throw new Error('Project persistence failed; inspect artifacts');w.status='failed';w.outcome='execution_failed';}
+  }catch(error){if(broken)throw new Error('Project persistence failed; inspect artifacts');w.status='failed';w.outcome='execution_failed';w.failure=(error instanceof Error?error.message:String(error)).slice(0,500);}
   w.finishedAt=new Date().toISOString();await save();return w;
 }

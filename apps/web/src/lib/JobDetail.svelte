@@ -66,7 +66,7 @@
   <p>Loading job…</p>
 {:else}
   <p class="crumbs"><a href="#/jobs">Jobs</a> / {job.jobId}</p>
-  <h1><span class={`status ${job.status}`}>{job.status}</span> <a href={`#/run/${job.capability}`}>{job.capability}</a> <span class="muted">{job.version}</span></h1>
+  <h1><span class={`status ${job.status}`}>{job.status}</span> {#if job.outcome}<span class={`outcome ${job.outcome.status}`}>{job.outcome.label}</span>{/if} <a href={`#/run/${job.capability}`}>{job.capability}</a> <span class="muted">{job.version}</span></h1>
 
   <p class="actions">
     {#if job.status === 'queued' || job.status === 'running'}

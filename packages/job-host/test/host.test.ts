@@ -313,3 +313,17 @@ test('tailnet users are identified by the local proxy header and mapped to invok
   assert.equal((await discover({ Host: tailnet, Origin: `https://${tailnet}`, 'Tailscale-User-Login': 'stranger@github' })).status, 403);
   await assert.rejects(listenJobHost(host, { web: { directory: site, invoker: 'web' }, tailscale: { users: { 'x@github': 'nobody' } } }), /unknown_tailscale_invoker/);
 });
+
+test('a completed job records the capability\'s own outcome so lists can show failed work without loading results', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'job-outcome-'));
+  const judged: Capability = { ...capability(async (input) => input), outcome: (result) => ({ status: result.value > 0 ? 'ok' : 'failed', label: result.value > 0 ? 'positive' : 'non-positive' }) };
+  const host = await openJobHost({ directory, binding: {}, invokers, capabilities: [judged] });
+  t.after(async () => { await host.close(); await rm(directory, { recursive: true, force: true }); });
+  const good = await settled(host, 'chat', (await host.submit('chat', request('outcome-good', 3))).jobId);
+  const bad = await settled(host, 'chat', (await host.submit('chat', request('outcome-bad', 0))).jobId);
+  assert.equal(good.status, 'completed');
+  assert.deepEqual(good.outcome, { status: 'ok', label: 'positive' });
+  assert.equal(bad.status, 'completed');
+  assert.deepEqual(bad.outcome, { status: 'failed', label: 'non-positive' });
+  assert.deepEqual(host.list('chat').map((j) => j.outcome?.status), ['failed', 'ok']);
+});

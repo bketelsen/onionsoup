@@ -152,6 +152,9 @@ function mappingFor(proposal: Proposal, profile: RepositoryProfile, task: Task):
   return proposal.acceptanceCriteria.map((criterion) => ({ criterionId: criterion.id, checks }));
 }
 
+/** Typed requests are authoritative; the proposal agent should not stall on rendering boundaries. */
+const REQUEST_SCOPE_NOTE = 'Scope note from the operator: this request is authoritative as written. The listed files are the whole scope. If edited data is shared by other pages or views, the change applies wherever it renders; do not ask about rendering boundaries or page-specific sources. Propose the change.';
+
 /** Excerpt bounds the project proposal agent accepts per context entry. */
 const EXCERPT_CHARS = 5000;
 const MAX_EXCERPTS = 30;
@@ -219,6 +222,7 @@ export function implementationCapabilities(options: ImplementationOptions): Capa
       override: z.string().min(1).max(2000).optional(),
     }).strict(),
     output: ApprovalResult,
+    outcome: (result) => ({ status: 'ok', label: `${result.approval.task.allowedFiles.length} file(s) approved` }),
     metadata,
     effects: ['local_artifacts'],
     execute: async ({ proposalJobId, reason, allowedFiles, override }, ctx) => {
@@ -253,6 +257,7 @@ export function implementationCapabilities(options: ImplementationOptions): Capa
       allowedFiles: z.array(SafePath).min(1).max(30),
     }).strict(),
     output: ApprovalResult,
+    outcome: (result) => ({ status: 'ok', label: `${result.approval.task.allowedFiles.length} file(s) approved` }),
     metadata,
     effects: ['local_artifacts'],
     execute: async ({ repository: name, title, request: text, allowedFiles }, ctx) => {
@@ -263,7 +268,7 @@ export function implementationCapabilities(options: ImplementationOptions): Capa
       if (allowedFiles.length > profile.changes.maximumFiles) throw new Error(`too_many_files:${profile.changes.maximumFiles}`);
       const baseCommit = await gitHead(repository.checkout, ctx.signal);
       const context = await fileContext(repository.checkout, baseCommit, allowedFiles, ctx.signal);
-      const task = TaskDraft.parse({ title, request: text, allowedFiles, context });
+      const task = TaskDraft.parse({ title, request: `${text}\n\n${REQUEST_SCOPE_NOTE}`.slice(0, 40000), allowedFiles, context });
       const approval = Approval.parse({
         schemaVersion: 1, origin: 'request', repository: name, baseCommit, profileHash: hash(profile),
         reason: 'Requested directly by the operator.', approvedAt: new Date().toISOString(), task,
@@ -279,6 +284,7 @@ export function implementationCapabilities(options: ImplementationOptions): Capa
     description: 'Run the accepted pipeline for an approval: project proposal, acceptance, pinned dependencies, patch and review agents, sandbox checks.',
     input: z.object({ approvalJobId: z.uuid() }).strict(),
     output: ImplementResult,
+    outcome: (result) => ({ status: result.outcome === 'candidate_verified' ? 'ok' : 'failed', label: String(result.outcome).replaceAll('_', ' ') }),
     validateOutput: (raw) => { const result = ImplementResult.parse(raw); validateProject(result.workflow); return result; },
     metadata,
     effects: ['sandbox_execution', 'model_calls', 'local_artifacts'],
@@ -305,11 +311,15 @@ export function implementationCapabilities(options: ImplementationOptions): Capa
     const proposed = await pipeline.propose(repository.checkout, task.baseCommit, proposalDirectory, options.provider, { repositoryProfile: profile, task, modelFactory });
     if (proposed.status !== 'completed') throw new Error('project_proposal_failed');
     const proposal = Proposal.parse(proposed.proposal!.result);
-    if (proposal.status !== 'proposal_ready') throw new Error('project_proposal_not_ready');
+    if (proposal.status !== 'proposal_ready') {
+      const questions = proposal.questions.map((question) => question.question).join(' | ').slice(0, 1500);
+      throw new Error(`project_proposal_needs_information: ${questions || 'no question recorded'}`);
+    }
     await pipeline.accept(repository.checkout, proposalDirectory, mappingFor(proposal, profile, task), approval.reason, { runtime, dependencies, verificationPlan: plan });
     const workflow = await pipeline.execute(repository.checkout, proposalDirectory, {
       directory: join(ctx.directory, 'execution'), runtime, dependencies, provider: options.provider, modelFactory, signal: ctx.signal,
     });
+    if (workflow.outcome === 'execution_failed') throw new Error(`execution_failed:${workflow.failure ?? 'unknown'}`);
     return { outcome: workflow.outcome ?? workflow.status, headCommit: workflow.headCommit, diff: workflow.diff, workflow };
   }
 
@@ -321,6 +331,7 @@ export function implementationCapabilities(options: ImplementationOptions): Capa
     description: 'Open a draft pull request from a verified candidate. A person submits this; the approval is the click.',
     input: z.object({ implementJobId: z.uuid(), reason: Approval.shape.reason }).strict(),
     output: PublishResult,
+    outcome: (result) => ({ status: result.status === 'published' ? 'ok' : result.status === 'unknown' ? 'partial' : 'failed', label: result.pull?.url ? `${result.status}: ${result.pull.url}` : result.status }),
     metadata,
     effects: ['github_writes', 'local_artifacts'],
     execute: async ({ implementJobId, reason }, ctx) => {

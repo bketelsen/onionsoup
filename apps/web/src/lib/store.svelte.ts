@@ -13,6 +13,7 @@ export type Job = {
   status: JobStatus;
   events: { sequence: number; at: string; status: JobStatus }[];
   error?: string;
+  outcome?: { status: 'ok' | 'partial' | 'failed'; label: string };
   result?: unknown;
 };
 

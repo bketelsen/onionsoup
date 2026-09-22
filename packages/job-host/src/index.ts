@@ -35,6 +35,9 @@ export const JobRequest = z.object({
 export type JobRequest = z.infer<typeof JobRequest>;
 
 const Event = z.object({ sequence: z.number().int().positive(), at: z.iso.datetime(), status: Status }).strict();
+/** What the work itself concluded, distinct from whether the job ran to completion. */
+export const Outcome = z.object({ status: z.enum(['ok', 'partial', 'failed']), label: z.string().min(1).max(200) }).strict();
+export type Outcome = z.infer<typeof Outcome>;
 
 const Job = z.object({
   schemaVersion: z.literal(1),
@@ -53,6 +56,7 @@ const Job = z.object({
   events: z.array(Event).min(1).max(HOST_LIMITS.events),
   resultHash: z.string().length(64).optional(),
   error: z.string().max(2000).optional(),
+  outcome: Outcome.optional(),
 }).strict();
 export type Job = z.infer<typeof Job>;
 export type JobView = Job & { result?: unknown };
@@ -88,6 +92,8 @@ export type Capability = {
   interactive?: boolean;
   /** Jobs whose lane matches run one at a time, for example one sandbox or one repository. */
   lane?: (input: any) => string | undefined;
+  /** Summarize what a validated result concluded, so lists can show it without loading the result. */
+  outcome?: (result: any) => Outcome | undefined;
   execute: (input: any, context: CapabilityContext) => Promise<unknown>;
 };
 
@@ -293,6 +299,7 @@ export async function openJobHost(options: HostOptions) {
     let status: JobStatus = 'failed';
     let error: string | undefined;
     let resultHash: string | undefined;
+    let outcome: Outcome | undefined;
     try {
       signal.throwIfAborted();
       const directory = join(root, job.jobId);
@@ -321,6 +328,7 @@ export async function openJobHost(options: HostOptions) {
       }
       resultHash = digest(result);
       status = 'completed';
+      try { outcome = c.outcome ? Outcome.parse(c.outcome(result)) : undefined; } catch { outcome = undefined; }
     } catch (e) {
       status = signal.aborted ? 'cancelled' : 'failed';
       error = e instanceof HostError ? e.code : e instanceof Error ? e.message : 'failed';
@@ -329,6 +337,7 @@ export async function openJobHost(options: HostOptions) {
     controllers.delete(job.jobId);
     await exclusive(async () => {
       if (resultHash) job.resultHash = resultHash;
+      if (outcome) job.outcome = outcome;
       transition(job, status, error);
       await save();
     });
@@ -413,6 +422,7 @@ export async function openJobHost(options: HostOptions) {
     controllers.delete(parent.jobId);
     await exclusive(async () => {
       if (resultHash) parent.resultHash = resultHash;
+      if (status === 'completed') parent.outcome = { status: outcomes.every((o) => o.status === 'completed') ? 'ok' : 'partial', label: `${outcomes.filter((o) => o.status === 'completed').length}/${outcomes.length} steps completed` };
       transition(parent, status, error ?? (outcomes.length ? undefined : 'no steps'));
       await save();
     });

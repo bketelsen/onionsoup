@@ -29,7 +29,7 @@ export type HostChatMemory = z.infer<typeof HostChatMemory>;
 export type HostCaller = {
   discover(): { capabilities: { id: string; description: string; inputSchema: unknown; effects: string[]; interactive?: boolean }[] };
   submit(request: { capability: string; input: unknown; idempotencyKey: string }): Promise<{ jobId: string }>;
-  inspect(jobId: string): Promise<{ jobId: string; capability: string; status: string; createdAt: string; error?: string; result?: unknown }>;
+  inspect(jobId: string): Promise<{ jobId: string; capability: string; status: string; createdAt: string; error?: string; outcome?: { status: string; label: string }; result?: unknown }>;
   list(): { jobId: string; capability: string; status: string; createdAt: string }[];
   cancel(jobId: string): Promise<unknown>;
 };
@@ -58,6 +58,8 @@ export function createHostChatProfile(options: { bindingHash: string; host: Host
       'To find where something lives in a repository, run repository.search with a literal phrase; it returns matching paths and lines.',
       'To make a code change the person describes: repository.search for the file, then change.request with the exact files, then change.implement with the approval job ID, then change.publish with the implement job ID and the person\'s words as the reason. Each step waits for the previous one; report each job ID.',
       allowInteractive ? 'Interactive capabilities (request, approve, publish) run only when the person explicitly asked for that effect in this message.' : 'Capabilities marked interactive need a person to submit them from the job page; say so.',
+      'If change.implement fails with project_proposal_needs_information, restate the request answering that question and run change.request and change.implement once more; if you cannot answer it, ask the person.',
+      'A completed job can still report a failed outcome; read the outcome and error fields before claiming success.',
       'Every factual answer cites job IDs you inspected in this turn. Never invent results, paths or credentials.',
     ].join(' '),
     turn(context: ProfileContext) {
@@ -72,7 +74,7 @@ export function createHostChatProfile(options: { bindingHash: string; host: Host
         const job = await host.inspect(jobId);
         if (settled(job.status)) active.delete(jobId);
         const projection = job.status === 'completed' ? summarize(job.result) : { summary: job.error ?? job.status, truncated: false };
-        const evidence = { jobId, capability: job.capability, status: job.status, createdAt: job.createdAt, ...(job.error ? { error: job.error } : {}) };
+        const evidence = { jobId, capability: job.capability, status: job.status, createdAt: job.createdAt, ...(job.error ? { error: job.error } : {}), ...(job.outcome ? { outcome: job.outcome } : {}) };
         seen.set(jobId, evidence);
         return { ...evidence, ...projection };
       }

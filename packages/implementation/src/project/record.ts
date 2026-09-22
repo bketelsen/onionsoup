@@ -8,7 +8,7 @@ import {validateParent,proof,type ProjectProposal} from './proposal.ts';
 import {validateProjectAgentRun,type ProjectAgentRun} from './agents.ts';
 export type ProjectWorkflow={schemaVersion:1;kind:'project-change';workflowId:string;startedAt:string;finishedAt?:string;status:'running'|'completed'|'failed';
   parent:ProjectProposal;job:Job;verificationPlan?:VerificationPlan;runtime:Runtime;dependencies:Dependency;seedHash:string;baseline?:Verification;candidate?:Verification;after?:Files;headCommit?:string;headTree?:string;diff?:string;diffHash?:string;appliedTree?:string;
-  stages:Array<{agent:WorkerId;reservedAt:string;run?:ProjectAgentRun}>;pendingExecution?:unknown;outcome?:'candidate_verified'|'needs_information'|'verification_failed'|'review_blocked'|'execution_failed'};
+  stages:Array<{agent:WorkerId;reservedAt:string;run?:ProjectAgentRun}>;pendingExecution?:unknown;outcome?:'candidate_verified'|'needs_information'|'verification_failed'|'review_blocked'|'execution_failed';failure?:string};
 export function projectInput(w:ProjectWorkflow,id:WorkerId) {
   const base={schemaVersion:2,job:w.job,before:w.job.files,fileHashes:Object.fromEntries(Object.entries(w.job.files).map(([p,v])=>[p,hash(v)])),baseline:w.baseline};
   return id==='scoped-patch'?base:{...base,after:w.after,candidate:w.candidate,diff:w.diff,diffHash:w.diffHash};

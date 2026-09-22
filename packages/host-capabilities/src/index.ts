@@ -92,7 +92,7 @@ export function registeredCapabilities(raw:unknown,options:{apiKey?:string; mode
   const entries=repositoryEntries(config);
   if(entries.length){const repositories=entries.map(r=>r.name.toLowerCase());result.push({...common,id:'repository.brief',description:'Collect bounded repository evidence and compose a maintainer brief.',
     input:BriefRequest.refine(r=>repositories.includes(r.repository.toLowerCase())&&Date.parse(r.until)<=Date.now(),'Repository or time window not allowed'),
-    output:RepoBrief,validateOutput:raw=>{const r=RepoBrief.parse(raw);validateRepositoryBrief(r.brief);return r;},
+    output:RepoBrief,outcome:(result)=>{const status=String((result.brief as {status?:string})?.status??'unknown');return {status:status==='completed'?'ok':status==='partial'?'partial':'failed',label:status};},validateOutput:raw=>{const r=RepoBrief.parse(raw);validateRepositoryBrief(r.brief);return r;},
     metadata:{provider:config.provider,model:EVALUATION_MODEL,repositories,maxModelCalls:4,resultContract:'repository-brief-v1',agents:RepoAgentId.options.map(repositoryCapabilityManifest)},effects:['github_reads','model_calls','local_artifacts'],
     execute:async(input,ctx)=>{const brief=await(options.repositoryBrief??createRepositoryBrief)(input,{directory:join(ctx.directory,'analysis'),provider:config.provider,modelFactory,signal:ctx.signal});return {brief,markdown:repositoryBriefMarkdown(brief)};} });}
   result.push(...maintenanceCapabilities({provider:config.provider,repositories:entries,modelFactory,...options.maintenance}));
