@@ -65,7 +65,7 @@
   <section class="conversation">
     <div class="transcript" bind:this={transcript}>
       {#if !store.chatSession}
-        <p class="muted">Ask for a brief, an issue assessment, or a recipe run. The assistant can run anything in the catalog except approval and publish steps, and it must cite the jobs it inspected.</p>
+        <p class="muted">Describe a change to a repository, ask for a brief or an issue assessment, run a recipe, or onboard a repository. The assistant runs the catalog on your behalf and cites the jobs it inspected; anything it publishes shows up as a draft PR.</p>
       {:else}
         {#each store.chatSession.turns as turn (turn.turnId)}
           <div class="turn">
