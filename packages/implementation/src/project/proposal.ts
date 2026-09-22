@@ -1,4 +1,3 @@
-import {EVALUATION_MODEL} from '@onionsoup/providers/evaluation-policy';
 import {mkdir} from 'node:fs/promises';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
@@ -6,7 +5,7 @@ import {z} from 'zod';
 import {atomicJson,readJson} from '@onionsoup/runtime/storage';
 import {hash} from '@onionsoup/repository-analysis/contracts';
 import {git} from '../fixture/fixture.ts';
-import {liveModel} from '@onionsoup/providers';
+import type {ModelResolver} from '@onionsoup/providers';
 import {extractFeatureRequirements,draftChangeProposal,validateProposalAgentRun,type ProposalAgentRun} from '@onionsoup/maintenance/proposal/agents';
 import {Proposal,FeatureRequirements} from '@onionsoup/maintenance/proposal/contracts';
 import {sourceFiles} from './source.ts';
@@ -25,7 +24,7 @@ export function validateParent(raw:unknown):ProjectProposal {
   for(const s of input.sources) {const text=p.files[s.path as keyof Files];if(typeof text!=='string'||text.split('\n').slice(s.startLine-1,s.endLine).join('\n')!==s.quote)throw new Error('Source citation changed');}
   return p;
 }
-export async function proposeProject(checkout:string,commit:string,directory:string,provider:'copilot'|'codex',options:{modelFactory?:typeof liveModel;profile?:ProfileId;repositoryProfile?:RepositoryProfile;task?:Task}={}) {
+export async function proposeProject(checkout:string,commit:string,directory:string,options:{models:ModelResolver;profile?:ProfileId;repositoryProfile?:RepositoryProfile;task?:Task}) {
   const prepared=options.repositoryProfile||options.task?validateTask(options.repositoryProfile,options.task):undefined;
   if(prepared&&prepared.task.baseCommit!==commit)throw new Error('Task base mismatch');
   const profile=prepared?profilePolicy(prepared.profile,prepared.task):projectProfile(options.profile??PROFILE);
@@ -35,9 +34,8 @@ export async function proposeProject(checkout:string,commit:string,directory:str
   const save=()=>atomicJson(join(directory,'proposal.json'),p);await save();
   const issue={schemaVersion:1,repository:p.repository,number:1,title:'Operator request: '+profile.title,body:p.request,updatedAt:new Date().toISOString()};
   // The existing snapshot envelope's number is a local request ordinal, never a GitHub issue identity.
-  p.reserved++;await save();const adapter=await(options.modelFactory??liveModel)(EVALUATION_MODEL,provider);
-  if(adapter.provider!==provider||adapter.modelId!==EVALUATION_MODEL)throw new Error('Provider mismatch');
-  p.requirements=await extractFeatureRequirements({schemaVersion:1,issue},{...adapter,checkpoint:async r=>{p.requirements=r;await save();}});
+  p.reserved++;await save();
+  p.requirements=await extractFeatureRequirements({schemaVersion:1,issue},{...await options.models('feature-requirements'),checkpoint:async r=>{p.requirements=r;await save();}});
   if(p.requirements.status!=='completed'||FeatureRequirements.parse(p.requirements.result).status!=='sufficient_for_proposal'){p.status='failed';await save();return p;}
   const sourcePaths=prepared?prepared.task.context.map(c=>c.path):[...profile.paths,...(profile.language==='go'?['main.go']:[])];
   const sources=sourcePaths.map((path,i)=>{
@@ -52,7 +50,7 @@ export async function proposeProject(checkout:string,commit:string,directory:str
   });
   p.reserved++;await save();p.proposal=await draftChangeProposal({schemaVersion:1,packetId:p.requestId,packetHash:hash({requestId:p.requestId,text:p.request}),issue,commit,sources,
     limitations:['Operator-authored request with local ordinal 1, not a fetched GitHub issue.','Bounded pinned source excerpts; the host will inspect full allowed files before accepting. No execution or project acceptance yet.'],changeKind:'feature',requirements:p.requirements.result},
-    {...adapter,checkpoint:async r=>{p.proposal=r;await save();}});
+    {...await options.models('change-proposal'),checkpoint:async r=>{p.proposal=r;await save();}});
   p.status=p.proposal.status==='completed'?'completed':'failed';await save();return p;
 }
 export const proof=(r:ProposalAgentRun)=>({runId:r.runId,inputHash:r.inputHash,promptVersion:r.promptVersion,result:r.result});

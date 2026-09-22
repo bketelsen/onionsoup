@@ -7,7 +7,6 @@ import { Agent, defineToolInterface, maxSteps, startState, toolCompleted } from 
 import type { LanguageModel } from 'ai';
 import { atomicJson } from '@onionsoup/runtime/storage';
 import { TriageResult, findingCounts } from '@onionsoup/workload-triage';
-import { EVALUATION_MODEL } from '@onionsoup/providers/evaluation-policy';
 
 export const DELEGATION_LIMITS={steps:8,toolCalls:12,investigations:1,briefs:1,timeoutMs:360000,polls:220,pollMs:1000} as const;
 export const DELEGATION_PROMPT='homelab-delegation-v3';
@@ -21,9 +20,9 @@ const Inspection=z.object({schemaVersion:z.literal(1),jobId:z.uuid(),status:z.en
   findings:TriageResult.shape.findings.optional(),sourceRunId:z.uuid().optional(),observedAt:z.iso.datetime().optional(),assessedAt:z.iso.datetime().optional(),
   eligible:z.number().int().nonnegative().nullable().optional(),omitted:z.number().int().nonnegative().nullable().optional(),failure:z.string().max(100).optional()});
 export type McpCall=(name:string,args:Record<string,unknown>,signal:AbortSignal)=>Promise<{isError?:boolean;structuredContent?:unknown}>;
-export async function proveHomelabDelegation(options:{directory:string;provider:'copilot'|'codex';modelFactory:()=>Promise<LanguageModel>;call:McpCall;signal?:AbortSignal;pollMs?:number}){
+export async function proveHomelabDelegation(options:{directory:string;provider:'copilot'|'codex';modelId:string;modelFactory:()=>Promise<LanguageModel>;call:McpCall;signal?:AbortSignal;pollMs?:number}){
   const controller=new AbortController(),signal=AbortSignal.any([controller.signal,AbortSignal.timeout(DELEGATION_LIMITS.timeoutMs),...(options.signal?[options.signal]:[])]);
-  const record={schemaVersion:1,kind:'homelab-delegation',runId:randomUUID(),promptVersion:DELEGATION_PROMPT,provider:options.provider,model:EVALUATION_MODEL,
+  const record={schemaVersion:1,kind:'homelab-delegation',runId:randomUUID(),promptVersion:DELEGATION_PROMPT,provider:options.provider,model:options.modelId,
     startedAt:new Date().toISOString(),finishedAt:undefined as string|undefined,status:'running',steps:0,toolCalls:0,
     modelInvoked:false,tokenUsage:undefined as {input:number|null;output:number|null}|undefined,
     events:[] as {at:string;tool:string;stage:'intent'|'admitted'|'result'|'rejected';data:unknown}[],answer:undefined as (z.infer<typeof Answer>&{findingCounts:ReturnType<typeof findingCounts>})|undefined,failure:undefined as string|undefined};

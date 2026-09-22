@@ -1,3 +1,4 @@
+import {ModelChoice} from '@onionsoup/providers';
 import {VerificationPlan,validateTask} from './repository-profile.ts';
 import {z} from 'zod';
 import {hash} from '@onionsoup/repository-analysis/contracts';
@@ -28,7 +29,7 @@ export function validateProject(raw:unknown):ProjectWorkflow {
   }
   for(const [i,s] of w.stages.entries()){
     if(s.agent!==(i===0?'scoped-patch':'change-review')||!z.iso.datetime().safeParse(s.reservedAt).success)throw new Error('Invalid reservation');
-    if(s.run){const r=validateProjectAgentRun(s.run);if(r.inputHash!==hash(projectInput(w,s.agent))||r.agent!==s.agent||r.model!=='gpt-5.6-terra'||!['copilot','codex'].includes(r.provider))throw new Error('Worker input changed');}
+    if(s.run){const r=validateProjectAgentRun(s.run);if(r.inputHash!==hash(projectInput(w,s.agent))||r.agent!==s.agent||!ModelChoice.safeParse({provider:r.provider,model:r.model}).success)throw new Error('Worker input changed');}
   }
   if(w.after){Files.parse(w.after);const p=PatchResult.parse(w.stages[0]?.run?.result);if(p.status!=='candidate'||hash(w.after)!==hash(applyProjectPatch(j,p)))throw new Error('Unbound patch');}
   if(w.diff!==undefined&&hash(w.diff)!==w.diffHash)throw new Error('Diff mismatch');

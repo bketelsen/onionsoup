@@ -9,7 +9,7 @@ import {hash} from '@onionsoup/repository-analysis/contracts';
 import {Runtime} from './contracts.ts';
 import {projectProfile,GO_PROFILE} from './profiles.ts';
 import {verifyGoProject} from './go-sandbox.ts';
-import {liveModel} from '@onionsoup/providers';
+import type {ModelResolver} from '@onionsoup/providers';
 import {Dependency,validateJob,PatchResult,ReviewResult,PROFILE_LIMITS,paths,type WorkerId,jobPolicy,usesGo,applyProjectPatch} from './contracts.ts';
 import {patchProject,reviewProject} from './agents.ts';
 import {verifyProject} from './sandbox.ts';
@@ -17,7 +17,7 @@ import {sourceFiles} from './source.ts';
 import {validateParent} from './proposal.ts';
 import {seedsFrom,profileHash} from './profile.ts';
 import {projectInput,validateProject,baselineEligibleProject,type ProjectWorkflow} from './record.ts';
-export async function executeProject(checkout:string,proposalDirectory:string,options:{directory:string;runtime:Runtime;dependencies:Dependency;seedBundle?:unknown;provider:'copilot'|'codex';modelFactory?:typeof liveModel;verify?:typeof verifyProject;signal?:AbortSignal;persist?:typeof atomicJson}) {
+export async function executeProject(checkout:string,proposalDirectory:string,options:{directory:string;runtime:Runtime;dependencies:Dependency;seedBundle?:unknown;models:ModelResolver;verify?:typeof verifyProject;signal?:AbortSignal;persist?:typeof atomicJson}) {
   const job=validateJob(await readJson(join(proposalDirectory,'job.json'))),parent=validateParent(await readJson(join(proposalDirectory,'proposal.json')));
   if(job.profileHash!==(job.schemaVersion===2?await repositoryAdapterHash(job.repositoryProfile.execution.adapter):await profileHash(job.profile))||hash(await sourceFiles(checkout,job.baseCommit,job.allowedFiles))!==job.sourceHash)throw new Error('Frozen project inputs changed');
   const verificationPlan=job.schemaVersion===2?VerificationPlan.parse(await readJson(join(proposalDirectory,'checks.json'))):undefined;
@@ -32,7 +32,7 @@ export async function executeProject(checkout:string,proposalDirectory:string,op
   };
   const agent=async(id:WorkerId)=>{
     signal.throwIfAborted();if(w.stages.length>=2)throw new Error('Budget exhausted');const stage:ProjectWorkflow['stages'][number]={agent:id,reservedAt:new Date().toISOString()};w.stages.push(stage);await save();
-    const adapter=await(options.modelFactory??liveModel)('gpt-5.6-terra',options.provider);if(adapter.provider!==options.provider||adapter.modelId!=='gpt-5.6-terra')throw new Error('Provider mismatch');
+    const adapter=await options.models(id);
     stage.run=await(id==='scoped-patch'?patchProject:reviewProject)(projectInput(w,id),{...adapter,signal,checkpoint:async r=>{stage.run=r;await save();}});if(stage.run.status!=='completed')throw new Error('Worker failed');return stage.run.result;
   };
   try {

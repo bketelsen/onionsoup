@@ -4,14 +4,15 @@ import { randomUUID } from 'node:crypto';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { liveModel, providerName } from '@onionsoup/providers';
-import { EVALUATION_MODEL } from '@onionsoup/providers/evaluation-policy';
+import { HomelabMcpConfig } from '@onionsoup/homelab-mcp';
 import { proveHomelabDelegation } from './lib/homelab-delegation.ts';
 globalThis.AI_SDK_LOG_WARNINGS=false;
 console.error=console.warn=()=>process.stderr.write('Provider diagnostic suppressed.\n');
 async function main(){
   const [name,config,output,...extra]=process.argv.slice(2);
   if(!name||!config||extra.length)throw Error('Usage');const provider=providerName(name);
-  if(JSON.parse(await readFile(resolve(config),'utf8')).provider!==provider)throw Error('Provider mismatch');
+  const {model}=HomelabMcpConfig.parse(JSON.parse(await readFile(resolve(config),'utf8')));
+  if(model.provider!==provider)throw Error('Provider mismatch');
   const directory=resolve(output??`runs/homelab-delegation/${randomUUID()}`);await mkdir(dirname(directory),{recursive:true,mode:0o700});
   const client=new Client({name:'onionsoup-model-delegation-proof',version:'1.0.0'});
   const env=Object.fromEntries(Object.entries({PATH:process.env.PATH,HOME:process.env.HOME,SSH_AUTH_SOCK:process.env.SSH_AUTH_SOCK,
@@ -21,7 +22,7 @@ async function main(){
   try{
     await client.connect(transport);
     const catalog=await client.listTools();for(const name of ['discover_homelab','investigate_workload_findings','inspect_homelab_job','create_homelab_brief','cancel_homelab_job'])if(!catalog.tools.some(t=>t.name===name))throw Error('Missing tool');
-    const record=await proveHomelabDelegation({directory,provider,modelFactory:async()=>(await liveModel(EVALUATION_MODEL,provider)).model,
+    const record=await proveHomelabDelegation({directory,provider,modelId:model.model,modelFactory:async()=>(await liveModel(model.model,provider)).model,
       call:async(name,args,signal)=>{const result=await client.callTool({name,arguments:args},undefined,{signal,timeout:30000});return {isError:result.isError===true,structuredContent:result.structuredContent};}});
     process.stdout.write(JSON.stringify({directory,runId:record.runId,status:record.status,steps:record.steps,tokenUsage:record.tokenUsage,answer:record.answer})+'\n');
     if(record.status!=='completed')process.exitCode=1;

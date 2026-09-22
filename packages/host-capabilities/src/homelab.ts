@@ -4,8 +4,7 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import type { Capability } from '@onionsoup/job-host';
 import { atomicJson, optionalJson } from '@onionsoup/runtime/storage';
-import { liveModel } from '@onionsoup/providers';
-import { EVALUATION_MODEL } from '@onionsoup/providers/evaluation-policy';
+import type { ModelResolver } from '@onionsoup/providers';
 import { TrueNasTarget, TrueNasRun, collectTrueNasHealth } from '@onionsoup/truenas-source';
 import { ContainerTarget, Engine } from '@onionsoup/container-source';
 import { collectContainers, ContainersObservation } from '@onionsoup/container-source/containers';
@@ -172,9 +171,9 @@ export function assessTrueNas(observation: z.infer<typeof TrueNasRun>): HomelabI
 export type SourceView = z.infer<typeof SourceView>;
 
 export type HomelabOptions = {
-  provider: 'copilot' | 'codex';
   registry: HomelabRegistry;
-  modelFactory?: typeof liveModel;
+  /** Opens the model each agent runs on. */
+  models: ModelResolver;
   /** Injectable collectors and investigators for tests. */
   collectors?: Partial<{ truenas: typeof collectTrueNasHealth; containers: typeof collectContainers; kubernetes: typeof collectKubernetes }>;
   investigators?: Partial<{ containers: typeof investigateContainers; kubernetes: typeof investigateWorkloads }>;
@@ -200,11 +199,14 @@ export async function describeSource(registry: HomelabRegistry, entry: SourceEnt
 
 export function homelabCapabilities(options: HomelabOptions): Capability[] {
   const { registry } = options;
-  const modelFactory = options.modelFactory ?? liveModel;
-  const model = async () => (await modelFactory(EVALUATION_MODEL, options.provider)).model;
+  /** Investigators record the provider and model before they call it. */
+  const modelFor = async (agent: 'container-triage' | 'workload-triage') => {
+    const adapter = await options.models(agent);
+    return { provider: adapter.provider, modelId: adapter.modelId, modelFactory: async () => adapter.model };
+  };
   const collectors = { truenas: collectTrueNasHealth, containers: collectContainers, kubernetes: collectKubernetes, ...options.collectors };
   const investigators = { containers: investigateContainers, kubernetes: investigateWorkloads, ...options.investigators };
-  const common = { version: 'v1', metadata: { provider: options.provider, model: EVALUATION_MODEL, get sources() { return registry.names(); } } };
+  const common = { version: 'v1', metadata: { agents: ['container-triage', 'workload-triage'], get sources() { return registry.names(); } } };
   const sourceFor = (sourceId: string) => { const entry = registry.get(sourceId); if (!entry) throw new Error(`unknown_source:${sourceId}`); return entry; };
 
   const describe = (entry: SourceEntry) => describeSource(registry, entry);
@@ -287,11 +289,11 @@ export function homelabCapabilities(options: HomelabOptions): Capability[] {
       let names: Names = {};
       if (entry.kind === 'truenas') run = assessTrueNas(TrueNasRun.parse(await refresh(entry, join(directory, 'source'), ctx.signal)));
       else if (entry.kind === 'containers') {
-        run = await investigators.containers(entry.target, { directory: join(directory, 'run'), provider: options.provider, modelId: EVALUATION_MODEL, modelFactory: model, signal: ctx.signal });
+        run = await investigators.containers(entry.target, { directory: join(directory, 'run'), ...(await modelFor('container-triage')), signal: ctx.signal });
         names = await readNames(join(directory, 'run', 'source', 'containers.private.json'));
         await registry.recordLatest(entry.sourceId, 'observation', run.input);
       } else {
-        run = await investigators.kubernetes(entry.target, { directory: join(directory, 'run'), provider: options.provider, modelId: EVALUATION_MODEL, modelFactory: model, signal: ctx.signal });
+        run = await investigators.kubernetes(entry.target, { directory: join(directory, 'run'), ...(await modelFor('workload-triage')), signal: ctx.signal });
         names = await readNames(join(directory, 'run', 'source', 'resources.private.json'));
       }
       await registry.recordLatest(entry.sourceId, 'investigation', run);

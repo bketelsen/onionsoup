@@ -36,6 +36,6 @@ export const verify:typeof verifyFiles=async(files,scope,rt,options)=>{
 export async function fixture(t:TestContext) {
   const root=await mkdtemp(join(tmpdir(),'onionsoup-fixture-test-'));t.after(()=>rm(root,{recursive:true,force:true}));let calls=0;
   const options={mode:'patch' as const,directory:join(root,'run'),provider:'copilot' as const,runtime,checkRuntime:async()=>runtime,verify,
-    modelFactory:async()=>({provider:'copilot' as const,modelId:'gpt-5.6-terra',model:model(calls++===0?patch:()=>review)})};
+    models:async()=>({provider:'copilot' as const,modelId:'gpt-5.6-terra',model:model(calls++===0?patch:()=>review)})};
   return {root,options,calls:()=>calls};
 }

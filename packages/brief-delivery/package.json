@@ -57,12 +57,13 @@
     "dist"
   ],
   "dependencies": {
+    "@onionsoup/job-host": "0.1.0",
+    "@onionsoup/providers": "0.1.0",
     "@onionsoup/repository-analysis": "0.1.0",
     "@onionsoup/repository-brief": "0.1.0",
     "@onionsoup/runtime": "0.1.0",
     "nodemailer": "10.0.10",
     "smtp-server": "3.19.13",
-    "zod": "4.3.6",
-    "@onionsoup/job-host": "0.1.0"
+    "zod": "4.3.6"
   }
 }

@@ -2,7 +2,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { IssueSnapshot } from './contracts.ts';
 import { fixtureModel } from './fixture-model.ts';
-import { liveModel, login, models, providerName } from './providers.ts';
+import { catalogs, environmentChoice, liveModel, login, providerName } from './providers.ts';
 import { triage, type RunRecord } from './triage.ts';
 
 async function save(record: RunRecord) {
@@ -17,7 +17,7 @@ async function save(record: RunRecord) {
 async function main() {
   const [command, file] = process.argv.slice(2);
   if (command === 'login') return login(providerName(file));
-  if (command === 'models') return models();
+  if (command === 'models') return console.log(JSON.stringify(await catalogs(), null, 2));
   if (!['run', 'demo'].includes(command) || !file)
     throw new Error('Usage: triage run <snapshot.json> | demo <snapshot.json> | login copilot|codex | models');
   const input = IssueSnapshot.parse(JSON.parse(await readFile(file, 'utf8')));
@@ -25,7 +25,7 @@ async function main() {
   process.once('SIGINT', () => controller.abort());
   const options = command === 'demo'
     ? { provider: 'fixture', modelId: 'scripted', model: fixtureModel([JSON.parse(await readFile(new URL('../examples/incomplete-assessment.json', import.meta.url), 'utf8'))]) }
-    : await liveModel();
+    : await (async () => { const choice = environmentChoice(); return liveModel(choice.model, choice.provider); })();
   const result = await triage(input, { ...options, signal: controller.signal, checkpoint: save });
   console.log(JSON.stringify(result, null, 2));
   console.error(`Saved ${join(process.env.ONIONSOUP_RUNS_DIR ?? 'runs', `${result.runId}.json`)} (${result.status})`);

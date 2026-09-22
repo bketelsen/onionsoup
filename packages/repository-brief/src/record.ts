@@ -1,3 +1,4 @@
+import { ModelChoice, ranOnWorkflowModel } from '@onionsoup/providers';
 import { z } from 'zod';
 import { isDeepStrictEqual } from 'node:util';
 import { BriefRequest, Snapshot, ThemeResult, hash, type Evidence } from '@onionsoup/repository-analysis/contracts';
@@ -11,11 +12,18 @@ const Stage = z.object({ key: z.enum(stageKeys), status: z.enum(['pending','runn
   updatedAt: z.iso.datetime(), reservation: InvocationBudgetSnapshot.optional(), reservedAt: z.iso.datetime().optional(),
   reason: z.enum(['no_data','disabled','cancelled','prior_attempt_unfinished','execution_error','agent_failed']).optional(), run: z.custom<RepoAgentRun>().optional() }).strict();
 export const RepositoryBrief = z.object({ schemaVersion: z.literal(1), kind: z.literal('repository-brief'), workflowId: z.uuid(),
-  request: BriefRequest, execution: z.object({ provider: z.enum(['copilot','codex']), model: z.string().min(1) }).strict(),
+  request: BriefRequest,
+  /** Briefs from before per-agent models ran every stage on this one model; newer stage runs record their own. */
+  execution: ModelChoice.optional(),
   startedAt: z.iso.datetime(), finishedAt: z.iso.datetime().optional(), status: z.enum(['running','completed','partial','failed']),
   budget: InvocationBudgetSnapshot, snapshot: Snapshot.optional(), snapshotHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   stages: z.array(Stage).length(4), failure: z.enum(['collection_failed','execution_error','cancelled']).optional() }).strict();
 export type RepositoryBrief = z.infer<typeof RepositoryBrief>;
+/** The models a brief ran on, as "provider / model" labels, one per distinct model. */
+export function briefModels(b: RepositoryBrief): string[] {
+  if (b.execution) return [`${b.execution.provider} / ${b.execution.model}`];
+  return [...new Set(b.stages.flatMap((stage) => (stage.run ? [`${stage.run.provider} / ${stage.run.model}`] : [])))];
+}
 export function actionEvidence(b: RepositoryBrief): Evidence[] {
   const s = b.snapshot!;
   const evidence = [...repositoryMetrics(s).evidence, ...itemEvidence(s)];
@@ -60,7 +68,7 @@ export function validateRepositoryBrief(raw: unknown): RepositoryBrief {
     } else if (stage.run || stage.reservation || stage.reservedAt) invalid();
     if (stage.run) {
       const r = validateRepoAgentRun(stage.run);
-      if (runIds.has(r.runId) || r.agent !== stageAgent[stage.key] || r.provider !== b.execution.provider || r.model !== b.execution.model ||
+      if (runIds.has(r.runId) || r.agent !== stageAgent[stage.key] || !ranOnWorkflowModel(b.execution, r) ||
           !isDeepStrictEqual(r.input,stageInput(b,stage.key)) || r.status !== (stage.status === 'unfinished' ? 'running' : stage.status)) invalid();
       runIds.add(r.runId);
     }

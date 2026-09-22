@@ -1,13 +1,13 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { liveModel } from '../src/providers.ts';
+import { liveModel, providerName } from '../src/providers.ts';
 import { triage } from '../src/triage.ts';
 import { EVALUATION_MODEL } from '../src/evaluation-policy.ts';
 
 const cases = JSON.parse(await readFile(new URL('../evals/cases.json', import.meta.url), 'utf8')) as Array<{
   id: string; title: string; body: string; expected: { kind: string; bug_readiness: string }; missing: string[];
 }>;
-const provider = await liveModel(EVALUATION_MODEL);
+const provider = await liveModel(EVALUATION_MODEL, providerName());
 const directory = process.env.ONIONSOUP_RUNS_DIR ?? 'runs';
 await mkdir(directory, { recursive: true, mode: 0o700 });
 let passed = 0;

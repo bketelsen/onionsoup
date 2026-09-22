@@ -6,6 +6,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { BriefRequest, RepoAgentId, repositoryCapabilityManifest, hash } from '@onionsoup/repository-analysis';
 import { createRepositoryBrief, validateRepositoryBrief, repositoryBriefMarkdown, workflowEvents } from '@onionsoup/repository-brief';
 import { atomicJson, optionalJson } from '@onionsoup/runtime/storage';
+import { ProviderId, environmentModels, type ModelResolver } from '@onionsoup/providers';
 
 const Job = z.object({ schemaVersion: z.literal(1), kind: z.literal('brief-mcp-job'), jobId: z.uuid(),
   request: BriefRequest, provider: z.enum(['copilot', 'codex']), createdAt: z.iso.datetime(),
@@ -17,7 +18,8 @@ export type BriefMcpOptions = {
   provider: 'copilot' | 'codex';
   maxJobs?: number;
   reader?: Parameters<typeof createRepositoryBrief>[1]['reader'];
-  modelFactory?: Parameters<typeof createRepositoryBrief>[1]['modelFactory'];
+  /** Opens the model each agent runs on; defaults to ONIONSOUP_MODEL on the configured provider. */
+  models?: ModelResolver;
 };
 const reply = (body: Record<string, unknown>, isError = false) => ({ isError,
   content: [{ type: 'text' as const, text: JSON.stringify(body) }], structuredContent: body });
@@ -25,7 +27,8 @@ const reply = (body: Record<string, unknown>, isError = false) => ({ isError,
 // One host process owns this directory. A durable admission precedes all API/model work.
 // Saved jobs are inspectable after restart; an interrupted attempt is never replayed.
 export function createBriefMcpServer(options: BriefMcpOptions) {
-  const provider = z.enum(['copilot', 'codex']).parse(options.provider);
+  const provider = ProviderId.parse(options.provider);
+  const models = options.models ?? environmentModels(provider);
   const repositories = new Set(z.array(z.string().regex(/^[\w.-]+\/[\w.-]+$/)).min(1).max(100)
     .parse(options.repositories).map(repository => repository.toLowerCase()));
   const limit = z.number().int().min(1).max(10).parse(options.maxJobs ?? 1);
@@ -75,8 +78,8 @@ export function createBriefMcpServer(options: BriefMcpOptions) {
     // Start on a subsequent microtask so pending is installed before execution settles.
     const promise = Promise.resolve().then(async () => {
       try {
-        await createRepositoryBrief(request, { directory: join(home, 'analysis'), provider,
-          reader: options.reader, modelFactory: options.modelFactory, signal: controller.signal });
+        await createRepositoryBrief(request, { directory: join(home, 'analysis'), models,
+          reader: options.reader, signal: controller.signal });
         job.status = 'settled';
       } catch { job.status = 'execution_failed'; }
       job.finishedAt = new Date().toISOString();
@@ -95,7 +98,7 @@ export function createBriefMcpServer(options: BriefMcpOptions) {
       if (!job) return reply({ error: 'job_not_found' }, true);
       const raw = await optionalJson(join(directory(jobId), 'analysis', 'repository-brief.json'));
       const brief = raw ? validateRepositoryBrief(raw) : undefined;
-      if (brief && (hash(brief.request) !== hash(job.request) || brief.execution.provider !== job.provider))
+      if (brief && (hash(brief.request) !== hash(job.request) || brief.stages.some((stage) => stage.run && stage.run.provider !== job.provider)))
         return reply({ error: 'artifact_mismatch' }, true);
       const status = pending.has(jobId) ? 'running' : job.status === 'admitted' ? 'unfinished' : job.status;
       return reply({ schemaVersion: 1, jobId, status, ...(brief ? { workflowId: brief.workflowId,

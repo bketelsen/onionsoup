@@ -72,7 +72,7 @@ test('the site profile builds in the sandbox at its base commit', { skip: !proce
   // One adapter serves both project agents in order: requirements first, then the proposal.
   const adapter = { provider: 'copilot' as const, modelId: 'gpt-5.6-terra' as const, model: scripted([requirements, proposal]) };
   const modelFactory = async () => adapter;
-  const proposed = await proposeProject(checkout, commit, proposalDirectory, 'copilot', { repositoryProfile: profile, task, modelFactory });
+  const proposed = await proposeProject(checkout, commit, proposalDirectory, { repositoryProfile: profile, task, models: modelFactory });
   assert.equal(proposed.status, 'completed');
   const job = await acceptProject(checkout, proposalDirectory, [{ criterionId: 'AC1', checks: ['node-build', 'task-index-changed'] }], 'Site build qualification.', { runtime, dependencies, verificationPlan: plan });
   const baseline = await verifyProject(checkout, commit, job, runtime, dependencies, [], { directory: join(root, 'baseline'), phase: 'baseline', verificationPlan: plan });

@@ -5,8 +5,7 @@ import { atomicJson, readJson } from '@onionsoup/runtime/storage';
 import { hash } from '@onionsoup/repository-analysis/contracts';
 import { LocationSource } from '../location-source.ts';
 import { createInvocationBudget } from '@onionsoup/runtime/budget';
-import { liveModel } from '@onionsoup/providers';
-import { EVALUATION_MODEL } from '@onionsoup/providers/evaluation-policy';
+import type { ModelResolver } from '@onionsoup/providers';
 import { LIMITS, safeInput, type ProposalAgentId } from './contracts.ts';
 import { extractFeatureRequirements, draftChangeProposal } from './agents.ts';
 import { eligiblePacket, bugPreparation, stageInput, validateChangeWorkflow, Query, type ChangeWorkflow, type Preparation } from './record.ts';
@@ -40,14 +39,14 @@ export async function renderChangeProposal(directory:string,events?:EventsFor) {
   if(events) await atomicJson(join(directory,'events.json'),events(w));
   await writeFile(join(directory,'proposal.md'),proposalMarkdown(w),{mode:0o600});return w;
 }
-export async function createChangeProposal(raw:unknown,options:{directory:string;provider:'copilot'|'codex';checkout?:string;query?:string;
-  signal?:AbortSignal;modelFactory?:typeof liveModel;prepareFeature?:typeof featurePreparation;persist?:(file:string,w:ChangeWorkflow)=>Promise<void>;events?:EventsFor}) {
+export async function createChangeProposal(raw:unknown,options:{directory:string;models:ModelResolver;checkout?:string;query?:string;
+  signal?:AbortSignal;prepareFeature?:typeof featurePreparation;persist?:(file:string,w:ChangeWorkflow)=>Promise<void>;events?:EventsFor}) {
   const parent=structuredClone(eligiblePacket(raw)),changeKind=parent.readiness!.assessment!.kind==='bug_report'?'bug_fix':'feature';
   const query=changeKind==='feature'?Query.parse(options.query):undefined;
   if(changeKind==='feature'&&!options.checkout||changeKind==='bug_fix'&&options.query!==undefined) throw new Error('Invalid source selection');
   safeInput('feature-requirements',{schemaVersion:1,issue:parent.issue});options.signal?.throwIfAborted();
   const budget=createInvocationBudget(2),w:ChangeWorkflow={schemaVersion:1,kind:'change-proposal',workflowId:randomUUID(),startedAt:at(),status:'running',
-    parent,parentHash:hash(parent),changeKind,query,execution:{provider:options.provider,model:EVALUATION_MODEL},acceptance:'not_recorded',verification:'not_executed',budget:budget.snapshot(),stages:[]};
+    parent,parentHash:hash(parent),changeKind,query,acceptance:'not_recorded',verification:'not_executed',budget:budget.snapshot(),stages:[]};
   await mkdir(options.directory,{mode:0o700});let storageBroken=false;
   const save=async()=>{
     try {await (options.persist??atomicJson)(join(options.directory,'proposal.json'),structuredClone(validateChangeWorkflow(w)));}
@@ -62,8 +61,7 @@ export async function createChangeProposal(raw:unknown,options:{directory:string
       signal.throwIfAborted();const input=safeInput(agent,stageInput(w,agent));
       const reservation=budget.reserve();if(!reservation) throw new Error('Budget exhausted');
       const stage:ChangeWorkflow['stages'][number]={agent,reservation,reservedAt:at()};w.stages.push(stage);w.budget=reservation;await save();
-      const adapter=await (options.modelFactory??liveModel)(EVALUATION_MODEL,options.provider);
-      if(adapter.provider!==options.provider||adapter.modelId!==EVALUATION_MODEL) throw new Error('Adapter mismatch');
+      const adapter=await options.models(agent);
       signal.throwIfAborted();
       stage.run=await (agent==='feature-requirements'?extractFeatureRequirements:draftChangeProposal)(input,{...adapter,signal,checkpoint:async r=>{stage.run=r;await save();}});
       if(stage.run.status!=='completed') {w.failure='agent_failed';break;}

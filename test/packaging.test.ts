@@ -42,10 +42,10 @@ test('compiled release runs CLI, delivery worker and MCP outside the source repo
   for(const path of ['packages/chat','packages/homelab-chat','apps/chat-cli'])await assert.rejects(readFile(join(release,path,'package.json')));
   const request = { schemaVersion: 1, repository: 'example/widget', since: '2026-09-17T00:00:00Z', until: '2026-09-18T00:00:00Z', maxSuggestions: 0 };
   const original = join(parent, 'original');
-  const record = await createRepositoryBrief(request, { directory: original, provider: 'copilot',
+  const record = await createRepositoryBrief(request, { directory: original,
     reader: async endpoint => endpoint === 'repos/example/widget' ? { full_name: 'example/widget', default_branch: 'main' }
       : endpoint.includes('/actions/runs') ? { total_count: 0, workflow_runs: [] } : { total_count: 0, incomplete_results: false, items: [] },
-    modelFactory: async () => ({ provider: 'copilot', modelId: 'gpt-5.6-terra', model: new MockLanguageModelV3({ doStream: async () => ({
+    models: async () => ({ provider: 'copilot', modelId: 'gpt-5.6-terra', model: new MockLanguageModelV3({ doStream: async () => ({
       stream: simulateReadableStream({ initialDelayInMs: null, chunkDelayInMs: null, chunks: [{ type: 'stream-start', warnings: [] },
         { type: 'tool-call', toolCallId: '1', toolName: 'submit_result', input: JSON.stringify({ schemaVersion: 1, observations: [], limitations: ['No observed activity.'] }) },
         { type: 'finish', finishReason: { unified: 'tool-calls', raw: 'tool-calls' }, usage: { inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },

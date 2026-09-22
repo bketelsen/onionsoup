@@ -200,6 +200,33 @@ sudo) and `truenas` (the operator's truenas-mcp binary; the API key is read from
 
 The homelab MCP server remains for external agents; the homelab CLI is gone.
 
+## Models
+
+Every agent runs on its own provider and model. The host config names a
+default and, optionally, a model for particular agents:
+
+```json
+"capabilities": {
+  "schemaVersion": 2,
+  "models": {
+    "default": { "provider": "codex", "model": "gpt-5.6-terra" },
+    "agents": { "change-review": { "provider": "copilot", "model": "claude-opus-5" } }
+  }
+}
+```
+
+Settings → Models (`GET /v1/models`) lists every agent with its model and where
+that came from, plus the catalog each signed-in provider offers (Copilot's
+`/models`, Codex's `/codex/models`; `?refresh=1` asks again, otherwise catalogs
+are reused for ten minutes). `models.assign` sets one agent's model or, without
+a choice, returns it to the config. It accepts only a model the provider lists,
+persists under `<state>/models/assignments.json`, and applies from the next run
+without a restart. The agent IDs and their descriptions live in
+`packages/host-capabilities/src/models.ts`; an agent that calls a model must be
+listed there. Each agent run records the provider and model it ran on. Workflow
+records from before per-agent models keep their single `execution` model and are
+still validated against it.
+
 ## Limits
 
 Limits are configuration with generous defaults, not contracts. The host runs
@@ -211,12 +238,12 @@ sessions allow hundreds of turns. Profiles set their own sandbox bounds
 thirty, and whether existing tests are `append-only` or `editable`. Publication
 approvals last ninety days unless `approvalDays` says otherwise. Any GitHub
 owner is accepted; the profile and publication target name the repository.
-The model is `ONIONSOUP_MODEL` in the host's environment.
 
 ## Rules kept from the proving phase
 
-Browser input picks configured targets by ID and never paths, credentials,
-commands, providers or models. Every job persists before it runs and after it
+Browser input picks configured targets by ID and never paths, credentials or
+commands. A model assignment picks among the models a signed-in provider lists,
+through a recorded `models.assign` job. Every job persists before it runs and after it
 finishes; interrupted jobs are never replayed automatically. Completed means a
 validated artifact exists; the artifact's own partial or failed status stays
 visible.

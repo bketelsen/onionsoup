@@ -10,7 +10,7 @@ import { validateAssessment } from './contracts.ts';
 import { PROMPT_VERSION, SYSTEM_PROMPT } from './prompt.ts';
 
 export const projectRoot = fileURLToPath(new URL('../', import.meta.url));
-const runtimeFiles = ['packages/maintenance/src/prompt.ts', 'packages/maintenance/src/contracts.ts', 'packages/maintenance/src/triage.ts', 'packages/providers/src/index.ts', 'packages/providers/src/evaluation-policy.ts',
+const runtimeFiles = ['packages/maintenance/src/prompt.ts', 'packages/maintenance/src/contracts.ts', 'packages/maintenance/src/triage.ts', 'packages/providers/src/index.ts', 'src/evaluation-policy.ts',
   'src/batch-run.ts', 'package-lock.json'];
 export async function freezeRuntime() {
   const entries = await Promise.all(runtimeFiles.map(async file => [file,

@@ -46,10 +46,11 @@ async function fixture(t:TestContext,bug=false) {
   // A valid partial ready-bug packet intentionally has no location, so its proposal must ask for context.
   const packet=bug?{schemaVersion:1 as const,packetId:randomUUID(),createdAt:issue.updatedAt,finishedAt:issue.updatedAt,status:'partial' as const,stage:'done' as const,issue,inputHash:hash(issue),repository:{name:issue.repository,commit:'a'.repeat(40)},
     execution:{provider:'copilot' as const,model:'gpt-5.6-terra' as const},reusedReadiness:true,readiness:r,locationDisposition:'failed' as const}:
-    await createPacket(issue,{directory:join(root,'packet'),checkout:'/unused',commit:'a'.repeat(40),provider:'copilot',readiness:r});
+    await createPacket(issue,{directory:join(root,'packet'),checkout:'/unused',commit:'a'.repeat(40),readiness:r,
+      models:async()=>{throw new Error('reused readiness opens no model');}});
   let calls=0;
   const options={directory:join(root,'proposal'),provider:'copilot' as const,checkout:'/unused',...(bug?{}:{query:'list'}),prepareFeature:async()=>structuredClone(preparation),
-    modelFactory:async()=>({provider:'copilot' as const,modelId:'gpt-5.6-terra',model:model([bug?missing:calls++===0?requirements:proposal])})};
+    models:async()=>({provider:'copilot' as const,modelId:'gpt-5.6-terra',model:model([bug?missing:calls++===0?requirements:proposal])})};
   return {root,packet,options,calls:()=>calls};
 }
 test('feature and bug profiles enforce evidence, coverage, preparation and acceptance separation',()=>{
@@ -115,7 +116,7 @@ test('initialization failure, child failure and cancellation never advance to pr
   t.mock.method(console,'error',()=>{});
   for(const mode of ['initialize','child','cancel']) {
     const f=await fixture(t),c=new AbortController();let calls=0;
-    const w=await createChangeProposal(f.packet,{...f.options,signal:c.signal,modelFactory:async()=>{
+    const w=await createChangeProposal(f.packet,{...f.options,signal:c.signal,models:async()=>{
       calls++;if(mode==='initialize') throw new Error('secret provider diagnostic');return {provider:'copilot',modelId:'gpt-5.6-terra',model:model([new Error('secret provider diagnostic')])};
     },persist:async(file,w)=>{await atomicJson(file,w);if(mode==='cancel'&&w.preparation) c.abort();}});
     assert.equal(w.status,'failed');assert.equal(calls,mode==='cancel'?0:1);assert.ok(w.stages.every(s=>s.agent==='feature-requirements'));

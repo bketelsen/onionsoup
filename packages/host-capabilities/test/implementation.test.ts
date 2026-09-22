@@ -56,11 +56,11 @@ test('approval fixes an in-profile task from a real proposal; implement and publ
 
   // Build a completed proposal workflow the way the maintenance capabilities would.
   const readiness = await triage(issue, { ...adapter(scripted('submit_assessment', [assessment])) });
-  const packet = await createPacket(issue, { directory: join(root, 'packet'), checkout: '/unused', commit, provider: 'copilot', readiness });
+  const packet = await createPacket(issue, { directory: join(root, 'packet'), checkout: '/unused', commit, readiness, models: async () => { throw new Error('reused readiness opens no model'); } });
   let proposalCalls = 0;
   const workflow = await createChangeProposal(packet, {
-    directory: join(root, 'proposal'), provider: 'copilot', checkout: '/unused', query: 'list', prepareFeature: async () => structuredClone(preparation),
-    modelFactory: async () => adapter(scripted('submit_result', [proposalCalls++ === 0 ? requirements : proposal])),
+    directory: join(root, 'proposal'), checkout: '/unused', query: 'list', prepareFeature: async () => structuredClone(preparation),
+    models: async () => adapter(scripted('submit_result', [proposalCalls++ === 0 ? requirements : proposal])),
   });
   assert.equal(workflow.status, 'completed');
 
@@ -84,13 +84,13 @@ test('approval fixes an in-profile task from a real proposal; implement and publ
   const pipelineCalls: string[] = [];
   let acceptedMapping: unknown;
   let proposedTask: any;
-  const capabilities = registeredCapabilities({ schemaVersion: 1, provider: 'copilot', repositories: [{ name: 'bketelsen/widget', checkout, implementation: { ...files, target: 0 } }] }, {
-    modelFactory: async () => { throw new Error('no live model in this test'); },
+  const capabilities = registeredCapabilities({ schemaVersion: 2, models: { default: { provider: 'copilot', model: 'gpt-5.6-terra' } }, repositories: [{ name: 'bketelsen/widget', checkout, implementation: { ...files, target: 0 } }] }, {
+    models: async () => { throw new Error('no live model in this test'); },
     repositoryBrief: async () => { throw new Error('not used'); },
     maintenance: { source: githubSource, head: async () => commit, packet: async () => packet, proposal: async () => workflow },
     implementation: { pipeline: {
       provisionNode: async () => { pipelineCalls.push('provision'); return { schemaVersion: 1 } as any; },
-      propose: async (_checkout, _commit, _dir, _provider, options) => { pipelineCalls.push('propose'); proposedTask = options?.task; return { status: 'completed', proposal: { result: proposal } } as any; },
+      propose: async (_checkout, _commit, _dir, options) => { pipelineCalls.push('propose'); proposedTask = options?.task; return { status: 'completed', proposal: { result: proposal } } as any; },
       accept: async (_checkout, _dir, mapping) => { pipelineCalls.push('accept'); acceptedMapping = mapping; return {} as any; },
       execute: async () => { pipelineCalls.push('execute'); throw new Error('sandbox_unavailable_in_test'); },
     } },

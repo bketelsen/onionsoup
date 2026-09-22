@@ -1,3 +1,4 @@
+import {isWorkflowExecution,ranOnWorkflowModel,type WorkflowExecution} from '@onionsoup/providers';
 import {z} from 'zod';
 import {hash} from '@onionsoup/repository-analysis/contracts';
 import {Scope,Files,Runtime,Receipt,PatchResult,ReviewResult,POLICY,type FixtureCase} from './contracts.ts';
@@ -7,7 +8,7 @@ import type {ExecutionIntent} from './sandbox.ts';
 import {checks} from './fixture.ts';
 export type FixtureWorkflow={schemaVersion:1;kind:'fixture-change';workflowId:string;startedAt:string;finishedAt?:string;
   status:'running'|'completed'|'failed';mode:'baseline'|'patch';case:FixtureCase;runtime:Runtime;seed:string;
-  execution:{provider:'copilot'|'codex';model:string};scope?:Scope;before?:Files;after?:Files;
+  execution?:WorkflowExecution;scope?:Scope;before?:Files;after?:Files;
   baseline?:Receipt;candidate?:Receipt;pendingExecution?:ExecutionIntent;diff?:string;diffHash?:string;diffAppliedTreeHash?:string;
   budget:InvocationBudgetSnapshot;stages:Array<{agent:'scoped-patch'|'change-review';reservedAt:string;reservation:InvocationBudgetSnapshot;run?:FixtureAgentRun}>;
   outcome?:'baseline_observed'|'candidate_verified'|'needs_information'|'verification_failed'|'review_blocked'|'execution_failed';
@@ -26,7 +27,7 @@ export function validateFixtureWorkflow(raw:unknown):FixtureWorkflow {
   const w=raw as FixtureWorkflow;
   if(!w||w.schemaVersion!==1||w.kind!=='fixture-change'||!z.uuid().safeParse(w.workflowId).success||!z.uuid().safeParse(w.seed).success||
     !z.iso.datetime().safeParse(w.startedAt).success||!['running','completed','failed'].includes(w.status)||!['baseline','patch'].includes(w.mode)||
-    !['bug','feature'].includes(w.case)||w.publication!=='not_authorized'||!['copilot','codex'].includes(w.execution?.provider)||w.execution.model!=='gpt-5.6-terra'||!Array.isArray(w.stages)) throw new Error('Invalid fixture workflow');
+    !['bug','feature'].includes(w.case)||w.publication!=='not_authorized'||!isWorkflowExecution(w.execution)||!Array.isArray(w.stages)) throw new Error('Invalid fixture workflow');
   Runtime.parse(w.runtime);InvocationBudgetSnapshot.parse(w.budget);
   if(w.budget.limit!==2||w.budget.consumed!==w.stages.length||w.stages.length>2) throw new Error('Budget mismatch');
   if(w.scope) {Scope.parse(w.scope);if(w.scope.case!==w.case||hash(Files.parse(w.before))!==w.scope.baseTree) throw new Error('Scope mismatch');}
@@ -47,7 +48,7 @@ export function validateFixtureWorkflow(raw:unknown):FixtureWorkflow {
   if(w.pendingExecution&&(!w.scope||w.pendingExecution.scopeHash!==hash(w.scope)||w.pendingExecution.runtimeHash!==hash(w.runtime)||w.pendingExecution.policyHash!==hash(POLICY))) throw new Error('Execution intent mismatch');
   for(const [i,s] of w.stages.entries()) {
     if(s.agent!==(i===0?'scoped-patch':'change-review')||!z.iso.datetime().safeParse(s.reservedAt).success||hash(s.reservation)!==hash({limit:2,consumed:i+1,remaining:1-i})) throw new Error('Reservation mismatch');
-    if(s.run) {const r=validateFixtureAgentRun(s.run);if(r.agent!==s.agent||r.inputHash!==hash(agentInput(w,s.agent))||r.provider!==w.execution.provider||r.model!==w.execution.model) throw new Error('Agent binding mismatch');}
+    if(s.run) {const r=validateFixtureAgentRun(s.run);if(r.agent!==s.agent||r.inputHash!==hash(agentInput(w,s.agent))||!ranOnWorkflowModel(w.execution,r)) throw new Error('Agent binding mismatch');}
   }
   const patch=w.stages[0]?.run?.result;
   if(w.after) {

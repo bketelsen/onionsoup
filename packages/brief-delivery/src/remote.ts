@@ -10,7 +10,8 @@ const RepoBrief=z.object({brief:z.json(),markdown:z.string().optional()}).strict
 export function remoteBriefGenerator(client:JobClient):typeof createRepositoryBrief {
   return async(request,options)=>{
     const catalog=await client.discover(options.signal),capability=catalog.capabilities.find((c:any)=>c.id==='repository.brief');
-    if(!capability||capability.metadata.provider!==options.provider)throw Error('Provider mismatch');
+    // The job host chooses each agent's model; the brief's stage runs record which ones ran.
+    if(!capability)throw Error('remote_brief_unavailable');
     await mkdir(options.directory,{mode:0o700});
     const parent=DeliveryRecord.parse(await readJson(join(options.directory,'..','delivery.json')));
     if(digest(parent.request)!==digest(request))throw Error('Delivery request mismatch');
@@ -20,7 +21,7 @@ export function remoteBriefGenerator(client:JobClient):typeof createRepositoryBr
     await atomicJson(join(options.directory,'host-job.json'),{schemaVersion:1,jobId:submitted.jobId,idempotencyKey,correlationId,binding:catalog.binding,status:'admitted'});
     const job=await client.wait(submitted.jobId,options.signal);if(job.status!=='completed')throw Error('Remote analysis unfinished');
     const brief=validateRepositoryBrief(RepoBrief.parse(job.result).brief);
-    if(digest(brief.request)!==digest(request)||brief.execution.provider!==options.provider)throw Error('Remote result mismatch');
+    if(digest(brief.request)!==digest(request))throw Error('Remote result mismatch');
     await atomicJson(join(options.directory,'repository-brief.json'),brief);return brief;
   };
 }

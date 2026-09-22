@@ -1,7 +1,7 @@
 import {parseArgs} from 'node:util';
 import {resolve} from 'node:path';
 import {atomicJson,readJson} from '@onionsoup/runtime/storage';
-import {providerName} from '@onionsoup/providers';
+import {environmentModels,providerName} from '@onionsoup/providers';
 import {pinRuntime} from './sandbox.ts';
 import {Runtime} from './contracts.ts';
 import {runFixture,renderFixture} from './recipe.ts';
@@ -19,7 +19,7 @@ try {
     else {
       if(positionals.length!==2||!['baseline','patch'].includes(positionals[0])||!values.runtime||!values.output||!values.provider) throw new Error('Arguments');
       const controller=new AbortController(),abort=()=>controller.abort();process.once('SIGINT',abort);process.once('SIGTERM',abort);
-      try {w=await runFixture(positionals[1],{mode:positionals[0] as 'baseline'|'patch',directory:resolve(values.output),runtime:Runtime.parse(await readJson(resolve(values.runtime))),provider:providerName(values.provider),signal:controller.signal});}
+      try {w=await runFixture(positionals[1],{mode:positionals[0] as 'baseline'|'patch',directory:resolve(values.output),runtime:Runtime.parse(await readJson(resolve(values.runtime))),models:environmentModels(providerName(values.provider)),signal:controller.signal});}
       finally{process.removeListener('SIGINT',abort);process.removeListener('SIGTERM',abort);}
     }
     process.stdout.write(JSON.stringify({workflowId:w.workflowId,status:w.status,outcome:w.outcome,budget:w.budget})+'\n');if(!['candidate_verified','baseline_observed'].includes(w.outcome??'')) process.exitCode=1;

@@ -32,7 +32,7 @@ const mapping:Job['mapping']=[{criterionId:'AC1',checks:['default-history','stat
 async function setup(t:TestContext,baseCommit?:string) {
  const f=await fixture(t),w=await runFixture('bug',f.options),fc=PublicationConfig.parse({schemaVersion:1,stateDirectory:join(f.root,'fixture-publications'),targets:[{repository:'bketelsen/onionsoup-fixtures',repositoryId:42,baseBranch:'main',baseCommit:w.scope!.baseCommit}]});
  const seed=await preparePublication(fc,f.options.directory,fc.targets[0]),dir=join(f.root,'proposal'),base=baseCommit??PROFILE_COMMIT;
- const parent=await proposeProject(process.cwd(),base,dir,'copilot',{modelFactory:async()=>({provider:'copilot',modelId:'gpt-5.6-terra',model:model(input=>'changeKind' in input?proposal:requirements)})});
+ const parent=await proposeProject(process.cwd(),base,dir,{models:async()=>({provider:'copilot',modelId:'gpt-5.6-terra',model:model(input=>'changeKind' in input?proposal:requirements)})});
  assert.equal(parent.status,'completed');const job=await acceptProject(process.cwd(),dir,mapping,'Scripted accepted proposal for software tests.');
  const deps=Dependency.parse({schemaVersion:1,directory:'/fixture/dependencies',packageHash:job.packageHash,lockHash:job.lockHash,treeHash:'a'.repeat(64),nodeHash:runtime.nodeHash,npmHash:'b'.repeat(64),npmVersion:'fixture',scripts:'disabled',registry:'https://registry.npmjs.org/',createdAt:new Date().toISOString()});
  let calls=0;
@@ -41,7 +41,7 @@ async function setup(t:TestContext,baseCommit?:string) {
   const at=new Date().toISOString();await o.checkpoint?.({phase:o.phase});
   return Verification.parse({schemaVersion:1,receiptId:randomUUID(),phase:o.phase,jobHash:hash(j),tree:(await git(checkout,['rev-parse',commit+'^{tree}'])).trim(),runtimeHash:hash(rt),dependencyHash:hash(d),profileHash:j.profileHash,seedHash:hash(seeds),startedAt:at,finishedAt:at,status:o.phase==='candidate'?'passed':'checks_failed',checks:CheckId.options.map(id=>({id,status:o.phase==='baseline'&&['status-filter','filter-controls','invalid-filter','documentation'].includes(id)?'failed':'passed'})),exitCode:0,cleanup:'removed',commandHash:'c'.repeat(64),outputHash:'d'.repeat(64),containerName:'onionsoup-project-'+randomUUID()});
  };
- const options={directory:join(f.root,'project'),runtime,dependencies:deps,seedBundle:seed,provider:'copilot' as const,modelFactory,verify};
+ const options={directory:join(f.root,'project'),runtime,dependencies:deps,seedBundle:seed,models:modelFactory,verify};
  return {...f,dir,parent,job,seed,options,calls:()=>calls};
 }
 test('acceptance binds a real proposal and all criteria; models receive compact results rather than conversations',async t=>{

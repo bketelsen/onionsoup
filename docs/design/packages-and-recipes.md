@@ -51,7 +51,7 @@ flowchart TD
 | `repository-brief` | Sequence, four admissions, record validation, events, rendering |
 | `brief-delivery` | Schedule, occurrence ledger, SMTP and capture support |
 | `brief-mcp` | Allowlisted asynchronous delegation and saved-job inspection |
-| `providers` | Subscription adapters, explicit selection, development model policy |
+| `providers` | Subscription adapters, model catalogs, per-agent model resolution |
 | `runtime` | Small shared storage, budget, event-schema and text primitives |
 
 For repository briefs, four thin applications select configuration: on-demand CLI, scheduled worker,
@@ -168,7 +168,7 @@ specific operational needs; do not require a service boundary for each agent.
 ## Operational notes
 
 The on-demand command requires authenticated `gh` and a configured Copilot or
-Codex subscription; the development model is Terra. It needs no target repository
+Codex subscription and `ONIONSOUP_MODEL`. It needs no target repository
 checkout. API and model failures produce partial artifacts when possible. Existing
 output paths are exclusive. Inspect running artifacts as unknown, then deliberately
 start a new attempt if needed; `render` never resumes work.

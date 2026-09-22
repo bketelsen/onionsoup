@@ -1,4 +1,4 @@
-import { EVALUATION_MODEL } from '@onionsoup/providers/evaluation-policy';
+import { isWorkflowExecution, ranOnWorkflowModel, type WorkflowExecution } from '@onionsoup/providers';
 import { z } from 'zod';
 import { validatePacket, type Packet } from '../packet.ts';
 import { hash } from '@onionsoup/repository-analysis/contracts';
@@ -13,7 +13,7 @@ export type Preparation=z.infer<typeof Preparation>;
 export type ChangeWorkflow={ schemaVersion:1;kind:'change-proposal';workflowId:string;startedAt:string;finishedAt?:string;
   status:'running'|'completed'|'failed';failure?:'execution_error'|'interrupted_or_timed_out'|'agent_failed';
   parent:Packet;parentHash:string;changeKind:'bug_fix'|'feature';query?:string;preparation?:Preparation;
-  execution:{provider:'copilot'|'codex';model:string};acceptance:'not_recorded';verification:'not_executed';
+  execution?:WorkflowExecution;acceptance:'not_recorded';verification:'not_executed';
   budget:InvocationBudgetSnapshot;stages:Array<{agent:ProposalAgentId;reservedAt:string;reservation:InvocationBudgetSnapshot;run?:ProposalAgentRun}> };
 export function eligiblePacket(raw:unknown) {
   const p=validatePacket(raw),a=p.readiness?.assessment;
@@ -41,8 +41,8 @@ export function validateChangeWorkflow(raw:unknown):ChangeWorkflow {
   const w=raw as ChangeWorkflow;
   if(!w||w.schemaVersion!==1||w.kind!=='change-proposal'||!z.uuid().safeParse(w.workflowId).success||
     !z.iso.datetime().safeParse(w.startedAt).success||!['running','completed','failed'].includes(w.status)||
-    w.acceptance!=='not_recorded'||w.verification!=='not_executed'||!['copilot','codex'].includes(w.execution?.provider)||
-    w.execution?.model!==EVALUATION_MODEL||!Array.isArray(w.stages)) throw new Error('Invalid proposal workflow');
+    w.acceptance!=='not_recorded'||w.verification!=='not_executed'||!isWorkflowExecution(w.execution)||
+    !Array.isArray(w.stages)) throw new Error('Invalid proposal workflow');
   const p=eligiblePacket(w.parent);
   if(hash(p)!==w.parentHash||w.changeKind!==(p.readiness!.assessment!.kind==='bug_report'?'bug_fix':'feature')) throw new Error('Parent mismatch');
   if(w.changeKind==='feature') Query.parse(w.query); else if(w.query!==undefined) throw new Error('Unexpected query');
@@ -59,7 +59,7 @@ export function validateChangeWorkflow(raw:unknown):ChangeWorkflow {
       hash(s.reservation)!==hash({limit:2,consumed:i+1,remaining:1-i})||i>0&&w.stages[i-1].run?.status!=='completed') throw new Error('Invalid stage reservation');
     if(s.run) {
       const r=validateProposalAgentRun(s.run);
-      if(r.agent!==s.agent||r.inputHash!==hash(safeInput(s.agent,stageInput(w,s.agent)))||r.provider!==w.execution.provider||r.model!==w.execution.model) throw new Error('Stage binding mismatch');
+      if(r.agent!==s.agent||r.inputHash!==hash(safeInput(s.agent,stageInput(w,s.agent)))||!ranOnWorkflowModel(w.execution,r)) throw new Error('Stage binding mismatch');
     }
   }
   if(w.status==='running'?(w.finishedAt!==undefined||w.failure!==undefined):!z.iso.datetime().safeParse(w.finishedAt).success) throw new Error('Termination mismatch');

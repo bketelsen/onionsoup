@@ -5,7 +5,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MockLanguageModelV3, simulateReadableStream } from 'ai/test';
 import { openJobHost, type JobHost } from '@onionsoup/job-host';
-import { EVALUATION_MODEL } from '@onionsoup/providers/evaluation-policy';
 import { IssueSnapshot } from '@onionsoup/maintenance/contracts';
 import type { Source } from '@onionsoup/maintenance/github-issues';
 import { registeredCapabilities } from '../src/index.ts';
@@ -43,8 +42,8 @@ async function settled(host: JobHost, id: string) {
 test('maintenance capabilities run readiness from the catalog and refuse ineligible or unconfigured handoffs', async (t) => {
   const directory = await mkdtemp(join(tmpdir(), 'maintenance-host-'));
   let modelCalls = 0;
-  const capabilities = registeredCapabilities({ schemaVersion: 1, provider: 'copilot', repositories: [{ name: 'example/widget' }] }, {
-    modelFactory: async (modelId, provider) => { modelCalls++; return { model: scripted([assessment]), provider: provider as 'copilot', modelId: modelId as typeof EVALUATION_MODEL }; },
+  const capabilities = registeredCapabilities({ schemaVersion: 2, models: { default: { provider: 'copilot', model: 'gpt-5.6-terra' } }, repositories: [{ name: 'example/widget' }] }, {
+    models: async () => { modelCalls++; return { model: scripted([assessment]), provider: 'copilot', modelId: 'gpt-5.6-terra' }; },
     repositoryBrief: async () => { throw new Error('not used'); },
     maintenance: { source },
   });

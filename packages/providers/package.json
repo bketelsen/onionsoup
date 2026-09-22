@@ -11,11 +11,6 @@
       "onionsoup-source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
-    },
-    "./evaluation-policy": {
-      "onionsoup-source": "./src/evaluation-policy.ts",
-      "types": "./dist/evaluation-policy.d.ts",
-      "default": "./dist/evaluation-policy.js"
     }
   },
   "files": [
@@ -24,6 +19,8 @@
   "dependencies": {
     "@humanlayer/agentlayer-provider-auth": "0.0.36",
     "@humanlayer/agentlayer-provider-github-copilot": "0.0.36",
-    "@humanlayer/agentlayer-provider-openai-codex": "0.0.36"
+    "@humanlayer/agentlayer-provider-openai-codex": "0.0.36",
+    "ai": "6.0.191",
+    "zod": "4.3.6"
   }
 }

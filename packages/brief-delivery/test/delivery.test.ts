@@ -12,7 +12,7 @@ import { smtpSender, bytesHash } from '@onionsoup/brief-delivery/mail';
 import { tick, prepareSaved, deliver, inspect, reconcile, type DeliveryOptions } from '@onionsoup/brief-delivery/runtime';
 import { createRepositoryBrief } from '@onionsoup/repository-brief/recipe';
 import { atomicJson, readJson } from '@onionsoup/runtime/storage';
-import { EVALUATION_MODEL } from '@onionsoup/providers/evaluation-policy';
+const TEST_MODEL = 'gpt-5.6-terra';
 import { workflowEvents } from '@onionsoup/brief-delivery/events';
 const config=DeliveryConfig.parse({ schemaVersion:1,jobId:'test-brief',repository:'example/widget',provider:'copilot',days:7,maxSuggestions:0,
   schedule:{ timeZone:'America/New_York',time:'09:00',weekdays:[1,2,3,4,5],catchUpHours:2 },
@@ -25,7 +25,7 @@ async function fixture(t:TestContext) {
     generations++;
     return createRepositoryBrief(raw,{ ...options,reader:async endpoint=>endpoint==='repos/example/widget'?{ full_name:'example/widget',default_branch:'main' }:
       endpoint.includes('/actions/runs')?{ total_count:0,workflow_runs:[] }:{ total_count:0,incomplete_results:false,items:[] },
-      modelFactory:async()=>{ modelCalls++; return { provider:'copilot',modelId:EVALUATION_MODEL,model:new MockLanguageModelV3({
+      models:async()=>{ modelCalls++; return { provider:'copilot',modelId:TEST_MODEL,model:new MockLanguageModelV3({
         doStream:async()=>({ stream:simulateReadableStream({ initialDelayInMs:null,chunkDelayInMs:null,chunks:[{ type:'stream-start',warnings:[] },
           { type:'tool-call',toolCallId:'one',toolName:'submit_result',input:JSON.stringify({ schemaVersion:1,observations:[],limitations:['No activity in the sample.'] }) },
           { type:'finish',finishReason:{ unified:'tool-calls',raw:'tool-calls' },usage:{ inputTokens:{ total:1,noCache:1,cacheRead:0,cacheWrite:0 },outputTokens:{ total:1,text:1,reasoning:0 } } }] }) }) }) }; } });
@@ -145,7 +145,7 @@ test('interrupted analysis is not replayed; saved completed analysis is adopted 
   }
 });
 test('artifact, destination and request substitution stop before sending',async t=>{
-  const f=await fixture(t), b=await f.generate({ schemaVersion:1,repository:config.repository,since:'2026-09-11T13:00:00.000Z',until:'2026-09-18T13:00:00.000Z',maxSuggestions:0 },{ directory:join(f.parent,'saved'),provider:'copilot' });
+  const f=await fixture(t), b=await f.generate({ schemaVersion:1,repository:config.repository,since:'2026-09-11T13:00:00.000Z',until:'2026-09-18T13:00:00.000Z',maxSuggestions:0 },{ directory:join(f.parent,'saved'),models:async()=>{ throw Error('generate supplies the model'); } });
   const result=await prepareSaved(config,b,f.options);
   await assert.rejects(deliver({ ...config,to:'other@example.invalid' },result.occurrence,f.options));
   await writeFile(join(result.directory,'message.eml'),'tampered'); await assert.rejects(deliver(config,result.occurrence,f.options));

@@ -64,7 +64,8 @@ Budgets, persisted failures, hashes, and historical schema support are part of
 provenance, not simply an issue number.
 
 Use `npm run verify` and `npm run demo` without credentials. Live evaluations
-require a configured subscription and currently use Terra only. The
+require a configured subscription. The legacy evaluation CLIs pin one model
+(`src/evaluation-policy.ts`); the job host picks a model per agent. The
 [validation design](validation.md) and [evaluation plan](../plans/evaluations.md)
 separate runtime success, citation grounding, semantic relevance, and independent
 maintainer acceptance.

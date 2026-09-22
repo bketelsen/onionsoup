@@ -18,6 +18,7 @@
   ],
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.0",
+    "@onionsoup/providers": "0.1.0",
     "@onionsoup/repository-analysis": "0.1.0",
     "@onionsoup/repository-brief": "0.1.0",
     "@onionsoup/runtime": "0.1.0",

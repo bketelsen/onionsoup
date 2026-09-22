@@ -1,3 +1,4 @@
+import { environmentModels } from '@onionsoup/providers';
 import { z } from 'zod';
 import { scheduleControl } from './control.ts';
 import { randomUUID } from 'node:crypto';
@@ -93,7 +94,7 @@ async function runOccurrence(c:DeliveryConfig,occurrence:{ key:string;dueAt:stri
         occurrence:occurrence.key,dueAt:occurrence.dueAt,createdAt:stamp(),configHash:hash(c),request,attempts:[] });
       await save(directory,r,options);
       // Generation owns its own initial/final checkpoints. No retry can re-enter here.
-      await (options.generate??createRepositoryBrief)(request,{ directory:join(directory,'analysis'),provider:c.provider });
+      await (options.generate??createRepositoryBrief)(request,{ directory:join(directory,'analysis'),models:environmentModels(c.provider) });
     }
     await prepare(c,directory,r,options);
     await send(c,directory,r,options,false);

@@ -4,8 +4,7 @@ import { promisify } from 'node:util';
 import { z } from 'zod';
 import type { Capability, CapabilityContext } from '@onionsoup/job-host';
 import { readJson } from '@onionsoup/runtime/storage';
-import { liveModel } from '@onionsoup/providers';
-import { EVALUATION_MODEL } from '@onionsoup/providers/evaluation-policy';
+import type { ModelResolver } from '@onionsoup/providers';
 import { hash } from '@onionsoup/repository-analysis/contracts';
 import { validateChangeWorkflow, type ChangeWorkflow } from '@onionsoup/maintenance/proposal/record';
 import { Proposal } from '@onionsoup/maintenance/proposal/contracts';
@@ -40,9 +39,9 @@ export type ImplementationConfig = z.infer<typeof ImplementationConfig>;
 export type ImplementationRepository = { name: string; checkout?: string; implementation?: ImplementationConfig };
 
 export type ImplementationOptions = {
-  provider: 'copilot' | 'codex';
   registry: RepositoryRegistry;
-  modelFactory?: typeof liveModel;
+  /** Opens the model each agent runs on. */
+  models: ModelResolver;
   pipeline?: Partial<Pipeline>;
 };
 
@@ -191,7 +190,6 @@ async function fileContext(checkout: string, commit: string, files: string[], si
 export function implementationCapabilities(options: ImplementationOptions): Capability[] {
   const { registry } = options;
   const implementable = () => registry.list().filter((repository) => repository.implementation && repository.checkout) as Required<ImplementationRepository>[];
-  const modelFactory = options.modelFactory ?? liveModel;
   const pipeline: Pipeline = {
     propose: proposeProject, accept: acceptProject, execute: executeProject,
     provisionNode: provisionDependencies, provisionGo: provisionGoDependencies,
@@ -199,7 +197,7 @@ export function implementationCapabilities(options: ImplementationOptions): Capa
     ...options.pipeline,
   };
   const common = { version: 'v1', timeoutMs: 1800000 };
-  const metadata = { provider: options.provider, model: EVALUATION_MODEL, get repositories() { return implementable().map((r) => r.name); } };
+  const metadata = { get repositories() { return implementable().map((r) => r.name); } };
 
   const repositoryFor = (name: string) => {
     const repository = implementable().find((r) => r.name === name);
@@ -290,7 +288,7 @@ export function implementationCapabilities(options: ImplementationOptions): Capa
     output: ImplementResult,
     outcome: (result) => ({ status: result.outcome === 'candidate_verified' ? 'ok' : 'failed', label: String(result.outcome).replaceAll('_', ' ') }),
     validateOutput: (raw) => { const result = ImplementResult.parse(raw); validateProject(result.workflow); return result; },
-    metadata,
+    metadata: { ...metadata, agents: ['feature-requirements', 'change-proposal', 'scoped-patch', 'change-review'] },
     effects: ['sandbox_execution', 'model_calls', 'local_artifacts'],
     execute: async ({ approvalJobId }, ctx) => runImplementation(approvalJobId, ctx),
   };
@@ -312,7 +310,7 @@ export function implementationCapabilities(options: ImplementationOptions): Capa
       ? await pipeline.provisionGo(repository.checkout, task.baseCommit, join(ctx.directory, 'dependencies'), runtime)
       : await pipeline.provisionNode(repository.checkout, task.baseCommit, join(ctx.directory, 'dependencies'));
     const proposalDirectory = join(ctx.directory, 'project');
-    const proposed = await pipeline.propose(repository.checkout, task.baseCommit, proposalDirectory, options.provider, { repositoryProfile: profile, task, modelFactory });
+    const proposed = await pipeline.propose(repository.checkout, task.baseCommit, proposalDirectory, { repositoryProfile: profile, task, models: options.models });
     if (proposed.status !== 'completed') throw new Error('project_proposal_failed');
     const proposal = Proposal.parse(proposed.proposal!.result);
     if (proposal.status !== 'proposal_ready') {
@@ -321,7 +319,7 @@ export function implementationCapabilities(options: ImplementationOptions): Capa
     }
     await pipeline.accept(repository.checkout, proposalDirectory, mappingFor(proposal, profile, task), approval.reason, { runtime, dependencies, verificationPlan: plan });
     const workflow = await pipeline.execute(repository.checkout, proposalDirectory, {
-      directory: join(ctx.directory, 'execution'), runtime, dependencies, provider: options.provider, modelFactory, signal: ctx.signal,
+      directory: join(ctx.directory, 'execution'), runtime, dependencies, models: options.models, signal: ctx.signal,
     });
     if (workflow.outcome === 'execution_failed') throw new Error(`execution_failed:${workflow.failure ?? 'unknown'}`);
     return { outcome: workflow.outcome ?? workflow.status, headCommit: workflow.headCommit, diff: workflow.diff, workflow };

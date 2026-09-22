@@ -1,4 +1,4 @@
-import { validateRepositoryBrief, actionEvidence } from './record.ts';
+import { validateRepositoryBrief, actionEvidence, briefModels } from './record.ts';
 import { repositoryMetrics, themeInput } from '@onionsoup/repository-analysis/metrics';
 import { ThemeResult, HealthResult, ActionsResult } from '@onionsoup/repository-analysis/contracts';
 import { text } from '@onionsoup/runtime/text';
@@ -7,7 +7,7 @@ export function repositoryBriefMarkdown(raw: unknown) {
   const lines = [`# Repository brief: ${text(b.request.repository)}`, '',
     `Status: **${b.status === 'running' ? 'unfinished — outcome unknown' : b.status}** · Agent attempts: ${b.budget.consumed}/4`, '',
     `Activity window: **[${b.request.since}, ${b.request.until})**`, '',
-    `Workflow: ${b.workflowId} · ${b.execution.provider} / ${text(b.execution.model)}`, '',
+    `Workflow: ${b.workflowId} · ${text(briefModels(b).join(', ') || 'no model runs')}`, '',
     '[Saved evidence and agent records](repository-brief.json) · [Common trace](events.json)', '',
     'Open counts are current at collection; activity counts refer to the window. GitHub search is indexed and non-atomic. Theme summaries use sampled titles and labels only; comments, issue bodies, PR diffs, review state and merge safety were not inspected.', ''];
   if (b.failure) lines.push(`Workflow failure: **${b.failure}**.`, '');
@@ -103,6 +103,6 @@ export function repositoryBriefHtml(raw: unknown) {
     for (const e of actionEvidence(b)) parts.push(`<dt id="${esc(e.id)}">${esc(e.id)}</dt><dd>${esc(e.statement)}</dd>`);
     parts.push('</dl>');
   } else parts.push('<p>Collection has no saved outcome.</p>');
-  parts.push(`<footer><p>Workflow ${b.workflowId} · ${b.execution.provider} / ${esc(b.execution.model)}<br>Snapshot SHA-256: ${b.snapshotHash ?? 'not established'}</p><p>Cost and remaining subscription quota are unknown. No target code execution or GitHub/email writes.</p></footer>`);
+  parts.push(`<footer><p>Workflow ${b.workflowId} · ${esc(briefModels(b).join(', ') || 'no model runs')}<br>Snapshot SHA-256: ${b.snapshotHash ?? 'not established'}</p><p>Cost and remaining subscription quota are unknown. No target code execution or GitHub/email writes.</p></footer>`);
   return `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><title>Repository brief</title><style>body{max-width:1050px;margin:2rem auto;padding:0 1rem;font:16px/1.6 system-ui;color:#17212c;background:#fafafa}table{border-collapse:collapse;width:100%}th,td{text-align:left;border-bottom:1px solid #ccc;padding:.5rem}h2{margin-top:2.5rem}a{color:#175cad}small{display:block}dt{font-weight:bold;margin-top:1rem}dd,details,footer{overflow-wrap:anywhere}footer{border-top:1px solid #ccc;margin-top:2rem}li{margin:.5rem 0}</style><body>${parts.join('\n')}</body></html>\n`;
 }

@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
-import { liveModel } from '../src/providers.ts';
+import { liveModel, providerName } from '../src/providers.ts';
 import { EVALUATION_MODEL } from '../src/evaluation-policy.ts';
 import { locateCode } from '../src/location-agent.ts';
 import { makeLocationInput } from '../src/location-workflow.ts';
@@ -31,7 +31,7 @@ await git('init', '-q'); await git('remote', 'add', 'origin', 'https://github.co
 await git('add', '.'); await git('commit', '-qm', 'Synthetic code-location development fixture');
 const commit = (await git('rev-parse', 'HEAD')).stdout.trim();
 await atomicJson(join(directory, 'corpus.json'), corpus);
-const adapter = await liveModel(EVALUATION_MODEL);
+const adapter = await liveModel(EVALUATION_MODEL, providerName());
 const results = [];
 for (const [i, item] of corpus.cases.entries()) {
   const issue = { schemaVersion: 1, repository: 'example/widget', number: i + 1,

@@ -9,7 +9,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 test('compiled stdio host discovers and creates a saved-source brief without credentials or model calls',async t=>{
   const root=await mkdtemp(join(tmpdir(),'homelab-stdio-'));t.after(()=>rm(root,{recursive:true,force:true}));
   await writeFile(join(root,'nas.json'),JSON.stringify({schemaVersion:1,kind:'truenas-observation',runId:randomUUID(),assetId:'nas',targetHash:'a'.repeat(64),binaryHash:'b'.repeat(64),readOnly:true,tlsInsecure:true,startedAt:'2026-09-19T00:00:00Z',finishedAt:'2026-09-19T00:00:01Z',status:'failed',failure:'connection_failed'}));
-  const config=join(root,'config.json');await writeFile(config,JSON.stringify({schemaVersion:1,provider:'copilot',runsDirectory:'state',observations:['nas.json'],targets:[],maxJobs:1}));
+  const config=join(root,'config.json');await writeFile(config,JSON.stringify({schemaVersion:1,model:{provider:'copilot',model:'gpt-5.6-terra'},runsDirectory:'state',observations:['nas.json'],targets:[],maxJobs:1}));
   const client=new Client({name:'external-homelab-chat',version:'1'}),transport=new StdioClientTransport({command:process.execPath,args:[resolve('apps/homelab-mcp/dist/main.js')],cwd:tmpdir(),env:{ONIONSOUP_HOMELAB_CONFIG:config,PATH:'/nonexistent'},stderr:'pipe'});
   t.after(()=>client.close());await client.connect(transport);
   const call=async(name:string,args:Record<string,unknown>={})=>(await client.callTool({name,arguments:args})).structuredContent as any;

@@ -5,12 +5,13 @@ import { HomelabConfig, HomelabRegistry, homelabCapabilities } from './homelab.t
 export { HomelabConfig, HomelabRegistry, homelabCapabilities, investigationMarkdown, assessTrueNas, describeSource } from './homelab.ts';
 import { BriefRequest, RepoAgentId, repositoryCapabilityManifest } from '@onionsoup/repository-analysis';
 import { createRepositoryBrief, validateRepositoryBrief, repositoryBriefMarkdown } from '@onionsoup/repository-brief';
-import { EVALUATION_MODEL } from '@onionsoup/providers/evaluation-policy';
-import { liveModel } from '@onionsoup/providers';
+import type { ModelResolver } from '@onionsoup/providers';
 import { maintenanceCapabilities, type MaintenanceRepository } from './maintenance.ts';
 import { implementationCapabilities, ImplementationConfig, type ImplementationRepository } from './implementation.ts';
 import { RepositoryRegistry } from './registry.ts';
 import { onboardingCapabilities } from './onboarding.ts';
+import { ModelConfig, ModelRegistry, modelCapabilities, type CatalogReader } from './models.ts';
+export { ModelConfig, ModelRegistry, ModelAgentId, MODEL_AGENTS, modelCapabilities, type CatalogReader, type ModelOrigin } from './models.ts';
 export { describeEntry } from './onboarding.ts';
 export { RepositoryRegistry, onboardRepository, updateRepository, detectProfile } from './registry.ts';
 
@@ -18,7 +19,7 @@ const Id=z.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
 const RepositoryName = BriefRequest.shape.repository;
 /** A bare name allows briefs and issue reads; a checkout additionally allows bounded source reads. */
 const RepositoryConfig = z.union([RepositoryName, z.object({ name: RepositoryName, checkout: z.string().min(1).optional(), implementation: ImplementationConfig.optional() }).strict()]);
-export const CapabilityConfig=z.object({schemaVersion:z.literal(1),provider:z.enum(['copilot','codex']),
+export const CapabilityConfig=z.object({schemaVersion:z.literal(2),models:ModelConfig,
   homelab:HomelabConfig.optional(),repositories:z.array(RepositoryConfig).max(100).default([])}).strict()
 
 export const repositoryEntries = (config: CapabilityConfig): (MaintenanceRepository & ImplementationRepository)[] =>
@@ -65,27 +66,34 @@ export function resolveCapabilityConfig(raw:unknown,file:string){
   });
   return c;
 }
-export function registeredCapabilities(raw:unknown,options:{modelFactory?:typeof liveModel; repositoryBrief?:typeof createRepositoryBrief;
-  maintenance?:Omit<Parameters<typeof maintenanceCapabilities>[0],'provider'|'registry'|'modelFactory'>;
-  implementation?:Omit<Parameters<typeof implementationCapabilities>[0],'provider'|'registry'|'modelFactory'>;
+export function registeredCapabilities(raw:unknown,options:{repositoryBrief?:typeof createRepositoryBrief;
+  /** Live model assignments; when absent, a fixed registry is built from the configuration. */
+  modelRegistry?:ModelRegistry; catalog?:CatalogReader;
+  /** Opens each agent's model; defaults to the model registry's resolver. Tests script models here. */
+  models?:ModelResolver;
+  maintenance?:Omit<Parameters<typeof maintenanceCapabilities>[0],'registry'|'models'>;
+  implementation?:Omit<Parameters<typeof implementationCapabilities>[0],'registry'|'models'>;
   /** Live repository registry; when absent, a fixed in-memory registry is built from the configuration. */
   registry?:RepositoryRegistry; onboarding?:Parameters<typeof onboardingCapabilities>[1];
   /** Live homelab source registry; when absent, a fixed one is built from the configuration. */
-  homelab?:HomelabRegistry; homelabOptions?:Omit<Parameters<typeof homelabCapabilities>[0],'provider'|'registry'|'modelFactory'>}={}):Capability[]{
-  const config=CapabilityConfig.parse(raw),modelFactory=options.modelFactory??liveModel,result:Capability[]=[];
+  homelab?:HomelabRegistry; homelabOptions?:Omit<Parameters<typeof homelabCapabilities>[0],'registry'|'models'>}={}):Capability[]{
+  const config=CapabilityConfig.parse(raw),result:Capability[]=[];
+  const modelRegistry=options.modelRegistry??ModelRegistry.fixed(config.models);
+  const models=options.models??modelRegistry.resolver();
   const common={version:'v1',timeoutMs:600000};
   const homelab=options.homelab??(config.homelab?HomelabRegistry.fixed({directory:'',entries:config.homelab.sources,maxAgeSeconds:config.homelab.maxAgeSeconds,truenasApiKeyFile:config.homelab.truenasApiKeyFile}):undefined);
-  if(homelab)result.push(...homelabCapabilities({provider:config.provider,registry:homelab,modelFactory,...options.homelabOptions}));
+  if(homelab)result.push(...homelabCapabilities({registry:homelab,models,...options.homelabOptions}));
   const entries=repositoryEntries(config);
   const registry=options.registry??RepositoryRegistry.fixed(entries);
   const repositoriesNow=()=>registry.names().map(r=>r.toLowerCase());
   {result.push({...common,id:'repository.brief',description:'Collect bounded repository evidence and compose a maintainer brief.',
     get input(){return BriefRequest.safeExtend({repository:registry.schema()}).refine(r=>repositoriesNow().includes(r.repository.toLowerCase())&&Date.parse(r.until)<=Date.now(),'Repository or time window not allowed');},
     output:RepoBrief,outcome:(result)=>{const status=String((result.brief as {status?:string})?.status??'unknown');return {status:status==='completed'?'ok':status==='partial'?'partial':'failed',label:status};},validateOutput:raw=>{const r=RepoBrief.parse(raw);validateRepositoryBrief(r.brief);return r;},
-    metadata:{provider:config.provider,model:EVALUATION_MODEL,get repositories(){return repositoriesNow();},maxModelCalls:4,resultContract:'repository-brief-v1',agents:RepoAgentId.options.map(repositoryCapabilityManifest)},effects:['github_reads','model_calls','local_artifacts'],
-    execute:async(input,ctx)=>{const brief=await(options.repositoryBrief??createRepositoryBrief)(input,{directory:join(ctx.directory,'analysis'),provider:config.provider,modelFactory,signal:ctx.signal});return {brief,markdown:repositoryBriefMarkdown(brief)};} });}
-  result.push(...maintenanceCapabilities({provider:config.provider,registry,modelFactory,...options.maintenance}));
-  result.push(...implementationCapabilities({provider:config.provider,registry,modelFactory,...options.implementation}));
+    metadata:{agents:RepoAgentId.options,get repositories(){return repositoriesNow();},maxModelCalls:4,resultContract:'repository-brief-v1',manifests:RepoAgentId.options.map(repositoryCapabilityManifest)},effects:['github_reads','model_calls','local_artifacts'],
+    execute:async(input,ctx)=>{const brief=await(options.repositoryBrief??createRepositoryBrief)(input,{directory:join(ctx.directory,'analysis'),models,signal:ctx.signal});return {brief,markdown:repositoryBriefMarkdown(brief)};} });}
+  result.push(...maintenanceCapabilities({registry,models,...options.maintenance}));
+  result.push(...implementationCapabilities({registry,models,...options.implementation}));
   if(options.registry)result.push(...onboardingCapabilities(registry,options.onboarding));
+  if(options.modelRegistry)result.push(...modelCapabilities(options.modelRegistry,options.catalog));
   return result;
 }

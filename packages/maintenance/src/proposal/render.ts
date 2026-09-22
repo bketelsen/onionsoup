@@ -20,8 +20,8 @@ export function proposalMarkdown(raw:unknown) {
   lines.push('## Preparation limits','',...(w.preparation?.limitations??['Preparation unavailable.']).map(l=>`- ${text(l)}`),'',
     '## Source evidence','');
   for(const s of w.preparation?.sources??[]) lines.push(`### ${s.id}: ${text(s.path)}:${s.startLine}–${s.endLine}`,'',`Relevance: ${s.relevance}`,'',quote(s.quote),'');
-  lines.push('## Provenance','',quote(JSON.stringify({workflowId:w.workflowId,execution:w.execution,budget:w.budget,
-    parentPacketId:w.parent.packetId,query:w.query,sourceAttempts:w.preparation?.attempts,stages:w.stages.map(s=>({agent:s.agent,runId:s.run?.runId,promptVersion:s.run?.promptVersion,status:s.run?.status,usage:s.run?.tokenUsage?.totals}))},null,2)),
+  lines.push('## Provenance','',quote(JSON.stringify({workflowId:w.workflowId,...(w.execution?{execution:w.execution}:{}),budget:w.budget,
+    parentPacketId:w.parent.packetId,query:w.query,sourceAttempts:w.preparation?.attempts,stages:w.stages.map(s=>({agent:s.agent,model:s.run?`${s.run.provider}/${s.run.model}`:undefined,runId:s.run?.runId,promptVersion:s.run?.promptVersion,status:s.run?.status,usage:s.run?.tokenUsage?.totals}))},null,2)),
     '', 'Token counts are provider reports. Billed cost and subscription quota consumption are unknown.','');return lines.join('\n');
 }
 

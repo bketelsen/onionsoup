@@ -8,9 +8,9 @@ console.error = console.warn = () => process.stderr.write('Provider diagnostic s
 let release: (() => Promise<void>) | undefined;
 try {
   if (process.argv.includes('--help')) {
-    process.stdout.write('Repository brief MCP (stdio): set ONIONSOUP_PROVIDER, ONIONSOUP_RUNS_DIR, ONIONSOUP_REPOSITORIES (comma separated); optional ONIONSOUP_MAX_JOBS (1..10, default 1).\n');
+    process.stdout.write('Repository brief MCP (stdio): set ONIONSOUP_PROVIDER, ONIONSOUP_MODEL, ONIONSOUP_RUNS_DIR, ONIONSOUP_REPOSITORIES (comma separated); optional ONIONSOUP_MAX_JOBS (1..10, default 1).\n');
   } else {
-    if (process.argv.length !== 2 || !process.env.ONIONSOUP_RUNS_DIR || !process.env.ONIONSOUP_PROVIDER || !process.env.ONIONSOUP_REPOSITORIES)
+    if (process.argv.length !== 2 || !process.env.ONIONSOUP_RUNS_DIR || !process.env.ONIONSOUP_PROVIDER || !process.env.ONIONSOUP_MODEL || !process.env.ONIONSOUP_REPOSITORIES)
       throw new Error('Missing host configuration');
     const root = resolve(process.env.ONIONSOUP_RUNS_DIR);
     const host = createBriefMcpServer({ runsDirectory: root, provider: providerName(process.env.ONIONSOUP_PROVIDER),

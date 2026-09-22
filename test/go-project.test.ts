@@ -31,14 +31,14 @@ async function setup(t:any){
  await writeFile(join(repo,'go.mod'),'module github.com/bketelsen/clippy\n\ngo 1.21\n');await writeFile(join(repo,'go.sum'),'');
  await mkdir(join(repo,'assets'));await writeFile(join(repo,'assets','image.bin'),Buffer.from([0,255,254,100]));
  await git(repo,['init','-q']);await git(repo,['remote','add','origin','https://github.com/bketelsen/clippy.git']);await git(repo,['add','.']);await git(repo,['-c','user.name=Test','-c','user.email=test@example.invalid','commit','-qm','Base']);
- const base=(await git(repo,['rev-parse','HEAD'])).trim(),dir=join(root,'proposal');await proposeProject(repo,base,dir,'copilot',{profile:GO_PROFILE,modelFactory:prepareModel});
+ const base=(await git(repo,['rev-parse','HEAD'])).trim(),dir=join(root,'proposal');await proposeProject(repo,base,dir,{profile:GO_PROFILE,models:prepareModel});
  const job=await acceptProject(repo,dir,mapping,'Scripted software test under fixture authority.');
  const deps=GoDependency.parse({schemaVersion:2,directory:'/fixture/modules',packageHash:job.packageHash,lockHash:job.lockHash,treeHash:'c'.repeat(64),goHash:runtime.goHash,goVersion:runtime.goVersion,registry:'https://proxy.golang.org',checksumDatabase:'sum.golang.org',createdAt:new Date().toISOString()});
  return {root,repo,dir,base,job,deps};
 }
 test('Go uses the same proposal, patch, review, publication and event functions with profile-specific authority',async t=>{
  const f=await setup(t);let calls=0;
- const w=await executeProject(f.repo,f.dir,{directory:join(f.root,'run'),runtime,dependencies:f.deps,provider:'copilot',modelFactory:async()=>({provider:'copilot',modelId:'gpt-5.6-terra',model:model(()=>calls++===0?{schemaVersion:2,status:'candidate',summary:'Scripted plumbing test.',edits:[{path:'main.go',beforeHash:hash(f.job.files['main.go']),content:f.job.files['main.go']+'// Fixture change.\n'}],questions:[]}:{schemaVersion:2,verdict:'no_blocking_findings',findings:[],limitations:['Scripted; no quality claim.']})}),
+ const w=await executeProject(f.repo,f.dir,{directory:join(f.root,'run'),runtime,dependencies:f.deps,models:async()=>({provider:'copilot',modelId:'gpt-5.6-terra',model:model(()=>calls++===0?{schemaVersion:2,status:'candidate',summary:'Scripted plumbing test.',edits:[{path:'main.go',beforeHash:hash(f.job.files['main.go']),content:f.job.files['main.go']+'// Fixture change.\n'}],questions:[]}:{schemaVersion:2,verdict:'no_blocking_findings',findings:[],limitations:['Scripted; no quality claim.']})}),
  verify:async(checkout,commit,j,rt,d,seeds,o)=>{const at=new Date().toISOString();await o.checkpoint?.({phase:o.phase});return Verification.parse({schemaVersion:1,receiptId:randomUUID(),phase:o.phase,jobHash:hash(j),tree:(await git(checkout,['rev-parse',commit+'^{tree}'])).trim(),runtimeHash:hash(rt),dependencyHash:hash(d),profileHash:j.profileHash,seedHash:hash(seeds),startedAt:at,finishedAt:at,status:o.phase==='baseline'?'checks_failed':'passed',checks:projectProfile(GO_PROFILE).checks.map(id=>({id,status:o.phase==='baseline'&&['bubble-colors','documentation'].includes(id)?'failed':'passed'})),exitCode:0,cleanup:'removed',commandHash:'d'.repeat(64),outputHash:'e'.repeat(64),containerName:'onionsoup-project-'+randomUUID()});}});
  assert.equal(w.outcome,'candidate_verified');assert.equal(calls,2);assert.equal(w.appliedTree,w.headTree);assert.equal(workflowEvents(w).events.filter(e=>e.type==='verification.completed').length,2);
  const config={schemaVersion:1 as const,stateDirectory:join(f.root,'publications'),targets:[{repository:'bketelsen/clippy',repositoryId:172236427,baseBranch:'master',baseCommit:f.base}]};
@@ -70,7 +70,7 @@ test('Go provisioning rejects replacement paths and modules without public check
 });
 test('real Go profile preserves original tests and reports absent colors with unchanged embedded assets',{skip:!process.env.ONIONSOUP_GO_CHECKOUT},async t=>{
  const root=await mkdtemp(join(tmpdir(),'onionsoup-go-real-'));t.after(()=>rm(root,{recursive:true,force:true}));const checkout=process.env.ONIONSOUP_GO_CHECKOUT!,base=(await git(checkout,['rev-parse','HEAD'])).trim(),dir=join(root,'proposal');
- await proposeProject(checkout,base,dir,'copilot',{profile:GO_PROFILE,modelFactory:prepareModel});const job=await acceptProject(checkout,dir,mapping,'Explicit software integration preflight.');
+ await proposeProject(checkout,base,dir,{profile:GO_PROFILE,models:prepareModel});const job=await acceptProject(checkout,dir,mapping,'Explicit software integration preflight.');
  const rt=GoRuntime.parse(JSON.parse(await readFile(process.env.ONIONSOUP_GO_RUNTIME!,'utf8'))),deps=GoDependency.parse(JSON.parse(await readFile(process.env.ONIONSOUP_GO_DEPENDENCIES!,'utf8')));
  const r=await verifyGoProject(checkout,base,job,rt,deps,[],{directory:join(root,'baseline'),phase:'baseline'});
  assert.equal(r.status,'checks_failed');for(const id of projectProfile(GO_PROFILE).baseline)assert.equal(r.checks.find(c=>c.id===id)?.status,'passed',id);

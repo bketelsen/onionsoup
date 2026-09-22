@@ -44,8 +44,8 @@ test('onboarding clones, detects a build or test profile, lists, updates, and re
   const clone = async (name: string, directory: string) => { await git(root, ['clone', '-q', origins[name], directory]); };
 
   const registry = await RepositoryRegistry.open({ directory: join(root, 'registry'), entries: [{ name: 'someone/fixed', checkout: '/unused' }], nodeRuntime: runtimeFile });
-  const capabilities = registeredCapabilities({ schemaVersion: 1, provider: 'copilot', repositories: ['someone/fixed'] }, {
-    registry, onboarding: { lookup, clone }, modelFactory: async () => { throw new Error('no model'); }, repositoryBrief: async () => { throw new Error('no'); },
+  const capabilities = registeredCapabilities({ schemaVersion: 2, models: { default: { provider: 'copilot', model: 'gpt-5.6-terra' } }, repositories: ['someone/fixed'] }, {
+    registry, onboarding: { lookup, clone }, models: async () => { throw new Error('no model'); }, repositoryBrief: async () => { throw new Error('no'); },
   });
   const ids = capabilities.map((c) => c.id);
   assert.ok(['repository.list', 'repository.onboard', 'repository.update', 'repository.search'].every((id) => ids.includes(id)));

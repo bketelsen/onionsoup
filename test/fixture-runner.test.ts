@@ -62,13 +62,13 @@ test('baseline setup failure and failed candidate cleanup prevent model or revie
 });
 test('review findings remain a blocked result even when the candidate checks passed',async t=>{
   const f=await fixture(t);let i=0;
-  const w=await runFixture('bug',{...f.options,modelFactory:async()=>({provider:'copilot',modelId:'gpt-5.6-terra',model:model(i++===0?patch:()=>({schemaVersion:1,verdict:'changes_requested',
+  const w=await runFixture('bug',{...f.options,models:async()=>({provider:'copilot',modelId:'gpt-5.6-terra',model:model(i++===0?patch:()=>({schemaVersion:1,verdict:'changes_requested',
     findings:[{severity:'blocking',path:'tasks.mjs',line:2,criterionIds:['AC1'],explanation:'Requires further evidence.'}],limitations:['Scripted review boundary.']}))})});
   assert.equal(w.candidate!.status,'passed');assert.equal(w.outcome,'review_blocked');assert.equal(w.stages.length,2);
 });
 test('cancelled work and initialization failure spend no hidden retry',async t=>{
   const f=await fixture(t),controller=new AbortController();controller.abort();await assert.rejects(runFixture('bug',{...f.options,signal:controller.signal}));assert.equal(f.calls(),0);
-  const g=await fixture(t);let calls=0;const w=await runFixture('feature',{...g.options,modelFactory:async()=>{calls++;throw new Error('Private auth failure');}});
+  const g=await fixture(t);let calls=0;const w=await runFixture('feature',{...g.options,models:async()=>{calls++;throw new Error('Private auth failure');}});
   assert.equal(w.status,'failed');assert.equal(calls,1);assert.equal(w.budget.consumed,1);assert.ok(!JSON.stringify(w).includes('Private auth'));
 });
 test('fixture console history excludes conflicts and malformed records without executing anything',async t=>{

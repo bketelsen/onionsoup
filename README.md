@@ -53,7 +53,9 @@ npm run jobs -- --config .local/job-host/config.json           # open http://127
 ```
 
 Browser input only picks configured repositories and prior jobs by ID. Checkout
-paths, credentials, providers and models come from the configuration file.
+paths and credentials come from the configuration file. Each agent's provider and
+model default from the config's `capabilities.models` and can be changed under
+Settings → Models, among the models the signed-in providers list.
 See [the web design page](docs/design/web.md).
 
 ## Homelab
@@ -117,8 +119,8 @@ npm run triage -- run examples/incomplete-bug.json
 
 For Codex, set `ONIONSOUP_PROVIDER=codex` and a model supported by that subscription.
 Use `npm run triage -- login codex` if the selected credential store has no Codex
-entry. Provider token refresh may update the selected store. `models` currently
-lists Copilot models only. Both adapters are included; the validation report records
+entry. Provider token refresh may update the selected store. `models` lists what
+each signed-in provider offers. Both adapters are included; the validation report records
 which providers have actually been exercised.
 
 To assess a GitHub issue's title and body, fetch a snapshot outside the agent:

@@ -5,8 +5,7 @@ import { z } from 'zod';
 import type { Capability } from '@onionsoup/job-host';
 import { atomicJson } from '@onionsoup/runtime/storage';
 import { createInvocationBudget } from '@onionsoup/runtime/budget';
-import { liveModel } from '@onionsoup/providers';
-import { EVALUATION_MODEL } from '@onionsoup/providers/evaluation-policy';
+import type { ModelResolver } from '@onionsoup/providers';
 import { Observation } from '@onionsoup/maintenance/issues';
 import { githubSource, type Source } from '@onionsoup/maintenance/github-issues';
 import { triage, LIMITS as READINESS_LIMITS } from '@onionsoup/maintenance/triage';
@@ -28,9 +27,9 @@ import type { RepositoryRegistry } from './registry.ts';
 export type MaintenanceRepository = { name: string; checkout?: string };
 
 export type MaintenanceOptions = {
-  provider: 'copilot' | 'codex';
   registry: RepositoryRegistry;
-  modelFactory?: typeof liveModel;
+  /** Opens the model each agent runs on. */
+  models: ModelResolver;
   source?: Source;
   triage?: typeof triage;
   locate?: typeof locateReadyIssue;
@@ -70,13 +69,7 @@ export async function gitHead(checkout: string, signal: AbortSignal) {
 export function maintenanceCapabilities(options: MaintenanceOptions): Capability[] {
   const { registry } = options;
   const source = options.source ?? githubSource;
-  const modelFactory = options.modelFactory ?? liveModel;
   const head = options.head ?? gitHead;
-  const adapter = async () => {
-    const a = await modelFactory(EVALUATION_MODEL, options.provider);
-    if (a.provider !== options.provider || a.modelId !== EVALUATION_MODEL) throw new Error('Provider/model mismatch');
-    return a;
-  };
   const checkoutFor = (repository: string) => {
     const configured = registry.get(repository)?.checkout;
     if (!configured) throw new Error(`no_checkout_configured:${repository}`);
@@ -84,8 +77,6 @@ export function maintenanceCapabilities(options: MaintenanceOptions): Capability
   };
   const common = { version: 'v1', timeoutMs: 1200000 };
   const metadata = {
-    provider: options.provider,
-    model: EVALUATION_MODEL,
     get repositories() { return registry.list().map((r) => ({ name: r.name, sourceReads: Boolean(r.checkout) })); },
   };
 
@@ -98,13 +89,13 @@ export function maintenanceCapabilities(options: MaintenanceOptions): Capability
     output: ReadinessResult,
     outcome: (result) => { const a = result.run?.assessment; return a ? { status: 'ok', label: `${String(a.kind).replaceAll('_', ' ')} · ${String(a.bug_readiness).replaceAll('_', ' ')}` } : { status: 'failed', label: result.run?.failure ?? 'no assessment' }; },
     validateOutput: (raw) => { const r = ReadinessResult.parse(raw); validateReadinessRun(r.run); return r; },
-    metadata: { ...metadata, promptVersion: READINESS_PROMPT, limits: READINESS_LIMITS },
+    metadata: { ...metadata, agents: ['bug-readiness'], promptVersion: READINESS_PROMPT, limits: READINESS_LIMITS },
     effects: ['github_reads', 'model_calls', 'local_artifacts'],
     execute: async ({ repository, issue }, ctx) => {
       const observation = await source.get(repository, issue, ctx.signal);
       if (!observation.snapshot) throw new Error(`issue_${observation.rejection ?? 'unusable'}`);
       const run = await (options.triage ?? triage)(observation.snapshot, {
-        ...(await adapter()),
+        ...(await options.models('bug-readiness')),
         signal: ctx.signal,
         checkpoint: (record) => atomicJson(join(ctx.directory, 'readiness.json'), record),
       });
@@ -120,7 +111,7 @@ export function maintenanceCapabilities(options: MaintenanceOptions): Capability
     output: LocationResult,
     outcome: (result) => ({ status: result.handoff.disposition === 'located' ? 'ok' : result.handoff.disposition === 'not_located' ? 'partial' : 'failed', label: String(result.handoff.disposition).replaceAll('_', ' ') }),
     validateOutput: (raw) => { const r = LocationResult.parse(raw); validateLocationHandoff(r.handoff); return r; },
-    metadata: { ...metadata, promptVersion: LOCATION_PROMPT, limits: LOCATION_LIMITS },
+    metadata: { ...metadata, agents: ['code-location'], promptVersion: LOCATION_PROMPT, limits: LOCATION_LIMITS },
     effects: ['local_source_reads', 'model_calls', 'local_artifacts'],
     execute: async ({ readinessJobId }, ctx) => {
       const parent = await ctx.dependency(readinessJobId);
@@ -135,7 +126,7 @@ export function maintenanceCapabilities(options: MaintenanceOptions): Capability
         source: { checkout, repository: { name: run.input.repository, commit } },
         budget: createInvocationBudget(1),
         signal: ctx.signal,
-        model: adapter,
+        model: () => options.models('code-location'),
         checkpoint: (record) => atomicJson(join(ctx.directory, 'location.json'), record),
       });
       return { handoff };
@@ -151,7 +142,7 @@ export function maintenanceCapabilities(options: MaintenanceOptions): Capability
     output: PacketResult,
     outcome: (result) => ({ status: result.packet.status === 'completed' ? 'ok' : result.packet.status === 'partial' ? 'partial' : 'failed', label: `${result.packet.status} · location ${String(result.packet.locationDisposition).replaceAll('_', ' ')}` }),
     validateOutput: (raw) => { const r = PacketResult.parse(raw); validatePacket(r.packet); return r; },
-    metadata,
+    metadata: { ...metadata, agents: ['bug-readiness', 'code-location'] },
     effects: ['github_reads', 'local_source_reads', 'model_calls', 'local_artifacts'],
     execute: async ({ repository, issue }, ctx) => {
       const observation = await source.get(repository, issue, ctx.signal);
@@ -159,7 +150,7 @@ export function maintenanceCapabilities(options: MaintenanceOptions): Capability
       const checkout = checkoutFor(repository);
       const commit = await head(checkout, ctx.signal);
       const result = await (options.packet ?? createPacket)(observation.snapshot, {
-        directory: join(ctx.directory, 'packet'), checkout, commit, provider: options.provider, signal: ctx.signal, modelFactory,
+        directory: join(ctx.directory, 'packet'), checkout, commit, signal: ctx.signal, models: options.models,
       });
       return { packet: result, markdown: packetMarkdown(result) };
     },
@@ -173,15 +164,15 @@ export function maintenanceCapabilities(options: MaintenanceOptions): Capability
     output: ProposalResult,
     outcome: (result) => { const stage = result.proposal.stages?.at(-1)?.run?.result; const status = stage?.status ?? result.proposal.status; return { status: status === 'proposal_ready' ? 'ok' : status === 'needs_information' ? 'partial' : 'failed', label: String(status).replaceAll('_', ' ') }; },
     validateOutput: (raw) => { const r = ProposalResult.parse(raw); validateChangeWorkflow(r.proposal); return r; },
-    metadata,
+    metadata: { ...metadata, agents: ['feature-requirements', 'change-proposal'] },
     effects: ['local_source_reads', 'model_calls', 'local_artifacts'],
     execute: async ({ packetJobId, query }, ctx) => {
       const parent = await ctx.dependency(packetJobId);
       if (parent.capability !== 'investigation.packet') throw new Error('dependency_not_packet');
       const p = validatePacket(PacketResult.parse(parent.result).packet);
       const workflow = await (options.proposal ?? createChangeProposal)(p, {
-        directory: join(ctx.directory, 'proposal'), provider: options.provider, checkout: registry.get(p.repository.name)?.checkout,
-        query, signal: ctx.signal, modelFactory,
+        directory: join(ctx.directory, 'proposal'), models: options.models, checkout: registry.get(p.repository.name)?.checkout,
+        query, signal: ctx.signal,
       });
       return { proposal: workflow, markdown: proposalMarkdown(workflow) };
     },

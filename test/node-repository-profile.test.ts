@@ -34,7 +34,7 @@ async function fixture(t:any){
  const def={...task,repositoryProfileHash:hash(p),baseCommit:base,context:task.allowedFiles.map(path=>({path,startLine:1,endLine:1}))};
  const runtime=Runtime.parse({schemaVersion:1,imageId:'sha256:'+'a'.repeat(64),nodePath:process.execPath,nodeHash:digest,podmanVersion:'fixture'});
  const dependencies=NodeDependency.parse({schemaVersion:1,directory:'/fixture/modules',packageHash:hash('{}\n'),lockHash:hash('{}\n'),treeHash:'c'.repeat(64),nodeHash:digest,npmHash:'b'.repeat(64),npmVersion:'fixture',scripts:'disabled',registry:'https://registry.npmjs.org/',createdAt:new Date().toISOString()});
- const dir=join(root,'proposal');await proposeProject(repo,base,dir,'copilot',{repositoryProfile:p,task:def,modelFactory:prepareModel});
+ const dir=join(root,'proposal');await proposeProject(repo,base,dir,{repositoryProfile:p,task:def,models:prepareModel});
  const job=await acceptProject(repo,dir,mapping,'Scripted boundary test.',{runtime,dependencies,verificationPlan:plan});return {root,repo,dir,job,runtime,dependencies,base};
 }
 test('Node profiles reject mixed adapters, task commands, altered test coverage and missing host exports',async()=>{
@@ -53,7 +53,7 @@ test('Node selected-suite evidence rejects missing, skipped, cancelled, todo and
 });
 test('Node tasks reuse acceptance, workers and publisher while keeping host assertions private',async t=>{
  const f=await fixture(t);let calls=0;
- const options={directory:join(f.root,'run'),runtime:f.runtime,dependencies:f.dependencies,provider:'copilot' as const,modelFactory:async()=>({provider:'copilot' as const,modelId:'gpt-5.6-terra',model:model(()=>calls++===0?{schemaVersion:2,status:'candidate',summary:'Scripted helper.',edits:f.job.allowedFiles.map(path=>({path,beforeHash:hash(f.job.files[path]),...(path.endsWith('.test.ts')?{operation:'append',content:'\n// Added\n'}:{content:f.job.files[path]+'// Added\n'})})),questions:[]}:{schemaVersion:2,verdict:'no_blocking_findings',findings:[],limitations:['Scripted plumbing only.']})}),verify:async(...args:Parameters<typeof verifyProject>)=>{
+ const options={directory:join(f.root,'run'),runtime:f.runtime,dependencies:f.dependencies,provider:'copilot' as const,models:async()=>({provider:'copilot' as const,modelId:'gpt-5.6-terra',model:model(()=>calls++===0?{schemaVersion:2,status:'candidate',summary:'Scripted helper.',edits:f.job.allowedFiles.map(path=>({path,beforeHash:hash(f.job.files[path]),...(path.endsWith('.test.ts')?{operation:'append',content:'\n// Added\n'}:{content:f.job.files[path]+'// Added\n'})})),questions:[]}:{schemaVersion:2,verdict:'no_blocking_findings',findings:[],limitations:['Scripted plumbing only.']})}),verify:async(...args:Parameters<typeof verifyProject>)=>{
  const [checkout,commit,j,rt,d,seeds,o]=args,at=new Date().toISOString();assert.deepEqual(seeds,[]);await o.checkpoint?.({phase:o.phase});
  return Verification.parse({schemaVersion:1,receiptId:randomUUID(),phase:o.phase,jobHash:hash(j),tree:(await git(checkout,['rev-parse',commit+'^{tree}'])).trim(),runtimeHash:hash(rt),dependencyHash:hash(d),profileHash:j.profileHash,seedHash:hash(seeds),startedAt:at,finishedAt:at,status:o.phase==='baseline'?'checks_failed':'passed',checks:mapping[0].checks.map(id=>({id,status:o.phase==='baseline'&&task.checks.find(c=>c.id===id)?.baseline==='fail'?'failed':'passed'})),exitCode:0,cleanup:'removed',commandHash:'d'.repeat(64),outputHash:'e'.repeat(64),containerName:'onionsoup-project-'+randomUUID()});}};
  const w=await executeProject(f.repo,f.dir,options);assert.equal(w.outcome,'candidate_verified');assert.equal(calls,2);
@@ -79,7 +79,7 @@ test('Node tasks reuse acceptance, workers and publisher while keeping host asse
 test('real reusable Node adapter reports preview absence with complete selected-suite coverage',{skip:!process.env.ONIONSOUP_NODE_TASK_CHECKOUT},async t=>{
  const root=await mkdtemp(join(tmpdir(),'onionsoup-node-profile-real-'));t.after(()=>rm(root,{recursive:true,force:true}));const checkout=process.env.ONIONSOUP_NODE_TASK_CHECKOUT!,dir=join(root,'proposal');
  const runtime=Runtime.parse(await json(process.env.ONIONSOUP_FIXTURE_RUNTIME!)),dependencies=NodeDependency.parse(await json(process.env.ONIONSOUP_PROJECT_DEPENDENCIES!));
- await proposeProject(checkout,task.baseCommit,dir,'copilot',{repositoryProfile:profile,task,modelFactory:prepareModel});const job=await acceptProject(checkout,dir,mapping,'Scripted sandbox qualification.',{runtime,dependencies,verificationPlan:plan});
+ await proposeProject(checkout,task.baseCommit,dir,{repositoryProfile:profile,task,models:prepareModel});const job=await acceptProject(checkout,dir,mapping,'Scripted sandbox qualification.',{runtime,dependencies,verificationPlan:plan});
  const r=await verifyProject(checkout,task.baseCommit,job,runtime,dependencies,[],{directory:join(root,'baseline'),phase:'baseline',verificationPlan:plan});
  assert.equal(r.status,'checks_failed');for(const id of ['node-typecheck','node-tests','task-existing-schedule'])assert.equal(r.checks.find(c=>c.id===id)?.status,'passed',id);
  for(const id of ['task-preview-basic','task-preview-dst','task-preview-validation'])assert.equal(r.checks.find(c=>c.id===id)?.status,'failed',id);assert.equal(r.cleanup,'removed');

@@ -19,7 +19,7 @@ const fake:McpCall=async(name,args)=>({structuredContent:name==='discover_homela
   {schemaVersion:1,jobId:args.jobId,status:'settled',runId:randomUUID(),...(args.jobId===investigation?{resultStatus:'completed',findings:[],eligible:0,omitted:0}:{markdown:'# Homelab brief\nIncomplete coverage.'})}});
 test('model-selected delegation checkpoints effects and binds the answer to its completed child jobs',async t=>{
   const root=await mkdtemp(join(tmpdir(),'homelab-chat-'));t.after(()=>rm(root,{recursive:true,force:true}));const directory=join(root,'run'),calls:string[]=[];
-  const result=await proveHomelabDelegation({directory,provider:'copilot',modelFactory:async()=>model(actions),pollMs:0,call:async(name,args,signal)=>{
+  const result=await proveHomelabDelegation({directory,provider:'copilot',modelId:'gpt-5.6-terra',modelFactory:async()=>model(actions),pollMs:0,call:async(name,args,signal)=>{
     const saved=JSON.parse(await readFile(join(directory,'delegation.json'),'utf8'));
     if(['investigate_workload_findings','create_homelab_brief'].includes(name))assert.ok(saved.events.some((e:any)=>e.tool===name&&e.stage==='intent'));
     calls.push(name);return fake(name,args,signal);
@@ -35,21 +35,21 @@ test('unknown targets, foreign jobs, paths and repeated investigation cannot acq
     [{tool:'inspect_homelab_job',args:{jobId:randomUUID()}}],
     [actions[0],actions[1],actions[1]],
     [{tool:'submit_answer',args:{summary:'invented',investigationJobId:investigation,briefJobId:brief}}]]){
-    let admissions=0;const result=await proveHomelabDelegation({directory:join(root,String(n++)),provider:'copilot',modelFactory:async()=>model(sequence),pollMs:0,
+    let admissions=0;const result=await proveHomelabDelegation({directory:join(root,String(n++)),provider:'copilot',modelId:'gpt-5.6-terra',modelFactory:async()=>model(sequence),pollMs:0,
       call:async(name,args,signal)=>{if(name==='investigate_workload_findings')admissions++;return fake(name,args,signal);}});
     assert.equal(result.status,'failed');assert.equal(result.answer,undefined);assert.ok(result.steps<=8);assert.equal(admissions,sequence.length===3?1:0);
   }
 });
 test('mismatched inspection identity, cancellation and persistence failure stop delegation',async t=>{
   const root=await mkdtemp(join(tmpdir(),'homelab-chat-'));t.after(()=>rm(root,{recursive:true,force:true}));
-  const mismatch=await proveHomelabDelegation({directory:join(root,'mismatch'),provider:'copilot',modelFactory:async()=>model(actions),pollMs:0,
+  const mismatch=await proveHomelabDelegation({directory:join(root,'mismatch'),provider:'copilot',modelId:'gpt-5.6-terra',modelFactory:async()=>model(actions),pollMs:0,
     call:async(name,args,signal)=>name==='inspect_homelab_job'?{structuredContent:{schemaVersion:1,jobId:randomUUID(),status:'settled',resultStatus:'completed'}}:fake(name,args,signal)});
   assert.equal(mismatch.status,'failed');
   const controller=new AbortController();controller.abort();let calls=0;
-  const cancelled=await proveHomelabDelegation({directory:join(root,'cancelled'),provider:'copilot',modelFactory:async()=>{calls++;return model(actions);},call:fake,signal:controller.signal});
+  const cancelled=await proveHomelabDelegation({directory:join(root,'cancelled'),provider:'copilot',modelId:'gpt-5.6-terra',modelFactory:async()=>{calls++;return model(actions);},call:fake,signal:controller.signal});
   assert.equal(cancelled.status,'failed');assert.equal(calls,0);
   const directory=join(root,'storage');
-  await assert.rejects(proveHomelabDelegation({directory,provider:'copilot',modelFactory:async()=>{
+  await assert.rejects(proveHomelabDelegation({directory,provider:'copilot',modelId:'gpt-5.6-terra',modelFactory:async()=>{
     await rename(join(directory,'delegation.json'),join(root,'admission.json'));await mkdir(join(directory,'delegation.json'));return model(actions);},call:async()=>{calls++;return {};}}),/PERSISTENCE_FAILED/);
   assert.equal(calls,0);
 });
@@ -58,7 +58,7 @@ test('mismatched inspection identity, cancellation and persistence failure stop 
 test('malformed brief fields are rejected locally and a corrected call can still use the reserved recipe',async t=>{
   const root=await mkdtemp(join(tmpdir(),'homelab-chat-'));t.after(()=>rm(root,{recursive:true,force:true}));let briefs=0;
   const sequence=[actions[0],actions[1],{tool:'create_homelab_brief',args:{investigationJobId:investigation,minItems:1,maxItems:1}},actions[2],actions[3]];
-  const result=await proveHomelabDelegation({directory:join(root,'run'),provider:'copilot',modelFactory:async()=>model(sequence),pollMs:0,
+  const result=await proveHomelabDelegation({directory:join(root,'run'),provider:'copilot',modelId:'gpt-5.6-terra',modelFactory:async()=>model(sequence),pollMs:0,
     call:async(name,args,signal)=>{if(name==='create_homelab_brief'){briefs++;assert.deepEqual(args,{investigationJobIds:[investigation]});}return fake(name,args,signal);}});
   assert.equal(result.status,'completed');assert.equal(briefs,1);assert.equal(result.steps,5);
   assert.ok(result.events.some(e=>e.stage==='rejected'&&(e.data as any).error==='INVALID_ARGUMENTS'));
@@ -67,7 +67,7 @@ test('malformed brief fields are rejected locally and a corrected call can still
 
 test('failed child terminates the parent without another model turn or another admission',async t=>{
   const root=await mkdtemp(join(tmpdir(),'homelab-chat-'));t.after(()=>rm(root,{recursive:true,force:true}));let admissions=0;
-  const result=await proveHomelabDelegation({directory:join(root,'run'),provider:'copilot',modelFactory:async()=>model(actions),pollMs:0,
+  const result=await proveHomelabDelegation({directory:join(root,'run'),provider:'copilot',modelId:'gpt-5.6-terra',modelFactory:async()=>model(actions),pollMs:0,
     call:async(name,args,signal)=>{
       if(name==='investigate_workload_findings')admissions++;
       if(name==='inspect_homelab_job')return {structuredContent:{schemaVersion:1,jobId:investigation,status:'settled',runId:randomUUID(),resultStatus:'failed',failure:'no_valid_result'}};

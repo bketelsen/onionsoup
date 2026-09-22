@@ -2,12 +2,10 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
-import type { LanguageModel } from 'ai';
 import { HostError, respondJson, type JobHost, type RouteHandler } from '@onionsoup/job-host';
 import { openChatSession, chatTurn, closeChatSession, hash, type ChatHandle, type ChatSession } from '@onionsoup/chat';
 import { createHostChatProfile, type HostCaller } from '@onionsoup/host-chat';
-import { liveModel } from '@onionsoup/providers';
-import { EVALUATION_MODEL } from '@onionsoup/providers/evaluation-policy';
+import type { ModelResolver } from '@onionsoup/providers';
 
 const SessionId = z.uuid();
 const TurnRequest = z.object({ message: z.string().min(1).max(8000) }).strict();
@@ -17,8 +15,8 @@ export type ChatServiceOptions = {
   host: JobHost;
   /** Sessions live under <directory>/<sessionId>/ with an owner sidecar. */
   directory: string;
-  provider: 'copilot' | 'codex';
-  modelFactory?: () => Promise<LanguageModel>;
+  /** Opens the chat agent's model; the assignment may change between turns. */
+  models: ModelResolver;
   /** Whether chat may run interactive capabilities when the person asks. Default true. */
   allowInteractive?: boolean;
 };
@@ -27,7 +25,6 @@ export type ChatServiceOptions = {
 export function createChatService(options: ChatServiceOptions) {
   const { host } = options;
   const handles = new Map<string, ChatHandle>();
-  const modelFactory = options.modelFactory ?? (async () => (await liveModel(EVALUATION_MODEL, options.provider)).model);
 
   const caller = (principal: string): HostCaller => ({
     discover: () => host.discover(principal),
@@ -37,6 +34,11 @@ export function createChatService(options: ChatServiceOptions) {
     cancel: (jobId) => host.cancel(principal, jobId),
   });
   const profileFor = (principal: string) => createHostChatProfile({ bindingHash: hash({ profile: 'host', principal }), host: caller(principal), allowInteractive: options.allowInteractive });
+
+  const chatModel = async () => {
+    const adapter = await options.models('chat');
+    return { provider: adapter.provider, modelId: adapter.modelId };
+  };
 
   async function ownerOf(sessionId: string) {
     try {
@@ -50,7 +52,7 @@ export function createChatService(options: ChatServiceOptions) {
     const existing = handles.get(sessionId);
     if (existing) return existing;
     if ((await ownerOf(sessionId)) !== principal) throw new HostError('session_not_found', 404);
-    const handle = await openChatSession({ directory: join(options.directory, sessionId), profile: profileFor(principal), provider: options.provider, modelId: EVALUATION_MODEL, resume: true });
+    const handle = await openChatSession({ directory: join(options.directory, sessionId), profile: profileFor(principal), ...(await chatModel()), resume: true });
     handles.set(sessionId, handle);
     return handle;
   }
@@ -58,7 +60,7 @@ export function createChatService(options: ChatServiceOptions) {
   async function create(principal: string) {
     const sessionId = randomUUID();
     await mkdir(options.directory, { recursive: true, mode: 0o700 });
-    const handle = await openChatSession({ directory: join(options.directory, sessionId), profile: profileFor(principal), provider: options.provider, modelId: EVALUATION_MODEL });
+    const handle = await openChatSession({ directory: join(options.directory, sessionId), profile: profileFor(principal), ...(await chatModel()) });
     await writeFile(join(options.directory, sessionId, 'owner.json'), JSON.stringify({ principal }), { mode: 0o600 });
     handles.set(sessionId, handle);
     return { sessionId, session: handle.session };
@@ -102,7 +104,11 @@ export function createChatService(options: ChatServiceOptions) {
       const { message } = TurnRequest.parse(await body());
       const handle = await open(principal, sessionId);
       if (handle.busy) throw new HostError('turn_active', 409);
-      const turn = await chatTurn(handle, message, { modelFactory });
+      const adapter = await options.models('chat');
+      // The session records the model its latest turn runs on.
+      handle.session.provider = adapter.provider;
+      handle.session.model = adapter.modelId;
+      const turn = await chatTurn(handle, message, { modelFactory: async () => adapter.model });
       respondJson(res, 200, { sessionId, turn });
       return true;
     }

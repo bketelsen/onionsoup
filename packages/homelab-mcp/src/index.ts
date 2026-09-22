@@ -9,8 +9,8 @@ import { digest, type WorkloadTransport } from '@onionsoup/kubernetes-source/wor
 import { investigateWorkloads, TriageRun, findingCounts, workloadEvents, workloadCapabilityManifest, type TriageOptions } from '@onionsoup/workload-triage';
 import { composeHomelabBrief, renderHomelabBrief, readHomelabObservation, HomelabBrief } from '@onionsoup/homelab-brief';
 import { atomicJson } from '@onionsoup/runtime/storage';
-import { EVALUATION_MODEL } from '@onionsoup/providers/evaluation-policy';
-export const HomelabMcpConfig=z.object({schemaVersion:z.literal(1),provider:z.enum(['copilot','codex']),runsDirectory:z.string().min(1),
+import { ModelChoice } from '@onionsoup/providers';
+export const HomelabMcpConfig=z.object({schemaVersion:z.literal(1),model:ModelChoice,runsDirectory:z.string().min(1),
   observations:z.array(z.string().min(1)).max(16),targets:z.array(KubernetesTarget).max(10),refreshSources:z.array(RefreshSource).max(10).optional(),maxJobs:z.number().int().min(1).max(10).default(4)}).strict()
   .refine(c=>new Set(c.targets.map(t=>t.assetId)).size===c.targets.length,'Duplicate targets')
   .refine(c=>new Set((c.refreshSources??[]).map(s=>s.sourceId)).size===(c.refreshSources??[]).length&&new Set((c.refreshSources??[]).map(s=>s.kind+':'+s.target.assetId)).size===(c.refreshSources??[]).length,'Duplicate refresh sources');
@@ -39,7 +39,7 @@ export function createHomelabMcpServer(raw:unknown,options:{modelFactory:TriageO
   async function readJob(id:string){const job=Job.parse(await readSaved(id,'job.json'));if(job.jobId!==id||job.configHash!==configHash)throw new Error('Job mismatch');return job;}
   async function readTriage(id:string){const job=await readJob(id);if(job.kind!=='investigation'||job.status!=='settled')throw new Error('Investigation unfinished');
     const triage=TriageRun.parse(await readSaved(id,'investigation/triage/triage.json')),target=targets.get(job.targetId!);
-    if(!target||triage.input.targetHash!==digest(target)||triage.assetId!==job.targetId||triage.provider!==config.provider||triage.model!==EVALUATION_MODEL)throw new Error('Target mismatch');
+    if(!target||triage.input.targetHash!==digest(target)||triage.assetId!==job.targetId||triage.provider!==config.model.provider||triage.model!==config.model.model)throw new Error('Target mismatch');
     return triage;
   }
   async function readRefresh(id:string){const job=await readJob(id),source=refreshSources.get(job.sourceId!);
@@ -61,7 +61,7 @@ export function createHomelabMcpServer(raw:unknown,options:{modelFactory:TriageO
     const promise=Promise.resolve().then(async()=>{
       try{
         controller.signal.throwIfAborted();
-        if(kind==='investigation')await investigateWorkloads(targets.get(targetId!)!,{directory:join(home(job.jobId),'investigation'),provider:config.provider,modelId:EVALUATION_MODEL,modelFactory:options.modelFactory,transport:options.transport,signal:controller.signal});
+        if(kind==='investigation')await investigateWorkloads(targets.get(targetId!)!,{directory:join(home(job.jobId),'investigation'),provider:config.model.provider,modelId:config.model.model,modelFactory:options.modelFactory,transport:options.transport,signal:controller.signal});
         else if(kind==='refresh'){const source=refreshSources.get(sourceId!)!;const result=await(options.refresh??collectRefresh)(source,{directory:join(home(job.jobId),'source'),signal:controller.signal,apiKey:options.apiKey});
           validateRefresh(source,result);
         }else{

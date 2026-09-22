@@ -40,9 +40,9 @@ async function settled(host: JobHost, id: string) {
 test('homelab sources are registered, refreshed, investigated with names joined, and briefed from the latest observations', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'homelab-host-'));
   const registry = await HomelabRegistry.open({ directory: join(root, 'homelab'), entries: [{ sourceId: 'fixed-k3s', kind: 'kubernetes', target: { schemaVersion: 1, assetId: 'fixed-k3s', host: 'k3s.invalid', user: 'operator' } }], maxAgeSeconds: 600 });
-  const capabilities = registeredCapabilities({ schemaVersion: 1, provider: 'copilot', homelab: { schemaVersion: 1 } }, {
+  const capabilities = registeredCapabilities({ schemaVersion: 2, models: { default: { provider: 'copilot', model: 'gpt-5.6-terra' } }, homelab: { schemaVersion: 1 } }, {
     homelab: registry,
-    modelFactory: async (modelId, provider) => ({ provider: provider as 'copilot', modelId: modelId as string, model: scripted(assessment) }),
+    models: async () => ({ provider: 'copilot', modelId: 'gpt-5.6-terra', model: scripted(assessment) }),
     homelabOptions: { investigators: { containers: (target, options) => investigateContainers(target, { ...options, transport }) } },
     repositoryBrief: async () => { throw new Error('unused'); },
   });

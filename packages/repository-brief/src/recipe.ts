@@ -3,11 +3,10 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { BriefRequest, REPO_BRIEF_LIMITS, hash } from '@onionsoup/repository-analysis/contracts';
 import { collectRepository, type GithubReader } from '@onionsoup/repository-analysis/collect';
-import { type RepositoryBrief, repositoryBriefStatus, skipReason, stageInput, stageKeys, validateRepositoryBrief } from './record.ts';
+import { type RepositoryBrief, repositoryBriefStatus, skipReason, stageAgent, stageInput, stageKeys, validateRepositoryBrief } from './record.ts';
 import { summarizeRepositoryThemes, interpretRepositoryHealth, suggestMaintenanceActions } from '@onionsoup/repository-analysis/agents';
 import { createInvocationBudget } from '@onionsoup/runtime/budget';
-import { liveModel } from '@onionsoup/providers';
-import { EVALUATION_MODEL } from '@onionsoup/providers/evaluation-policy';
+import type { ModelResolver } from '@onionsoup/providers';
 import { atomicJson, readJson } from '@onionsoup/runtime/storage';
 import { repositoryBriefMarkdown, repositoryBriefHtml } from './render.ts';
 import { workflowEvents } from './events.ts';
@@ -18,12 +17,12 @@ export async function renderRepositoryBrief(directory: string) {
   await writeFile(join(directory,'repository-brief.html'),repositoryBriefHtml(b),{ mode: 0o600 });
   return b;
 }
-export async function createRepositoryBrief(raw: unknown, options: { directory: string; provider: 'copilot'|'codex';
-  reader?: GithubReader; signal?: AbortSignal; modelFactory?: typeof liveModel;
+export async function createRepositoryBrief(raw: unknown, options: { directory: string; models: ModelResolver;
+  reader?: GithubReader; signal?: AbortSignal;
   persist?: (file: string, record: RepositoryBrief) => Promise<void> }) {
   const request = BriefRequest.parse(raw), budget = createInvocationBudget(4), startedAt = new Date().toISOString();
   const b: RepositoryBrief = { schemaVersion: 1, kind: 'repository-brief', workflowId: randomUUID(), request,
-    execution: { provider: options.provider, model: EVALUATION_MODEL }, startedAt, status: 'running', budget: budget.snapshot(),
+    startedAt, status: 'running', budget: budget.snapshot(),
     stages: stageKeys.map(key => ({ key, status: 'pending', updatedAt: startedAt })) };
   await mkdir(options.directory,{ mode: 0o700 });
   let storageBroken = false;
@@ -44,8 +43,7 @@ export async function createRepositoryBrief(raw: unknown, options: { directory: 
         stage.reservation = budget.reserve()!; stage.reservedAt = new Date().toISOString();
         b.budget = stage.reservation; stage.status = 'running'; stage.updatedAt = stage.reservedAt; await save();
         try {
-          const adapter = await (options.modelFactory ?? liveModel)(EVALUATION_MODEL,options.provider);
-          if (adapter.provider !== options.provider || adapter.modelId !== EVALUATION_MODEL) throw new Error('Adapter mismatch');
+          const adapter = await options.models(stageAgent[stage.key]);
           if (signal.aborted) { stage.status = 'failed'; stage.reason = 'cancelled'; }
           else {
             const fn = stage.key.endsWith('themes') ? summarizeRepositoryThemes : stage.key === 'health' ? interpretRepositoryHealth : suggestMaintenanceActions;

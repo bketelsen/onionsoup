@@ -3,7 +3,6 @@ import { resolve, join, dirname } from 'node:path';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { createHomelabMcpServer, HomelabMcpConfig } from '@onionsoup/homelab-mcp';
 import { readJson } from '@onionsoup/runtime/storage';
-import { EVALUATION_MODEL } from '@onionsoup/providers/evaluation-policy';
 import { liveModel } from '@onionsoup/providers';
 globalThis.AI_SDK_LOG_WARNINGS = false;
 console.error = console.warn = () => process.stderr.write('Provider diagnostic suppressed; inspect saved job status.\n');
@@ -17,7 +16,7 @@ try {
     config.runsDirectory=resolve(dirname(path),config.runsDirectory);
     config.observations=config.observations.map(p=>resolve(dirname(path),p));
     const root=config.runsDirectory;
-    const host=createHomelabMcpServer(config,{apiKey:process.env.TRUENAS_API_KEY,modelFactory:async()=>(await liveModel(EVALUATION_MODEL,config.provider)).model});
+    const host=createHomelabMcpServer(config,{apiKey:process.env.TRUENAS_API_KEY,modelFactory:async()=>(await liveModel(config.model.model,config.model.provider)).model});
     await mkdir(root, { recursive: true, mode: 0o700 });
     const lock = join(root, '.host-lock');
     await mkdir(lock, { mode: 0o700 });

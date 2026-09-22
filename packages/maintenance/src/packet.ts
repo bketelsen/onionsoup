@@ -7,9 +7,8 @@ import { inputHash, triage, type RunRecord } from './triage.ts';
 import { LocationInput, Commit } from './location-contracts.ts';
 import { locateCode, type LocationRun } from './location-agent.ts';
 import { validateLocationRun } from './location-record.ts';
-import { liveModel } from '@onionsoup/providers';
+import { isWorkflowExecution, ranOnWorkflowModel, type ModelAdapter, type ModelResolver, type WorkflowExecution } from '@onionsoup/providers';
 import { PROMPT_VERSION } from './prompt.ts';
-import { EVALUATION_MODEL } from '@onionsoup/providers/evaluation-policy';
 import { atomicJson } from '@onionsoup/runtime/storage';
 
 export const PACKET_TIMEOUT_MS = 900000;
@@ -17,7 +16,7 @@ export type Packet = {
   schemaVersion: 1; packetId: string; createdAt: string; finishedAt?: string;
   status: 'running' | 'completed' | 'partial' | 'failed'; stage: 'readiness' | 'location' | 'done';
   issue: IssueSnapshot; inputHash: string; repository: { name: string; commit: string };
-  execution: { provider: 'copilot' | 'codex'; model: typeof EVALUATION_MODEL };
+  execution?: WorkflowExecution;
   reusedReadiness: boolean; readiness?: RunRecord; location?: LocationRun;
   locationDisposition: 'pending' | 'not_eligible' | 'completed' | 'not_located' | 'failed' | 'not_started';
   failure?: string;
@@ -38,12 +37,12 @@ export function validatePacket(raw: unknown): Packet {
   if (!p || p.schemaVersion !== 1 || !z.string().uuid().safeParse(p.packetId).success ||
       !z.iso.datetime().safeParse(p.createdAt).success || !['running', 'completed', 'partial', 'failed'].includes(p.status) ||
       !['readiness', 'location', 'done'].includes(p.stage) || typeof p.reusedReadiness !== 'boolean' ||
-      !['copilot', 'codex'].includes(p.execution?.provider) || p.execution.model !== EVALUATION_MODEL)
+      !isWorkflowExecution(p.execution))
     throw new Error('Invalid packet');
   IssueSnapshot.parse(p.issue); Commit.parse(p.repository?.commit);
   if (p.inputHash !== inputHash(p.issue) || p.repository.name !== p.issue.repository) throw new Error('Packet input identity mismatch');
   if (p.readiness) validateReadiness(p.readiness, p.issue);
-  if (p.readiness && (p.readiness.provider !== p.execution.provider || p.readiness.model !== p.execution.model)) throw new Error('Packet provider/model mismatch');
+  if (p.readiness && !ranOnWorkflowModel(p.execution, p.readiness)) throw new Error('Packet provider/model mismatch');
   if (p.reusedReadiness && p.readiness?.status !== 'completed') throw new Error('Invalid reused readiness');
   const eligible = p.readiness?.status === 'completed' && p.readiness.assessment?.kind === 'bug_report' && p.readiness.assessment.bug_readiness === 'ready';
   if (p.location) {
@@ -51,7 +50,7 @@ export function validatePacket(raw: unknown): Packet {
     if (!eligible || r.input.parent.runId !== p.readiness!.runId || r.input.parent.inputHash !== p.inputHash ||
         r.input.parent.promptVersion !== p.readiness!.promptVersion || r.input.parent.summary !== p.readiness!.assessment!.summary ||
         r.input.repository.commit !== p.repository.commit || r.input.repository.name !== p.repository.name ||
-        r.provider !== p.execution.provider || r.model !== p.execution.model) throw new Error('Packet handoff identity mismatch');
+        !ranOnWorkflowModel(p.execution, r)) throw new Error('Packet handoff identity mismatch');
   }
   if (p.status === 'running') {
     if (p.stage === 'done' || p.finishedAt || p.locationDisposition !== 'pending') throw new Error('Invalid running packet');
@@ -100,7 +99,9 @@ export function packetMarkdown(raw: unknown) {
     lines.push('### Uncertainties', '', ...l.brief.uncertainties.map(u => `- ${text(u)}`), '');
   } else lines.push(p.locationDisposition === 'not_eligible' ? 'Code-location does not apply to this readiness outcome.' : text(l?.failure ?? p.failure ?? 'Location is unfinished or has not started.'), '');
   lines.push('## Provenance', '', quote(JSON.stringify({ packetId: p.packetId, issueHash: p.inputHash,
-    execution: p.execution, reusedReadiness: p.reusedReadiness, readinessRunId: r?.runId, readinessPrompt: r?.promptVersion,
+    ...(p.execution ? { execution: p.execution } : {}), reusedReadiness: p.reusedReadiness,
+    readinessModel: r ? `${r.provider}/${r.model}` : undefined, readinessRunId: r?.runId, readinessPrompt: r?.promptVersion,
+    locationModel: l ? `${l.provider}/${l.model}` : undefined,
     locationRunId: l?.runId, locationParentId: l?.input.parent.runId, locationPrompt: l?.promptVersion,
     locationRuntime: l?.runtimeHash, repositoryCommit: p.repository.commit,
     readinessUsage: r?.tokenUsage?.totals, locationUsage: l?.tokenUsage?.totals }, null, 2)), '',
@@ -114,28 +115,27 @@ export async function writePacket(directory: string, packet: Packet) {
 }
 
 export async function createPacket(raw: unknown, options: { directory: string; checkout: string; commit: string;
-  provider: 'copilot' | 'codex'; readiness?: unknown; signal?: AbortSignal; modelFactory?: typeof liveModel }) {
+  readiness?: unknown; signal?: AbortSignal; models: ModelResolver }) {
   const issue = IssueSnapshot.parse(raw); Commit.parse(options.commit); options.signal?.throwIfAborted();
   const reused = options.readiness === undefined ? undefined : validateReadiness(options.readiness, issue);
-  if (reused && (reused.status !== 'completed' || reused.provider !== options.provider || reused.model !== EVALUATION_MODEL || reused.promptVersion !== PROMPT_VERSION)) throw new Error('Reused readiness must match current prompt and selected Terra subscription');
+  // A reused run records the model it ran on; only the prompt must be current.
+  if (reused && (reused.status !== 'completed' || reused.promptVersion !== PROMPT_VERSION))
+    throw new Error('reused_readiness_mismatch: reused readiness must be completed on the current prompt');
   const p: Packet = { schemaVersion: 1, packetId: randomUUID(), createdAt: new Date().toISOString(), status: 'running', stage: 'readiness',
     issue, inputHash: inputHash(issue), repository: { name: issue.repository, commit: options.commit },
-    execution: { provider: options.provider, model: EVALUATION_MODEL }, reusedReadiness: Boolean(reused),
+    reusedReadiness: Boolean(reused),
     readiness: reused, locationDisposition: 'pending' };
   // Exclusive directory admission also prevents concurrent invocations overwriting a packet.
   await mkdir(options.directory, { mode: 0o700 });
   const save = () => writePacket(options.directory, p);
   await save();
   const signal = options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(PACKET_TIMEOUT_MS)]) : AbortSignal.timeout(PACKET_TIMEOUT_MS);
-  let adapter: Awaited<ReturnType<typeof liveModel>> | undefined;
-  const model = async () => {
+  const model = async (agent: 'bug-readiness' | 'code-location'): Promise<ModelAdapter> => {
     signal.throwIfAborted();
-    adapter ??= await (options.modelFactory ?? liveModel)(EVALUATION_MODEL, options.provider);
-    if (adapter.provider !== options.provider || adapter.modelId !== EVALUATION_MODEL) throw new Error('Provider/model mismatch');
-    return adapter;
+    return options.models(agent);
   };
   try {
-    if (!p.readiness) p.readiness = await triage(issue, { ...await model(), signal,
+    if (!p.readiness) p.readiness = await triage(issue, { ...await model('bug-readiness'), signal,
       checkpoint: async r => { p.readiness = r; await save(); } });
     if (p.readiness.status !== 'completed') {
       p.status = 'failed'; p.failure = p.readiness.failure; p.locationDisposition = 'not_started';
@@ -146,7 +146,7 @@ export async function createPacket(raw: unknown, options: { directory: string; c
       const input = LocationInput.parse({ schemaVersion: 1, issue, repository: p.repository,
         parent: { runId: p.readiness.runId, inputHash: p.inputHash, promptVersion: p.readiness.promptVersion,
           kind: 'bug_report', bug_readiness: 'ready', summary: p.readiness.assessment!.summary } });
-      p.location = await locateCode(input, { ...await model(), checkout: options.checkout, signal,
+      p.location = await locateCode(input, { ...await model('code-location'), checkout: options.checkout, signal,
         checkpoint: async r => { p.location = r; await save(); } });
       p.locationDisposition = p.location.status === 'completed' ? p.location.brief!.status === 'located' ? 'completed' : 'not_located' : 'failed';
       p.status = p.locationDisposition === 'completed' ? 'completed' : 'partial';

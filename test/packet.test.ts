@@ -51,7 +51,7 @@ async function fixture(t: { after: (fn: () => Promise<void>) => void }) {
   const parent = await triage(issue, { model: fixtureModel([ready]), provider: 'copilot', modelId: 'gpt-5.6-terra' });
   const model = scripted(locationCalls);
   const options = { directory: join(directory, 'packet'), checkout, commit, provider: 'copilot' as const,
-    modelFactory: async (modelId = 'gpt-5.6-terra', provider: 'copilot' | 'codex' = 'copilot') => ({ modelId, provider, model }) };
+    models: async () => ({ modelId: 'gpt-5.6-terra', provider: 'copilot' as const, model }) };
   return { directory, parent, model, options };
 }
 
@@ -59,7 +59,7 @@ test('standalone snapshot runs both agents and embeds exact handoff and Markdown
   const f = await fixture(t);
   const model = scripted([{ name: 'submit_assessment', input: ready }, ...locationCalls]);
   const packet = await createPacket(issue, { ...f.options,
-    modelFactory: async (modelId = 'gpt-5.6-terra', provider: 'copilot' | 'codex' = 'copilot') => ({ modelId, provider, model }) });
+    models: async () => ({ modelId: 'gpt-5.6-terra', provider: 'copilot' as const, model }) });
   assert.equal(packet.status, 'completed'); assert.equal(packet.reusedReadiness, false);
   assert.equal(model.doStreamCalls.length, 5);
   assert.equal(packet.location?.input.parent.runId, packet.readiness?.runId);
@@ -94,7 +94,7 @@ test('feature requests and incomplete bugs export their result without initializ
   for (const [i, assessment] of outcomes.entries()) {
     const parent = await triage(issue, { model: fixtureModel([assessment]), provider: 'copilot', modelId: 'gpt-5.6-terra' });
     const p = await createPacket(issue, { ...f.options, directory: join(f.directory, `packet${i}`), readiness: parent, checkout: '/absent',
-      modelFactory: async () => { throw new Error('Provider must not initialize'); } });
+      models: async () => { throw new Error('Provider must not initialize'); } });
     assert.equal(p.status, 'completed'); assert.equal(p.locationDisposition, 'not_eligible'); assert.equal(p.location, undefined);
     if (i === 1) assert.match(packetMarkdown(p), /Which command/);
   }
@@ -102,7 +102,8 @@ test('feature requests and incomplete bugs export their result without initializ
 
 test('stale, historical, failed and mismatched reused readiness fail before admission', async t => {
   const f = await fixture(t);
-  for (const parent of [{ ...f.parent, model: 'other' }, { ...f.parent, promptVersion: 'old' }, { ...f.parent, schemaVersion: 1 },
+  // A reused run may come from another model; it records the one it ran on.
+  for (const parent of [{ ...f.parent, promptVersion: 'old' }, { ...f.parent, schemaVersion: 1 },
     { ...f.parent, inputHash: '0'.repeat(64) }, { ...f.parent, status: 'failed', assessment: undefined }])
     await assert.rejects(createPacket(issue, { ...f.options, readiness: parent }));
   await assert.rejects(createPacket({ ...issue, body: 'Edited report' }, { ...f.options, readiness: f.parent }));
@@ -118,11 +119,11 @@ test('source failure and cancellation produce partial packets; invalid readiness
   assert.equal(f.model.doStreamCalls.length, 0);
   const controller = new AbortController();
   const cancelled = await createPacket(issue, { ...f.options, directory: join(f.directory, 'cancelled'), readiness: f.parent, signal: controller.signal,
-    modelFactory: async (...args) => { controller.abort(); return f.options.modelFactory(...args); } });
+    models: async () => { controller.abort(); return f.options.models(); } });
   assert.equal(cancelled.status, 'partial'); assert.equal(cancelled.failure, 'interrupted_or_timed_out');
   const bad = fixtureModel([{}, {}, {}]);
   const failed = await createPacket(issue, { ...f.options, directory: join(f.directory, 'failed'),
-    modelFactory: async (modelId = 'gpt-5.6-terra', provider: 'copilot' | 'codex' = 'copilot') => ({ modelId, provider, model: bad }) });
+    models: async () => ({ modelId: 'gpt-5.6-terra', provider: 'copilot' as const, model: bad }) });
   assert.equal(failed.status, 'failed'); assert.equal(failed.location, undefined);
 });
 
@@ -144,7 +145,7 @@ test('a valid not_located brief is an explicit partial packet, with no invented 
   const model = scripted([locationCalls[0], { name: 'submit_brief', input: { status: 'not_located',
     codePointers: [], testPointers: [], testSearch: { status: 'unfinished', reason: 'Search was inconclusive.' }, uncertainties: ['Search was inconclusive.'] } }]);
   const p = await createPacket(issue, { ...f.options, readiness: f.parent,
-    modelFactory: async (modelId = 'gpt-5.6-terra', provider: 'copilot' | 'codex' = 'copilot') => ({ modelId, provider, model }) });
+    models: async () => ({ modelId: 'gpt-5.6-terra', provider: 'copilot' as const, model }) });
   assert.equal(p.status, 'partial'); assert.equal(p.locationDisposition, 'not_located');
   assert.equal(p.location?.status, 'completed'); assert.equal(p.location?.brief?.codePointers.length, 0);
   assert.match(packetMarkdown(p), /Search was inconclusive/);

@@ -79,6 +79,13 @@ export type ChatSessionSummary = { sessionId: string; createdAt: string; turns: 
 export type ChatSession = { sessionId: string; createdAt: string; turns: ChatTurn[] };
 
 export type HomelabSource = { sourceId: string; kind: 'truenas' | 'containers' | 'kubernetes'; origin: 'config' | 'registry'; host: string; detail: string; latestObservation: { at: string; status: string } | null; latestInvestigation: { at: string; status: string; summary: string } | null };
+export type ModelChoice = { provider: 'copilot' | 'codex'; model: string };
+export type AgentModel = { agent: string; description: string; choice: ModelChoice; origin: 'assigned' | 'config' | 'default'; configured: ModelChoice };
+export type ProviderCatalog =
+  | { provider: ModelChoice['provider']; status: 'ok'; models: { id: string; name: string; vendor?: string }[] }
+  | { provider: ModelChoice['provider']; status: 'signed_out' }
+  | { provider: ModelChoice['provider']; status: 'unavailable'; reason: string };
+export type ModelsView = { agents: AgentModel[]; catalogs: ProviderCatalog[]; catalogsAt: string; persisted: boolean };
 export type RegisteredRepository = { name: string; origin: 'config' | 'registry'; checkout: boolean; implementation: boolean; onboardedAt?: string; profile?: any };
 
 export type Discovery = {
@@ -110,6 +117,7 @@ class Store {
   chatSessions = $state<ChatSessionSummary[]>([]);
   repositories = $state<RegisteredRepository[]>([]);
   sources = $state<HomelabSource[]>([]);
+  models = $state<ModelsView | null>(null);
   nodeRuntime = $state(false);
   chatSession = $state<ChatSession | null>(null);
   chatBusy = $state(false);
@@ -137,6 +145,10 @@ class Store {
   async loadSources() {
     const data = await api<{ sources: HomelabSource[] }>('/v1/homelab/sources');
     this.sources = data.sources;
+  }
+
+  async loadModels(refresh = false) {
+    this.models = await api<ModelsView>(refresh ? '/v1/models?refresh=1' : '/v1/models');
   }
 
   async loadRepositories() {

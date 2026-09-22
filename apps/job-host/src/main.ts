@@ -2,11 +2,12 @@ import { readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { openJobHost, listenJobHost, tokenHash, type Invoker } from '@onionsoup/job-host';
-import { HostConfig, registeredCapabilities, resolveCapabilityConfig, RepositoryRegistry, repositoryEntries, HomelabRegistry } from '@onionsoup/host-capabilities';
+import { HostConfig, registeredCapabilities, resolveCapabilityConfig, RepositoryRegistry, repositoryEntries, HomelabRegistry, ModelRegistry } from '@onionsoup/host-capabilities';
 import { readJson } from '@onionsoup/runtime/storage';
 import { createChatService } from './chat.ts';
 import { repositoriesRoute } from './repositories.ts';
 import { homelabRoute } from './homelab.ts';
+import { modelsRoute } from './models.ts';
 
 globalThis.AI_SDK_LOG_WARNINGS = false;
 
@@ -46,21 +47,22 @@ async function main() {
     maxAgeSeconds: capabilities.homelab?.maxAgeSeconds,
     ...(capabilities.homelab?.truenasApiKeyFile ? { truenasApiKeyFile: capabilities.homelab.truenasApiKeyFile } : {}),
   });
+  const models = await ModelRegistry.open({ directory: resolve(dirname(path), config.directory, 'models'), config: capabilities.models });
   const host = await openJobHost({
     directory: resolve(dirname(path), config.directory),
     binding: capabilities,
-    capabilities: registeredCapabilities(capabilities, { registry, homelab }),
+    capabilities: registeredCapabilities(capabilities, { registry, homelab, modelRegistry: models }),
     invokers,
     recipes,
     ...(config.limits ? { limits: config.limits } : {}),
   });
-  const chat = createChatService({ host, directory: resolve(dirname(path), config.directory, 'chat'), provider: config.capabilities.provider, allowInteractive: config.chat?.interactive ?? true });
+  const chat = createChatService({ host, directory: resolve(dirname(path), config.directory, 'chat'), models: models.resolver(), allowInteractive: config.chat?.interactive ?? true });
   let listener;
   try {
     listener = await listenJobHost(host, {
       port: values.port ? Number(values.port) : config.port,
       address: config.address,
-      routes: [chat.routes, repositoriesRoute(registry), homelabRoute(homelab)],
+      routes: [chat.routes, repositoriesRoute(registry), homelabRoute(homelab), modelsRoute(models)],
       ...(config.tailscale ? { tailscale: { users: Object.fromEntries(config.tailscale.users.map((user) => [user.login, user.invoker])) } } : {}),
       ...(config.web ? { web: { directory: resolve(dirname(path), config.web.directory), invoker: config.web.invoker } } : {}),
     });

@@ -4,7 +4,7 @@ import { mkdir } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { createRepositoryBrief, renderRepositoryBrief } from '@onionsoup/repository-brief/recipe';
 import { BriefRequest } from '@onionsoup/repository-analysis/contracts';
-import { providerName } from '@onionsoup/providers';
+import { environmentModels, providerName } from '@onionsoup/providers';
 globalThis.AI_SDK_LOG_WARNINGS = false;
 console.error = console.warn = () => process.stderr.write('Provider diagnostic suppressed; inspect saved status.\n');
 const usage = 'Usage: npm run repo-brief -- OWNER/REPO [--days 1..90 | --since ISO --until ISO] [--max-suggestions 0..10] [--provider copilot|codex] [--output NEW_DIRECTORY]\n       npm run repo-brief -- render DIRECTORY\n';
@@ -31,7 +31,7 @@ try {
       directory = resolve(values.output ?? join('runs/repository-briefs',randomUUID()));
       const controller = new AbortController(), abort = () => controller.abort();
       process.once('SIGINT',abort); process.once('SIGTERM',abort);
-      try { b = await createRepositoryBrief(request,{ directory, provider, signal:controller.signal }); }
+      try { b = await createRepositoryBrief(request,{ directory, models: environmentModels(provider), signal:controller.signal }); }
       finally { process.removeListener('SIGINT',abort); process.removeListener('SIGTERM',abort); }
     }
     process.stdout.write(JSON.stringify({ workflowId:b.workflowId, status:b.status, budget:b.budget, directory })+'\n');

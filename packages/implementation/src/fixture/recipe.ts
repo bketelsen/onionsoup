@@ -4,8 +4,7 @@ import {randomUUID} from 'node:crypto';
 import {atomicJson,readJson} from '@onionsoup/runtime/storage';
 import {hash} from '@onionsoup/repository-analysis/contracts';
 import {createInvocationBudget} from '@onionsoup/runtime/budget';
-import {liveModel} from '@onionsoup/providers';
-import {EVALUATION_MODEL} from '@onionsoup/providers/evaluation-policy';
+import type {ModelResolver} from '@onionsoup/providers';
 import {FixtureCase,Runtime,PatchResult,ReviewResult,POLICY} from './contracts.ts';
 import {createFixture,acceptedScope,git} from './fixture.ts';
 import {verifyFiles,validateRuntime} from './sandbox.ts';
@@ -19,12 +18,12 @@ export async function renderFixture(directory:string,events?:FixtureEvents) {
   if(events) await atomicJson(join(directory,'events.json'),events(w));
   return w;
 }
-export async function runFixture(which:unknown,options:{mode:'baseline'|'patch';directory:string;runtime:Runtime;provider:'copilot'|'codex';signal?:AbortSignal;
-  modelFactory?:typeof liveModel;verify?:typeof verifyFiles;checkRuntime?:typeof validateRuntime;persist?:(file:string,w:FixtureWorkflow)=>Promise<void>}) {
+export async function runFixture(which:unknown,options:{mode:'baseline'|'patch';directory:string;runtime:Runtime;models:ModelResolver;signal?:AbortSignal;
+  verify?:typeof verifyFiles;checkRuntime?:typeof validateRuntime;persist?:(file:string,w:FixtureWorkflow)=>Promise<void>}) {
   const fixtureCase=FixtureCase.parse(which);Runtime.parse(options.runtime);await(options.checkRuntime??validateRuntime)(options.runtime);options.signal?.throwIfAborted();
   const directory=resolve(options.directory);await mkdir(directory,{mode:0o700});
   const budget=createInvocationBudget(2),w:FixtureWorkflow={schemaVersion:1,kind:'fixture-change',workflowId:randomUUID(),startedAt:new Date().toISOString(),status:'running',
-    mode:options.mode,case:fixtureCase,runtime:options.runtime,seed:randomUUID(),execution:{provider:options.provider,model:EVALUATION_MODEL},budget:budget.snapshot(),stages:[],publication:'not_authorized'};
+    mode:options.mode,case:fixtureCase,runtime:options.runtime,seed:randomUUID(),budget:budget.snapshot(),stages:[],publication:'not_authorized'};
   let broken=false;
   const save=async()=>{try {await (options.persist??atomicJson)(join(directory,'fixture.json'),structuredClone(validateFixtureWorkflow(w)));}catch{broken=true;throw new Error('Fixture persistence failed; inspect saved artifacts');}};
   await save();
@@ -38,8 +37,7 @@ export async function runFixture(which:unknown,options:{mode:'baseline'|'patch';
   const agent=async(id:'scoped-patch'|'change-review')=>{
     signal.throwIfAborted();const reservation=budget.reserve();if(!reservation) throw new Error('Budget exhausted');
     const stage:FixtureWorkflow['stages'][number]={agent:id,reservedAt:new Date().toISOString(),reservation};w.stages.push(stage);w.budget=reservation;await save();
-    const adapter=await(options.modelFactory??liveModel)(EVALUATION_MODEL,options.provider);
-    if(adapter.provider!==options.provider||adapter.modelId!==EVALUATION_MODEL) throw new Error('Adapter mismatch');
+    const adapter=await options.models(id);
     signal.throwIfAborted();
     stage.run=await(id==='scoped-patch'?proposeScopedPatch:reviewChange)(agentInput(w,id),{...adapter,signal,checkpoint:async r=>{stage.run=r;await save();}});
     if(stage.run.status!=='completed') throw new Error('Agent failed');return stage.run;

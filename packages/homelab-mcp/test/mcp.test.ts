@@ -17,7 +17,7 @@ const model=()=>new MockLanguageModelV3({doStream:async()=>({stream:simulateRead
   {type:'finish',finishReason:{unified:'tool-calls',raw:'tool-calls'},usage:{inputTokens:{total:10,noCache:10,cacheRead:0,cacheWrite:0},outputTokens:{total:5,text:5,reasoning:0}}}]})})});
 async function setup(t:TestContext,overrides:{transport?:WorkloadTransport;maxJobs?:number}={}){
   const root=await mkdtemp(join(tmpdir(),'homelab-mcp-'));t.after(()=>rm(root,{recursive:true,force:true}));let calls=0;
-  const config={schemaVersion:1,provider:'copilot',runsDirectory:root,observations:[],targets:[{schemaVersion:1,assetId:'cluster',host:'example.invalid',user:'operator'}],maxJobs:overrides.maxJobs??4};
+  const config={schemaVersion:1,model:{provider:'copilot',model:'gpt-5.6-terra'},runsDirectory:root,observations:[],targets:[{schemaVersion:1,assetId:'cluster',host:'example.invalid',user:'operator'}],maxJobs:overrides.maxJobs??4};
   const options={transport:overrides.transport??transport,modelFactory:async()=>{calls++;return model();}};
   const host=createHomelabMcpServer(config,options),client=new Client({name:'fixture-orchestrator',version:'1.0.0'});
   const [serverTransport,clientTransport]=InMemoryTransport.createLinkedPair();await host.server.connect(serverTransport);await client.connect(clientTransport);
@@ -55,7 +55,7 @@ test('restart inspection does not replay and rejects changed configuration, prov
   const f=await setup(t);const job=(await f.call('investigate_workload_findings',{targetId:'cluster'})).body.jobId;await finished(f.call,job);await f.host.shutdown();await f.client.close();
   const connect=async(config:unknown)=>{const h=createHomelabMcpServer(config,{modelFactory:async()=>{throw new Error('No model on inspect');}});const c=new Client({name:'restart',version:'1'});const [a,b]=InMemoryTransport.createLinkedPair();await h.server.connect(a);await c.connect(b);t.after(async()=>{await h.shutdown();await c.close();});return async()=>c.callTool({name:'inspect_homelab_job',arguments:{jobId:job}});};
   const inspect=await connect(f.config);assert.equal(((await inspect()).structuredContent as any).resultStatus,'completed');
-  const changed=await connect({...f.config,provider:'codex'});assert.equal((await changed()).isError,true);
+  const changed=await connect({...f.config,model:{...f.config.model,provider:'codex'}});assert.equal((await changed()).isError,true);
   const path=join(f.root,job,'investigation/triage/triage.json'),original=await readFile(path,'utf8');
   await writeFile(path,JSON.stringify({...JSON.parse(original),inputHash:'0'.repeat(64)}));assert.equal((await inspect()).isError,true);
   await writeFile(path,original);const outside=join(f.root,'outside.json');await rename(path,outside);await symlink(outside,path);assert.equal((await inspect()).isError,true);

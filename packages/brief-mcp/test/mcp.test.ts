@@ -8,14 +8,14 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { MockLanguageModelV3, simulateReadableStream } from 'ai/test';
 import { createBriefMcpServer, type BriefMcpOptions } from '../src/index.ts';
-import { EVALUATION_MODEL } from '@onionsoup/providers/evaluation-policy';
+const TEST_MODEL = 'gpt-5.6-terra';
 import { createRepositoryBrief, workflowEvents } from '@onionsoup/repository-brief';
 const request = { schemaVersion: 1 as const, repository: 'example/widget', since: '2026-09-17T00:00:00Z',
   until: '2026-09-18T00:00:00Z', maxSuggestions: 0 };
 const reader: BriefMcpOptions['reader'] = async endpoint => endpoint === 'repos/example/widget'
   ? { full_name: 'example/widget', default_branch: 'main' }
   : endpoint.includes('/actions/runs') ? { total_count: 0, workflow_runs: [] } : { total_count: 0, incomplete_results: false, items: [] };
-const modelFactory: BriefMcpOptions['modelFactory'] = async () => ({ provider: 'copilot', modelId: EVALUATION_MODEL,
+const models: BriefMcpOptions['models'] = async () => ({ provider: 'copilot', modelId: TEST_MODEL,
   model: new MockLanguageModelV3({ doStream: async () => ({ stream: simulateReadableStream({ initialDelayInMs: null,
     chunkDelayInMs: null, chunks: [{ type: 'stream-start', warnings: [] }, { type: 'tool-call', toolCallId: '1',
       toolName: 'submit_result', input: JSON.stringify({ schemaVersion: 1, observations: [], limitations: ['No observed activity.'] }) },
@@ -24,7 +24,7 @@ const modelFactory: BriefMcpOptions['modelFactory'] = async () => ({ provider: '
 async function setup(t: TestContext, overrides: Partial<BriefMcpOptions> = {}) {
   const root = await mkdtemp(join(tmpdir(), 'brief-mcp-'));
   t.after(() => rm(root, { recursive: true, force: true }));
-  const options: BriefMcpOptions = { runsDirectory: root, provider: 'copilot', repositories: ['example/widget'], reader, modelFactory, ...overrides };
+  const options: BriefMcpOptions = { runsDirectory: root, provider: 'copilot', repositories: ['example/widget'], reader, models, ...overrides };
   const host = createBriefMcpServer(options), client = new Client({ name: 'test-orchestrator', version: '1.0.0' });
   const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
   await host.server.connect(serverTransport); await client.connect(clientTransport);
@@ -45,7 +45,7 @@ async function finished(call: Awaited<ReturnType<typeof setup>>['call'], jobId: 
 }
 test('MCP calls the shared recipe and preserves durable artifacts, events, and rendered results', async t => {
   let calls = 0;
-  const f = await setup(t, { modelFactory: async (...args) => { calls++; return modelFactory!(...args); } });
+  const f = await setup(t, { models: async (agent) => { calls++; return models!(agent); } });
   assert.equal((await f.call('discover_repository_brief')).body.agents.length, 3);
   assert.equal(calls, 0);
   const { body } = await f.call('submit_repository_brief', { request });
@@ -57,7 +57,7 @@ test('MCP calls the shared recipe and preserves durable artifacts, events, and r
   assert.equal(result.body.state, undefined); assert.ok(!JSON.stringify(result.body).includes(f.root));
   assert.equal((await f.call('submit_repository_brief', { request })).body.error, 'job_limit');
   await f.shutdown();
-  const restarted = await setup(t, { ...f.options, modelFactory: async () => { throw new Error('Must not replay'); } });
+  const restarted = await setup(t, { ...f.options, models: async () => { throw new Error('Must not replay'); } });
   assert.deepEqual((await restarted.call('inspect_repository_brief', { jobId: body.jobId })).body, result.body);
 });
 test('MCP rejects request authority substitution and storage traversal before admission', async t => {
@@ -88,7 +88,7 @@ test('MCP restart exposes admitted work as unfinished and refuses mismatched sav
     request, provider: 'copilot', createdAt: new Date().toISOString(), status: 'admitted' }));
   assert.equal((await f.call('inspect_repository_brief', { jobId })).body.status, 'unfinished');
   await createRepositoryBrief({ ...request, maxSuggestions: 1 }, { directory: join(directory, 'analysis'),
-    provider: 'copilot', reader: async () => { throw new Error('unavailable'); } });
+    models: async () => { throw new Error('collection fails first'); }, reader: async () => { throw new Error('unavailable'); } });
   assert.equal((await f.call('inspect_repository_brief', { jobId })).body.error, 'artifact_mismatch');
 });
 test('MCP cannot begin collection when durable admission storage fails', async t => {
