@@ -2,7 +2,7 @@ import { dirname, join } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { z } from 'zod';
-import type { Capability, CapabilityContext } from '@onionsoup/job-host';
+import { jobReference, type Capability, type CapabilityContext } from '@onionsoup/job-host';
 import { readJson } from '@onionsoup/runtime/storage';
 import type { ModelResolver } from '@onionsoup/providers';
 import { hash } from '@onionsoup/repository-analysis/contracts';
@@ -216,7 +216,7 @@ export function implementationCapabilities(options: ImplementationOptions): Capa
     interactive: true,
     description: 'Record that a person accepts a completed change proposal for implementation, and fix the files it may touch.',
     input: z.object({
-      proposalJobId: z.uuid(),
+      proposalJobId: jobReference('change.proposal'),
       reason: Approval.shape.reason,
       /** Override the files the proposal cited. Must stay within the repository profile. */
       allowedFiles: z.array(SafePath).min(1).max(30).optional(),
@@ -284,7 +284,7 @@ export function implementationCapabilities(options: ImplementationOptions): Capa
     id: 'change.implement',
     lane: () => 'sandbox',
     description: 'Run the accepted pipeline for an approval: project proposal, acceptance, pinned dependencies, patch and review agents, sandbox checks.',
-    input: z.object({ approvalJobId: z.uuid() }).strict(),
+    input: z.object({ approvalJobId: jobReference('change.approve', 'change.request') }).strict(),
     output: ImplementResult,
     outcome: (result) => ({ status: result.outcome === 'candidate_verified' ? 'ok' : 'failed', label: String(result.outcome).replaceAll('_', ' ') }),
     validateOutput: (raw) => { const result = ImplementResult.parse(raw); validateProject(result.workflow); return result; },
@@ -331,7 +331,7 @@ export function implementationCapabilities(options: ImplementationOptions): Capa
     interactive: true,
     lane: () => 'publication',
     description: 'Open a draft pull request from a verified candidate. A person submits this; the approval is the click.',
-    input: z.object({ implementJobId: z.uuid(), reason: Approval.shape.reason }).strict(),
+    input: z.object({ implementJobId: jobReference('change.implement'), reason: Approval.shape.reason }).strict(),
     output: PublishResult,
     outcome: (result) => ({ status: result.status === 'published' ? 'ok' : result.status === 'unknown' ? 'partial' : 'failed', label: result.pull?.url ? `${result.status}: ${result.pull.url}` : result.status }),
     metadata,

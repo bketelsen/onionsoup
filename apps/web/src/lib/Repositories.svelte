@@ -1,5 +1,6 @@
 <script lang="ts">
   import { store, ApiError, type RegisteredRepository } from './store.svelte.ts';
+  import ErrorText from './ui/ErrorText.svelte';
 
   let name = $state('');
   let submitting = $state(false);
@@ -54,7 +55,7 @@
       <p>
         <span class={`status ${onboardJob.status}`}>{onboardJob.status}</span>
         {#if onboardJob.outcome}<span class={`outcome ${onboardJob.outcome.status}`}>{onboardJob.outcome.label}</span>{/if}
-        {#if onboardJob.error}<span class="error">{onboardJob.error}</span>{/if}
+        {#if onboardJob.error}<ErrorText error={onboardJob.error} />{/if}
         <a href={`#/jobs/${onboardJob.jobId}`}>job</a>
       </p>
     {/if}
@@ -65,16 +66,16 @@
 {#if store.repositories.length === 0}
   <p>No repositories yet.</p>
 {:else}
-  <table>
+  <table class="list">
     <thead><tr><th>Repository</th><th>Source</th><th>Checkout</th><th>Implementation</th><th>Verification</th><th></th></tr></thead>
     <tbody>
       {#each store.repositories as repository (repository.name)}
         <tr>
-          <td><a href={`https://github.com/${repository.name}`} target="_blank" rel="noopener noreferrer">{repository.name}</a></td>
-          <td><span class="tag">{repository.origin === 'config' ? 'config' : 'onboarded'}</span></td>
-          <td>{repository.checkout ? 'yes' : 'no'}</td>
-          <td>{repository.implementation ? `${repository.profile?.changes?.maximumFiles ?? '?'} files · tests ${repository.profile?.changes?.existingTests ?? '?'}` : 'no'}</td>
-          <td>{verification(repository)}</td>
+          <td data-label="Repository"><a href={`https://github.com/${repository.name}`} target="_blank" rel="noopener noreferrer">{repository.name}</a></td>
+          <td data-label="Source"><span class="tag">{repository.origin === 'config' ? 'config' : 'onboarded'}</span></td>
+          <td data-label="Checkout">{repository.checkout ? 'yes' : 'no'}</td>
+          <td data-label="Implementation">{repository.implementation ? `${repository.profile?.changes?.maximumFiles ?? '?'} files · tests ${repository.profile?.changes?.existingTests ?? '?'}` : 'no'}</td>
+          <td data-label="Verification">{verification(repository)}</td>
           <td>
             {#if repository.origin === 'registry' && repository.implementation && canUpdate}
               <a class="button secondary small" href={`#/run/repository.update?repository=${encodeURIComponent(repository.name)}`}>Edit</a>
@@ -91,8 +92,4 @@
   .onboard label { font-weight: 600; font-size: 0.9rem; }
   .row { display: flex; gap: 0.5rem; }
   .row input { flex: 1; width: auto; }
-  table { width: 100%; border-collapse: collapse; }
-  th, td { text-align: left; padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
-  th { color: var(--muted); font-weight: 600; font-size: 0.85rem; }
-  a.button { display: inline-block; border-radius: 6px; padding: 0.2rem 0.6rem; font-size: 0.85rem; text-decoration: none; color: var(--text); border: 1px solid var(--line); }
 </style>

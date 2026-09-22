@@ -25,6 +25,12 @@ const Id = z.string().regex(/^[a-z][a-z0-9.-]{0,63}$/);
 const Status = z.enum(['queued', 'running', 'completed', 'failed', 'cancelled', 'interrupted']);
 export type JobStatus = z.infer<typeof Status>;
 
+/**
+ * An input field holding the ID of an earlier job. `jobOf` names the capabilities whose jobs it accepts,
+ * so a form can offer those jobs instead of asking for a UUID.
+ */
+export const jobReference = (...capabilities: [string, ...string[]]) => z.uuid().meta({ jobOf: capabilities });
+
 export const JobRequest = z.object({
   capability: Id,
   input: z.json(),
@@ -35,8 +41,11 @@ export const JobRequest = z.object({
 export type JobRequest = z.infer<typeof JobRequest>;
 
 const Event = z.object({ sequence: z.number().int().positive(), at: z.iso.datetime(), status: Status }).strict();
-/** What the work itself concluded, distinct from whether the job ran to completion. */
-export const Outcome = z.object({ status: z.enum(['ok', 'partial', 'failed']), label: z.string().min(1).max(200) }).strict();
+/**
+ * What the work itself concluded, distinct from whether the job ran to completion.
+ * `attention` means the work succeeded and found something a person should look at.
+ */
+export const Outcome = z.object({ status: z.enum(['ok', 'attention', 'partial', 'failed']), label: z.string().min(1).max(200) }).strict();
 export type Outcome = z.infer<typeof Outcome>;
 
 const Job = z.object({

@@ -1,20 +1,23 @@
 <script lang="ts">
+  import { summarizeError } from '../reasons.ts';
+
+  type StepOutcome = { id: string; capability: string; jobId?: string; status: string; error?: string };
   let { result }: { result: unknown } = $props();
-  const r = $derived(result as { recipe: string; params: unknown; steps: { id: string; capability: string; jobId?: string; status: string; error?: string }[] });
+  const run = $derived(result as { recipe: string; params: unknown; steps: StepOutcome[] });
 </script>
 
-<p><span class="tag">recipe {r.recipe}</span></p>
+<p><span class="tag">recipe {run.recipe}</span></p>
 <ol class="steps">
-  {#each r.steps as s}
+  {#each run.steps as step}
     <li>
-      <span class={`status ${s.status}`}>{s.status}</span>
-      {#if s.jobId}<a href={`#/jobs/${s.jobId}`}>{s.id}</a>{:else}{s.id}{/if}
-      <span class="muted">{s.capability}</span>
-      {#if s.error}<span class="error">{s.error}</span>{/if}
+      <span class={`status ${step.status}`}>{step.status}</span>
+      {#if step.jobId}<a href={`#/jobs/${step.jobId}`}>{step.id}</a>{:else}{step.id}{/if}
+      <span class="muted">{step.capability}</span>
+      {#if step.error}<span class="error" title={step.error}>{summarizeError(step.error)}</span>{/if}
     </li>
   {/each}
 </ol>
-<details><summary>Parameters</summary><pre>{JSON.stringify(r.params, null, 2)}</pre></details>
+<details><summary>Parameters</summary><pre>{JSON.stringify(run.params, null, 2)}</pre></details>
 
 <style>
   ol.steps { display: grid; gap: 0.3rem; padding-left: 1.2rem; }

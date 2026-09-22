@@ -1,4 +1,6 @@
 export type JobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted';
+export type OutcomeStatus = 'ok' | 'attention' | 'partial' | 'failed';
+export const isActive = (job: Job) => job.status === 'queued' || job.status === 'running';
 
 export type Job = {
   jobId: string;
@@ -13,7 +15,7 @@ export type Job = {
   status: JobStatus;
   events: { sequence: number; at: string; status: JobStatus }[];
   error?: string;
-  outcome?: { status: 'ok' | 'partial' | 'failed'; label: string };
+  outcome?: { status: OutcomeStatus; label: string };
   result?: unknown;
 };
 
@@ -46,6 +48,9 @@ export type JsonSchema = {
   maxLength?: number;
   anyOf?: JsonSchema[];
   additionalProperties?: boolean | JsonSchema;
+  title?: string;
+  /** Set on job-reference fields: the capabilities whose completed jobs the field accepts. */
+  jobOf?: string[];
   [key: string]: unknown;
 };
 
@@ -75,10 +80,10 @@ export type ChatTurn = {
   toolCalls: number;
   events: { at: string; tool: string; stage: string; details: unknown }[];
 };
-export type ChatSessionSummary = { sessionId: string; createdAt: string; turns: number; title: string; lastAt: string };
+export type ChatSessionSummary = { sessionId: string; createdAt: string; turns: number; title: string; lastAt: string; busy: boolean };
 export type ChatSession = { sessionId: string; createdAt: string; turns: ChatTurn[] };
 
-export type HomelabSource = { sourceId: string; kind: 'truenas' | 'containers' | 'kubernetes'; origin: 'config' | 'registry'; host: string; detail: string; latestObservation: { at: string; status: string } | null; latestInvestigation: { at: string; status: string; summary: string } | null };
+export type HomelabSource = { sourceId: string; kind: 'truenas' | 'containers' | 'kubernetes'; origin: 'config' | 'registry'; host: string; detail: string; latestObservation: { at: string; status: string } | null; latestInvestigation: { at: string; status: string; summary: string; attention: boolean } | null };
 export type ModelChoice = { provider: 'copilot' | 'codex'; model: string };
 export type AgentModel = { agent: string; description: string; choice: ModelChoice; origin: 'assigned' | 'config' | 'default'; configured: ModelChoice };
 export type ProviderCatalog =
@@ -102,6 +107,11 @@ export class ApiError extends Error {
   }
 }
 
+/** How often the chat view re-reads a session while a turn runs. */
+export const CHAT_POLL_MS = 1500;
+/** How often relative times re-render. */
+const CLOCK_MS = 30000;
+
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, { ...init, headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) } });
   const text = await response.text();
@@ -123,7 +133,23 @@ class Store {
   chatBusy = $state(false);
   connected = $state(false);
   error = $state<string | null>(null);
+  /** Ticks so relative times ("5m ago") stay current. */
+  now = $state(Date.now());
+  /** An input handed to the run form, e.g. by "Run again". Taken once by the form for that capability. */
+  draft = $state<{ capability: string; input: unknown } | null>(null);
+  /** Set by a view with unsaved work; returns false to stay on the page. */
+  leaveGuard: (() => boolean) | null = null;
   private source: EventSource | null = null;
+
+  constructor() {
+    setInterval(() => { this.now = Date.now(); }, CLOCK_MS);
+  }
+
+  takeDraft(capability: string) {
+    const draft = this.draft?.capability === capability ? this.draft.input : undefined;
+    this.draft = null;
+    return draft;
+  }
 
   get capabilities() {
     return this.discovery?.capabilities ?? [];
@@ -131,6 +157,10 @@ class Store {
 
   get jobList() {
     return Object.values(this.jobs).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  get activeJobs() {
+    return this.jobList.filter(isActive);
   }
 
   capability(id: string) {
@@ -163,8 +193,9 @@ class Store {
   }
 
   async openChatSession(sessionId: string) {
-    const { session } = await api<{ session: ChatSession }>(`/v1/chat/sessions/${sessionId}`);
+    const { session, busy } = await api<{ session: ChatSession; busy: boolean }>(`/v1/chat/sessions/${sessionId}`);
     this.chatSession = { ...session, sessionId };
+    if (busy && !this.chatBusy) void this.followTurn(sessionId);
   }
 
   async createChatSession() {
@@ -174,24 +205,50 @@ class Store {
     return created.sessionId;
   }
 
+  /** Re-read the session while its turn runs, so tool steps show up as they happen. */
+  private async followTurn(sessionId: string, finished?: Promise<unknown>) {
+    this.chatBusy = true;
+    let isDone = false;
+    finished?.finally(() => { isDone = true; });
+    try {
+      while (!isDone && this.chatSession?.sessionId === sessionId) {
+        await new Promise((resolve) => setTimeout(resolve, CHAT_POLL_MS));
+        const { session, busy } = await api<{ session: ChatSession; busy: boolean }>(`/v1/chat/sessions/${sessionId}`);
+        if (this.chatSession?.sessionId === sessionId) this.chatSession = { ...session, sessionId };
+        if (!busy && !finished) break;
+      }
+    } finally {
+      this.chatBusy = false;
+    }
+  }
+
   async sendChat(message: string) {
     if (!this.chatSession) throw new Error('No session');
     const sessionId = this.chatSession.sessionId;
-    this.chatBusy = true;
     const pending: ChatTurn = { turnId: 'pending', message, startedAt: new Date().toISOString(), status: 'running', steps: 0, toolCalls: 0, events: [] };
     this.chatSession.turns.push(pending);
+    const posted = api<{ turn: ChatTurn }>(`/v1/chat/sessions/${sessionId}/turns`, { method: 'POST', body: JSON.stringify({ message }) });
+    const following = this.followTurn(sessionId, posted);
     try {
-      const { turn } = await api<{ turn: ChatTurn }>(`/v1/chat/sessions/${sessionId}/turns`, { method: 'POST', body: JSON.stringify({ message }) });
-      if (this.chatSession?.sessionId === sessionId) this.chatSession.turns.splice(this.chatSession.turns.indexOf(pending), 1, turn);
+      const { turn } = await posted;
+      await following;
+      await this.openChatSession(sessionId);
       await this.load();
       await this.loadChatSessions();
       return turn;
     } catch (e) {
-      if (this.chatSession?.sessionId === sessionId) this.chatSession.turns.splice(this.chatSession.turns.indexOf(pending), 1);
+      if (this.chatSession?.sessionId === sessionId) this.chatSession.turns = this.chatSession.turns.filter((t) => t.turnId !== 'pending');
       throw e;
-    } finally {
-      this.chatBusy = false;
     }
+  }
+
+  async cancelChat() {
+    if (this.chatSession) await api(`/v1/chat/sessions/${this.chatSession.sessionId}/cancel`, { method: 'POST', body: '{}' });
+  }
+
+  async updateChatSession(sessionId: string, change: { title?: string; archived?: boolean }) {
+    await api(`/v1/chat/sessions/${sessionId}`, { method: 'PATCH', body: JSON.stringify(change) });
+    await this.loadChatSessions();
   }
 
   async loadRecipes() {
@@ -218,7 +275,7 @@ class Store {
       const [discovery, list] = await Promise.all([api<Discovery>('/v1/capabilities'), api<{ jobs: Job[] }>('/v1/jobs')]);
       this.discovery = discovery;
       const next: Record<string, Job> = {};
-      for (const job of list.jobs) next[job.jobId] = job;
+      for (const job of list.jobs) next[job.jobId] = this.withKnownResult(job);
       this.jobs = next;
       this.error = null;
       await this.loadRecipes().catch(() => {});
@@ -228,6 +285,12 @@ class Store {
     this.listen();
   }
 
+  /** Lists and transitions never carry results; keep one already fetched unless the status moved on. */
+  private withKnownResult(job: Job): Job {
+    const previous = this.jobs[job.jobId];
+    return previous?.result !== undefined && previous.status === job.status ? { ...job, result: previous.result } : job;
+  }
+
   private listen() {
     if (this.source) return;
     this.source = new EventSource('/v1/events');
@@ -235,9 +298,7 @@ class Store {
     this.source.onerror = () => { this.connected = false; };
     this.source.addEventListener('job', (event) => {
       const job = JSON.parse((event as MessageEvent).data) as Job;
-      const previous = this.jobs[job.jobId];
-      // Transitions never carry results; keep one already fetched unless the status moved on.
-      this.jobs[job.jobId] = previous?.result !== undefined && previous.status === job.status ? { ...job, result: previous.result } : job;
+      this.jobs[job.jobId] = this.withKnownResult(job);
     });
   }
 

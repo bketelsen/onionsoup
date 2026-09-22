@@ -1,6 +1,5 @@
 <script lang="ts">
   import type { Component } from 'svelte';
-  import Capabilities from './Capabilities.svelte';
   import Recipes from './recipes/Recipes.svelte';
   import Models from './Models.svelte';
   import Repositories from './Repositories.svelte';
@@ -13,7 +12,6 @@
     repositories: { label: 'Repositories', view: Repositories },
     sources: { label: 'Homelab sources', view: Sources },
     models: { label: 'Models', view: Models },
-    capabilities: { label: 'Capabilities', view: Capabilities },
     recipes: { label: 'Recipes', view: Recipes },
   };
   const current = $derived(sections[tab] ?? sections.repositories);

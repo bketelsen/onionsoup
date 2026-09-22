@@ -8,15 +8,21 @@ Living document. Supersedes the CLI-per-recipe and loopback-console approach.
   launch from operator configuration. Endpoints:
   `GET /v1/capabilities`, `GET /v1/jobs`, `POST /v1/jobs`, `GET /v1/jobs/:id`,
   `POST /v1/jobs/:id/cancel`, `GET /v1/events` (server-sent job transitions),
-  `GET|PUT|DELETE /v1/recipes[/:id]`, and `/v1/chat/sessions[/:id[/turns]]`.
+  `GET|PUT|DELETE /v1/recipes[/:id]`, and `/v1/chat/sessions[/:id[/turns|/cancel]]`
+  (`PATCH` a session to rename or archive it).
   The host also serves the built web app from a configured directory on the
   same origin.
-- **Web app:** `apps/web`, Svelte + Vite. Chat is the front door; Jobs is the
-  history; a Settings gear holds Repositories (the registry, with onboarding),
-  Capabilities (run forms generated from each capability's JSON schema) and
-  Recipes (the graph editor). Job history and status update live over the
-  event stream. Results render as structured views where a renderer exists and
-  as JSON otherwise.
+- **Web app:** `apps/web`, Svelte + Vite. Chat is the front door; Inbox collects
+  what needs a person (next steps nobody took, failures nobody retried, homelab
+  sources flagged or stale); Jobs is the history, with New job for the catalog;
+  Homelab shows each source's latest observation and assessment and the latest
+  brief. A Settings gear holds Repositories (the registry, with onboarding),
+  Homelab sources, Models and Recipes (the graph editor). Job history and status
+  update live over the event stream. Results render as structured views where a
+  renderer exists (readiness, location, packet, proposal, approval, implementation
+  with its diff and checks, publication, search, recipe runs) and as Markdown or
+  JSON otherwise. Errors show the meaning of their code, with unexpected ones
+  behind a disclosure.
 - **Access:** on loopback the browser is the configured `web` invoker without a
   token; same-origin requests only. Remote invokers (the scheduler) keep bearer
   tokens. Over the tailnet, `tailscale serve` terminates HTTPS and adds
@@ -85,6 +91,16 @@ to the host config so your login maps to an invoker.
    access without the header stays the local operator. A systemd user unit is
    in `deploy/`. Homelab capabilities join the same catalog through the
    existing `capabilities.homelab` block. *(done 2026-09-21)*
+
+8. Operator UX pass. Job-reference inputs carry `jobOf` (the capabilities whose
+   jobs they accept, set with `jobReference()` in `@onionsoup/job-host`), so run
+   forms offer a picker instead of a UUID box. Outcomes gain `attention`: the
+   work succeeded and found something to act on, which is how homelab triage
+   reports now. Source views report `latestInvestigation.attention`. Chat shows
+   tool steps while a turn runs (the page re-reads the session), can stop a
+   turn, links cited jobs instead of printing IDs, and offers a job's next step
+   under the answer. Sessions can be renamed and archived; archived ones leave
+   the list but stay on disk. *(done 2026-09-22)*
 
 Fixture execution, draft publication and owned-project changes stay on their
 CLIs until the read-only surface is done; they carry real effects.
