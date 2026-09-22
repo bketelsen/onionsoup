@@ -5,4 +5,5 @@ export { Ledger, WorkItem, WorkStatus, HireRecord, Verification } from './ledger
 export { Notebook, editSection } from './notebook.ts';
 export { Runtime } from './runtime.ts';
 export { wake, distill, recordLearnings } from './owner.ts';
-export { advance, approvePlan, rejectPlan } from './workflow.ts';
+export { advance, approvePlan, rejectPlan, revisePlan } from './workflow.ts';
+export { publish } from './publish.ts';

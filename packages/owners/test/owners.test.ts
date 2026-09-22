@@ -51,3 +51,33 @@ test('example declarations load and reference known models', async () => {
   }
   familyOf(declarations.families, clippy.model);
 });
+
+test('a person can send a plan back with feedback, or reject it, and both are recorded', async () => {
+  const { Runtime, revisePlan, rejectPlan } = await import('@onionsoup/owners');
+  const runtime = await Runtime.open({ declarations: 'examples/owners', state: await mkdtemp(join(tmpdir(), 'owners-state-')) });
+  await runtime.notebook('clippy').ensure('# Charter\n');
+  const proposal = { title: 't', goal: 'g', rationale: 'r', acceptance: ['a'], size: 'small' as const };
+  const plan = { summary: 's', steps: [{ description: 'd', files: ['main.go'] }], tests: ['t'], risks: [], outOfScope: [], questionsForOwner: [] };
+  const first = await runtime.ledger.create('clippy', 'change', proposal);
+  await runtime.ledger.save({ ...first, status: 'awaiting-plan-approval', plan });
+  const revised = await revisePlan(runtime, first.id, 'bjk', 'also bound -font-size');
+  assert.equal(revised.status, 'planning');
+  assert.deepEqual(revised.humanNotes.map(note => [note.kind, note.note]), [['plan-feedback', 'also bound -font-size']]);
+  const second = await runtime.ledger.create('clippy', 'change', proposal);
+  await runtime.ledger.save({ ...second, status: 'awaiting-plan-approval', plan });
+  const rejected = await rejectPlan(runtime, second.id, 'bjk', 'busywork');
+  assert.equal(rejected.status, 'rejected');
+  await assert.rejects(rejectPlan(runtime, second.id, 'bjk', 'again'), /not_awaiting_plan_approval: rejected/);
+});
+
+test('survey context says when landed work is not yet on the base branch', async () => {
+  const { workSoFarText } = await import('../src/briefs.ts');
+  const base = { owner: 'clippy', workflow: 'change', implementations: [], verdicts: [], replans: 0, hires: [], humanNotes: [], createdAt: '', updatedAt: '' };
+  const proposal = { title: 'Alignment tests', goal: 'g', rationale: 'r', acceptance: ['a'], size: 'small' as const };
+  const text = workSoFarText([
+    { ...base, id: 'w-1', proposal, status: 'landed', branch: 'owners/w-1' },
+    { ...base, id: 'w-2', proposal: { ...proposal, title: 'Clipboard note' }, status: 'rejected', reason: 'busywork' },
+  ]);
+  assert.match(text, /Alignment tests \[w-1\]: landed on local branch owners\/w-1, NOT yet on the base branch/);
+  assert.match(text, /Clipboard note \[w-2\]: plan rejected by a person: busywork/);
+});

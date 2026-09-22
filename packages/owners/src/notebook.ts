@@ -39,11 +39,11 @@ export class Notebook {
       await git(this.root, ['init', '-q', '-b', 'main']);
     }
     await mkdir(join(this.directory, 'journal'), { recursive: true });
-    await this.writeIfMissing('CHARTER.md', charter);
+    const created = [await this.writeIfMissing('CHARTER.md', charter)];
     for (const [register, title] of Object.entries(REGISTER_TITLES)) {
-      await this.writeIfMissing(`${register}.md`, `# ${title}\n`);
+      created.push(await this.writeIfMissing(`${register}.md`, `# ${title}\n`));
     }
-    await this.commit('Scaffold notebook');
+    await this.commit(created.some(Boolean) ? 'Scaffold notebook' : 'journal');
   }
 
   async orientation() {
@@ -79,7 +79,9 @@ export class Notebook {
 
   private async writeIfMissing(file: string, content: string) {
     const path = join(this.directory, file);
-    if (!existsSync(path)) await writeFile(path, content);
+    if (existsSync(path)) return false;
+    await writeFile(path, content);
+    return true;
   }
 
   private async applyOne(edit: NotebookEdit) {

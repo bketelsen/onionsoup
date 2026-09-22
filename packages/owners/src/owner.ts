@@ -1,10 +1,12 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Learnings, OwnerAnswers, Survey } from './artifacts.ts';
-import { distillBrief, learningsBrief, ownerAnswerBrief, surveyBrief } from './briefs.ts';
+import { distillBrief, learningsBrief, ownerAnswerBrief, surveyBrief, workSoFarText } from './briefs.ts';
 import type { WorkItem } from './ledger.ts';
 import type { Runtime } from './runtime.ts';
 import { refreshCheckout } from './workspace.ts';
+
+export const SURVEY_LIMITS = { recentWork: 20 };
 
 async function prepare(runtime: Runtime, ownerId: string) {
   const owner = runtime.owner(ownerId);
@@ -19,11 +21,9 @@ export async function wake(runtime: Runtime, ownerId: string, dutyId: string) {
   const duty = owner.duties.find(candidate => candidate.id === dutyId);
   if (!duty) throw new Error(`unknown_duty: ${ownerId}/${dutyId}`);
   const head = await refreshCheckout(owner);
-  const open = (await runtime.ledger.list()).filter(item => item.owner === ownerId && !['landed', 'failed'].includes(item.status));
-  const inProgress = open.map(item => `- ${item.proposal.title} (${item.status})`).join('\n');
-  const brief = `${surveyBrief(duty, await notebook.orientation(), head, owner.maxProposals)}\n\nWork already open:\n${inProgress || '(none)'}`;
-  const pool = await runtime.freelancers();
-  const result = await pool.hire({ role: 'owner', model: owner.model, directory: owner.checkout, title: `${ownerId}: ${dutyId}`, brief, schema: Survey });
+  const history = (await runtime.ledger.list()).filter(item => item.owner === ownerId).slice(-SURVEY_LIMITS.recentWork);
+  const brief = surveyBrief(duty, await notebook.orientation(), head, owner.maxProposals, workSoFarText(history));
+  const result = await runtime.hire(ownerId, { role: 'owner', model: owner.model, directory: owner.checkout, title: `${ownerId}: ${dutyId}`, brief, schema: Survey });
   const survey = result.value;
   await notebook.apply(survey.notebook, `${dutyId} at ${head.slice(0, 8)}`);
   const proposals = survey.proposals.slice(0, owner.maxProposals);
@@ -59,9 +59,8 @@ export async function distill(runtime: Runtime, ownerId: string) {
   const marker = await readFile(markerPath, 'utf8').then(text => text.trim(), () => undefined);
   const journal = await notebook.journalSince(marker);
   if (!journal.length) return { edits: 0, cost: 0 };
-  const pool = await runtime.freelancers();
   const brief = distillBrief(journal, await notebook.orientation());
-  const result = await pool.hire({ role: 'owner', model: owner.model, directory: owner.checkout, title: `${ownerId}: distill`, brief, schema: Learnings });
+  const result = await runtime.hire(ownerId, { role: 'owner', model: owner.model, directory: owner.checkout, title: `${ownerId}: distill`, brief, schema: Learnings });
   await notebook.apply(result.value.notebook, `distill ${journal.length} journal lines`);
   await writeFile(markerPath, new Date().toISOString());
   return { edits: result.value.notebook.length, cost: result.cost };

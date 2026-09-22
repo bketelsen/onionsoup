@@ -374,7 +374,7 @@ create and delete approvals.
 
 The first slice is running as a spike in `packages/owners`, with declarations
 in `examples/owners` and state under `.local/owners/`. Run it with
-`npm run owners -- <wake|items|show|approve|reject|run|distill|notebook|recover>`.
+`npm run owners -- <wake|items|show|approve|revise-plan|reject|run|publish|distill|notebook|recover>`.
 
 What exists:
 
@@ -405,9 +405,28 @@ Findings so far:
   `format: json_schema`.** The spike takes the reply from the synchronous
   prompt call, with timeouts disabled, and aborts the session on its own
   deadline instead.
-- **Plans need a middle option.** Approve and reject are not enough; a
-  person often wants "approve, but also cover X".
+- **Plans need a middle option.** Approve and reject were not enough; a
+  person often wants "approve, but also cover X". `revise-plan --note` now
+  sends feedback back to the planner, and an approval note reaches the
+  implementer and reviewer as conditions of approval.
 - **Cost is uneven.** Copilot reports per-call cost; ChatGPT OAuth reports $0.
+- **The notebook loop works.** After one landed item and two rejections,
+  `distill` moved the rejection reasons from the journal into the registers.
+  The next survey, which saw only the notebook, re-proposed the font-size
+  bound citing the rejection, did not re-propose the rejected clipboard note,
+  did not duplicate the landed tests, and found a new bug (text starting with
+  `-` is parsed as a flag). It still proposes some housekeeping churn.
+- **Owners need to know what they already did.** Surveys now get recent work
+  items with their outcome, including landed work that is only on a local
+  branch and therefore invisible in the owner's checkout.
+- **Findings are written as they happen.** Every hire gets one writable
+  findings file (all other writes stay blocked), and the runtime journals it
+  even when the hire fails. opencode matches `edit` rules against the path
+  relative to the session worktree, not the absolute path.
+- **Publishing is a separate, human-only command.** `publish <item>` pushes
+  the landed branch and opens a draft PR whose body carries the plan, the
+  host verification, the review and which model did each step. The first
+  one is bketelsen/clippy#10.
 
 ## References
 

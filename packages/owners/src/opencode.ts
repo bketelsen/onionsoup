@@ -1,3 +1,4 @@
+import { dirname, join, relative } from 'node:path';
 import { createOpencodeClient } from '@opencode-ai/sdk/v2/client';
 import { Agent } from 'undici';
 import { z } from 'zod';
@@ -78,6 +79,8 @@ export interface HireRequest<T> {
   title: string;
   brief: string;
   schema: z.ZodType<T>;
+  /** A file the hire may append findings to while it works; read back even if the hire fails. */
+  notesFile?: string;
 }
 
 export interface HireResult<T> {
@@ -103,9 +106,34 @@ const ROLE_WRITES: Record<Role, (directory: string) => string[]> = {
   reviewer: () => [],
 };
 
-const AGENT_CONFIG = {
-  agent: Object.fromEntries(Object.entries(ROLE_AGENTS).map(([role, definition]) => [`onionsoup-${role}`, { mode: 'primary', ...definition }])),
-};
+/**
+ * Carve one writable notes file out of an otherwise read-only role. Later rules win in opencode.
+ * Edit rules match the path relative to the session's worktree; external_directory rules match an absolute glob.
+ */
+function withNotes(permission: ReturnType<typeof rolePermission>, directory: string, notesFile: string | undefined) {
+  if (!notesFile) return permission;
+  return {
+    ...permission,
+    edit: { '*': permission.edit, [relative(directory, notesFile)]: 'allow' },
+    external_directory: { '*': 'deny', [join(dirname(notesFile), '*')]: 'allow' },
+  };
+}
+
+function agentConfig(directory: string, notesFile: string | undefined) {
+  return {
+    agent: Object.fromEntries(Object.entries(ROLE_AGENTS).map(([role, definition]) => [
+      `onionsoup-${role}`,
+      { mode: 'primary', prompt: definition.prompt, permission: withNotes(definition.permission, directory, notesFile) },
+    ])),
+  };
+}
+
+function notesInstruction(notesFile: string) {
+  return `Findings file: ${notesFile}
+The moment you discover something a future worker must not lose (a bug, a surprising behavior, a risky
+input, a convention), append one line to that file with the edit tool. Do not wait until the end: if this
+session dies, only what is in that file survives. It is the only file you may write.`;
+}
 
 interface SandboxedServer {
   url: string;
@@ -113,12 +141,13 @@ interface SandboxedServer {
 }
 
 /** One opencode server per hire, inside a sandbox shaped for the role. */
-async function startServer(role: Role, directory: string): Promise<SandboxedServer> {
+async function startServer(role: Role, directory: string, notesFile: string | undefined): Promise<SandboxedServer> {
   const port = await freePort();
+  const notesWritable = notesFile ? [dirname(notesFile)] : [];
   const child = spawnSandboxed('opencode', ['serve', '--hostname=127.0.0.1', `--port=${port}`], {
     cwd: directory,
-    writable: ROLE_WRITES[role](directory),
-    env: { OPENCODE_CONFIG_CONTENT: JSON.stringify(AGENT_CONFIG) },
+    writable: [...ROLE_WRITES[role](directory), ...notesWritable],
+    env: { OPENCODE_CONFIG_CONTENT: JSON.stringify(agentConfig(directory, notesFile)) },
   });
   const url = await new Promise<string>((resolve, reject) => {
     let output = '';
@@ -150,7 +179,7 @@ export class Freelancers {
   close() {}
 
   async hire<T>(request: HireRequest<T>): Promise<HireResult<T>> {
-    const server = await startServer(request.role, request.directory);
+    const server = await startServer(request.role, request.directory, request.notesFile);
     try {
       return await this.hireOn(server.url, request);
     } finally {
@@ -175,7 +204,7 @@ export class Freelancers {
         agent: `onionsoup-${request.role}`,
         model: { providerID: providerID!, modelID: rest.join('/') },
         format: { type: 'json_schema', schema: z.toJSONSchema(request.schema) as Record<string, unknown>, retryCount: 2 },
-        parts: [{ type: 'text', text: request.brief }],
+        parts: [{ type: 'text', text: request.notesFile ? `${request.brief}\n\n${notesInstruction(request.notesFile)}` : request.brief }],
       });
       const info = reply.data?.info as AssistantInfo | undefined;
       if (!info) throw new HireError(`no_assistant_reply: ${JSON.stringify(reply.error).slice(0, 300)}`, sessionID);

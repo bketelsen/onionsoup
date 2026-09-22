@@ -5,7 +5,8 @@ import { parseArgs } from 'node:util';
 import type { WorkItem } from './ledger.ts';
 import { distill, wake } from './owner.ts';
 import { Runtime } from './runtime.ts';
-import { advance, approvePlan, rejectPlan } from './workflow.ts';
+import { publish } from './publish.ts';
+import { advance, approvePlan, rejectPlan, revisePlan } from './workflow.ts';
 
 const run = promisify(execFile);
 
@@ -30,6 +31,7 @@ function line(item: WorkItem) {
 
 function detail(item: WorkItem) {
   const out = [line(item), '', `Goal: ${item.proposal.goal}`, `Why: ${item.proposal.rationale}`, 'Acceptance:', ...item.proposal.acceptance.map(entry => `  - ${entry}`)];
+  if (item.humanNotes.length) out.push('', 'Notes from people:', ...item.humanNotes.map(note => `  ${note.kind} by ${note.by}: ${note.note}`));
   if (item.ownerAnswers) out.push('', 'Owner answered the planner:', ...item.ownerAnswers.answers.map(entry => `  Q: ${entry.question}\n  A: ${entry.answer}`));
   if (item.plan) {
     out.push('', `Plan: ${item.plan.summary}`, ...item.plan.steps.map((step, index) => `  ${index + 1}. ${step.description} [${step.files.join(', ')}]`));
@@ -45,6 +47,7 @@ function detail(item: WorkItem) {
   out.push('', 'Hires:', ...item.hires.map(hire => `  ${hire.stage.padEnd(9)} ${hire.craft.padEnd(14)} ${hire.model.padEnd(34)} ${hire.family.padEnd(9)} ${hire.outcome} $${hire.cost.toFixed(4)}${hire.error ? ` ${hire.error}` : ''}`));
   if (item.branch) out.push('', `Branch: ${item.branch}  Worktree: ${item.worktree}`);
   if (item.landedCommit) out.push(`Landed: ${item.landedCommit}`);
+  if (item.publication) out.push(`Published: ${item.publication.url}`);
   return out.join('\n');
 }
 
@@ -72,6 +75,15 @@ const COMMANDS: Record<string, Command> = {
     const item = await approvePlan(runtime, required(itemId, 'work item'), userInfo().username, options.note);
     console.log(line(item));
     if (!options['no-advance']) console.log(detail(await advance(runtime, item.id, progress)));
+  },
+  async 'revise-plan'(runtime, [itemId]) {
+    const item = await revisePlan(runtime, required(itemId, 'work item'), userInfo().username, required(options.note, '--note'));
+    console.log(line(item));
+    if (!options['no-advance']) console.log(detail(await advance(runtime, item.id, progress)));
+  },
+  async publish(runtime, [itemId]) {
+    const item = await publish(runtime, required(itemId, 'work item'), userInfo().username);
+    console.log(`${line(item)}\n${item.publication?.url ?? ''}`);
   },
   async reject(runtime, [itemId]) {
     console.log(line(await rejectPlan(runtime, required(itemId, 'work item'), userInfo().username, required(options.reason, '--reason'))));

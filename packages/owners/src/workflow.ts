@@ -2,7 +2,7 @@ import { ImplementationReport, Plan, Verdict } from './artifacts.ts';
 import { implementBrief, planBrief, reviewBrief } from './briefs.ts';
 import { requireFreelancer, requireWorkflow, type Craft, type WorkflowDeclaration } from './declarations.ts';
 import { pickModel } from './families.ts';
-import type { WorkItem, WorkStatus } from './ledger.ts';
+import type { HumanNote, WorkItem, WorkStatus } from './ledger.ts';
 import { answerQuestions, recordLearnings } from './owner.ts';
 import type { Runtime } from './runtime.ts';
 import { commitWorktree, createWorktree, diffAgainstBase, refreshCheckout, resetWorktree, verificationPassed, verify } from './workspace.ts';
@@ -153,18 +153,34 @@ export async function advance(runtime: Runtime, itemId: string, onProgress: (ite
   return item;
 }
 
-/** The human gate: nothing is implemented until a person approves the plan. */
-export async function approvePlan(runtime: Runtime, itemId: string, by: string, note?: string) {
+function humanNote(kind: HumanNote['kind'], by: string, note: string): HumanNote {
+  return { kind, by, at: new Date().toISOString(), note };
+}
+
+async function requireAwaitingApproval(runtime: Runtime, itemId: string) {
   const item = await runtime.ledger.get(itemId);
   if (item.status !== 'awaiting-plan-approval') throw new Error(`not_awaiting_plan_approval: ${item.status}`);
-  const approved = { ...transition(item, 'implementing'), planApproval: { by, at: new Date().toISOString(), note } };
+  return item;
+}
+
+/** The human gate: nothing is implemented until a person approves the plan. An approval note travels to the implementer and reviewer. */
+export async function approvePlan(runtime: Runtime, itemId: string, by: string, note?: string) {
+  const item = await requireAwaitingApproval(runtime, itemId);
+  const humanNotes = note ? [...item.humanNotes, humanNote('approval', by, note)] : item.humanNotes;
+  const approved = { ...transition(item, 'implementing'), humanNotes, planApproval: { by, at: new Date().toISOString(), note } };
   await runtime.notebook(item.owner).journal({ kind: 'plan-approved', workItem: item.id, note: `${by}${note ? `: ${note}` : ''}` });
   return runtime.ledger.save(approved);
 }
 
+/** The middle option: send the plan back to the planner with a person's feedback; it returns to the gate. */
+export async function revisePlan(runtime: Runtime, itemId: string, by: string, feedback: string) {
+  const item = await requireAwaitingApproval(runtime, itemId);
+  await runtime.notebook(item.owner).journal({ kind: 'plan-feedback', workItem: item.id, note: `${by}: ${feedback}` });
+  return runtime.ledger.save({ ...transition(item, 'planning'), humanNotes: [...item.humanNotes, humanNote('plan-feedback', by, feedback)] });
+}
+
 export async function rejectPlan(runtime: Runtime, itemId: string, by: string, reason: string) {
-  const item = await runtime.ledger.get(itemId);
-  if (item.status !== 'awaiting-plan-approval') throw new Error(`not_awaiting_plan_approval: ${item.status}`);
+  const item = await requireAwaitingApproval(runtime, itemId);
   await runtime.notebook(item.owner).journal({ kind: 'plan-rejected', workItem: item.id, note: `${by}: ${reason}` });
-  return runtime.ledger.save(transition(item, 'failed', `plan_rejected: ${reason}`));
+  return runtime.ledger.save({ ...transition(item, 'rejected', reason), humanNotes: [...item.humanNotes, humanNote('rejection', by, reason)] });
 }

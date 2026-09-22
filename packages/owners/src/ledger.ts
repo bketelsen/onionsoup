@@ -34,9 +34,21 @@ export const WorkStatus = z.enum([
   'landing',
   'landed',
   'failed',
+  'rejected',
   'interrupted',
 ]);
 export type WorkStatus = z.infer<typeof WorkStatus>;
+
+export const HumanNote = z.object({
+  kind: z.enum(['approval', 'plan-feedback', 'rejection']),
+  by: z.string(),
+  at: z.string(),
+  note: z.string(),
+});
+export type HumanNote = z.infer<typeof HumanNote>;
+
+export const Publication = z.object({ url: z.string(), branch: z.string(), by: z.string(), at: z.string() });
+export type Publication = z.infer<typeof Publication>;
 
 export const WorkItem = z.object({
   id: z.string(),
@@ -55,6 +67,8 @@ export const WorkItem = z.object({
   branch: z.string().optional(),
   landedCommit: z.string().optional(),
   hires: z.array(HireRecord).default([]),
+  humanNotes: z.array(HumanNote).default([]),
+  publication: Publication.optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });

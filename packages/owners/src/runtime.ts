@@ -1,10 +1,13 @@
-import { mkdir, readFile, rm } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { loadDeclarations, requireOwner, type Declarations, type OwnerDeclaration } from './declarations.ts';
 import { familyOf } from './families.ts';
 import { Ledger, type HireRecord, type WorkItem } from './ledger.ts';
 import { Notebook } from './notebook.ts';
 import { Freelancers, HireError, type HireRequest } from './opencode.ts';
+
+export const RUNTIME_LIMITS = { findingChars: 2_000 };
 
 export interface RuntimePaths {
   declarations: string;
@@ -67,13 +70,37 @@ export class Runtime {
     this.pool?.close();
   }
 
+  /**
+   * Hire with a findings file, and journal whatever the hire wrote there, even when it fails or dies.
+   * A crashed session once found a real bug and took it to the grave; this is the fix.
+   */
+  async hire<T>(ownerId: string, request: HireRequest<T>, workItem?: string) {
+    const pool = await this.freelancers();
+    const notesDirectory = join(this.stateDirectory, 'notes', `${Date.now()}-${randomUUID().slice(0, 8)}`);
+    await mkdir(notesDirectory, { recursive: true });
+    const notesFile = join(notesDirectory, 'findings.md');
+    await writeFile(notesFile, '');
+    try {
+      return await pool.hire({ ...request, notesFile });
+    } finally {
+      await this.ingestFindings(ownerId, notesFile, request.title, workItem);
+    }
+  }
+
+  private async ingestFindings(ownerId: string, notesFile: string, title: string, workItem?: string) {
+    const findings = (await readFile(notesFile, 'utf8').catch(() => '')).split('\n').map(line => line.trim()).filter(Boolean);
+    if (!findings.length) return;
+    const notebook = this.notebook(ownerId);
+    for (const finding of findings) await notebook.journal({ kind: 'finding', workItem, stage: title, note: finding.slice(0, RUNTIME_LIMITS.findingChars) });
+    await notebook.commit(`findings from ${title}`);
+  }
+
   /** Hire, record the hire on the work item, and rethrow failures after recording them. */
   async hireFor<T>(item: WorkItem, stage: string, craft: string, request: HireRequest<T>) {
-    const pool = await this.freelancers();
     const startedAt = new Date().toISOString();
     const base = { stage, craft, model: request.model, family: this.family(request.model) };
     try {
-      const result = await pool.hire(request);
+      const result = await this.hire(item.owner, request, item.id);
       const record: HireRecord = { ...base, sessionID: result.sessionID, startedAt, finishedAt: result.finishedAt, cost: result.cost, outcome: 'delivered' };
       item.hires.push(record);
       return result.value;
