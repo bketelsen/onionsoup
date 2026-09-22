@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { z } from 'zod';
-import type { Capability } from '@onionsoup/job-host';
+import { jobReference, type Capability } from '@onionsoup/job-host';
 import { atomicJson } from '@onionsoup/runtime/storage';
 import { createInvocationBudget } from '@onionsoup/runtime/budget';
 import type { ModelResolver } from '@onionsoup/providers';
@@ -107,7 +107,7 @@ export function maintenanceCapabilities(options: MaintenanceOptions): Capability
     ...common,
     id: 'code.location',
     description: 'For a completed ready bug assessment, suggest code and test starting points in the configured checkout. No diagnosis.',
-    input: z.object({ readinessJobId: z.uuid() }).strict(),
+    input: z.object({ readinessJobId: jobReference('issue.readiness') }).strict(),
     output: LocationResult,
     outcome: (result) => ({ status: result.handoff.disposition === 'located' ? 'ok' : result.handoff.disposition === 'not_located' ? 'partial' : 'failed', label: String(result.handoff.disposition).replaceAll('_', ' ') }),
     validateOutput: (raw) => { const r = LocationResult.parse(raw); validateLocationHandoff(r.handoff); return r; },
@@ -160,7 +160,7 @@ export function maintenanceCapabilities(options: MaintenanceOptions): Capability
     ...common,
     id: 'change.proposal',
     description: 'Draft a read-only change proposal from a completed packet. Features need a literal source search query.',
-    input: z.object({ packetJobId: z.uuid(), query: z.string().min(1).max(160).optional() }).strict(),
+    input: z.object({ packetJobId: jobReference('investigation.packet'), query: z.string().min(1).max(160).optional() }).strict(),
     output: ProposalResult,
     outcome: (result) => { const stage = result.proposal.stages?.at(-1)?.run?.result; const status = stage?.status ?? result.proposal.status; return { status: status === 'proposal_ready' ? 'ok' : status === 'needs_information' ? 'partial' : 'failed', label: String(status).replaceAll('_', ' ') }; },
     validateOutput: (raw) => { const r = ProposalResult.parse(raw); validateChangeWorkflow(r.proposal); return r; },

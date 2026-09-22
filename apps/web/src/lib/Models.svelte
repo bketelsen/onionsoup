@@ -64,15 +64,15 @@
 {#if store.models && !store.models.persisted}<p class="muted">This host does not persist assignments; edit the host config instead.</p>{/if}
 
 {#if store.models}
-  <table>
+  <table class="list">
     <thead><tr><th>Agent</th><th>Model</th><th>From</th><th></th></tr></thead>
     <tbody>
       {#each store.models.agents as row (row.agent)}
         <tr>
-          <td><strong>{row.agent}</strong><br /><small class="muted">{row.description}</small></td>
-          <td>
+          <td data-label="Agent"><strong>{row.agent}</strong><br /><small class="muted">{row.description}</small></td>
+          <td data-label="Model">
             {#if canAssign && store.models.persisted}
-              <select value={key(row.choice)} disabled={Boolean(pending[row.agent])} onchange={(e) => choose(row, e.currentTarget.value)}>
+              <select aria-label={`Model for ${row.agent}`} value={key(row.choice)} disabled={Boolean(pending[row.agent])} onchange={(e) => choose(row, e.currentTarget.value)}>
                 {#if !listed(row.choice)}<option value={key(row.choice)}>{key(row.choice)} (not listed)</option>{/if}
                 {#each catalogs as catalog (catalog.provider)}
                   {#if catalog.status === 'ok'}
@@ -89,7 +89,7 @@
             {/if}
             {#if !listed(row.choice)}<br /><small class="warn">Not in a signed-in provider's catalog; runs may fail.</small>{/if}
           </td>
-          <td><span class="tag">{originLabel[row.origin]}</span></td>
+          <td data-label="From"><span class="tag">{originLabel[row.origin]}</span></td>
           <td class="actions">
             {#if pending[row.agent]}
               <a href={`#/jobs/${pending[row.agent]}`}><span class={`status ${store.jobs[pending[row.agent]]?.status ?? 'queued'}`}>{store.jobs[pending[row.agent]]?.status ?? 'queued'}</span></a>
@@ -112,9 +112,6 @@
   .catalog.signed_out { color: var(--muted); }
   .catalog.unavailable { border-color: var(--warn); }
   .warn { color: var(--warn); }
-  table { width: 100%; border-collapse: collapse; }
-  th, td { text-align: left; padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
-  th { color: var(--muted); font-weight: 600; font-size: 0.85rem; }
   td select { width: min(100%, 22rem); }
   .actions, .tag { white-space: nowrap; }
 </style>

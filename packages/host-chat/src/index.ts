@@ -57,12 +57,12 @@ export function createHostChatProfile(options: { bindingHash: string; host: Host
       'Discover the catalog before running anything. Run only what the request needs: briefs are for repository overviews, not for finding files.',
       'To find where something lives in a repository, run repository.search with a literal phrase; it returns matching paths and lines.',
       'repository.list shows the repositories the host works on. To add one, run repository.onboard with its owner/name; it clones it, detects how to verify it, and registers it. repository.update changes an onboarded repository\'s editable paths, protected paths, file limit, test policy, build command, test files or base branch.',
-      'To make a code change the person describes: repository.search for the file, then change.request with the exact files, then change.implement with the approval job ID, then change.publish with the implement job ID and the person\'s words as the reason. Each step waits for the previous one; report each job ID.',
+      'To make a code change the person describes: repository.search for the file, then change.request with the exact files, then change.implement with the approval job ID, then change.publish with the implement job ID and the person\'s words as the reason. Each step waits for the previous one; cite each job.',
       allowInteractive ? 'Interactive capabilities (request, approve, publish) run only when the person explicitly asked for that effect in this message.' : 'Capabilities marked interactive need a person to submit them from the job page; say so.',
       'Homelab: homelab.sources lists the observed hosts. homelab.investigate collects fresh evidence from one source and assesses it (pods on k3s, containers on Docker/Podman/Incus hosts, the TrueNAS health report); homelab.refresh only collects; homelab.brief is one page across every source from the latest observations, with refresh true to collect first. homelab.add-source registers a new host; homelab.update-source changes one.',
       'If change.implement fails with project_proposal_needs_information, restate the request answering that question and run change.request and change.implement once more; if you cannot answer it, ask the person.',
       'A completed job can still report a failed outcome; read the outcome and error fields before claiming success.',
-      'Every factual answer cites job IDs you inspected in this turn. Never invent results, paths or credentials.',
+      'Every factual answer cites the jobs you inspected in this turn through references. Do not write job IDs in the answer text; the interface links every cited job. Never invent results, paths or credentials.',
     ].join(' '),
     turn(context: ProfileContext) {
       const memory = HostChatMemory.parse(context.memory);

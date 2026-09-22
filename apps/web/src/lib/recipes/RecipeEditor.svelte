@@ -4,6 +4,7 @@
   import StepNode from './StepNode.svelte';
   import SchemaForm from '../SchemaForm.svelte';
   import { store, ApiError, type Recipe, type Step, type JsonSchema } from '../store.svelte.ts';
+  import ConfirmButton from '../ui/ConfirmButton.svelte';
 
   let { id }: { id: string } = $props();
   const isNew = $derived(id === 'new');
@@ -18,6 +19,18 @@
   let error = $state<string | null>(null);
   let notice = $state<string | null>(null);
   let dirty = $state(false);
+
+  // Unsaved edits survive neither navigation nor closing the tab, so ask first.
+  const UNSAVED = 'Discard unsaved recipe changes?';
+  $effect(() => {
+    const warnOnUnload = (event: BeforeUnloadEvent) => { if (dirty) event.preventDefault(); };
+    store.leaveGuard = () => !dirty || confirm(UNSAVED);
+    window.addEventListener('beforeunload', warnOnUnload);
+    return () => {
+      store.leaveGuard = null;
+      window.removeEventListener('beforeunload', warnOnUnload);
+    };
+  });
 
   $effect(() => {
     if (loaded) return;
@@ -171,8 +184,8 @@
     }
   }
   async function remove() {
-    if (isNew) { location.hash = '#/recipes'; return; }
-    await store.deleteRecipe(recipe.id);
+    dirty = false;
+    if (!isNew) await store.deleteRecipe(recipe.id);
     location.hash = '#/recipes';
   }
 </script>
@@ -259,7 +272,7 @@
     <div class="actions">
       <button type="button" onclick={save} disabled={saving || !recipe.steps.length}>{saving ? 'Saving…' : 'Save'}</button>
       {#if !isNew && !dirty}<a class="button" href={`#/run/recipe.${recipe.id}`}>Run</a>{/if}
-      <button type="button" class="secondary" onclick={remove}>{isNew ? 'Discard' : 'Delete'}</button>
+      <ConfirmButton label={isNew ? 'Discard' : 'Delete'} confirmLabel={isNew ? 'discard' : 'delete recipe'} onconfirm={remove} />
     </div>
   </aside>
 </div>
@@ -267,6 +280,7 @@
 
 <style>
   .editor { display: grid; grid-template-columns: 1fr 380px; gap: 1rem; height: calc(100vh - 6rem); }
+  @media (max-width: 900px) { .editor { grid-template-columns: 1fr; height: auto; } .canvas { height: 55vh; } }
   .canvas { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--bg); }
   .canvas :global(.svelte-flow) { background: var(--bg); }
   .canvas :global(.svelte-flow__edge-label) { background: var(--panel); color: var(--muted); font-size: 11px; padding: 1px 5px; border-radius: 4px; border: 1px solid var(--line); }

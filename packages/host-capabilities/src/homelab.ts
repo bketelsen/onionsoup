@@ -182,19 +182,26 @@ export type HomelabOptions = {
 const SourceView = z.object({
   sourceId: SourceId, kind: z.enum(['truenas', 'containers', 'kubernetes']), origin: Origin, host: z.string(), detail: z.string(),
   latestObservation: z.object({ at: z.string(), status: z.string() }).strict().nullable(),
-  latestInvestigation: z.object({ at: z.string(), status: z.string(), summary: z.string() }).strict().nullable(),
+  /** `attention` is true when the latest assessment found something a person should act on now; records from before it read as false. */
+  latestInvestigation: z.object({ at: z.string(), status: z.string(), summary: z.string(), attention: z.boolean().default(false) }).strict().nullable(),
 }).strict();
 
 export async function describeSource(registry: HomelabRegistry, entry: SourceEntry) {
   const observation = await registry.latestObservation(entry.sourceId).catch(() => undefined);
   const investigation = await registry.latestInvestigation(entry.sourceId).catch(() => undefined);
   const detail = entry.kind === 'containers' ? `${entry.target.user}@${entry.target.host}: ${entry.target.engines.join(', ')}` : entry.kind === 'kubernetes' ? `${entry.target.user}@${entry.target.host} (${entry.target.access})` : entry.target.host;
-  const summary = (run: HomelabInvestigation) => run.kind === 'truenas-assessment' ? run.classification.replaceAll('_', ' ') : !run.result ? run.failure ?? run.status : (() => { const c = run.kind === 'container-triage' ? containerCounts(run.result) : workloadCounts(run.result); return `${c.attentionNow} attention, ${c.historical} historical`; })();
   return SourceView.parse({
     sourceId: entry.sourceId, kind: entry.kind, origin: entry.origin, host: entry.target.host, detail,
     latestObservation: observation ? { at: observation.startedAt, status: observation.status } : investigation && 'input' in investigation ? { at: investigation.input.startedAt, status: investigation.input.status } : null,
-    latestInvestigation: investigation ? { at: investigation.kind === 'truenas-assessment' ? investigation.observedAt : investigation.startedAt, status: investigation.kind === 'truenas-assessment' ? 'completed' : investigation.status, summary: summary(investigation) } : null,
+    latestInvestigation: investigation ? investigationView(investigation) : null,
   });
+}
+
+function investigationView(run: HomelabInvestigation) {
+  if (run.kind === 'truenas-assessment') return { at: run.observedAt, status: 'completed', summary: run.classification.replaceAll('_', ' '), attention: run.classification === 'attention_now' };
+  if (!run.result) return { at: run.startedAt, status: run.status, summary: run.failure ?? run.status, attention: false };
+  const counts = run.kind === 'container-triage' ? containerCounts(run.result) : workloadCounts(run.result);
+  return { at: run.startedAt, status: run.status, summary: `${counts.attentionNow} attention, ${counts.historical} historical`, attention: counts.attentionNow > 0 };
 }
 
 export function homelabCapabilities(options: HomelabOptions): Capability[] {
@@ -275,10 +282,10 @@ export function homelabCapabilities(options: HomelabOptions): Capability[] {
     output: z.object({ sourceId: SourceId, kind: z.enum(['truenas', 'containers', 'kubernetes']), run: z.json(), names: z.json(), markdown: z.string() }).strict(),
     outcome: (result) => {
       const run = result.run as HomelabInvestigation;
-      if (run.kind === 'truenas-assessment') return { status: run.classification === 'ok' ? 'ok' : run.classification === 'attention_now' ? 'failed' : 'partial', label: run.classification.replaceAll('_', ' ') };
+      if (run.kind === 'truenas-assessment') return { status: run.classification === 'ok' ? 'ok' : run.classification === 'attention_now' ? 'attention' : 'partial', label: run.classification.replaceAll('_', ' ') };
       if (run.status !== 'completed' || !run.result) return { status: 'failed', label: run.failure ?? run.status };
       const counts = run.kind === 'container-triage' ? containerCounts(run.result) : workloadCounts(run.result);
-      return { status: counts.attentionNow ? 'failed' : counts.insufficientEvidence ? 'partial' : 'ok', label: `${counts.attentionNow} attention, ${counts.historical} historical, ${counts.insufficientEvidence} unclear` };
+      return { status: counts.attentionNow ? 'attention' : counts.insufficientEvidence ? 'partial' : 'ok', label: `${counts.attentionNow} attention, ${counts.historical} historical, ${counts.insufficientEvidence} unclear` };
     },
     effects: ['configured_source_reads', 'model_calls', 'local_artifacts'],
     execute: async ({ sourceId }, ctx) => {

@@ -5,6 +5,11 @@
   import LocationResult from './LocationResult.svelte';
   import Packet from './Packet.svelte';
   import RecipeRun from './RecipeRun.svelte';
+  import Implement from './Implement.svelte';
+  import Approval from './Approval.svelte';
+  import Proposal from './Proposal.svelte';
+  import Publish from './Publish.svelte';
+  import Search from './Search.svelte';
 
   type Renderer = Component<{ result: unknown }>;
 
@@ -13,6 +18,12 @@
     'issue.readiness': ReadinessResult,
     'code.location': LocationResult,
     'investigation.packet': Packet,
+    'change.proposal': Proposal,
+    'change.request': Approval,
+    'change.approve': Approval,
+    'change.implement': Implement,
+    'change.publish': Publish,
+    'repository.search': Search,
   };
   const byPrefix: [string, Renderer][] = [['recipe.', RecipeRun]];
 

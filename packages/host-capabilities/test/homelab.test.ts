@@ -64,11 +64,17 @@ test('homelab sources are registered, refreshed, investigated with names joined,
   assert.equal(result.run.result.findings.length, 1);
   assert.match(result.markdown, /\*\*attention now\*\* — payments-gateway \(podman, Up 2 minutes \(unhealthy\)\)/);
   assert.equal(JSON.stringify(result.run).includes('payments-gateway'), false);
-  assert.deepEqual(investigated.outcome, { status: 'failed', label: '1 attention, 0 historical, 0 unclear' });
+  assert.deepEqual(investigated.outcome, { status: 'attention', label: '1 attention, 0 historical, 0 unclear' });
 
   const listed = await run('homelab.sources', {}, 'list-sources-1');
   const lab = (listed.result as { sources: any[] }).sources.find((s) => s.sourceId === 'lab-box');
   assert.equal(lab.latestInvestigation.summary, '1 attention, 0 historical');
+  assert.equal(lab.latestInvestigation.attention, true);
+  // Results recorded before `attention` existed must still read back.
+  const sourcesOutput = capabilities.find((c) => c.id === 'homelab.sources')!.output;
+  const { attention: _unrecorded, ...older } = lab.latestInvestigation;
+  const reread = sourcesOutput.parse({ sources: [{ ...lab, latestInvestigation: older }] }) as { sources: { latestInvestigation: { attention: boolean } }[] };
+  assert.equal(reread.sources[0].latestInvestigation.attention, false);
   assert.equal(lab.latestObservation.status, 'completed');
 
   const brief = await run('homelab.brief', {}, 'homelab-brief-1');

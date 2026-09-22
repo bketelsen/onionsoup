@@ -101,6 +101,12 @@ test('approval fixes an in-profile task from a real proposal; implement and publ
   const host = await openJobHost({ directory: join(root, 'host'), binding: {}, capabilities, invokers: [{ id: 'web', capabilities: ids }] });
   t.after(async () => { await host.close(); await rm(root, { recursive: true, force: true }); });
 
+  // Discovery tells a form which earlier jobs each job reference accepts.
+  const discovered = new Map(host.discover('web').capabilities.map((c) => [c.id, c.inputSchema as any]));
+  assert.deepEqual(discovered.get('change.approve').properties.proposalJobId.jobOf, ['change.proposal']);
+  assert.deepEqual(discovered.get('change.implement').properties.approvalJobId.jobOf, ['change.approve', 'change.request']);
+  assert.deepEqual(discovered.get('change.publish').properties.implementJobId.jobOf, ['change.implement']);
+
   const packetJob = await host.submit('web', { capability: 'investigation.packet', idempotencyKey: 'packet-job-1', input: { repository: 'bketelsen/widget', issue: 7 } });
   assert.equal((await settled(host, packetJob.jobId)).status, 'completed');
   const proposalJob = await host.submit('web', { capability: 'change.proposal', idempotencyKey: 'proposal-job-1', input: { packetJobId: packetJob.jobId, query: 'list' } });
