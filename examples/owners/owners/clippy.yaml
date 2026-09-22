@@ -3,15 +3,15 @@ domain:
   kind: git-repository
   name: bketelsen/clippy
   remote: https://github.com/bketelsen/clippy
+  baseBranch: master
+  # Host-run verification after every implementation. Freelancer claims are not evidence.
+  verify:
+    - [go, build, ./...]
+    - [go, vet, ./...]
+    - [go, test, ./...]
 # The owner's own clone, relative to this declarations directory. It is never edited;
 # freelancers work in per-item worktrees.
-checkout: ../../.local/owners/checkouts/clippy
-baseBranch: master
-# Host-run verification after every implementation. Freelancer claims are not evidence.
-verify:
-  - [go, build, ./...]
-  - [go, vet, ./...]
-  - [go, test, ./...]
+workspace: ../../.local/owners/checkouts/clippy
 model: github-copilot/claude-sonnet-5
 workflow: change
 maxProposals: 3
@@ -24,3 +24,12 @@ duties:
       valuable small or medium improvements: correctness bugs, missing tests for real behavior,
       CLI usability, robustness of input handling, maintainability. There are no open issues, so
       you are deciding what matters. Avoid cosmetic churn and dependency upgrades Dependabot handles.
+  - id: distro-smoke
+    kind: request-instance
+    requestTo: homelab-virt
+    followUp: distro-smoke
+    instructions: |
+      Confirm that clippy, built as a static Linux binary from master, runs on a clean Linux
+      distribution and writes a valid PNG. Ask the virtualization owner for a fresh instance of a
+      current, widely used distribution. The runtime builds clippy, runs it there, checks the output,
+      and releases the instance afterwards.

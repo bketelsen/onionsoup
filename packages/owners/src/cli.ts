@@ -5,7 +5,10 @@ import { parseArgs } from 'node:util';
 import type { WorkItem } from './ledger.ts';
 import { distill, wake } from './owner.ts';
 import { Runtime } from './runtime.ts';
+import { approveCreate, approveDelete, denyRequest, processRequests } from './brokering.ts';
+import { daemon, recordDutyRun, tick, type TickLog } from './daemon.ts';
 import { publish } from './publish.ts';
+import type { ResourceRequest } from './requests.ts';
 import { advance, approvePlan, rejectPlan, revisePlan } from './workflow.ts';
 
 const run = promisify(execFile);
@@ -18,6 +21,7 @@ const { values: options, positionals } = parseArgs({
     note: { type: 'string' },
     reason: { type: 'string' },
     'no-advance': { type: 'boolean', default: false },
+    'with-delete': { type: 'boolean', default: false },
   },
 });
 
@@ -53,6 +57,35 @@ function detail(item: WorkItem) {
 
 const progress = (item: WorkItem) => console.log(`  → ${line(item)}`);
 
+function requestLine(request: ResourceRequest) {
+  const instance = request.instance ? `  ${request.instance.remote}:${request.instance.name}` : '';
+  const result = request.followUpResult ? `  [${request.followUp}: ${request.followUpResult.ok ? 'ok' : 'FAILED'}: ${request.followUpResult.summary}]` : '';
+  const why = request.reason ? `  (${request.reason})` : '';
+  return `${request.id}  ${request.status.padEnd(24)} ${request.from} → ${request.to}  ${request.ask.image}${instance}${result}${why}`;
+}
+
+const tickLog: TickLog = {
+  duty: (ownerId, dutyId, summary) => console.log(`[duty] ${ownerId}/${dutyId}: ${summary}`),
+  item: item => console.log(`[item] ${line(item)}`),
+  request: request => console.log(`[request] ${requestLine(request)}`),
+  error: (context, error) => console.error(`[error] ${context}: ${error instanceof Error ? error.message : error}`),
+};
+
+/** Record a decision, then continue in this process only if no daemon holds the runtime. */
+async function continueIfFree(runtime: Runtime, item: WorkItem) {
+  if (options['no-advance']) return;
+  const unlock = await runtime.lock().catch(() => undefined);
+  if (!unlock) {
+    console.log('  (runtime is busy, likely the daemon; it will continue this)');
+    return;
+  }
+  try {
+    console.log(detail(await advance(runtime, item.id, progress)));
+  } finally {
+    await unlock();
+  }
+}
+
 type Command = (runtime: Runtime, args: string[]) => Promise<void>;
 
 const COMMANDS: Record<string, Command> = {
@@ -60,6 +93,12 @@ const COMMANDS: Record<string, Command> = {
     console.log(`waking ${ownerId} for ${dutyId} (${runtime.owner(required(ownerId, 'owner')).model})`);
     const result = await wake(runtime, required(ownerId, 'owner'), dutyId);
     console.log(`${ownerId} ${dutyId}: ${result.survey.summary}\nnotebook edits: ${result.survey.notebook.length}; cost $${result.cost.toFixed(4)}`);
+    await recordDutyRun(runtime, required(ownerId, 'owner'), dutyId);
+    if (result.request) {
+      await processRequests(runtime, tickLog.request);
+      console.log(requestLine(await runtime.requests.get(result.request.id)));
+    }
+    for (const item of result.attention) console.log(`ATTENTION: ${item.title}\n  ${item.goal}\n  why: ${item.rationale}\n  do: ${item.acceptance.join('; ')}`);
     for (const item of result.items) {
       console.log(line(item));
       if (!options['no-advance']) await advance(runtime, item.id, progress);
@@ -74,12 +113,12 @@ const COMMANDS: Record<string, Command> = {
   async approve(runtime, [itemId]) {
     const item = await approvePlan(runtime, required(itemId, 'work item'), userInfo().username, options.note);
     console.log(line(item));
-    if (!options['no-advance']) console.log(detail(await advance(runtime, item.id, progress)));
+    await continueIfFree(runtime, item);
   },
   async 'revise-plan'(runtime, [itemId]) {
     const item = await revisePlan(runtime, required(itemId, 'work item'), userInfo().username, required(options.note, '--note'));
     console.log(line(item));
-    if (!options['no-advance']) console.log(detail(await advance(runtime, item.id, progress)));
+    await continueIfFree(runtime, item);
   },
   async publish(runtime, [itemId]) {
     const item = await publish(runtime, required(itemId, 'work item'), userInfo().username);
@@ -100,6 +139,27 @@ const COMMANDS: Record<string, Command> = {
     const { stdout } = await run('git', ['-C', notebook.root, 'log', '--oneline', '-15', '--', notebook.ownerId]);
     console.log(`${notebook.directory}\n${stdout}`);
   },
+  async requests(runtime) {
+    for (const request of await runtime.requests.list()) console.log(requestLine(request));
+  },
+  async 'approve-create'(runtime, [requestId]) {
+    console.log(requestLine(await approveCreate(runtime, required(requestId, 'request'), userInfo().username, options['with-delete']!)));
+  },
+  async 'approve-delete'(runtime, [requestId]) {
+    console.log(requestLine(await approveDelete(runtime, required(requestId, 'request'), userInfo().username)));
+  },
+  async 'deny-request'(runtime, [requestId]) {
+    console.log(requestLine(await denyRequest(runtime, required(requestId, 'request'), userInfo().username, required(options.reason, '--reason'))));
+  },
+  async tick(runtime) {
+    await tick(runtime, tickLog);
+  },
+  async daemon(runtime) {
+    const stop = new AbortController();
+    for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => stop.abort());
+    console.log(`owners daemon: ${runtime.declarations.owners.size} owners, tick every ${60}s; stop with SIGTERM`);
+    await daemon(runtime, tickLog, stop.signal);
+  },
   async recover(runtime) {
     console.log(`marked interrupted: ${await runtime.ledger.markInterrupted()}`);
   },
@@ -117,7 +177,9 @@ if (!command) {
   process.exit(2);
 }
 const runtime = await Runtime.open({ declarations: options.declarations!, state: options.state! });
-const unlock = ['items', 'show', 'notebook'].includes(commandName!) ? async () => {} : await runtime.lock();
+/** Commands that only read, or only record a person's decision, never take the runtime lock. */
+const LOCK_FREE = ['items', 'show', 'notebook', 'requests', 'approve', 'revise-plan', 'reject', 'approve-create', 'approve-delete', 'deny-request'];
+const unlock = LOCK_FREE.includes(commandName!) ? async () => {} : await runtime.lock();
 try {
   await command(runtime, args);
 } finally {

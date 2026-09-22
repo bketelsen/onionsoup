@@ -1,0 +1,23 @@
+# Always-on owners. Not installed by anything; to use it:
+#   cp examples/owners/systemd/onionsoup-owners.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user start onionsoup-owners
+#   journalctl --user -u onionsoup-owners -f
+# Approvals keep working while it runs: approve, approve-create, approve-delete and reject only
+# record decisions, and the daemon acts on them at its next tick.
+[Unit]
+Description=onionsoup owners daemon
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/projects/onionsoup
+ExecStart=%h/.local/share/mise/installs/node/24.19.0/bin/node --conditions=onionsoup-source --import tsx packages/owners/src/cli.ts daemon
+Environment=PATH=%h/.opencode/bin:%h/.local/share/mise/installs/node/24.19.0/bin:/usr/local/bin:/usr/bin:/bin
+Restart=on-failure
+RestartSec=30
+# A stop marks in-flight work interrupted; nothing is replayed on the next start.
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target

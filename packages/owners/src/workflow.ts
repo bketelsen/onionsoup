@@ -24,11 +24,11 @@ function transition(item: WorkItem, status: WorkStatus, reason?: string): WorkIt
 }
 
 const plan: Step = async (runtime, item, workflow) => {
-  const owner = runtime.owner(item.owner);
+  const owner = runtime.repositoryOwner(item.owner);
   await refreshCheckout(owner);
   const hired = await freelancer(runtime, 'planning');
   const hirePlanner = async (current: WorkItem) => runtime.hireFor(current, 'plan', 'planning', {
-    role: 'planner', model: hired.model, directory: owner.checkout, title: `${item.id}: plan`,
+    role: 'planner', model: hired.model, directory: owner.workspace, title: `${item.id}: plan`,
     brief: planBrief(current, await notebookFor(runtime, current), hired.rubric), schema: Plan,
   });
   let drafted = await hirePlanner(item);
@@ -41,7 +41,7 @@ const plan: Step = async (runtime, item, workflow) => {
 };
 
 const implement: Step = async (runtime, item, workflow) => {
-  const owner = runtime.owner(item.owner);
+  const owner = runtime.repositoryOwner(item.owner);
   if (!item.plan || !item.planApproval) throw new Error('plan_not_approved');
   const { path, branch } = await createWorktree(owner, runtime.worktreesRoot, item.id);
   if (item.verdicts.at(-1)?.decision === 'replan') await resetWorktree(owner, path);
@@ -79,7 +79,7 @@ const DECISIONS: Record<Verdict['decision'], (item: WorkItem, workflow: Workflow
 };
 
 const review: Step = async (runtime, item, workflow) => {
-  const owner = runtime.owner(item.owner);
+  const owner = runtime.repositoryOwner(item.owner);
   if (!item.plan || !item.worktree) throw new Error('nothing_to_review');
   const excluded = familiesOf(item, workflow.review.familyDiffersFrom);
   const hired = await freelancer(runtime, 'review', excluded);
@@ -179,8 +179,12 @@ export async function revisePlan(runtime: Runtime, itemId: string, by: string, f
   return runtime.ledger.save({ ...transition(item, 'planning'), humanNotes: [...item.humanNotes, humanNote('plan-feedback', by, feedback)] });
 }
 
+const REJECTABLE: readonly WorkStatus[] = ['proposed', 'awaiting-plan-approval'];
+
+/** A person can turn down a proposal before it is planned, or a plan at the gate. */
 export async function rejectPlan(runtime: Runtime, itemId: string, by: string, reason: string) {
-  const item = await requireAwaitingApproval(runtime, itemId);
+  const item = await runtime.ledger.get(itemId);
+  if (!REJECTABLE.includes(item.status)) throw new Error(`not_rejectable: ${item.status}`);
   await runtime.notebook(item.owner).journal({ kind: 'plan-rejected', workItem: item.id, note: `${by}: ${reason}` });
   return runtime.ledger.save({ ...transition(item, 'rejected', reason), humanNotes: [...item.humanNotes, humanNote('rejection', by, reason)] });
 }

@@ -8,24 +8,61 @@ export type ModelRef = z.infer<typeof ModelRef>;
 
 export const Duty = z.object({
   id: z.string(),
-  every: z.string().optional(),
+  /** survey: look at the domain and propose work. request-instance: ask another owner for an instance. */
+  kind: z.enum(['survey', 'request-instance']).default('survey'),
+  every: z.string().regex(/^\d+[mhd]$/).optional(),
   on: z.string().optional(),
   instructions: z.string(),
+  requestTo: z.string().optional(),
+  followUp: z.string().optional(),
 });
 export type Duty = z.infer<typeof Duty>;
 
+export const RepositoryDomain = z.object({
+  kind: z.literal('git-repository'),
+  name: z.string(),
+  remote: z.string(),
+  baseBranch: z.string(),
+  /** Host-run verification after every implementation. Freelancer claims are not evidence. */
+  verify: z.array(z.array(z.string()).min(1)).min(1),
+});
+export type RepositoryDomain = z.infer<typeof RepositoryDomain>;
+
+export const IncusPermission = z.enum(['observe', 'create', 'delete']);
+export type IncusPermission = z.infer<typeof IncusPermission>;
+
+export const IncusDomain = z.object({
+  kind: z.literal('incus'),
+  remotes: z.array(z.object({ name: z.string(), host: z.string(), allow: z.array(IncusPermission).min(1) })).min(1),
+  /** Images an approved create may use; anything else is refused before a person is asked. */
+  images: z.array(z.string()).min(1),
+  namePrefix: z.string().default('onionsoup-'),
+  maxManagedInstances: z.number().int().positive().default(3),
+});
+export type IncusDomain = z.infer<typeof IncusDomain>;
+
 export const OwnerDeclaration = z.object({
   id: z.string().regex(/^[a-z0-9-]+$/),
-  domain: z.object({ kind: z.literal('git-repository'), name: z.string(), remote: z.string() }),
-  checkout: z.string(),
-  baseBranch: z.string(),
-  verify: z.array(z.array(z.string()).min(1)).min(1),
+  domain: z.discriminatedUnion('kind', [RepositoryDomain, IncusDomain]),
+  /** The directory the owner's sessions read: a checkout, or an evidence snapshot. The owner never writes it. */
+  workspace: z.string(),
   model: ModelRef,
-  workflow: z.string(),
+  /** Workflow for change work items; owners without one raise attention items instead. */
+  workflow: z.string().optional(),
   duties: z.array(Duty),
-  maxProposals: z.number().int().positive().default(3),
+  maxProposals: z.number().int().min(0).default(3),
 });
 export type OwnerDeclaration = z.infer<typeof OwnerDeclaration>;
+export type RepositoryOwner = OwnerDeclaration & { domain: RepositoryDomain };
+export type IncusOwner = OwnerDeclaration & { domain: IncusDomain };
+
+export function isRepositoryOwner(owner: OwnerDeclaration): owner is RepositoryOwner {
+  return owner.domain.kind === 'git-repository';
+}
+
+export function isIncusOwner(owner: OwnerDeclaration): owner is IncusOwner {
+  return owner.domain.kind === 'incus';
+}
 
 export const Craft = z.enum(['planning', 'implementation', 'review']);
 export type Craft = z.infer<typeof Craft>;

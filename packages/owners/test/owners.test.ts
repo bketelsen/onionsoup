@@ -67,7 +67,7 @@ test('a person can send a plan back with feedback, or reject it, and both are re
   await runtime.ledger.save({ ...second, status: 'awaiting-plan-approval', plan });
   const rejected = await rejectPlan(runtime, second.id, 'bjk', 'busywork');
   assert.equal(rejected.status, 'rejected');
-  await assert.rejects(rejectPlan(runtime, second.id, 'bjk', 'again'), /not_awaiting_plan_approval: rejected/);
+  await assert.rejects(rejectPlan(runtime, second.id, 'bjk', 'again'), /not_rejectable: rejected/);
 });
 
 test('survey context says when landed work is not yet on the base branch', async () => {
@@ -80,4 +80,57 @@ test('survey context says when landed work is not yet on the base branch', async
   ]);
   assert.match(text, /Alignment tests \[w-1\]: landed on local branch owners\/w-1, NOT yet on the base branch/);
   assert.match(text, /Clipboard note \[w-2\]: plan rejected by a person: busywork/);
+});
+
+async function incusRuntime() {
+  const { Runtime } = await import('@onionsoup/owners');
+  const runtime = await Runtime.open({ declarations: 'examples/owners', state: await mkdtemp(join(tmpdir(), 'owners-incus-')) });
+  const calls: string[][] = [];
+  runtime.incus = { run: async args => { calls.push([...args]); return args[0] === 'list' || args[1] === 'list' ? '[]' : ''; } };
+  for (const ownerId of ['clippy', 'homelab-virt']) await runtime.notebook(ownerId).ensure('# Charter\n');
+  return { runtime, calls };
+}
+
+test('an approved lease creates, runs the follow-up, and deletes without a second prompt', async () => {
+  const { approveCreate, processRequests, FOLLOW_UPS } = await import('../src/brokering.ts');
+  const { runtime, calls } = await incusRuntime();
+  FOLLOW_UPS['test-follow-up'] = async (_runtime, request) => ({ ok: true, summary: `used ${request.instance!.name}` });
+  const ask = { kind: 'instance' as const, image: 'images:debian/13', purpose: 'smoke test', expectedMinutes: 10 };
+  const opened = await runtime.requests.open('clippy', 'homelab-virt', ask, 'test-follow-up');
+  const decision = { decision: 'accept' as const, reply: 'ok', remote: 'minideb', image: 'images:debian/13', nameSuffix: 'clippy-smoke' };
+  await runtime.requests.save({ ...opened, status: 'awaiting-create-approval', decision });
+  await approveCreate(runtime, opened.id, 'bjk', true);
+  await processRequests(runtime);
+  const done = await runtime.requests.get(opened.id);
+  assert.equal(done.status, 'deleted');
+  assert.equal(done.followUpResult?.summary, 'used onionsoup-clippy-smoke');
+  assert.deepEqual(calls.map(call => call.slice(0, 2)), [['launch', 'images:debian/13'], ['delete', '--force']]);
+  assert.deepEqual(await runtime.managed.list('homelab-virt'), []);
+});
+
+test('without a lease the release waits for a delete approval', async () => {
+  const { approveCreate, approveDelete, processRequests, FOLLOW_UPS } = await import('../src/brokering.ts');
+  const { runtime } = await incusRuntime();
+  FOLLOW_UPS['test-follow-up'] = async () => ({ ok: true, summary: 'fine' });
+  const ask = { kind: 'instance' as const, image: 'images:debian/13', purpose: 'p', expectedMinutes: 5 };
+  const opened = await runtime.requests.open('clippy', 'homelab-virt', ask, 'test-follow-up');
+  await runtime.requests.save({ ...opened, status: 'awaiting-create-approval', decision: { decision: 'accept', reply: 'ok', remote: 'minideb', image: 'images:debian/13', nameSuffix: 'x' } });
+  await approveCreate(runtime, opened.id, 'bjk', false);
+  await processRequests(runtime);
+  assert.equal((await runtime.requests.get(opened.id)).status, 'awaiting-delete-approval');
+  await approveDelete(runtime, opened.id, 'bjk');
+  await processRequests(runtime);
+  assert.equal((await runtime.requests.get(opened.id)).status, 'deleted');
+});
+
+test('create and delete guards hold regardless of what an owner decides', async () => {
+  const { checkCreate, deleteInstance } = await import('../src/incus.ts');
+  const { runtime, calls } = await incusRuntime();
+  const owner = runtime.incusOwner('homelab-virt');
+  await assert.rejects(checkCreate(owner, runtime.managed, { remote: 'selfie', image: 'images:debian/13', nameSuffix: 'x' }), /remote_forbids_create: selfie/);
+  await assert.rejects(checkCreate(owner, runtime.managed, { remote: 'minideb', image: 'images:alpine/edge', nameSuffix: 'x' }), /image_not_allowed/);
+  await assert.rejects(checkCreate(owner, runtime.managed, { remote: 'minideb', image: 'images:debian/13', nameSuffix: 'Bad Name' }), /bad_instance_name/);
+  await assert.rejects(deleteInstance(runtime.incus, owner, runtime.managed, 'minideb', 'onionsoup-not-mine'), /not_managed_by_onionsoup/);
+  await assert.rejects(deleteInstance(runtime.incus, owner, runtime.managed, 'selfie', 'bobsled'), /remote_forbids_delete: selfie/);
+  assert.deepEqual(calls, []);
 });

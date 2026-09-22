@@ -1,10 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { loadDeclarations, requireOwner, type Declarations, type OwnerDeclaration } from './declarations.ts';
+import { isIncusOwner, isRepositoryOwner, loadDeclarations, requireOwner, type Declarations, type IncusOwner, type OwnerDeclaration, type RepositoryOwner } from './declarations.ts';
 import { familyOf } from './families.ts';
+import { cliIncus, ManagedInstances, type IncusClient } from './incus.ts';
 import { Ledger, type HireRecord, type WorkItem } from './ledger.ts';
 import { Notebook } from './notebook.ts';
+import { Requests } from './requests.ts';
 import { Freelancers, HireError, type HireRequest } from './opencode.ts';
 
 export const RUNTIME_LIMITS = { findingChars: 2_000 };
@@ -19,12 +21,18 @@ export class Runtime {
   readonly ledger: Ledger;
   readonly notebooksRoot: string;
   readonly worktreesRoot: string;
+  readonly managed: ManagedInstances;
+  readonly requests: Requests;
+  /** Replaceable so tests never touch real incus. */
+  incus: IncusClient = cliIncus;
   private pool: Freelancers | undefined;
 
   private constructor(readonly declarations: Declarations, readonly stateDirectory: string) {
     this.ledger = new Ledger(join(stateDirectory, 'items'));
     this.notebooksRoot = join(stateDirectory, 'notebooks');
     this.worktreesRoot = join(stateDirectory, 'worktrees');
+    this.managed = new ManagedInstances(join(stateDirectory, 'managed'));
+    this.requests = new Requests(join(stateDirectory, 'requests'));
   }
 
   static async open(paths: RuntimePaths) {
@@ -46,7 +54,19 @@ export class Runtime {
 
   owner(ownerId: string): OwnerDeclaration {
     const owner = requireOwner(this.declarations, ownerId);
-    return { ...owner, checkout: resolve(this.declarations.root, owner.checkout) };
+    return { ...owner, workspace: resolve(this.declarations.root, owner.workspace) };
+  }
+
+  repositoryOwner(ownerId: string): RepositoryOwner {
+    const owner = this.owner(ownerId);
+    if (!isRepositoryOwner(owner)) throw new Error(`not_a_repository_owner: ${ownerId}`);
+    return owner;
+  }
+
+  incusOwner(ownerId: string): IncusOwner {
+    const owner = this.owner(ownerId);
+    if (!isIncusOwner(owner)) throw new Error(`not_an_incus_owner: ${ownerId}`);
+    return owner;
   }
 
   notebook(ownerId: string) {

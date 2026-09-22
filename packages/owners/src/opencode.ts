@@ -108,13 +108,15 @@ const ROLE_WRITES: Record<Role, (directory: string) => string[]> = {
 
 /**
  * Carve one writable notes file out of an otherwise read-only role. Later rules win in opencode.
- * Edit rules match the path relative to the session's worktree; external_directory rules match an absolute glob.
+ * Edit rules match the path relative to the session's git worktree ("/" outside git); external_directory
+ * rules match an absolute glob.
  */
 function withNotes(permission: ReturnType<typeof rolePermission>, directory: string, notesFile: string | undefined) {
   if (!notesFile) return permission;
   return {
     ...permission,
-    edit: { '*': permission.edit, [relative(directory, notesFile)]: 'allow' },
+    // Relative to the session's git worktree; outside git, opencode's worktree is "/".
+    edit: { '*': permission.edit, [relative(directory, notesFile)]: 'allow', [relative('/', notesFile)]: 'allow' },
     external_directory: { '*': 'deny', [join(dirname(notesFile), '*')]: 'allow' },
   };
 }

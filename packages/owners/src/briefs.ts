@@ -1,6 +1,7 @@
 import type { Finding, Plan, ProposedWork } from './artifacts.ts';
 import type { Duty } from './declarations.ts';
 import type { Verification, WorkItem } from './ledger.ts';
+import type { ResourceRequest } from './requests.ts';
 
 function block(label: string, body: string) {
   return `<${label}>\n${body.trim()}\n</${label}>`;
@@ -62,17 +63,24 @@ export function workSoFarText(items: readonly WorkItem[]) {
   }).join('\n') || '(none)';
 }
 
-export function surveyBrief(duty: Duty, notebook: string, head: string, maxProposals: number, workSoFar: string) {
+const PROPOSAL_MODES = {
+  work: (maxProposals: number) => `2. Propose at most ${maxProposals} improvements worth hiring freelancers for. Each must be small or medium, independently
+   landable, testable, and have concrete acceptance criteria. Prefer real user-facing or maintenance value over churn.
+   Do not propose work that duplicates what is already in progress or landed.`,
+  attention: (maxProposals: number) => `2. You have no freelancers for this domain and no authority to change it. Raise at most ${maxProposals} items that need
+   a person's attention (risks, broken or unready configuration, drift), each with what you observed, why it matters and
+   what a person should do. Raise nothing if nothing needs attention. Never suggest you will change anything yourself.`,
+};
+
+export function surveyBrief(duty: Duty, notebook: string, snapshot: string, maxProposals: number, workSoFar: string, mode: keyof typeof PROPOSAL_MODES = 'work') {
   return [
-    `Duty: ${duty.id}. You are working in your domain's checkout at commit ${head}.`,
+    `Duty: ${duty.id}. Your workspace (read-only) reflects your domain at ${snapshot}.`,
     block('instructions', duty.instructions),
     block('notebook', notebook),
     block('work-so-far', `${workSoFar}\nDo not re-propose landed work. A rejected item may come back only if you change it to answer the person's reason.`),
-    `You are a project manager: you do not implement. Read the code as much as you need. Then:
+    `You are a project manager: you do not implement. Read your workspace as much as you need. Then:
 1. Write notebook edits for what you learned (layout into MAP, conventions into WISDOM, unknowns into open-questions).
-2. Propose at most ${maxProposals} improvements worth hiring freelancers for. Each must be small or medium, independently
-   landable, testable, and have concrete acceptance criteria. Prefer real user-facing or maintenance value over churn.
-   Do not propose work that duplicates what is already in progress or landed.`,
+${PROPOSAL_MODES[mode](maxProposals)}`,
     NOTEBOOK_RULES,
   ].join('\n\n');
 }
@@ -163,5 +171,33 @@ export function distillBrief(journal: readonly string[], notebook: string) {
     block('journal', journal.join('\n')),
     block('notebook', notebook),
     NOTEBOOK_RULES,
+  ].join('\n\n');
+}
+
+export function requestDecisionBrief(request: ResourceRequest, notebook: string, snapshot: string) {
+  return [
+    `Another owner, ${request.from}, asks you for an instance. Your workspace (read-only) reflects your domain at ${snapshot}.`,
+    block('request', [
+      `Image: ${request.ask.image}`,
+      `Purpose: ${request.ask.purpose}`,
+      `Expected duration: ${request.ask.expectedMinutes} minutes`,
+    ].join('\n')),
+    block('notebook', notebook),
+    `Decide as the owner of this domain. Accept only if the purpose is legitimate, a remote you may create on is
+healthy and has capacity, and the image is one your domain allows (SNAPSHOT.md lists the create policy). Choose
+the remote, the image and a short name suffix that says what it is for. A person approves every create and
+delete after you; the runtime also re-checks your choice. Decline with a reason if anything is off.`,
+  ].join('\n\n');
+}
+
+export function composeAskBrief(duty: Duty, notebook: string, snapshot: string, target: string, followUp: string) {
+  return [
+    `Duty: ${duty.id}. Your workspace (read-only) reflects your domain at ${snapshot}.`,
+    block('instructions', duty.instructions),
+    block('notebook', notebook),
+    block('what-the-runtime-will-do-with-the-instance', followUp),
+    `You need an instance from ${target}, the owner of the homelab's virtualization. Write the request: which
+image you need, what it is for (so ${target} can judge it; describe what will actually happen, above) and how
+many minutes you expect to need it. The runtime releases the instance afterwards.`,
   ].join('\n\n');
 }

@@ -33,12 +33,12 @@ export async function publish(runtime: Runtime, itemId: string, by: string) {
   const item = await runtime.ledger.get(itemId);
   if (item.publication) return item;
   if (item.status !== 'landed' || !item.branch || !item.landedCommit) throw new Error(`not_landed: ${item.status}`);
-  const owner = runtime.owner(item.owner);
-  await git(owner.checkout, ['push', '-q', 'origin', `${item.branch}:${item.branch}`]);
+  const owner = runtime.repositoryOwner(item.owner);
+  await git(owner.workspace, ['push', '-q', 'origin', `${item.branch}:${item.branch}`]);
   const { stdout } = await run('gh', [
     'pr', 'create', '--draft',
     '--repo', owner.domain.name,
-    '--base', owner.baseBranch,
+    '--base', owner.domain.baseBranch,
     '--head', item.branch,
     '--title', item.proposal.title,
     '--body', prBody(item),

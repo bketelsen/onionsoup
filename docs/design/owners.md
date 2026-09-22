@@ -374,7 +374,7 @@ create and delete approvals.
 
 The first slice is running as a spike in `packages/owners`, with declarations
 in `examples/owners` and state under `.local/owners/`. Run it with
-`npm run owners -- <wake|items|show|approve|revise-plan|reject|run|publish|distill|notebook|recover>`.
+`npm run owners -- <wake|items|show|approve|revise-plan|reject|run|publish|requests|approve-create|approve-delete|deny-request|tick|daemon|distill|notebook|recover>`.
 
 What exists:
 
@@ -427,6 +427,31 @@ Findings so far:
   the landed branch and opens a draft PR whose body carries the plan, the
   host verification, the review and which model did each step. The first
   one is bketelsen/clippy#10.
+
+### Slice 2: a second owner, requests between owners, always on
+
+- `homelab-virt` owns the incus remotes `selfie` (observe only) and
+  `minideb` (observe, create, delete). It never gets the incus CLI: host code
+  writes a read-only snapshot (`SNAPSHOT.md` plus JSON) into its workspace
+  before every wake. Owners without a workflow raise attention items for a
+  person instead of work items. Its first health check found a running
+  container with no snapshots.
+- Owners exchange resource requests. `clippy`'s `distro-smoke` duty asks
+  `homelab-virt` for an instance; `homelab-virt` accepts or declines; the
+  runtime re-checks the choice (remote allows create, image allowlist, name,
+  managed-instance limit). A person approves the create, optionally with the
+  delete pre-approved (a lease). The runtime creates the instance, runs the
+  requester's follow-up (build clippy in the sandbox, push the binary, run it,
+  check the PNG), releases it, and deletes it after the delete approval. An
+  owner can only ever delete instances onionsoup created.
+- People only record decisions (`approve`, `revise-plan`, `reject`,
+  `approve-create [--with-delete]`, `approve-delete`, `deny-request`); the
+  runtime acts on them. `owners tick` runs one pass and `owners daemon` runs
+  forever; `examples/owners/systemd/onionsoup-owners.service` is a user unit
+  that is not installed by anything.
+- Found along the way: a requesting owner guessed wrongly what the follow-up
+  would do until the brief described it; opencode treats `/` as the worktree
+  outside Git, which changes how the findings-file rule must be written.
 
 ## References
 

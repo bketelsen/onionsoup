@@ -1,0 +1,24 @@
+id: homelab-virt
+domain:
+  kind: incus
+  remotes:
+    # selfie runs k3s and long-lived containers: observe only, never touched.
+    - { name: selfie, host: 10.0.1.200, allow: [observe] }
+    # minideb is for throwaway instances, created and deleted only after a person approves.
+    - { name: minideb, host: 10.0.1.175, allow: [observe, create, delete] }
+  images: ["images:debian/13", "images:debian/12", "images:ubuntu/24.04"]
+  namePrefix: onionsoup-
+  maxManagedInstances: 3
+# Host code writes a read-only snapshot here before every wake; the owner only reads it.
+workspace: ../../.local/owners/evidence/homelab-virt
+model: openai/gpt-5.6-sol
+maxProposals: 3
+duties:
+  - id: health
+    every: 1d
+    instructions: |
+      Check the health of your incus hosts from SNAPSHOT.md and the per-remote JSON: instances and
+      their state, snapshot counts and age, storage pools, and whether each remote is ready for what
+      it is allowed to do (a remote that allows create needs a storage pool and a usable default
+      profile). Record the inventory in MAP and anything surprising in open-questions or FAILURES.
+      Instances named with the onionsoup- prefix are ones onionsoup created; say if any look abandoned.
