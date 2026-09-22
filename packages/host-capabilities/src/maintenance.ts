@@ -181,5 +181,42 @@ export function maintenanceCapabilities(options: MaintenanceOptions): Capability
     },
   };
 
-  return [readiness, location, packet, proposal];
+  const SEARCH_LIMITS = { results: 100, textChars: 200, outputBytes: 4 * 1024 * 1024 } as const;
+  const SearchResult = z.object({
+    repository: z.string(), commit: z.string(), query: z.string(),
+    matches: z.array(z.object({ path: z.string(), line: z.number().int().positive(), text: z.string() }).strict()),
+    truncated: z.boolean(),
+  }).strict();
+  const search: Capability = {
+    ...common,
+    timeoutMs: 60000,
+    id: 'repository.search',
+    description: 'Find where a literal phrase appears in a configured checkout at its current base commit. Paths and matching lines only; no model.',
+    input: z.object({
+      repository: Repository,
+      query: z.string().min(1).max(200),
+      maxResults: z.number().int().min(1).max(SEARCH_LIMITS.results).default(40),
+    }).strict(),
+    output: SearchResult,
+    metadata,
+    effects: ['local_source_reads'],
+    execute: async ({ repository, query, maxResults }, ctx) => {
+      const checkout = checkoutFor(repository);
+      const commit = await head(checkout, ctx.signal);
+      let stdout = '';
+      try {
+        ({ stdout } = await execute('git', ['-C', checkout, 'grep', '-n', '-I', '-i', '-F', '-e', query, commit, '--', '.'], { signal: ctx.signal, timeout: 30000, maxBuffer: SEARCH_LIMITS.outputBytes }));
+      } catch (error) {
+        if ((error as { code?: number }).code !== 1) throw new Error('search_failed');
+      }
+      const lines = stdout.split('\n').filter(Boolean);
+      const matches = lines.slice(0, maxResults).map((line) => {
+        const [, path, lineNumber, text] = /^[a-f0-9]{40}:([^:]+):(\d+):(.*)$/.exec(line) ?? [];
+        return { path: path ?? '', line: Number(lineNumber ?? 0), text: (text ?? '').slice(0, SEARCH_LIMITS.textChars) };
+      }).filter((match) => match.path && match.line > 0);
+      return { repository, commit, query, matches, truncated: lines.length > maxResults };
+    },
+  };
+
+  return [readiness, location, packet, proposal, search];
 }

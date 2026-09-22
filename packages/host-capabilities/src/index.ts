@@ -33,6 +33,8 @@ export const HostConfig = z.object({
   web: z.object({ directory: z.string().min(1), invoker: Id }).strict().optional(),
   /** Trust identity from a local `tailscale serve` proxy: login to invoker. */
   tailscale: z.object({ users: z.array(z.object({ login: z.string().min(3).max(200), invoker: Id }).strict()).min(1).max(100) }).strict().optional(),
+  /** Chat policy: whether chat may run interactive capabilities (request, approve, publish) on request. */
+  chat: z.object({ interactive: z.boolean().default(true) }).strict().optional(),
   /** Overrides for the host's runtime limits (concurrency, queue, jobs, ...). */
   limits: z.record(z.string(), z.number()).optional(),
   /** Recipe JSON files loaded at launch; recipes saved from the web live in the state directory. */

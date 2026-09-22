@@ -41,7 +41,7 @@ async function main() {
     recipes,
     ...(config.limits ? { limits: config.limits } : {}),
   });
-  const chat = createChatService({ host, directory: resolve(dirname(path), config.directory, 'chat'), provider: config.capabilities.provider });
+  const chat = createChatService({ host, directory: resolve(dirname(path), config.directory, 'chat'), provider: config.capabilities.provider, allowInteractive: config.chat?.interactive ?? true });
   let listener;
   try {
     listener = await listenJobHost(host, {

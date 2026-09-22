@@ -91,7 +91,7 @@ export async function chatTurn(handle:ChatHandle,message:string,options:{modelFa
     tools.submit_answer=defineToolInterface({name:'submit_answer',description:'Answer with inspected evidence, ask a clarification, or explain an unsupported request. For an overview cite the job once; use findingId only for a focused finding. At most eight references. Choose current only when cited sources are fresh.',input:ChatAnswer}).define(async raw=>{
       signal.throwIfAborted();if(toolBusy||accepted)throw Error('NOT_READY');
       const parsed=ChatAnswer.safeParse(raw);
-      if(!parsed.success){const feedback={code:'INVALID_ANSWER',issues:parsed.error.issues.slice(0,8).map(i=>({code:i.code,path:i.path.slice(0,4)}))};await event('submit_answer','rejected',feedback);throw Error(JSON.stringify(feedback));}
+      if(!parsed.success){const feedback={code:'INVALID_ANSWER',issues:parsed.error.issues.slice(0,8).map(i=>({code:i.code,path:i.path.slice(0,4),message:i.message.slice(0,200)}))};await event('submit_answer','rejected',feedback);throw Error(JSON.stringify(feedback));}
       const answer=parsed.data;
       if(/[<>\u0000-\u0008]|BEGIN.*PRIVATE KEY|\bBearer\s/i.test(answer.text)){await event('submit_answer','rejected',{code:'UNSAFE_ANSWER'});throw Error('UNSAFE_ANSWER');}
       let evidence:unknown;

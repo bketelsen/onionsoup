@@ -43,8 +43,9 @@ export function summarize(result: unknown, limit: number = HOST_CHAT_LIMITS.summ
 
 const settled = (status: string) => status !== 'queued' && status !== 'running';
 
-export function createHostChatProfile(options: { bindingHash: string; host: HostCaller; pollMs?: number }): ChatProfile {
+export function createHostChatProfile(options: { bindingHash: string; host: HostCaller; pollMs?: number; allowInteractive?: boolean }): ChatProfile {
   const { host } = options;
+  const allowInteractive = options.allowInteractive ?? true;
   const pollMs = options.pollMs ?? HOST_CHAT_LIMITS.pollMs;
   return {
     id: 'host',
@@ -53,8 +54,10 @@ export function createHostChatProfile(options: { bindingHash: string; host: Host
     parseMemory: (memory) => HostChatMemory.parse(memory),
     system: [
       'You operate a catalog of reviewed capabilities and saved recipes for the person you are talking to.',
-      'Discover the catalog before running anything. Run a capability only when the request needs new work; otherwise inspect an existing job.',
-      'Capabilities marked interactive need a person to submit them and are not available to you; say so and point at the job page.',
+      'Discover the catalog before running anything. Run only what the request needs: briefs are for repository overviews, not for finding files.',
+      'To find where something lives in a repository, run repository.search with a literal phrase; it returns matching paths and lines.',
+      'To make a code change the person describes: repository.search for the file, then change.request with the exact files, then change.implement with the approval job ID, then change.publish with the implement job ID and the person\'s words as the reason. Each step waits for the previous one; report each job ID.',
+      allowInteractive ? 'Interactive capabilities (request, approve, publish) run only when the person explicitly asked for that effect in this message.' : 'Capabilities marked interactive need a person to submit them from the job page; say so.',
       'Every factual answer cites job IDs you inspected in this turn. Never invent results, paths or credentials.',
     ].join(' '),
     turn(context: ProfileContext) {
@@ -113,7 +116,7 @@ export function createHostChatProfile(options: { bindingHash: string; host: Host
               if (!catalog) throw new Error('DISCOVER_FIRST');
               const definition = catalog.find((c) => c.id === capability);
               if (!definition) throw new Error('CAPABILITY_NOT_AVAILABLE');
-              if (definition.interactive) throw new Error('INTERACTIVE_CAPABILITY');
+              if (definition.interactive && !allowInteractive) throw new Error('INTERACTIVE_CAPABILITY');
               if (runs >= HOST_CHAT_LIMITS.runsPerTurn) throw new Error('TURN_RUN_LIMIT');
               if (memory.admissions >= HOST_CHAT_LIMITS.sessionAdmissions) throw new Error('SESSION_ADMISSION_LIMIT');
               runs++;

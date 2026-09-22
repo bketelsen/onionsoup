@@ -35,13 +35,13 @@ function planner(decide: (results: string[]) => Call) {
 }
 const jobIdIn = (text: string) => /"jobId\\?":\\?"([0-9a-f-]{36})/.exec(text)?.[1];
 
-async function fixture() {
+async function fixture(allowInteractive?: boolean) {
   const root = await mkdtemp(join(tmpdir(), 'host-chat-'));
   const host = await openJobHost({ directory: join(root, 'host'), binding: {}, capabilities: [capability('fixture.double'), capability('fixture.approve', true)], invokers: [{ id: 'web', capabilities: ['fixture.double', 'fixture.approve'] }] });
   const caller: HostCaller = {
     discover: () => host.discover('web'), submit: (r) => host.submit('web', r), inspect: (id) => host.inspect('web', id), list: () => host.list('web'), cancel: (id) => host.cancel('web', id),
   };
-  const profile = createHostChatProfile({ bindingHash: 'a'.repeat(64), host: caller, pollMs: 5 });
+  const profile = createHostChatProfile({ bindingHash: 'a'.repeat(64), host: caller, pollMs: 5, allowInteractive });
   const handle = await openChatSession({ directory: join(root, 'session'), profile, provider: 'copilot', modelId: 'gpt-5.6-terra' });
   return { root, host, handle, async close() { await closeChatSession(handle); await host.close(); await rm(root, { recursive: true, force: true }); } };
 }
@@ -72,8 +72,8 @@ test('a turn discovers, runs a capability as a host job, and answers citing the 
   }
 });
 
-test('interactive capabilities and uninspected citations are refused; the model recovers with an unsupported answer', async () => {
-  const f = await fixture();
+test('interactive capabilities and uninspected citations are refused when the host forbids them; the model recovers with an unsupported answer', async () => {
+  const f = await fixture(false);
   try {
     const model = planner((results) => {
       if (results.length === 0) return { tool: 'discover_capabilities', input: {} };

@@ -19,6 +19,8 @@ export type ChatServiceOptions = {
   directory: string;
   provider: 'copilot' | 'codex';
   modelFactory?: () => Promise<LanguageModel>;
+  /** Whether chat may run interactive capabilities when the person asks. Default true. */
+  allowInteractive?: boolean;
 };
 
 /** Persistent chat sessions over the job host, one directory per session, opened lazily and closed on shutdown. */
@@ -34,7 +36,7 @@ export function createChatService(options: ChatServiceOptions) {
     list: () => host.list(principal),
     cancel: (jobId) => host.cancel(principal, jobId),
   });
-  const profileFor = (principal: string) => createHostChatProfile({ bindingHash: hash({ host: host.binding, principal }), host: caller(principal) });
+  const profileFor = (principal: string) => createHostChatProfile({ bindingHash: hash({ host: host.binding, principal }), host: caller(principal), allowInteractive: options.allowInteractive });
 
   async function ownerOf(sessionId: string) {
     try {

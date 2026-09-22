@@ -27,6 +27,7 @@
       "id": "web",
       "capabilities": [
         "repository.brief",
+        "repository.search",
         "issue.readiness",
         "code.location",
         "investigation.packet",
