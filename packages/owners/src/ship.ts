@@ -25,11 +25,11 @@ export function hasShipGrant(owner: RepositoryOwner) {
 }
 
 /** A small watchdog script run by systemd after the ship: restart, check health, roll back on failure. */
-function watchdogScript(checkout: string, previous: string, services: readonly string[], journal: string) {
+function watchdogScript(ownerId: string, checkout: string, previous: string, services: readonly string[], journal: string) {
   const units = services.join(' ');
   return `#!/bin/sh
 # Written by onionsoup's ship action. Restarts the services, confirms they come back, rolls back if not.
-record() { printf '{"at":"%s","owner":"leto","kind":"%s","note":"%s"}\\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$2" >> '${journal}'; }
+record() { printf '{"at":"%s","owner":"${ownerId}","kind":"%s","note":"%s"}\\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$2" >> '${journal}'; }
 systemctl --user restart ${units}
 sleep ${SHIP_LIMITS.healthWaitSeconds}
 healthy=1
@@ -65,7 +65,7 @@ export async function shipEngine(runtime: Runtime, ownerId: string): Promise<Shi
   await mkdir(scripts, { recursive: true });
   const script = join(scripts, `watchdog-${target.slice(0, 12)}.sh`);
   const journal = join(runtime.notebook(owner.id).directory, 'journal', `${new Date().toISOString().slice(0, 10)}.jsonl`);
-  await writeFile(script, watchdogScript(checkout, previous, owner.deploy.services, journal));
+  await writeFile(script, watchdogScript(owner.id, checkout, previous, owner.deploy.services, journal));
   await chmod(script, 0o755);
   await run('systemd-run', ['--user', '--quiet', `--on-active=${SHIP_LIMITS.restartDelaySeconds}`, `--unit=onionsoup-ship-${target.slice(0, 12)}`, '/bin/sh', script]);
   const notebook = runtime.notebook(owner.id);
