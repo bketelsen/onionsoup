@@ -11,6 +11,14 @@ const run = promisify(execFile);
 
 export const HIRE_LIMITS = { heartbeatMs: 30_000, timeoutMs: 20 * 60_000, serverStartMs: 30_000 };
 
+/**
+ * The onionsoup plugin, as a file:// URL sitting next to this module: sibling `plugin.ts` running from
+ * source, sibling `plugin.js` running from the compiled dist build. The host's global opencode config is
+ * masked inside the sandbox, so a sandboxed server can no longer find the plugin there; it is loaded
+ * explicitly instead.
+ */
+export const PLUGIN_URL = new URL(`plugin.${import.meta.url.endsWith('.ts') ? 'ts' : 'js'}`, import.meta.url).href;
+
 /** A hire can run far past undici's default 300 s header timeout; our own deadline aborts the session instead. */
 const untimedAgent = new Agent({ headersTimeout: 0, bodyTimeout: 0 });
 const untimedFetch = ((input: RequestInfo | URL, init?: RequestInit) =>
@@ -144,8 +152,10 @@ async function worktreeOf(directory: string) {
   }
 }
 
-function agentConfig(worktree: string, directory: string, notesFile: string | undefined, extra: Record<string, string> = {}) {
+/** Exported for tests: the per-hire opencode config, so the explicit plugin load can be checked directly. */
+export function agentConfig(worktree: string, directory: string, notesFile: string | undefined, extra: Record<string, string> = {}) {
   return {
+    plugin: [PLUGIN_URL],
     agent: Object.fromEntries(Object.entries(ROLE_AGENTS).map(([role, definition]) => [
       `onionsoup-${role}`,
       { mode: 'primary', prompt: definition.prompt, permission: { ...withNotes(definition.permission, worktree, directory, notesFile), ...extra } },
