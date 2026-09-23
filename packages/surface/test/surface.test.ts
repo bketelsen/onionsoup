@@ -37,7 +37,12 @@ function fakeOpencode() {
 async function start() {
   const runtime = await Runtime.open({ declarations: 'packages/owners/test/fixtures/owners', state: await mkdtemp(join(tmpdir(), 'surface-')) });
   const { api, calls } = fakeOpencode();
-  const state = new SurfaceState(runtime, api, async (_runtime, ownerId) => `/desks/${ownerId}`, undefined, sessionID => [{ info: { id: 'msg_1', sessionID, role: 'assistant' }, parts: [] }]);
+  const hireSessions = (prefix: string) => [
+    { id: 'ses_plan', title: 'w-1: plan', directory: '/checkouts/clippy', time: { created: 1, updated: 1 } },
+    { id: 'ses_impl', title: 'w-1: implement 1', directory: '/worktrees/clippy/w-1', time: { created: 2, updated: 3 } },
+    { id: 'ses_x', title: 'w-2: plan', directory: '/checkouts/clippy', time: { created: 1, updated: 1 } },
+  ].filter(session => session.title.startsWith(prefix));
+  const state = new SurfaceState(runtime, api, async (_runtime, ownerId) => `/desks/${ownerId}`, undefined, sessionID => [{ info: { id: 'msg_1', sessionID, role: 'assistant' }, parts: [] }], hireSessions);
   const { server } = surfaceServer(state, { webRoot: '/nonexistent', by: 'tester' });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -120,7 +125,7 @@ test('auto-accept answers the prompts of that chat and no other, including ones 
   }
 });
 
-test('a work item\'s hires are found by title where they ran, and read from opencode\'s store', async () => {
+test('a work item\'s hires are found by title in opencode\'s store, and read from it', async () => {
   const { runtime, server, call } = await start();
   try {
     const item = await runtime.ledger.create('clippy', 'change', { title: 'Fix it', goal: 'g', rationale: 'r', acceptance: ['a'], size: 'small' });

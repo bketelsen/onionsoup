@@ -32,3 +32,19 @@ export function readSessionMessages(sessionID: string, database = opencodeDataba
     db.close();
   }
 }
+
+/**
+ * Sessions whose title starts with a prefix (a work item's hires are titled "<item>: <stage>"), oldest first. Read
+ * from the store because an opencode server lists a folder's sessions from what it has loaded, and hires are
+ * created by the daemon's own servers after the surface's server loaded that folder.
+ */
+export function readSessionsTitled(prefix: string, database = opencodeDatabase()) {
+  const db = new DatabaseSync(database, { readOnly: true });
+  try {
+    const rows = db.prepare("select id, title, directory, time_created, time_updated from session where substr(title, 1, ?) = ? order by time_created, id")
+      .all(prefix.length, prefix) as { id: string; title: string; directory: string; time_created: number; time_updated: number }[];
+    return rows.map(row => ({ id: row.id, title: row.title, directory: row.directory, time: { created: row.time_created, updated: row.time_updated } }));
+  } finally {
+    db.close();
+  }
+}

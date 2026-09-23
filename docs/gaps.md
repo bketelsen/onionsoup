@@ -58,4 +58,8 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
   To check a new opencode: run any hire, then `GET /session/<id>/message` on the server that ran it (or, in the
   surface, point the item-messages route back at `state.opencode.messages`). If it answers, drop both workarounds:
   prompt hires asynchronously and read sessions through the API.
+- **An opencode server does not see sessions other servers create.** It lists a folder's sessions from what it has
+  loaded, and hires are created by the daemon's own servers, so the surface's opencode never listed a hire that
+  started after the surface did. The activity rail finds an item's hire sessions by title in opencode's store
+  (`readSessionsTitled` in `packages/surface/src/hire-store.ts`) instead.
 
