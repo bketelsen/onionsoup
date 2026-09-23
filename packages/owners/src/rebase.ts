@@ -12,10 +12,11 @@ const run = promisify(execFile);
 
 /**
  * Keeping published PRs mergeable is part of owning a repository. A conflicting PR gets a rebase work
- * item: the landed commit is replayed onto the current base in a fresh worktree. A clean replay that
- * passes verification is mechanical and needs no model; a conflicted one hires an implementer to
- * resolve it and a reviewer from another family to confirm it is still the same change. Force-pushing
- * over the PR branch rewrites history, so it always waits for a person (`approve-push`).
+ * item: the landed commit is replayed onto the current base in a fresh worktree. Detection and a clean
+ * replay that passes verification are deterministic and need no model. A conflict wakes the owner, who
+ * decides whether to abandon the PR or how it must be combined; only then is an implementer hired, and a
+ * reviewer from another family confirms it is still the same change. Force-pushing over the PR branch
+ * rewrites history, so it always waits for a person (`approve-push`).
  */
 export const REBASE_WORKFLOW = 'rebase';
 
@@ -94,13 +95,46 @@ run git commands that change history; the runtime continues the cherry-pick afte
   ].join('\n\n');
 }
 
+export const ConflictDecision = z.object({
+  decision: z.enum(['resolve', 'abandon']),
+  guidance: z.string().describe('For resolve: what the implementer must keep from each side and how to combine them'),
+  reason: z.string().describe('Why, citing what landed on the base branch'),
+});
+export type ConflictDecision = z.infer<typeof ConflictDecision>;
+
+function conflictBrief(source: WorkItem, files: readonly string[], originalPatch: string, baseChanges: string, notebook: string) {
+  return [
+    `Your published PR ${source.publication?.url ?? ''} ("${source.proposal.title}") conflicts with the base branch.`,
+    `<conflicted-files>\n${files.join('\n')}\n</conflicted-files>`,
+    `<your-original-change>\n${originalPatch}\n</your-original-change>`,
+    `<what-landed-on-the-base-since>\n${baseChanges}\n</what-landed-on-the-base-since>`,
+    `<notebook>\n${notebook}\n</notebook>`,
+    `As the owner, decide. resolve: the change is still wanted; tell the implementer you will hire exactly how to combine
+both sides. abandon: the base already covers it or it no longer makes sense; say why. You do not edit anything.`,
+  ].join('\n\n');
+}
+
+/** The owner is the project manager: it decides whether and how a conflict is resolved before anyone is hired. */
+async function ownerDecidesConflict(runtime: Runtime, item: WorkItem, source: WorkItem, worktree: string, files: string[], originalPatch: string) {
+  const owner = runtime.repositoryOwner(item.owner);
+  const originalBase = (await git(worktree, ['rev-parse', `${source.landedCommit!}~1`])).trim();
+  const baseChanges = (await git(worktree, ['log', '--stat', '--format=%h %s', `${originalBase}..origin/${owner.domain.baseBranch}`])).slice(0, 20_000);
+  const brief = conflictBrief(source, files, originalPatch, baseChanges, await runtime.notebook(owner.id).orientation());
+  return runtime.hireFor(item, 'decide', 'owner', { role: 'owner', model: owner.model, directory: owner.workspace, title: `${item.id}: owner decides conflict`, brief, schema: ConflictDecision });
+}
+
+class Abandoned extends Error {}
+
 async function resolveConflicts(runtime: Runtime, item: WorkItem, source: WorkItem, worktree: string, files: string[]) {
+  const originalPatch = (await git(worktree, ['show', source.landedCommit!])).slice(0, 40_000);
+  const decision = await ownerDecidesConflict(runtime, item, source, worktree, files, originalPatch);
+  await runtime.notebook(item.owner).journal({ kind: 'conflict-decision', workItem: item.id, outcome: decision.decision, note: decision.reason });
+  if (decision.decision === 'abandon') throw new Abandoned(`owner_abandoned: ${decision.reason}`);
   const declaration = requireFreelancer(runtime.declarations, 'implementation');
   const { model } = pickModel(runtime.declarations.families, declaration.models, []);
-  const originalPatch = (await git(worktree, ['show', source.landedCommit!])).slice(0, 40_000);
   const report = await runtime.hireFor(item, 'implement', 'implementation', {
     role: 'implementer', model, directory: worktree, title: `${item.id}: resolve conflicts`,
-    brief: resolveBrief(item, source, files, originalPatch), schema: ImplementationReport,
+    brief: `${resolveBrief(item, source, files, originalPatch)}\n\n<owner-guidance>\n${decision.guidance}\n</owner-guidance>`, schema: ImplementationReport,
   });
   if (await hasConflictMarkers(worktree)) throw new Error('conflict_markers_remain');
   await git(worktree, ['add', '-A']);
@@ -113,7 +147,9 @@ async function replay(runtime: Runtime, item: WorkItem): Promise<WorkItem> {
   const source = await runtime.ledger.get(item.rebaseOf!.itemId);
   await git(owner.workspace, ['fetch', '-q', 'origin']);
   const { path, branch } = await createWorktree(owner, runtime.worktreesRoot, item.id);
+  await git(path, ['cherry-pick', '--abort']).catch(() => '');
   await git(path, ['reset', '-q', '--hard', `origin/${owner.domain.baseBranch}`]);
+  await git(path, ['clean', '-q', '-fd']);
   const picked = await git(path, ['cherry-pick', source.landedCommit!]).then(() => true, () => false);
   const files = picked ? [] : await conflictedFiles(path);
   if (!picked && !files.length) throw new Error('cherry_pick_failed_without_conflicts');
@@ -182,7 +218,8 @@ export async function advanceRebase(runtime: Runtime, itemId: string, onProgress
     try {
       item = await step(runtime, current);
     } catch (error) {
-      item = transition(current, 'failed', error instanceof Error ? error.message.split('\n')[0] : String(error));
+      const status = error instanceof Abandoned ? 'rejected' : 'failed';
+      item = transition(current, status, error instanceof Error ? error.message.split('\n')[0] : String(error));
     }
     item = await runtime.ledger.save(item);
     onProgress(item);

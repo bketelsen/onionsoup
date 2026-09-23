@@ -8,7 +8,7 @@ import type { ResourceRequest } from './requests.ts';
 import type { Runtime } from './runtime.ts';
 import { advance } from './workflow.ts';
 
-export const DAEMON_LIMITS = { tickMs: 60_000 };
+export const DAEMON_LIMITS = { tickMs: 60_000, shutdownGraceMs: 5_000 };
 
 const UNIT_MS: Record<string, number> = { m: 60_000, h: 3_600_000, d: 86_400_000 };
 

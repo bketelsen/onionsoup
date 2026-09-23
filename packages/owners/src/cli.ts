@@ -1,4 +1,6 @@
 import { execFile } from 'node:child_process';
+import { rm } from 'node:fs/promises';
+import { join } from 'node:path';
 import { userInfo } from 'node:os';
 import { promisify } from 'node:util';
 import { parseArgs } from 'node:util';
@@ -6,11 +8,11 @@ import type { WorkItem } from './ledger.ts';
 import { distill, wake } from './owner.ts';
 import { Runtime } from './runtime.ts';
 import { approveCreate, approveDelete, denyRequest, processRequests } from './brokering.ts';
-import { daemon, recordDutyRun, tick, type TickLog } from './daemon.ts';
+import { DAEMON_LIMITS, daemon, recordDutyRun, tick, type TickLog } from './daemon.ts';
 import { publish } from './publish.ts';
 import { approvePush } from './rebase.ts';
 import type { ResourceRequest } from './requests.ts';
-import { advance, approvePlan, rejectPlan, revisePlan } from './workflow.ts';
+import { advance, approvePlan, rejectPlan, resumeItem, revisePlan } from './workflow.ts';
 
 const run = promisify(execFile);
 
@@ -141,6 +143,11 @@ const COMMANDS: Record<string, Command> = {
     const { stdout } = await run('git', ['-C', notebook.root, 'log', '--oneline', '-15', '--', notebook.ownerId]);
     console.log(`${notebook.directory}\n${stdout}`);
   },
+  async resume(runtime, [itemId]) {
+    const item = await resumeItem(runtime, required(itemId, 'work item'), userInfo().username);
+    console.log(line(item));
+    await continueIfFree(runtime, item);
+  },
   async 'approve-push'(runtime, [itemId]) {
     const item = await approvePush(runtime, required(itemId, 'work item'), userInfo().username);
     console.log(line(item));
@@ -163,7 +170,18 @@ const COMMANDS: Record<string, Command> = {
   },
   async daemon(runtime) {
     const stop = new AbortController();
-    for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => stop.abort());
+    const shutdown = () => {
+      stop.abort();
+      // Give in-flight work a moment, then mark it interrupted (never replayed) and exit cleanly.
+      setTimeout(async () => {
+        const stranded = await runtime.ledger.markInterrupted();
+        console.log(`owners daemon: stopped; ${stranded} work items marked interrupted`);
+        runtime.close();
+        await rm(join(runtime.stateDirectory, 'runtime.lock'), { recursive: true, force: true });
+        process.exit(0);
+      }, DAEMON_LIMITS.shutdownGraceMs).unref();
+    };
+    for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, shutdown);
     console.log(`owners daemon: ${runtime.declarations.owners.size} owners, tick every ${60}s; stop with SIGTERM`);
     await daemon(runtime, tickLog, stop.signal);
   },
@@ -185,7 +203,7 @@ if (!command) {
 }
 const runtime = await Runtime.open({ declarations: options.declarations!, state: options.state! });
 /** Commands that only read, or only record a person's decision, never take the runtime lock. */
-const LOCK_FREE = ['items', 'show', 'notebook', 'requests', 'approve', 'revise-plan', 'reject', 'approve-push', 'approve-create', 'approve-delete', 'deny-request'];
+const LOCK_FREE = ['items', 'show', 'notebook', 'requests', 'approve', 'revise-plan', 'reject', 'resume', 'approve-push', 'approve-create', 'approve-delete', 'deny-request'];
 try {
   const unlock = LOCK_FREE.includes(commandName!) ? async () => {} : await runtime.lock();
   try {

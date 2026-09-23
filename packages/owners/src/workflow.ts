@@ -190,3 +190,12 @@ export async function rejectPlan(runtime: Runtime, itemId: string, by: string, r
   await runtime.notebook(item.owner).journal({ kind: 'plan-rejected', workItem: item.id, note: `${by}: ${reason}` });
   return runtime.ledger.save({ ...transition(item, 'rejected', reason), humanNotes: [...item.humanNotes, humanNote('rejection', by, reason)] });
 }
+
+/** Interrupted work is never replayed on its own; a person resumes it, and the runtime continues at its next tick. */
+export async function resumeItem(runtime: Runtime, itemId: string, by: string) {
+  const item = await runtime.ledger.get(itemId);
+  if (item.status !== 'interrupted') throw new Error(`not_interrupted: ${item.status}`);
+  const status: WorkStatus = item.workflow === REBASE_WORKFLOW || item.planApproval ? 'implementing' : 'planning';
+  await runtime.notebook(item.owner).journal({ kind: 'resumed', workItem: item.id, note: `${by}: continue from ${status}` });
+  return runtime.ledger.save(transition(item, status, `resumed by ${by}`));
+}

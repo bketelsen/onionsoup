@@ -36,7 +36,7 @@ duties:
       and releases the instance afterwards.
   - id: maintain-prs
     kind: maintain-prs
-    every: 1d
+    every: 15m
     instructions: |
       Keep the pull requests you published mergeable: record the ones that were merged or closed,
       and rebase the ones that conflict with the base branch. Every force-push waits for a person.
