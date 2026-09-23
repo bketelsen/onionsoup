@@ -69,3 +69,9 @@ reject them; fix them when you touch a file that has them.
 - Docs: one living design page (`docs/design/owners.md`), the gaps list and the extending guide. Update them when
   reality changes.
 - Keep credentials, private keys, raw runs and local clones out of Git. Never log credentials.
+
+## Skills
+
+- [create-owner](.agents/skills/create-owner/SKILL.md): declare a new owner in the person's config.
+- [operate-onionsoup](.agents/skills/operate-onionsoup/SKILL.md): diagnose and operate the running system.
+- [ship-onionsoup](.agents/skills/ship-onionsoup/SKILL.md): take an engine change from plan to running.

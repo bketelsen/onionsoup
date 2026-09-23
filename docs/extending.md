@@ -52,8 +52,10 @@ Everything else follows the owner's `conversation:` rules: `allow`, `ask` (appro
 Authority comes only from your configuration:
 
 - `domain.incus.remotes[].allow` decides where instances may be created and deleted.
-- `grants:` are standing approvals: `{ to: <owner>, action: publish-site | update-app | merge, target: <name or "*"> }`.
+- `grants:` are standing approvals: `{ to: <owner>, action: publish-site | update-app | merge | ship, target: <name or "*"> }`.
   Without a grant, the runtime asks you.
+- `deploy: { checkout, services }` says where a repository owner's code runs; with it the owner can ship
+  (fast-forward, verify, restart with a health check and rollback).
 - Destructive actions, plan approval and creates/deletes always stop for you unless a grant says otherwise.
 
 ## Run it always on
@@ -67,6 +69,6 @@ Install the Owner's Desk in OpenChamber (Settings → Extensions → Add → `ex
 
 ## What needs engine code
 
-New domain kinds (how an owner observes and changes something, like `git-repository`, `incus`, `truenas`), new
+New domain kinds (how an owner observes and changes something, like `git-repository`, `incus`, `truenas`, `github-org`), new
 request kinds, and new duty kinds are engine code in `packages/owners`. See [gaps.md](gaps.md) for what is
 missing, and the [design](design/owners.md) for how the pieces fit.
