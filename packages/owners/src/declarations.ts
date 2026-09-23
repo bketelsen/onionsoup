@@ -152,6 +152,11 @@ export const OwnerDeclaration = z.object({
     services: z.array(z.string()).min(1),
     restartOpenChamber: z.boolean().default(false),
   }).optional(),
+  /**
+   * Stewardship: this owner may create, change and retire owners whose domain (repository, org or host name)
+   * matches one of these globs, with the person's approval for each write. Authority fields stay the person's.
+   */
+  manages: z.object({ owners: z.array(z.string()).min(1) }).optional(),
   /** MCP tool servers this owner uses in chats, keyed by a short name. */
   mcp: z.record(z.string().regex(/^[a-z][a-z0-9]*$/), OwnerToolServer).default({}),
 });

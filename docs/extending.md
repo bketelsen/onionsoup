@@ -25,7 +25,7 @@ Requirements: Node 24, opencode (logged in to the providers your owners use), `b
 
 1. Copy `owners/example.yaml` to `owners/<id>.yaml` and edit it: persona, domain, model, conversation rules,
    duties. Write `charters/<id>.md` yourself: it steers everything the owner does.
-2. Run `npm run owners -- sync-openchamber` (the daemon does this every minute): the owner gets a desk and an
+2. Run `npm run owners -- sync-openchamber` (the daemon re-reads your configuration and does this every minute): the owner gets a desk and an
    OpenChamber project with itself as the default agent.
 3. Restart opencode (or OpenChamber's opencode) so the plugin picks up the new agent.
 4. Talk to it. Run its duties with `npm run owners -- wake <id> <duty>`, or leave it to the daemon.
@@ -54,6 +54,9 @@ Authority comes only from your configuration:
 - `domain.incus.remotes[].allow` decides where instances may be created and deleted.
 - `grants:` are standing approvals: `{ to: <owner>, action: publish-site | update-app | merge | ship, target: <name or "*"> }`.
   Without a grant, the runtime asks you.
+- `manages: { owners: [<glob>, ...] }` makes an owner a steward: with its `onionsoup_owners` tool it creates,
+  changes and retires owners whose domain (repository or org name) matches, with your approval for each write. It
+  can never write `grants`, `deploy`, `incus`, `mcp` or `manages`, nor change itself.
 - `deploy: { checkout, services }` says where a repository owner's code runs; with it the owner can ship
   (fast-forward, verify, restart with a health check and rollback).
 - Destructive actions, plan approval and creates/deletes always stop for you unless a grant says otherwise.

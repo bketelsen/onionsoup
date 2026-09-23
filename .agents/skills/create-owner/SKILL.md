@@ -8,6 +8,9 @@ description: Creates a new onionsoup owner (declaration, charter draft, desk, Op
 Done means the new owner validates, has a desk and an OpenChamber project, its config is committed in the
 person's config repo, and the person knows to restart OpenChamber's opencode and rewrite the charter.
 
+A steward (an owner with `manages:`, such as Odrade for Frostyard) does this through its `onionsoup_owners` tool,
+which validates, asks the person and commits; steps 7 and 9 are then done for it.
+
 Owners are configuration, not engine code. The config directory is `$ONIONSOUP_CONFIG`, by default
 `~/.config/onionsoup`. It is a local Git repository and is never pushed. [docs/extending.md](../../../docs/extending.md)
 is the reference; the schema is `packages/owners/src/declarations.ts`.

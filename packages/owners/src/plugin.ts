@@ -7,6 +7,7 @@ import { requestPublish } from './brokering.ts';
 import { proposeDeskChanges } from './desk-changes.ts';
 import { itemText, statusText } from './desk.ts';
 import { hasShipGrant, shipEngine } from './ship.ts';
+import { ownerFiles, prepareOwnerWrite, prepareRetire, retireOwner, stewardGuide, writeOwner } from './stewardship.ts';
 import { expandHome, readEnvFile, truenasMcpEnvironment } from './truenas.ts';
 import { pickModel } from './families.ts';
 import type { Notebook } from './notebook.ts';
@@ -89,6 +90,9 @@ How you work with the person in this chat:
   watcher also notes decisions after each exchange; you do not need to record everything.
 - Your notebook and current work are appended to your context each turn. Never put secrets into notes or files.${verify.length ? `
 - Verify changes in your domain with these commands (they run without asking): ${verify.map(command => `\`${command}\``).join(', ')}.` : ''}
+${owner.manages ? `
+- You are a steward: with onionsoup_owners you create, change and retire owners whose domain matches ${owner.manages.owners.join(', ')}.
+  Start with its guide, agree the owner with the person, show them the declaration and charter, then write it; they approve each write.` : ''}
 - If a tool fails, say so plainly and say what failed. Never tell the person something was recorded, opened or done
   unless the tool confirmed it; an unrecorded decision is recoverable, a false claim about the record is not.`;
 }
@@ -98,6 +102,8 @@ function conversationPermission(owner: OwnerDeclaration, verify: readonly string
   const bash = { ...mode.bash, ...Object.fromEntries(verify.map(command => [`${command}*`, 'allow'])) };
   return { edit: mode.edit, bash, webfetch: mode.webfetch, external_directory: 'ask', doom_loop: 'ask' };
 }
+
+const STEWARD_TOOL = 'onionsoup_owners';
 
 const WATCHER_PERMISSION = Object.fromEntries(
   ['edit', 'bash', 'webfetch', 'websearch', 'read', 'glob', 'grep', 'list', 'task', 'external_directory', 'todowrite', 'question'].map(key => [key, 'deny']),
@@ -158,6 +164,11 @@ const server: Plugin = async (input, options) => {
     const match = [...runtime.declarations.owners.values()].find(owner => owner.id === name || owner.persona?.name.toLowerCase() === name.toLowerCase());
     if (!match) throw new Error(`unknown owner: ${name}`);
     return runtime.owner(match.id);
+  }
+
+  function required(value: string | undefined, name: string) {
+    if (!value) throw new Error(`missing ${name}`);
+    return value;
   }
 
   function requireOwner(agent: string) {
@@ -256,7 +267,7 @@ const server: Plugin = async (input, options) => {
         const persona = owner.persona!;
         const charter = await runtime.text(`charters/${owner.id}.md`).catch(() => '(no charter yet)');
         const verify = verifyCommands(owner, runtime.toolsDirectory);
-        const permission = { ...conversationPermission(owner, verify), ...(owner.domain.kind === 'truenas' ? NAS_CHAT_RULES : {}), ...ownerToolRules.get(owner.id) };
+        const permission = { ...conversationPermission(owner, verify), ...(owner.domain.kind === 'truenas' ? NAS_CHAT_RULES : {}), ...ownerToolRules.get(owner.id), ...(owner.manages ? { [STEWARD_TOOL]: 'allow' } : {}) };
         agents[persona.name] = {
           mode: 'primary',
           description: `${persona.title} (${persona.source})`,
@@ -265,6 +276,8 @@ const server: Plugin = async (input, options) => {
           permission,
         };
       }
+      // Only stewards see the owner-management tool.
+      hiddenFromEveryone[STEWARD_TOOL] = 'deny';
       // Owner tool servers are denied to every agent; each owner's own rules re-allow its servers (last match wins).
       const current = config.permission;
       config.permission = { ...(typeof current === 'string' ? { '*': current } : current ?? {}), ...hiddenFromEveryone } as never;
@@ -376,6 +389,35 @@ const server: Plugin = async (input, options) => {
           if (!hasShipGrant(repository)) await context.ask({ permission: 'onionsoup_ship', patterns: [repository.domain.name], always: [], metadata: { repository: repository.domain.name } });
           const result = await shipEngine(runtime, owner.id);
           return `${result.outcome}: ${result.summary}`;
+        },
+      }),
+      [STEWARD_TOOL]: tool({
+        description: `For stewards: create, change and retire owners within your scope. Start with action "guide" (the procedure, the owners that exist, model families). Use "show" to read an owner's declaration and charter before changing it. "write" takes the full YAML declaration (and a charter for a new owner); "retire" takes an id and a reason. Host code validates everything and refuses authority fields (grants, deploy, incus, mcp, manages); the person approves every write and retirement. Show the person what you will write before calling "write".`,
+        args: {
+          action: tool.schema.enum(['guide', 'show', 'write', 'retire']),
+          id: tool.schema.string().optional().describe('The owner id, for show and retire'),
+          declaration: tool.schema.string().optional().describe('For write: the complete owners/<id>.yaml text'),
+          charter: tool.schema.string().optional().describe('For write: the complete charters/<id>.md text (required for a new owner)'),
+          reason: tool.schema.string().optional().describe('For retire: why'),
+        },
+        async execute(args, context) {
+          const steward = requireOwner(context.agent);
+          if (args.action === 'guide') return stewardGuide(runtime, steward.id);
+          if (args.action === 'show') return ownerFiles(runtime, required(args.id, 'id'));
+          if (args.action === 'write') {
+            const prepared = await prepareOwnerWrite(runtime, steward.id, required(args.declaration, 'declaration'), args.charter);
+            const verb = prepared.created ? 'create' : 'update';
+            context.metadata({ title: `${verb} owner ${prepared.candidate.id}` });
+            await context.ask({ permission: 'onionsoup_owner_change', patterns: [`${verb} ${prepared.candidate.id}`], always: [], metadata: { action: verb, owner: prepared.candidate.id, files: Object.keys(prepared.files) } });
+            const commit = await writeOwner(runtime, steward.id, prepared);
+            const name = prepared.candidate.persona?.name ?? prepared.candidate.id;
+            return `${prepared.created ? 'Created' : 'Updated'} ${name} (config commit ${commit}). The daemon picks it up within a minute: desk, OpenChamber project and duties. The person restarts OpenChamber's opencode to chat with ${name}${prepared.created ? ', and should rewrite the charter' : ''}.`;
+          }
+          const owner = await prepareRetire(runtime, steward.id, required(args.id, 'id'));
+          context.metadata({ title: `retire owner ${owner.id}` });
+          await context.ask({ permission: 'onionsoup_owner_change', patterns: [`retire ${owner.id}`], always: [], metadata: { action: 'retire', owner: owner.id } });
+          const commit = await retireOwner(runtime, steward.id, owner, required(args.reason, 'reason'));
+          return `Retired ${owner.persona?.name ?? owner.id}: its declaration moved to retired/ (config commit ${commit}); its notebook and desk are kept. The daemon stops its duties within a minute.`;
         },
       }),
       onionsoup_request_publish: tool({

@@ -206,3 +206,40 @@ test('a deliverable with a list sent as a JSON string is repaired; a missing fie
   assert.equal(salvaged.value.answer, 'firn is coupled');
   assert.throws(() => salvageAnswer(new HireError('deliverable_invalid', 'ses_1', { observed: 'x' })), /deliverable_invalid/);
 });
+
+test('a steward creates and retires owners in its scope, and never writes authority or itself', async () => {
+  const { cp: copy, writeFile: write, access } = await import('node:fs/promises');
+  const { execFileSync } = await import('node:child_process');
+  const { Runtime } = await import('@onionsoup/owners');
+  const { prepareOwnerWrite, writeOwner, prepareRetire, retireOwner } = await import('../src/stewardship.ts');
+  const config = await mkdtemp(join(tmpdir(), 'owners-steward-'));
+  await copy('packages/owners/test/fixtures/owners', config, { recursive: true });
+  await write(join(config, 'owners', 'odrade.yaml'), 'id: odrade\ndomain: { kind: github-org, org: example }\nmodel: openai/gpt-5.6-sol\nduties: []\nmanages: { owners: ["example/*"] }\n');
+  execFileSync('git', ['-C', config, 'init', '-q']);
+  execFileSync('git', ['-C', config, '-c', 'user.name=t', '-c', 'user.email=t@t', 'add', '-A']);
+  execFileSync('git', ['-C', config, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'fixture']);
+  const runtime = await Runtime.open({ declarations: config, state: await mkdtemp(join(tmpdir(), 'owners-steward-state-')) });
+  await runtime.notebook('odrade').ensure('# Charter\n');
+  const widget = 'id: widget\npersona: { name: Tamalane, title: t, source: Heretics, voice: v }\ndomain: { kind: git-repository, name: example/widget, remote: https://example.invalid/widget.git, baseBranch: main, verify: [[make, test]] }\nmodel: github-copilot/claude-sonnet-5\nworkflow: change\nduties: []\n';
+
+  await assert.rejects(prepareOwnerWrite(runtime, 'odrade', widget), /needs a charter/);
+  await assert.rejects(prepareOwnerWrite(runtime, 'odrade', `${widget}grants: [{ to: widget, action: merge, target: example/widget }]\n`), /grants is authority/);
+  await assert.rejects(prepareOwnerWrite(runtime, 'odrade', widget.replace('example/widget', 'elsewhere/widget'), '# c'), /outside odrade's scope/);
+  await assert.rejects(prepareOwnerWrite(runtime, 'odrade', widget.replace('example/widget', 'example/wiki'), '# c'), /bellonda already owns example\/wiki/);
+  const fleet = execFileSync('cat', [join(config, 'owners', 'homelab.yaml')]).toString().replace(/\nincus:[\s\S]*?(?=\n[a-z]+:|$)/, '');
+  await assert.rejects(prepareOwnerWrite(runtime, 'odrade', fleet), /incus is authority/);
+  await assert.rejects(prepareOwnerWrite(runtime, 'odrade', 'id: odrade\ndomain: { kind: github-org, org: example }\nmodel: openai/gpt-5.6-sol\nduties: []\nmanages: { owners: ["*"] }\n'), /own declaration/);
+  await assert.rejects(prepareOwnerWrite(runtime, 'clippy', widget, '# c'), /not_a_steward/);
+
+  const prepared = await prepareOwnerWrite(runtime, 'odrade', widget, '# Charter: widget\n');
+  assert.equal(prepared.created, true);
+  await writeOwner(runtime, 'odrade', prepared);
+  assert.ok(runtime.declarations.owners.has('widget'));
+  assert.match(execFileSync('git', ['-C', config, 'log', '-1', '--format=%s']).toString(), /Add Tamalane \(example\/widget\), by odrade/);
+
+  const retiring = await prepareRetire(runtime, 'odrade', 'widget');
+  await retireOwner(runtime, 'odrade', retiring, 'merged into clippy');
+  assert.equal(runtime.declarations.owners.has('widget'), false);
+  await access(join(config, 'retired', 'widget.yaml'));
+  assert.equal(execFileSync('git', ['-C', config, 'status', '--porcelain']).toString(), '');
+});

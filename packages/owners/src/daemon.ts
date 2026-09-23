@@ -73,6 +73,11 @@ async function advanceRunnable(runtime: Runtime, log: TickLog) {
 /** One pass: owners' OpenChamber projects, requests (people may be waiting on an instance), due duties, work items. */
 export async function tick(runtime: Runtime, log: TickLog) {
   try {
+    await runtime.reloadDeclarations();
+  } catch (error) {
+    log.error('configuration (keeping the last good one)', error);
+  }
+  try {
     const { changes } = await syncOpenChamber(runtime);
     for (const change of changes) log.duty('openchamber', 'sync', change);
   } catch (error) {

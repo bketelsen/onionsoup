@@ -39,7 +39,7 @@ export class Runtime {
   incus: IncusClient = cliIncus;
   private pool: Freelancers | undefined;
 
-  private constructor(readonly declarations: Declarations, readonly stateDirectory: string) {
+  private constructor(public declarations: Declarations, readonly stateDirectory: string) {
     this.ledger = new Ledger(join(stateDirectory, 'items'));
     this.notebooksRoot = join(stateDirectory, 'notebooks');
     this.worktreesRoot = join(stateDirectory, 'worktrees');
@@ -53,6 +53,11 @@ export class Runtime {
     const state = resolve(paths.state);
     await mkdir(state, { recursive: true });
     return new Runtime(await loadDeclarations(paths.declarations), state);
+  }
+
+  /** Re-read the configuration, so owners created or changed since start take effect without a restart. */
+  async reloadDeclarations() {
+    this.declarations = await loadDeclarations(this.declarations.root);
   }
 
   /** One runtime at a time owns the ledger. The lock records who holds it, so "busy" can say who. */

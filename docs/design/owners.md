@@ -65,6 +65,9 @@ An owner is declared once (`owners/<id>.yaml`) and keeps one identity across ses
   in the chat. Owners reach for their own tools first and can do anything else with approval.
 - **Tools**: onionsoup tools, plus any MCP servers declared in `mcp:` (visible to that owner alone, with
   per-tool rules). The NAS owner gets truenas-mcp this way.
+- **Stewards**: an owner with `manages:` creates, changes and retires owners within its scope through a tool that
+  validates the whole configuration, refuses authority fields, asks the person, and commits to the config repo.
+  The daemon re-reads the configuration every tick, so new owners start without a restart.
 - **Grants**: standing approvals the person gives in configuration (`publish-site`, `update-app`, `merge`, `ship`),
   journaled as "approved by standing grant" whenever they are used.
 - **Desk**: a worktree on a `desk/<id>` branch (or the evidence folder for non-repository owners) where chat
