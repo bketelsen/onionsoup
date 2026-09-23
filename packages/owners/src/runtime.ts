@@ -56,11 +56,19 @@ export class Runtime {
     try {
       await mkdir(lockPath);
     } catch {
-      throw new Error(`runtime_locked: ${await this.lockHolder()}`);
+      if (!(await this.lockIsStale())) throw new Error(`runtime_locked: ${await this.lockHolder()}`);
+      // The holder died (SIGKILL, crash); its unfinished work is marked interrupted by whoever runs next.
+      await rm(lockPath, { recursive: true, force: true });
+      await mkdir(lockPath);
     }
     const holder = { pid: process.pid, command: process.argv.slice(2).join(' '), startedAt: new Date().toISOString() };
     await writeFile(join(lockPath, 'holder.json'), JSON.stringify(holder) + '\n');
     return async () => rm(lockPath, { recursive: true, force: true });
+  }
+
+  private async lockIsStale() {
+    const text = await readFile(join(this.stateDirectory, 'runtime.lock', 'holder.json'), 'utf8').catch(() => '');
+    return Boolean(text) && !isAlive((JSON.parse(text) as { pid: number }).pid);
   }
 
   /** Who holds the lock, and whether that process is still alive. */
