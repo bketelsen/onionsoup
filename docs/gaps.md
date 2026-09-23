@@ -44,3 +44,18 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
   as `echo`), and nothing notices before the 20-minute limit ends the hire. The owner now hears about the failure,
   but a progress watchdog (stop a hire whose recent tool calls change nothing) or a retry with the other model family
   would save the twenty minutes. Work opened by duties (not from a chat) is journaled but has no chat to be told in.
+
+## Workarounds to revisit
+
+- **opencode cannot return structured-output sessions (seen in 1.18.32).** Once a prompt carries a `json_schema`
+  format, listing that session's messages over HTTP fails with `BadRequest: Expected OutputFormatJsonSchema`.
+  Every hire asks for structured output, so two things work around it:
+  - `packages/owners/src/opencode.ts` prompts hires synchronously and takes the deliverable from the prompt's own
+    reply instead of reading the session back.
+  - `packages/surface/src/hire-store.ts` reads hire sessions for the work item activity rail straight from
+    opencode's SQLite store (read-only), which ties the surface to opencode's internal tables.
+
+  To check a new opencode: run any hire, then `GET /session/<id>/message` on the server that ran it (or, in the
+  surface, point the item-messages route back at `state.opencode.messages`). If it answers, drop both workarounds:
+  prompt hires asynchronously and read sessions through the API.
+
