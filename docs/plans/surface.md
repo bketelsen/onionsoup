@@ -91,8 +91,8 @@ Tick items as they land, with the commit.
 
 ### 7. Next (from daily use)
 - [x] Merge to `main` and install `deploy/onionsoup-surface.service` (2026-09-23; OpenChamber retired)
-- [ ] UI tests for the chat's event handling (useChat) and the diff parser
-- [ ] Decisions on the work item page itself (approve, send back, publish) instead of only from the inbox
+- [x] UI tests for the chat's event handling (chat/chatState.ts, pulled out of useChat) and the diff parser (chat/diff.ts)
+- [x] Decisions on the work item page itself (approve, send back, reject, force-push, publish)
 
 ## Notes for whoever resumes
 

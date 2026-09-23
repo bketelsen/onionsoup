@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { RiArrowLeftLine, RiExternalLinkLine } from '@remixicon/react';
 import { api, navigate, useEvents } from '../api.ts';
-import type { WorkItem } from '../types.ts';
+import type { InboxEntry, WorkItem } from '../types.ts';
+import { Decision } from './Decision.tsx';
 import { Badge, Empty, Section, statusTone, timeAgo } from './ui.tsx';
 
 /** One work item in full: what was proposed, the plan, who was hired, what verification and review said. */
@@ -14,6 +15,7 @@ export function ItemView({ itemId }: { itemId: string }) {
   if (error) return <div className="p-6 text-status-error">{error}</div>;
   if (!item) return <div className="p-6"><Empty>Loading…</Empty></div>;
   const cost = item.hires.reduce((total, hire) => total + hire.cost, 0);
+  const waiting = waitingOn(item);
   return (
     <div className="flex-1 overflow-y-auto">
       <div className="max-w-3xl mx-auto p-6 flex flex-col gap-5">
@@ -37,6 +39,12 @@ export function ItemView({ itemId }: { itemId: string }) {
           )}
           {!item.publication && item.status === 'landed' && item.branch && <div className="typography-meta text-muted-foreground">Landed on {item.branch}, not yet a PR.</div>}
         </div>
+        {waiting && (
+          <div className="flex flex-col gap-1">
+            <Decision entry={waiting} compact onDone={() => void load()} />
+            {waiting.kind === 'plan' && <span className="typography-micro text-muted-foreground">The plan is below; your note goes with an approval, and is required to send it back or reject it.</span>}
+          </div>
+        )}
         <Section title="Proposal">
           <div className="typography-markdown flex flex-col gap-1">
             <p><strong>Goal.</strong> {item.proposal.goal}</p>
@@ -103,4 +111,13 @@ export function ItemView({ itemId }: { itemId: string }) {
       </div>
     </div>
   );
+}
+
+/** The decision this item waits on, if any, in the inbox's terms so the same card can take it. */
+function waitingOn(item: WorkItem): InboxEntry | undefined {
+  const base = { id: item.id, owner: item.owner, title: item.proposal.title, at: item.updatedAt };
+  if (item.status === 'awaiting-plan-approval') return { ...base, kind: 'plan', detail: '' };
+  if (item.status === 'awaiting-push-approval') return { ...base, kind: 'push', detail: item.rebaseOf?.prUrl ?? '' };
+  if (item.status === 'landed' && !item.publication && !item.rebaseOf) return { ...base, kind: 'publish', detail: `Landed on ${item.branch}; publishing opens a draft PR.` };
+  return undefined;
 }

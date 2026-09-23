@@ -62,12 +62,12 @@ export function Decision({ entry, owner, onDone, compact }: { entry: InboxEntry;
           <Button variant="primary" disabled={busy} onClick={() => void decide('approve-plan', { note: text || undefined })}>Approve plan</Button>
           <Button disabled={busy || !text.trim()} title="Send the plan back with your note" onClick={() => void decide('revise-plan', { note: text })}>Send back</Button>
           <Button variant="destructive" disabled={busy || !text.trim()} title="Reject with your note as the reason" onClick={() => void decide('reject-plan', { reason: text })}>Reject</Button>
-          <Button variant="ghost" onClick={() => navigate('item', entry.id)}><RiExternalLinkLine className="size-3.5" />Full plan</Button>
+          {!onItemPage() && <Button variant="ghost" onClick={() => navigate('item', entry.id)}><RiExternalLinkLine className="size-3.5" />Full plan</Button>}
         </>}
         {entry.kind === 'push' && <Button variant="primary" disabled={busy} onClick={() => void decide('approve-push')}>Approve force-push</Button>}
         {entry.kind === 'publish' && <>
           <Button variant="primary" disabled={busy} onClick={() => void decide('publish')}>Publish draft PR</Button>
-          <Button variant="ghost" onClick={() => navigate('item', entry.id)}><RiExternalLinkLine className="size-3.5" />Details</Button>
+          {!onItemPage() && <Button variant="ghost" onClick={() => navigate('item', entry.id)}><RiExternalLinkLine className="size-3.5" />Details</Button>}
         </>}
         {entry.kind === 'create' && <>
           <label className="inline-flex items-center gap-1 typography-meta text-muted-foreground">
@@ -94,4 +94,8 @@ export function Decision({ entry, owner, onDone, compact }: { entry: InboxEntry;
       {error && <div className="typography-meta text-status-error">{error}</div>}
     </div>
   );
+}
+
+function onItemPage() {
+  return location.hash.startsWith('#/item/');
 }
