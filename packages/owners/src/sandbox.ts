@@ -19,6 +19,7 @@ const ALWAYS_WRITABLE = [
   join(HOME, '.local/state/opencode'),
   join(HOME, '.config/opencode'),
   join(HOME, '.cache'),
+  join(HOME, '.npm'),
   join(HOME, 'go'),
 ];
 

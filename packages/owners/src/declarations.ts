@@ -96,7 +96,8 @@ export type TruenasDomain = z.infer<typeof TruenasDomain>;
  */
 export const Grant = z.object({
   to: z.string(),
-  action: z.enum(['publish-site', 'update-app']),
+  /** publish-site and update-app are requests to another owner; merge lets an owner merge its own reviewed PRs. */
+  action: z.enum(['publish-site', 'update-app', 'merge']),
   /** The site or app, or "*" for all of them. */
   target: z.string(),
 });

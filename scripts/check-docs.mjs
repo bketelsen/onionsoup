@@ -97,7 +97,7 @@ function localTarget(file, href) {
 
 const docs = await markdownFiles("docs");
 const skills = await markdownFiles(".agents/skills");
-const files = ["AGENTS.md", "README.md", "REFERENCES.md", ...docs, ...skills];
+const files = ["AGENTS.md", "README.md", ...docs, ...skills];
 const sources = new Map();
 for (const file of files) {
   try { sources.set(path.resolve(file), await readFile(file, "utf8")); }

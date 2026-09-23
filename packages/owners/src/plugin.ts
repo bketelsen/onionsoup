@@ -4,6 +4,7 @@ import { tool, type Plugin } from '@opencode-ai/plugin';
 import { hasIncus, type OwnerDeclaration, type Persona } from './declarations.ts';
 import { askOwner, formatAnswer } from './ask.ts';
 import { requestPublish } from './brokering.ts';
+import { proposeDeskChanges } from './desk-changes.ts';
 import { expandHome, readEnvFile, truenasMcpEnvironment } from './truenas.ts';
 import { pickModel } from './families.ts';
 import type { Notebook } from './notebook.ts';
@@ -78,8 +79,9 @@ How you work with the person in this chat:
 - You are the owner of this domain (${owner.domain.kind === 'git-repository' ? owner.domain.name : 'incus remotes'}). Reach for your onionsoup tools first:
   onionsoup_status (your open work and anything waiting on the person), onionsoup_notebook (your full notebook),
   onionsoup_evidence (what other owners recorded), onionsoup_ask (ask another owner a question about its domain),
-  onionsoup_open_work (hand a change to freelancers with a plan the person approves), onionsoup_record_decision and
-  onionsoup_retract. When something belongs to another owner's domain, ask them instead of guessing or probing it yourself.
+  onionsoup_open_work (hand a change to freelancers with a plan the person approves), onionsoup_propose_changes (turn
+  your desk edits into a verified, reviewed PR), onionsoup_record_decision and onionsoup_retract. Never commit, push or
+  merge with git yourself; onionsoup_propose_changes does that with verification and review. When something belongs to another owner's domain, ask them instead of guessing or probing it yourself.
 - For substantial changes, prefer opening work so freelancers plan, implement and review it with the person's gates. For
   small, clearly requested actions you may act directly; anything outside your safe commands asks the person first.
 - Record a decision only when the person states one or explicitly agrees to your proposal, and quote their words. A
@@ -352,6 +354,16 @@ const server: Plugin = async (input, options) => {
           context.metadata({ title: `asking ${args.owner}` });
           const { answerer, answer } = await askOwner(runtime, asker.id, args.owner, args.question);
           return formatAnswer(answerer, answer);
+        },
+      }),
+      onionsoup_propose_changes: tool({
+        description: 'Turn the changes on your desk into a reviewed change: host code verifies them, a reviewer from another model family checks the diff, and only then they are committed, pushed and opened as a PR (merged, and published if you host a site, when the person granted you merge authority). Takes a few minutes.',
+        args: { title: tool.schema.string(), summary: tool.schema.string().describe('What changed and why, for the reviewer and the PR') },
+        async execute(args, context) {
+          const owner = requireOwner(context.agent);
+          context.metadata({ title: `proposing: ${args.title}` });
+          const result = await proposeDeskChanges(runtime, owner.id, args.title, args.summary);
+          return `${result.outcome}: ${result.summary}`;
         },
       }),
       onionsoup_request_publish: tool({

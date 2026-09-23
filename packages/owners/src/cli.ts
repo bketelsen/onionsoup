@@ -13,6 +13,7 @@ import { DAEMON_LIMITS, daemon, recordDutyRun, tick, type TickLog } from './daem
 import { publish } from './publish.ts';
 import { approvePush } from './rebase.ts';
 import { describeAsk, type ResourceRequest } from './requests.ts';
+import { proposeDeskChanges } from './desk-changes.ts';
 import { deskState } from './desk.ts';
 import { initConfig } from './init.ts';
 import { configDirectory, stateDirectory } from './paths.ts';
@@ -185,6 +186,10 @@ const COMMANDS: Record<string, Command> = {
       }
     }
   },
+  async propose(runtime, [ownerId]) {
+    const result = await proposeDeskChanges(runtime, required(ownerId, 'owner'), required(options.note, '--note (title)'), options.reason ?? options.note!);
+    console.log(`${result.outcome}: ${result.summary}`);
+  },
   async 'sync-openchamber'(runtime) {
     const { changes, via } = await syncOpenChamber(runtime);
     console.log(changes.length ? `${changes.join('\n')}\n(saved via ${via})` : 'OpenChamber projects already match the owners');
@@ -252,7 +257,7 @@ if (commandName === 'init') {
 }
 const runtime = await Runtime.open({ declarations: options.declarations!, state: options.state! });
 /** Commands that only read, or only record a person's decision, never take the runtime lock. */
-const LOCK_FREE = ['items', 'show', 'notebook', 'requests', 'approve', 'revise-plan', 'reject', 'resume', 'desk', 'desk-state', 'retract', 'ask', 'sync-openchamber', 'request-publish', 'approve-push', 'approve-create', 'approve-delete', 'deny-request'];
+const LOCK_FREE = ['items', 'show', 'notebook', 'requests', 'approve', 'revise-plan', 'reject', 'resume', 'desk', 'desk-state', 'retract', 'ask', 'sync-openchamber', 'request-publish', 'propose', 'approve-push', 'approve-create', 'approve-delete', 'deny-request'];
 try {
   const unlock = LOCK_FREE.includes(commandName!) ? async () => {} : await runtime.lock();
   try {
