@@ -68,7 +68,7 @@ export function OwnerView({ owner, inbox, sessionId, refresh }: { owner: OwnerSu
       <div className="flex-1 flex min-h-0">
         <main className="flex-1 flex flex-col min-w-0 min-h-0">
           {!owner.chat && <div className="p-6"><Empty>{owner.name} has no persona, so there is no one to chat with. Its work and notebook are on the right.</Empty></div>}
-          {owner.chat && current && <ChatPane key={current} owner={owner} sessionId={current} directory={directory} />}
+          {owner.chat && current && directory && <ChatPane key={current} owner={owner} sessionId={current} directory={directory} pending={waiting.filter(entry => entry.sessionID === current && (entry.kind === 'permission' || entry.kind === 'question'))} onPendingDone={refresh} />}
           {owner.chat && !current && (
             <div className="flex-1 flex flex-col items-center justify-center gap-3 text-muted-foreground">
               <OwnerIcon icon={owner.icon} className="size-8" />

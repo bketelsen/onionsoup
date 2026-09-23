@@ -1,0 +1,21 @@
+# The onionsoup surface: owners, their chats and the inbox at http://127.0.0.1:4747. To use it:
+#   npm run surface:build
+#   cp deploy/onionsoup-surface.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user enable --now onionsoup-surface
+# It starts its own `opencode serve` (which loads the onionsoup plugin from your opencode config). To attach to a
+# running opencode instead, set OPENCODE_URL (and OPENCODE_SERVER_PASSWORD in an EnvironmentFile, never here).
+[Unit]
+Description=onionsoup surface
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/projects/onionsoup
+Environment=PATH=%h/.local/share/mise/shims:%h/.local/bin:%h/.opencode/bin:/home/linuxbrew/.linuxbrew/bin:/usr/local/bin:/usr/bin:/bin
+Environment=SURFACE_PORT=4747
+ExecStart=%h/.local/share/mise/shims/node --conditions=onionsoup-source --import tsx packages/surface/src/main.ts
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

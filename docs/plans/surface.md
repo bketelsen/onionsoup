@@ -64,18 +64,20 @@ Tick items as they land, with the commit.
 - [x] Work item page: proposal, plan, hires, verification, reviews, PR link
 
 ### 4. Chat
-- [ ] Study OpenChamber's chat: ChatMessage, MessageBody, message/parts, toolRenderers, PermissionCard,
+- [x] Study OpenChamber's chat: ChatMessage, MessageBody, message/parts, toolRenderers, PermissionCard,
       QuestionCard, MarkdownRenderer; list what to port and what to simplify
-- [ ] Message list: user and assistant turns, streaming text parts, markdown (marked + DOMPurify), code highlighting
-- [ ] Reasoning parts (collapsed), tool parts (one line, expandable output; renderers for bash, read, edit/write
+- [x] Message list: user and assistant turns, streaming text parts, markdown (marked + DOMPurify)
+- [ ] Code highlighting (shiki, as OpenChamber) in markdown code blocks and tool output; a real diff view for edits
+- [x] Reasoning parts (collapsed), tool parts (one line, expandable output; renderers for bash, read, edit/write
       diffs, grep/glob, onionsoup tools)
-- [ ] Permission cards (once / always / reject) and question cards inline
-- [ ] Composer: textarea, send, stop; the owner's agent is fixed per chat
-- [ ] Threads per owner: list, new, rename; stay live across reconnects
+- [x] Permission cards (once / always / reject) and question cards inline
+- [x] Composer: textarea, send, stop; the owner's agent is fixed per chat
+- [x] Threads per owner: list, new; live across reconnects (reload on reconnect)
+- [ ] Rename threads
 - [ ] Owner-to-owner asks and hires shown as links in the timeline, not as loose sessions
 
 ### 5. Integration
-- [ ] Run it: `npm run surface`; a systemd user unit in `deploy/`
+- [x] Run it: `npm run surface`; `deploy/onionsoup-surface.service`
 - [ ] Docs: README, docs/extending.md (running the surface), design doc section
 - [ ] Decide what happens to `sync-openchamber` and the Owner's Desk extension (keep until the surface replaces them)
 
@@ -85,6 +87,9 @@ Tick items as they land, with the commit.
 - [ ] Long outputs, big diffs, very long chats (virtualize)
 
 ## Notes for whoever resumes
+
+- The chat's visual spec extracted from OpenChamber (class names, CSS, per-tool icons and titles) was saved at the
+  session scratchpad as openchamber-chat-spec.md; the source of truth is `~/projects/openchamber/packages/ui/src/components/chat`.
 
 - Run against the live system without disturbing it: `SURFACE_PORT=4748 OPENCODE_URL=http://127.0.0.1:<port>
   OPENCODE_SERVER_PASSWORD=… npm run surface` attaches to OpenChamber's opencode (find its port with

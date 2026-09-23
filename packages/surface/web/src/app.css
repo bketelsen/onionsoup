@@ -2,6 +2,7 @@
 @import "./styles/design-system.css";
 @import "./styles/typography.css";
 @import "./styles/themes.css";
+@import "./styles/chat.css";
 @source "./**/*.{ts,tsx}";
 
 @custom-variant dark (&:is(.dark *));

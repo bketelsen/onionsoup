@@ -1,0 +1,634 @@
+/* Copied from OpenChamber (https://github.com/openchamber/openchamber, MIT, see ../../NOTICE):
+   packages/ui/src/index.css at f25d6f503, lines 74-86, 248-339, 514-625, 937-953, 1038-1274, 1404-1511, 1770-1807.
+   Only the rules the chat display uses; kept verbatim so they can be refreshed from upstream. */
+
+/* index.css:74,86 */
+.message-content-text.leading-relaxed,
+.message-content-text .leading-relaxed {
+  line-height: round(1.625em, 1px);
+}
+
+/* Native selection uses the theme's selection pair. */
+.message-content-text::selection,
+.message-content-text ::selection,
+.oc-file-preview::selection,
+.oc-file-preview ::selection {
+  background: var(--oc-text-selection);
+  color: var(--interactive-selection-foreground);
+}
+
+/* index.css:248,339 */
+div[data-chat-input-footer="true"] {
+  background: transparent !important;
+  border: none;
+  box-shadow: none;
+  -webkit-appearance: none;
+}
+
+/* Scroll shadow (HeroUI) fallback styling to ensure visible gradients without the Tailwind plugin */
+[data-scroll-shadow="true"] {
+  /* A concrete default, not var(--scroll-shadow-size, 48px): a custom
+     property referencing itself is a cycle and computes to invalid, which
+     silently killed every mask below for consumers that don't set the
+     variable inline (the hook-based chat scroller). Inline styles from the
+     ScrollShadow component still override this. */
+  --scroll-shadow-size: 48px;
+}
+
+[data-scroll-shadow="true"][data-orientation="vertical"] {
+  mask-mode: alpha;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+}
+
+[data-scroll-shadow="true"][data-orientation="vertical"][data-top-bottom-scroll="true"],
+.chat-scroll[data-scroll-shadow="true"][data-orientation="vertical"][data-top-scroll="true"] {
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    transparent var(--scroll-shadow-top-clear-size, 0px),
+    #000 var(--scroll-shadow-top-size, var(--scroll-shadow-size)),
+    #000 calc(100% - var(--scroll-shadow-size)),
+    transparent 100%
+  );
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    transparent var(--scroll-shadow-top-clear-size, 0px),
+    #000 var(--scroll-shadow-top-size, var(--scroll-shadow-size)),
+    #000 calc(100% - var(--scroll-shadow-size)),
+    transparent 100%
+  );
+}
+
+[data-scroll-shadow="true"][data-orientation="vertical"][data-top-scroll="true"]:not(.chat-scroll) {
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    transparent var(--scroll-shadow-top-clear-size, 0px),
+    #000 var(--scroll-shadow-top-size, var(--scroll-shadow-size)),
+    #000 100%
+  );
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    transparent var(--scroll-shadow-top-clear-size, 0px),
+    #000 var(--scroll-shadow-top-size, var(--scroll-shadow-size)),
+    #000 100%
+  );
+}
+
+/* Sticky-fade overlay: the crisp duplicate identity stays
+   mounted and its visibility is driven synchronously by the scroller's own
+   top-scroll data attribute — the same signal that engages the mask — so the
+   overlay appears in the exact frame the mask hides the real header (no blink).
+   ScrollShadow sets data-top-scroll when nothing is below the viewport and
+   data-top-bottom-scroll when content is both above and below. */
+.oc-sticky-fade-overlay {
+  opacity: 0;
+}
+
+.oc-sticky-fade-root:has(.oc-sticky-fade-scroller[data-top-scroll="true"]) .oc-sticky-fade-overlay,
+.oc-sticky-fade-root:has(.oc-sticky-fade-scroller[data-top-bottom-scroll="true"]) .oc-sticky-fade-overlay {
+  opacity: 1;
+}
+
+[data-scroll-shadow="true"][data-orientation="vertical"][data-bottom-scroll="true"],
+.chat-scroll[data-scroll-shadow="true"][data-orientation="vertical"]:not([data-top-scroll="true"]):not([data-top-bottom-scroll="true"]) {
+  mask-image: linear-gradient(
+    to bottom,
+    #000 0%,
+    #000 calc(100% - var(--scroll-shadow-size)),
+    transparent 100%
+  );
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    #000 0%,
+    #000 calc(100% - var(--scroll-shadow-size)),
+    transparent 100%
+  );
+}
+
+/* index.css:514,625 */
+/* Custom scrollbar styles */
+*::-webkit-scrollbar {
+  width: 10px !important;
+  height: 10px !important;
+  background: transparent;
+  -webkit-appearance: none;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--oc-scrollbar-thumb);
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--oc-scrollbar-thumb-hover);
+  background-clip: padding-box;
+}
+
+.dark {
+  color-scheme: dark;
+  --oc-scrollbar-thumb: oklch(0.6 0.02 80 / 0.3);
+  --oc-scrollbar-thumb-hover: oklch(0.6 0.02 80 / 0.5);
+}
+
+[data-scrollbar="chat"]::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Fully hidden scrollbar for small mobile overlays (session switcher etc.)
+   where a visible bar reads as chrome noise. Scrolling stays intact. */
+.oc-hide-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.oc-hide-scrollbar::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+[data-scrollbar="chat"].chat-scroll,
+.chat-scroll {
+  scrollbar-gutter: stable both-edges;
+}
+
+html:not(.dark) .chat-scroll {
+  color-scheme: dark;
+}
+
+[data-scrollbar="chat"]::-webkit-scrollbar {
+  width: 10px !important;
+  height: 10px !important;
+  background: transparent !important;
+  -webkit-appearance: none;
+}
+
+[data-scrollbar="chat"].chat-scroll::-webkit-scrollbar,
+.chat-scroll::-webkit-scrollbar {
+  width: 10px !important;
+  height: 10px !important;
+}
+
+[data-scrollbar="chat"]::-webkit-scrollbar-track {
+  background: transparent !important;
+}
+
+[data-scrollbar="chat"].chat-scroll::-webkit-scrollbar-track,
+.chat-scroll::-webkit-scrollbar-track {
+  background: transparent !important;
+}
+
+[data-scrollbar="chat"]::-webkit-scrollbar-thumb {
+  background: var(--oc-scrollbar-thumb) !important;
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+[data-scrollbar="chat"].chat-scroll::-webkit-scrollbar-thumb,
+.chat-scroll::-webkit-scrollbar-thumb {
+  background: var(--oc-scrollbar-thumb) !important;
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+[data-scrollbar="chat"]::-webkit-scrollbar-thumb:hover {
+  background: var(--oc-scrollbar-thumb-hover) !important;
+  background-clip: padding-box;
+}
+
+[data-scrollbar="chat"].chat-scroll::-webkit-scrollbar-thumb:hover,
+.chat-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--oc-scrollbar-thumb-hover) !important;
+  background-clip: padding-box;
+}
+
+[data-scrollbar="chat"]::-webkit-scrollbar-corner {
+  background: transparent !important;
+}
+
+/* index.css:937,953 */
+.message-footer__facts {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+/* Each fact carries its own leading separator and spacing. */
+.message-footer__fact {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding-inline-start: 0.375rem;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* index.css:1038,1274 */
+.markdown-content {
+  font-family: var(--font-sans);
+  font-size: var(--text-markdown);
+  line-height: round(1.625em, 1px);
+}
+
+.markdown-content p,
+.markdown-content li,
+.markdown-content blockquote,
+.markdown-content td,
+.markdown-content th {
+  line-height: inherit;
+}
+
+/* Block rhythm: every block carries the same margin on both sides, so the
+   gap between any two neighbours is one paragraph spacing (margins collapse)
+   and the first/last block of a message adds nothing. Tailwind preflight
+   zeroes these margins, which left adjacent paragraphs reading as one. */
+.markdown-content p,
+.markdown-content ul,
+.markdown-content ol,
+.markdown-content blockquote,
+.markdown-content hr,
+.markdown-content table {
+  margin: var(--markdown-paragraph-spacing) 0;
+}
+
+/* The markdown renderer wraps each block in a display:contents [data-md-block]
+   element, so the message-level [&_.markdown-content>*:first-child]:mt-0 /
+   [&_.markdown-content>*:last-child]:mb-0 nullifiers target the wrapper
+   (where margin is ignored), not the block. Trim the outer blocks directly so
+   messages gain no extra space at the top or bottom. */
+.markdown-content > [data-md-block]:first-child > :first-child,
+.markdown-content > :first-child:not([data-md-block]) {
+  margin-top: 0;
+}
+
+.markdown-content > [data-md-block]:last-child > :last-child,
+.markdown-content > :last-child:not([data-md-block]) {
+  margin-bottom: 0;
+}
+
+/* Tool cards (code size) and reasoning (meta size, dimmed) are intentionally
+   compact — keep their paragraphs tight, matching prior behavior. */
+.markdown-content.markdown-tool p,
+.markdown-content.markdown-reasoning p {
+  margin-bottom: 0;
+}
+
+/* Tool markdown should render at code size to match tool card typography. */
+.markdown-content.markdown-tool {
+  font-size: var(--text-code) !important;
+}
+
+.question-markdown > .markdown-content.markdown-tool {
+  font-size: inherit !important;
+}
+
+.question-markdown > .markdown-content > [data-md-block]:first-child > :first-child {
+  margin-top: 0;
+}
+
+.question-markdown > .markdown-content > [data-md-block]:last-child > :last-child {
+  margin-bottom: 0;
+}
+
+/* Reasoning markdown renders at meta size, dimmed. */
+.markdown-content.markdown-reasoning {
+  font-size: var(--text-markdown);
+  color: var(--surface-muted-foreground);
+  --markdown-link: inherit;
+  --markdown-link-hover: var(--surface-foreground);
+  --markdown-blockquote: inherit;
+  --markdown-bold: inherit;
+  --markdown-italic: inherit;
+  --markdown-strikethrough: inherit;
+}
+
+.markdown-content.markdown-reasoning p,
+.markdown-content.markdown-reasoning li,
+.markdown-content.markdown-reasoning td,
+.markdown-content.markdown-reasoning th,
+.markdown-content.markdown-reasoning h1,
+.markdown-content.markdown-reasoning h2,
+.markdown-content.markdown-reasoning h3,
+.markdown-content.markdown-reasoning h4,
+.markdown-content.markdown-reasoning h5,
+.markdown-content.markdown-reasoning h6,
+.markdown-content.markdown-reasoning strong,
+.markdown-content.markdown-reasoning b,
+.markdown-content.markdown-reasoning em,
+.markdown-content.markdown-reasoning del,
+.markdown-content.markdown-reasoning [data-markdown="strong"],
+.markdown-content.markdown-reasoning [data-markdown="bold"] {
+  color: var(--surface-muted-foreground) !important;
+}
+
+.markdown-content.markdown-reasoning a,
+.markdown-content.markdown-reasoning [data-openchamber-file-link="true"] {
+  color: var(--surface-muted-foreground) !important;
+}
+
+.markdown-content.markdown-reasoning a:hover,
+.markdown-content.markdown-reasoning [data-openchamber-file-link="true"]:hover {
+  color: var(--surface-foreground) !important;
+}
+
+.markdown-content.markdown-reasoning strong,
+.markdown-content.markdown-reasoning b,
+.markdown-content.markdown-reasoning [data-markdown="strong"],
+.markdown-content.markdown-reasoning [data-markdown="bold"] {
+  font-weight: inherit !important;
+  color: inherit !important;
+  font-style: inherit !important;
+}
+
+.markdown-content.markdown-tool code,
+.markdown-content.markdown-tool pre {
+  font-size: inherit !important;
+}
+
+/* Headings: a clear step above the body without becoming display type, and
+   more air above than below so each heading binds to the text it introduces. */
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3,
+.markdown-content h4,
+.markdown-content h5,
+.markdown-content h6 {
+  margin: 1.25rem 0 0.5rem;
+  color: color-mix(in srgb, var(--foreground) 95%, transparent);
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.markdown-content h1 {
+  font-size: 1.25rem;
+}
+
+.markdown-content h2 {
+  font-size: 1.125rem;
+}
+
+.markdown-content h3 {
+  font-size: 1rem;
+}
+
+.markdown-content h4,
+.markdown-content h5,
+.markdown-content h6 {
+  font-size: 0.875rem;
+}
+
+/* Code font */
+.markdown-content code,
+.markdown-content pre {
+  font-family: var(--font-mono);
+  font-size: var(--text-code);
+}
+
+/* Inline code sits inside a sentence: the theme's code colour over its own
+   quiet chip. The colour keeps the theme's value with a touch of transparency,
+   and the chip fades into the background further, so neither shouts like the
+   original full-strength style. */
+.markdown-content code[data-markdown="inline-code"] {
+  background-color: var(--markdown-inline-code-bg, var(--surface-subtle)) !important;
+  color: var(--markdown-inline-code, var(--foreground)) !important;
+  padding: 0.1rem 0.35rem;
+  border-radius: 0.375rem;
+  word-break: break-all;
+  overflow-wrap: break-word;
+}
+
+@supports (color: color-mix(in lab, red, red)) {
+  .markdown-content code[data-markdown="inline-code"] {
+    background-color: color-mix(in srgb, var(--markdown-inline-code-bg, var(--surface-subtle)) 50%, transparent) !important;
+    color: color-mix(in srgb, var(--markdown-inline-code, var(--foreground)) 90%, transparent) !important;
+  }
+}
+
+/* Markdown links - use theme colors */
+.markdown-content a {
+  color: var(--markdown-link, var(--primary));
+}
+
+.markdown-content a:hover {
+  color: var(--markdown-link-hover, var(--primary));
+}
+
+.markdown-content [data-openchamber-file-link="true"] {
+  color: var(--markdown-link, var(--primary));
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+
+.markdown-content [data-openchamber-file-link="true"]:hover {
+  color: var(--markdown-link-hover, var(--primary));
+}
+
+/* Agent/skill mentions use the primary accent, not the markdown link color */
+.markdown-content a[data-openchamber-agent-mention="true"],
+.markdown-content a[data-skill-name] {
+  color: var(--primary);
+}
+
+.markdown-content a[data-openchamber-agent-mention="true"]:hover,
+.markdown-content a[data-skill-name]:hover {
+  color: var(--primary);
+}
+
+/* Markdown blockquote - use theme colors */
+.markdown-content blockquote {
+  border-left: 2px solid var(--markdown-blockquote-border, var(--border));
+  padding-left: 0.8rem;
+  color: var(--markdown-blockquote, var(--muted-foreground));
+}
+
+/* Markdown horizontal rule - use theme colors */
+.markdown-content hr {
+  border-color: var(--markdown-hr, var(--border));
+}
+
+/* Markdown bold/italic/strikethrough - use theme colors */
+.markdown-content strong {
+  color: var(--markdown-bold, var(--foreground));
+}
+
+.markdown-content em {
+  color: var(--markdown-italic, var(--foreground));
+}
+
+.markdown-content del {
+  color: var(--markdown-strikethrough, var(--muted-foreground));
+}
+
+/* index.css:1404,1511 */
+.markdown-content [data-md-code-body],
+.markdown-content [data-md-code-body] pre,
+.markdown-content [data-md-code-body] code,
+.markdown-content [data-md-code-body] [data-md-code-lines] {
+  background: transparent !important;
+}
+
+.markdown-content [data-md-code-lines] {
+  display: block;
+  min-width: 100%;
+}
+
+.markdown-content [data-md-code-line] {
+  display: grid;
+  grid-template-columns: 2rem minmax(0, 1fr);
+  column-gap: 0.75rem;
+  min-width: 100%;
+}
+
+/* First uncached open of a session shows a hydration skeleton; the real
+   timeline replacing it fades in once instead of popping. Cached session
+   switches never carry this class and stay instant. */
+@keyframes oc-chat-hydration-reveal {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.oc-chat-hydration-reveal,
+[data-timeline-reveal='fading'] {
+  animation: oc-chat-hydration-reveal 100ms ease-out both;
+}
+
+/* Timeline root while a freshly opened session still has provisional first
+   paints (see timelineRevealGate.ts): hidden until every hold releases, then
+   revealed as a whole. */
+[data-timeline-reveal='pending'] {
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .oc-chat-hydration-reveal,
+  [data-timeline-reveal='fading'] {
+    animation: none;
+  }
+}
+
+/* A block committed mid-stream enters with a fade and a gentle rise —
+   compositor-only properties, deliberately nothing heavier: during a long
+   stream the follow scroll masks the entrance anyway, so the effect only
+   really shows on short replies, and those must not pay for a GPU filter.
+   Blocks committed in the same tick cascade via --oc-md-enter-delay set
+   inline by the renderer. */
+@keyframes oc-md-block-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.oc-md-block-enter {
+  animation: oc-md-block-enter 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: var(--oc-md-enter-delay, 0ms);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .oc-md-block-enter {
+    animation: none;
+  }
+}
+
+/* While streaming defers the per-line gutter markup, hold its horizontal
+   footprint (2rem column + 0.75rem gap) so the finished pass only fills in
+   the numbers instead of shifting every code line. */
+.markdown-content pre[data-md-gutter-reserved] > code {
+  display: block;
+  padding-left: 2.75rem;
+}
+
+.markdown-content [data-md-code-line-number] {
+  align-self: stretch;
+  padding-right: 0.75rem;
+  border-right: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+  color: color-mix(in srgb, var(--muted-foreground) 45%, transparent);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.markdown-content [data-md-code-line-number]::before {
+  content: attr(data-md-code-line-number);
+}
+
+.markdown-content [data-md-code-line-content] {
+  min-width: 0;
+}
+
+.markdown-content [data-md-code-line-break] {
+  display: none;
+}
+
+/* index.css:1770,1807 */
+@keyframes oc-busy-pulse {
+  0%, 100% {
+    opacity: 0.2;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.animate-busy-pulse {
+  animation: oc-busy-pulse 1.2s ease-in-out infinite;
+}
+
+/*
+ * The staggered dots of a busy indicator that stays on screen for as long as
+ * the agent works. A smooth opacity pulse is composited, yet it still makes
+ * the compositor and the GPU process draw sixty frames a second: about ten
+ * percent of a core on an otherwise still page. Three steps per half cycle
+ * last 200ms each, the same as the stagger between dots, so every dot changes
+ * on the same five frames a second, which halves that cost. Keep the stagger
+ * a multiple of one step or the dots stop sharing frames.
+ */
+.animate-busy-wave {
+  animation: oc-busy-pulse 1.2s steps(3, jump-none) infinite;
+}
+
+@keyframes oc-status-logo {
+  0%, 100% {
+    opacity: 0.6;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.animate-status-logo {
+  animation: oc-status-logo 4s steps(10, jump-none) infinite;
+}

@@ -84,6 +84,10 @@ cp deploy/onionsoup-owners.service ~/.config/systemd/user/     # adjust WorkingD
 systemctl --user daemon-reload && systemctl --user enable --now onionsoup-owners
 ```
 
+The surface (`npm run surface:build && npm run surface`, or `deploy/onionsoup-surface.service`) serves your owners,
+their chats and one inbox of everything waiting on you at http://127.0.0.1:4747. It starts its own opencode, or
+attaches to one given `OPENCODE_URL`.
+
 Install the Owner's Desk in OpenChamber (Settings → Extensions → Add → `extensions/owners-desk`).
 
 ## What needs engine code
