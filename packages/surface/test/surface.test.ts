@@ -72,3 +72,17 @@ test('chats go to the owner\'s directory with its persona as the agent; bad inpu
     server.close();
   }
 });
+
+test('the person\'s owner order is kept by the server and new owners follow it', async () => {
+  const { ordered } = await import('@onionsoup/surface');
+  assert.deepEqual(ordered([{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }], ['c', 'a']).map(owner => owner.id), ['c', 'a', 'b', 'd']);
+  const { server, call } = await start();
+  try {
+    assert.equal((await call('PUT', '/api/settings/owner-order', { order: 'moneo' })).status, 400);
+    assert.equal((await call('PUT', '/api/settings/owner-order', { order: ['moneo', 'bellonda'] })).status, 200);
+    const owners = (await call('GET', '/api/state')).body.owners as { id: string }[];
+    assert.deepEqual(owners.slice(0, 2).map(owner => owner.id), ['moneo', 'bellonda']);
+  } finally {
+    server.close();
+  }
+});

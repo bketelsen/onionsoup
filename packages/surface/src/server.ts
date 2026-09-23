@@ -78,6 +78,14 @@ export function surfaceServer(state: SurfaceState, options: { webRoot: string; b
       const inbox = await state.inbox();
       return { owners: await state.owners(inbox), inbox };
     }),
+    route('GET', '/api/settings', async () => state.settings.read()),
+    route('PUT', '/api/settings/owner-order', async (_params, body) => {
+      const order = (await body()).order;
+      if (!Array.isArray(order) || !order.every(id => typeof id === 'string')) throw new HttpError(400, 'order must be a list of owner ids');
+      const settings = await state.settings.update({ ownerOrder: order as string[] });
+      broadcast('onionsoup', { reason: 'settings' });
+      return settings;
+    }),
     route('GET', '/api/owners/:owner', async params => state.owner(params.owner!)),
     route('GET', '/api/items/:item', async params => state.item(params.item!)),
     route('POST', '/api/decide', async (_params, body) => {

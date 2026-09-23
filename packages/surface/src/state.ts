@@ -1,8 +1,10 @@
+import { join } from 'node:path';
 import {
   approveCreate, approveDelete, approvePlan, approvePush, awaitingPublish, chatDirectory, denyRequest, deskState, describeAsk,
   domainSummary, itemText, publish, rejectPlan, revisePlan, type Runtime,
 } from '@onionsoup/owners';
 import type { OpencodeApi, PendingPermission, PendingQuestion } from './opencode.ts';
+import { ordered, SettingsStore } from './settings.ts';
 
 /**
  * The surface's view of onionsoup: owners with what waits on the person, one inbox across all of them, and the
@@ -43,7 +45,16 @@ export interface OwnerSummary {
 export class SurfaceState {
   private readonly directories = new Map<string, string>();
 
-  constructor(readonly runtime: Runtime, readonly opencode: OpencodeApi, private readonly resolveDirectory: (runtime: Runtime, ownerId: string) => Promise<string> = chatDirectory) {}
+  readonly settings: SettingsStore;
+
+  constructor(
+    readonly runtime: Runtime,
+    readonly opencode: OpencodeApi,
+    private readonly resolveDirectory: (runtime: Runtime, ownerId: string) => Promise<string> = chatDirectory,
+    settingsFile = join(runtime.stateDirectory, '..', 'surface', 'settings.json'),
+  ) {
+    this.settings = new SettingsStore(settingsFile);
+  }
 
   /** The owner's chat directory (desk or evidence folder), resolved once. */
   async directory(ownerId: string) {
@@ -91,7 +102,8 @@ export class SurfaceState {
   async owners(inbox?: InboxEntry[]): Promise<OwnerSummary[]> {
     const waiting = inbox ?? await this.inbox();
     const items = await this.runtime.ledger.list();
-    return [...this.runtime.declarations.owners.values()].map(owner => ({
+    const { ownerOrder } = await this.settings.read();
+    return ordered([...this.runtime.declarations.owners.values()], ownerOrder).map(owner => ({
       id: owner.id,
       name: owner.persona?.name ?? owner.id,
       title: owner.persona?.title ?? '',

@@ -24,7 +24,10 @@ export function App() {
   const owner = route[0] === 'owner' ? state?.owners.find(candidate => candidate.id === route[1]) : undefined;
   return (
     <div className="h-full flex bg-background text-foreground">
-      <Rail state={state} route={route} />
+      <Rail state={state} route={route} onReorder={order => {
+        setState(current => current && { ...current, owners: order.map(id => current.owners.find(owner => owner.id === id)!).filter(Boolean) });
+        void api('/api/settings/owner-order', { method: 'PUT', body: { order } }).catch(() => refresh());
+      }} />
       {route[0] === 'item' && route[1] ? <ItemView itemId={route[1]} />
         : owner ? <OwnerView key={owner.id} owner={owner} inbox={state?.inbox ?? []} sessionId={route[2] === 'chat' ? route[3] : undefined} refresh={refresh} />
           : <InboxView state={state} refresh={refresh} />}

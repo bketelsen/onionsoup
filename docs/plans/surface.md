@@ -57,6 +57,7 @@ Tick items as they land, with the commit.
 - [x] Theme: OpenChamber tokens (design-system.css, typography.css), light and dark
 - [x] Layout: owner rail (persona, icon, badges) | main pane | inbox drawer; hash routing
 - [x] Live updates from `/api/events` with reconnect
+- [x] Re-order owners in the rail (drag with pointer events), saved by the surface server so it holds across browsers
 
 ### 3. Owner and work views
 - [x] Inbox with inline decisions and their context (plan, diff stat, verification, failed logs)

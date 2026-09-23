@@ -1,11 +1,59 @@
-import { RiInbox2Line } from '@remixicon/react';
+import { useEffect, useRef, useState } from 'react';
+import { RiDraggable, RiInbox2Line } from '@remixicon/react';
 import { navigate, useConnected } from '../api.ts';
 import type { SurfaceState } from '../types.ts';
 import { BusyDots, cx, OwnerIcon } from './ui.tsx';
 
 /** The owners down the left, each with what waits on the person and whether it is working. */
-export function Rail({ state, route }: { state?: SurfaceState; route: string[] }) {
+export function Rail({ state, route, onReorder }: { state?: SurfaceState; route: string[]; onReorder: (order: string[]) => void }) {
   const connected = useConnected();
+  // Re-ordering with pointer events rather than HTML5 drag and drop: it behaves the same everywhere and needs no
+  // drag image. A press becomes a drag after a few pixels; the click that ends a drag is swallowed.
+  const [dragging, setDragging] = useState<string>();
+  const [over, setOver] = useState<{ id: string; after: boolean }>();
+  const press = useRef<{ id: string; y: number; moved: boolean }>(undefined);
+  const suppressClick = useRef(false);
+  const rows = useRef(new Map<string, HTMLButtonElement>());
+
+  const targetAt = (y: number) => {
+    for (const [id, element] of rows.current) {
+      const box = element.getBoundingClientRect();
+      if (y >= box.top && y <= box.bottom) return { id, after: y > box.top + box.height / 2 };
+    }
+    return undefined;
+  };
+  const onPointerDown = (id: string) => (event: React.PointerEvent) => {
+    if (event.button !== 0) return;
+    press.current = { id, y: event.clientY, moved: false };
+  };
+  useEffect(() => {
+    const move = (event: PointerEvent) => {
+      const current = press.current;
+      if (!current) return;
+      if (!current.moved && Math.abs(event.clientY - current.y) < 5) return;
+      current.moved = true;
+      setDragging(current.id);
+      setOver(targetAt(event.clientY));
+    };
+    const up = (event: PointerEvent) => {
+      const current = press.current;
+      press.current = undefined;
+      if (!current?.moved) return;
+      suppressClick.current = true;
+      const target = targetAt(event.clientY);
+      setDragging(undefined);
+      setOver(undefined);
+      if (!state || !target || target.id === current.id) return;
+      const ids = state.owners.map(owner => owner.id).filter(id => id !== current.id);
+      const index = ids.indexOf(target.id);
+      ids.splice(target.after ? index + 1 : index, 0, current.id);
+      onReorder(ids);
+    };
+    addEventListener('pointermove', move);
+    addEventListener('pointerup', up);
+    return () => { removeEventListener('pointermove', move); removeEventListener('pointerup', up); };
+  }, [state, onReorder]);
+
   const active = route[0] === 'owner' ? route[1] : undefined;
   const inboxActive = route.length === 0 || route[0] === 'inbox';
   return (
@@ -22,8 +70,14 @@ export function Rail({ state, route }: { state?: SurfaceState; route: string[] }
         </button>
         <div className="mt-3 mb-1 px-2 typography-micro uppercase tracking-wide text-muted-foreground text-[0.68rem]">Owners</div>
         {state?.owners.map(owner => (
-          <button key={owner.id} onClick={() => navigate('owner', owner.id)} title={`${owner.title}\n${owner.domain}`}
-            className={cx('flex items-center gap-2 rounded-md px-2 py-1.5 text-left', active === owner.id ? 'bg-interactive-active text-foreground' : 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground')}>
+          <button key={owner.id} onClick={() => navigate('owner', owner.id)} title={`${owner.title}\n${owner.domain}\n(drag to re-order)`}
+            ref={element => { if (element) rows.current.set(owner.id, element); else rows.current.delete(owner.id); }}
+            onPointerDown={onPointerDown(owner.id)}
+            onClickCapture={event => { if (suppressClick.current) { suppressClick.current = false; event.stopPropagation(); event.preventDefault(); } }}
+            className={cx('group/owner relative flex items-center gap-2 rounded-md px-2 py-1.5 text-left select-none touch-none', active === owner.id ? 'bg-interactive-active text-foreground' : 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground',
+              dragging === owner.id && 'opacity-40',
+              over?.id === owner.id && dragging !== owner.id && (over.after ? 'shadow-[inset_0_-2px_0_var(--primary)]' : 'shadow-[inset_0_2px_0_var(--primary)]'))}>
+            <RiDraggable className="absolute -left-1 size-3.5 opacity-0 group-hover/owner:opacity-40" />
             <OwnerIcon icon={owner.icon} />
             <span className="flex flex-col min-w-0 flex-1">
               <span className="typography-ui-label truncate">{owner.name}</span>
