@@ -25,7 +25,7 @@ function transition(item: WorkItem, status: WorkStatus, reason?: string): WorkIt
 }
 
 const plan: Step = async (runtime, item, workflow) => {
-  const owner = runtime.repositoryOwner(item.owner);
+  const owner = runtime.repositoryFor(item);
   await refreshCheckout(owner);
   const hired = await freelancer(runtime, 'planning');
   const hirePlanner = async (current: WorkItem) => runtime.hireFor(current, 'plan', 'planning', {
@@ -42,7 +42,7 @@ const plan: Step = async (runtime, item, workflow) => {
 };
 
 const implement: Step = async (runtime, item, workflow) => {
-  const owner = runtime.repositoryOwner(item.owner);
+  const owner = runtime.repositoryFor(item);
   if (!item.plan || !item.planApproval) throw new Error('plan_not_approved');
   const { path, branch } = await createWorktree(owner, runtime.worktreesRoot, item.id);
   if (item.verdicts.at(-1)?.decision === 'replan') await resetWorktree(owner, path);
@@ -80,7 +80,7 @@ const DECISIONS: Record<Verdict['decision'], (item: WorkItem, workflow: Workflow
 };
 
 const review: Step = async (runtime, item, workflow) => {
-  const owner = runtime.repositoryOwner(item.owner);
+  const owner = runtime.repositoryFor(item);
   if (!item.plan || !item.worktree) throw new Error('nothing_to_review');
   const excluded = familiesOf(item, workflow.review.familyDiffersFrom);
   const hired = await freelancer(runtime, 'review', excluded);

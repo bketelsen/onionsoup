@@ -63,7 +63,7 @@ export async function verify(owner: RepositoryOwner, worktree: string, toolsDire
 
 /** An owner's desk: its own worktree on a desk branch, where chats with a person do their work. */
 export async function ensureDesk(owner: RepositoryOwner, desksRoot: string) {
-  const path = join(desksRoot, owner.id);
+  const path = owner.desk ?? join(desksRoot, owner.id);
   const branch = `desk/${owner.id}`;
   // A new owner has no checkout yet: clone it first.
   if (!existsSync(join(owner.workspace, '.git'))) await run('git', ['clone', '-q', owner.domain.remote, owner.workspace]);

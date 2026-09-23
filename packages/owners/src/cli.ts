@@ -36,6 +36,7 @@ const { values: options, positionals } = parseArgs({
     agent: { type: 'string' },
     directory: { type: 'string' },
     owner: { type: 'string' },
+    repository: { type: 'string' },
   },
 });
 
@@ -165,10 +166,11 @@ const COMMANDS: Record<string, Command> = {
     await continueIfFree(runtime, item);
   },
   async desk(runtime, [ownerId]) {
-    const owner = runtime.repositoryOwner(required(ownerId, 'owner'));
-    const desk = await ensureDesk(owner, runtime.desksRoot);
-    const name = owner.persona?.name ?? owner.id;
-    console.log(`${name}'s desk: ${desk.path} (branch ${desk.branch})\nIn OpenChamber: add this folder as a project and set its default agent to ${name}.`);
+    for (const owner of runtime.repositoryViews(required(ownerId, 'owner'))) {
+      const desk = await ensureDesk(owner, runtime.desksRoot);
+      console.log(`${owner.persona?.name ?? owner.id}'s desk for ${owner.domain.name}: ${desk.path} (branch ${desk.branch})`);
+    }
+    console.log('sync-openchamber (or the daemon) adds the desk to OpenChamber with the owner as its default agent.');
   },
   async ask(runtime, [fromId, toName]) {
     const { answerer, answer, cost } = await askOwner(runtime, required(fromId, 'asking owner'), required(toName, 'answering owner'), required(options.note, '--note (the question)'));
@@ -192,7 +194,7 @@ const COMMANDS: Record<string, Command> = {
     console.log(`${result.outcome}: ${result.summary}`);
   },
   async propose(runtime, [ownerId]) {
-    const result = await proposeDeskChanges(runtime, required(ownerId, 'owner'), required(options.note, '--note (title)'), options.reason ?? options.note!);
+    const result = await proposeDeskChanges(runtime, required(ownerId, 'owner'), required(options.note, '--note (title)'), options.reason ?? options.note!, options.repository);
     console.log(`${result.outcome}: ${result.summary}`);
   },
   async 'sync-openchamber'(runtime) {

@@ -20,6 +20,8 @@ is the reference; the schema is `packages/owners/src/declarations.ts`.
 1. Settle with the person: the domain, what the owner is for, and what it may do. Ask; don't assume authority.
 2. Pick the domain kind:
    - `git-repository`: verify commands, change workflow, `maintain-prs` duty.
+   - `repository-group`: several related repositories under one owner, each with its own verify commands
+     (see docs/extending.md). Group by topic and coupling; keep a critical repository on its own.
    - `incus`: instances, create/delete behind `allow` and gates.
    - `truenas`: truenas-mcp, sites.
    - `github-org`: a read-only gh snapshot.

@@ -4,7 +4,7 @@ import { Learnings, OwnerAnswers, Survey } from './artifacts.ts';
 import { describeAsk, InstanceAsk } from './requests.ts';
 import { FOLLOW_UP_DESCRIPTIONS, requestInstance } from './brokering.ts';
 import { composeAskBrief, distillBrief, learningsBrief, ownerAnswerBrief, surveyBrief, workSoFarText } from './briefs.ts';
-import { hasIncus, type Duty, type OwnerDeclaration, type ResolvedOwner } from './declarations.ts';
+import { hasIncus, repositoryNames, repositoryShortName, type Duty, type OwnerDeclaration, type ResolvedOwner } from './declarations.ts';
 import { refreshIncusEvidence } from './incus.ts';
 import { refreshGithubOrgEvidence } from './github-org.ts';
 import { refreshTruenasEvidence } from './truenas.ts';
@@ -29,6 +29,12 @@ type Refresh = (runtime: Runtime, owner: OwnerDeclaration) => Promise<string>;
 /** How each kind of domain brings its workspace up to date before the owner reads it. */
 const REFRESH: Record<OwnerDeclaration['domain']['kind'], Refresh> = {
   'git-repository': async (runtime, owner) => `commit ${(await refreshCheckout(runtime.repositoryOwner(owner.id))).slice(0, 12)}`,
+  'repository-group': async (runtime, owner) => {
+    const views = runtime.repositoryViews(owner.id);
+    const commits = [];
+    for (const view of views) commits.push(`${view.domain.name} in ./${repositoryShortName(view.domain.name)} at commit ${(await refreshCheckout(view)).slice(0, 12)}`);
+    return `repositories (one directory each): ${commits.join('; ')}`;
+  },
   incus: async (runtime, owner) => refreshIncusEvidence(runtime.incus, runtime.incusOwner(owner.id), runtime.managed),
   truenas: async (runtime, owner) => refreshTruenasEvidence(runtime.truenasOwner(owner.id).domain, runtime.evidenceDirectory(owner.id)),
   'github-org': async (runtime, owner) => (owner.domain.kind === 'github-org' ? refreshGithubOrgEvidence(owner.domain, runtime.evidenceDirectory(owner.id)) : ''),
@@ -85,13 +91,25 @@ export async function wake(runtime: Runtime, ownerId: string, dutyId: string) {
   const evidence = await incusEvidenceText(runtime, owner);
   const brief = surveyBrief(duty, await notebook.orientation(), snapshot, owner.maxProposals, workSoFarText(history), mode, rosterText(runtime.declarations, ownerId))
     + (evidence ? `\n\n<your-incus-snapshot>\n${evidence}\n</your-incus-snapshot>` : '');
-  const result = await runtime.hire(ownerId, { role: 'owner', model: owner.model, directory: owner.workspace, title: `${ownerId}: ${dutyId}`, brief, schema: Survey });
+  const groupNote = owner.domain.kind === 'repository-group'
+    ? `\n\nYou own several repositories: ${repositoryNames(owner).join(', ')}. Every proposal must name its repository.`
+    : '';
+  const result = await runtime.hire(ownerId, { role: 'owner', model: owner.model, directory: owner.workspace, title: `${ownerId}: ${dutyId}`, brief: brief + groupNote, schema: Survey });
   const survey = result.value;
   await notebook.apply(survey.notebook, `${dutyId} at ${snapshot}`);
   const proposals = survey.proposals.slice(0, owner.maxProposals);
   const items: WorkItem[] = [];
   if (mode === 'work') {
-    for (const proposal of proposals) items.push(await runtime.ledger.create(ownerId, owner.workflow!, proposal));
+    for (const proposal of proposals) {
+      // A proposal in a repository the owner does not own (or, for a group, in none) is noted, not opened.
+      try {
+        runtime.repositoryOwner(ownerId, proposal.repository);
+      } catch (error) {
+        await notebook.journal({ kind: 'attention', note: `${proposal.title}: not opened (${error instanceof Error ? error.message : error})` });
+        continue;
+      }
+      items.push(await runtime.ledger.create(ownerId, owner.workflow!, proposal));
+    }
   } else {
     for (const proposal of proposals) await notebook.journal({ kind: 'attention', note: `${proposal.title}: ${proposal.goal}` });
   }

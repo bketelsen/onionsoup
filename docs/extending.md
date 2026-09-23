@@ -30,6 +30,22 @@ Requirements: Node 24, opencode (logged in to the providers your owners use), `b
 3. Restart opencode (or OpenChamber's opencode) so the plugin picks up the new agent.
 4. Talk to it. Run its duties with `npm run owners -- wake <id> <duty>`, or leave it to the daemon.
 
+### Own several repositories together
+
+Related repositories can share one owner. Each repository keeps its own verification; work items, proposals and
+desk changes name the repository they are in, and the desk is a folder with one worktree per repository.
+
+```yaml
+domain:
+  kind: repository-group
+  name: frostyard/image-platform
+  repositories:
+    - { name: frostyard/lab, remote: git@github.com:frostyard/lab.git, baseBranch: main, verify: [[make, check]] }
+    - { name: frostyard/testsuite, remote: git@github.com:frostyard/testsuite.git, baseBranch: main, verify: [[go, test, ./...]] }
+```
+
+A group owner cannot be a site source or ship (both need exactly one repository).
+
 ## Give an owner tools
 
 Any MCP server can be an owner's tool, visible to that owner alone:

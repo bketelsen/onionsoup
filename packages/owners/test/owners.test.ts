@@ -243,3 +243,53 @@ test('a steward creates and retires owners in its scope, and never writes author
   await access(join(config, 'retired', 'widget.yaml'));
   assert.equal(execFileSync('git', ['-C', config, 'status', '--porcelain']).toString(), '');
 });
+
+test('a group owner owns several repositories, each with its own checkout, desk and work items', async () => {
+  const { cp: copy, writeFile: write, access } = await import('node:fs/promises');
+  const { execFileSync } = await import('node:child_process');
+  const { Runtime } = await import('@onionsoup/owners');
+  const { refreshWorkspace } = await import('../src/owner.ts');
+  const { ensureDesk } = await import('../src/workspace.ts');
+  const { prepareOwnerWrite } = await import('../src/stewardship.ts');
+  const scratch = await mkdtemp(join(tmpdir(), 'owners-group-'));
+  const git = (...args: string[]) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args]).toString();
+  for (const name of ['lab', 'testsuite']) {
+    git('init', '-q', '-b', 'main', join(scratch, 'remotes', name));
+    await write(join(scratch, 'remotes', name, 'README.md'), `# ${name}\n`);
+    git('-C', join(scratch, 'remotes', name), 'add', '-A');
+    git('-C', join(scratch, 'remotes', name), 'commit', '-qm', 'init');
+  }
+  const config = join(scratch, 'config');
+  await copy('packages/owners/test/fixtures/owners', config, { recursive: true });
+  const member = (name: string) => `{ name: example/${name}, remote: ${join(scratch, 'remotes', name)}, baseBranch: main, verify: [[make, check]] }`;
+  const group = `id: platform\npersona: { name: Tamalane, title: t, source: Heretics, voice: v }\ndomain:\n  kind: repository-group\n  name: example/platform\n  repositories:\n    - ${member('lab')}\n    - ${member('testsuite')}\nmodel: github-copilot/claude-sonnet-5\nworkflow: change\nduties: []\n`;
+  await write(join(config, 'owners', 'platform.yaml'), group);
+  await write(join(config, 'owners', 'odrade.yaml'), 'id: odrade\ndomain: { kind: github-org, org: example }\nmodel: openai/gpt-5.6-sol\nduties: []\nmanages: { owners: ["example/*"] }\n');
+  const runtime = await Runtime.open({ declarations: config, state: join(scratch, 'home', 'state') });
+
+  assert.throws(() => runtime.repositoryOwner('platform'), /which_repository: platform owns example\/lab, example\/testsuite/);
+  assert.throws(() => runtime.repositoryOwner('platform', 'example/wiki'), /not_your_repository/);
+  const lab = runtime.repositoryOwner('platform', 'example/lab');
+  assert.equal(lab.domain.kind, 'git-repository');
+  assert.equal(lab.workspace, join(scratch, 'home', 'checkouts', 'platform', 'lab'));
+  assert.equal(lab.desk, join(scratch, 'home', 'desks', 'platform', 'lab'));
+  assert.equal(runtime.repositoryOwner('clippy').domain.name, 'example/clippy');
+
+  const label = await refreshWorkspace(runtime, runtime.owner('platform'));
+  assert.match(label, /example\/lab in \.\/lab at commit [0-9a-f]{12}; example\/testsuite in \.\/testsuite/);
+  await access(join(scratch, 'home', 'checkouts', 'platform', 'testsuite', 'README.md'));
+  const desk = await ensureDesk(runtime.repositoryOwner('platform', 'example/testsuite'), runtime.desksRoot);
+  assert.equal(desk.path, join(scratch, 'home', 'desks', 'platform', 'testsuite'));
+  await access(join(desk.path, 'README.md'));
+
+  const item = await runtime.ledger.create('platform', 'change', { title: 't', goal: 'g', rationale: 'r', acceptance: ['a'], size: 'small', repository: 'example/testsuite' });
+  assert.equal(runtime.repositoryFor(item).workspace, join(scratch, 'home', 'checkouts', 'platform', 'testsuite'));
+
+  const overlapping = group.replace('id: platform', 'id: platform2').replace('Tamalane', 'Sheeana').replace('example/platform', 'example/platform2');
+  await assert.rejects(prepareOwnerWrite(runtime, 'odrade', overlapping, '# c'), /platform already owns example\/lab, example\/testsuite/);
+  const partlyOutside = overlapping.replace(`example/lab, remote`, `elsewhere/lab, remote`);
+  await assert.rejects(prepareOwnerWrite(runtime, 'odrade', partlyOutside, '# c'), /outside odrade's scope/);
+  const repeated = group.replace('example/testsuite', 'other/lab');
+  await write(join(config, 'owners', 'platform.yaml'), repeated);
+  await assert.rejects(runtime.reloadDeclarations(), /repository names must differ after the owner: lab/);
+});

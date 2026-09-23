@@ -90,7 +90,7 @@ async function triageFailingCi(runtime: Runtime, item: WorkItem, headSha: string
   await writeFile(join(runtime.stateDirectory, `ci-triage-${owner.id}.json`), JSON.stringify(triaged, null, 2) + '\n');
   const kind = decision.decision === 'person' ? 'attention' : 'ci-triage';
   await notebook.journal({ kind, workItem: item.id, outcome: decision.decision, note: `CI on ${item.publication!.url}: ${decision.reason}` });
-  if (decision.decision === 'fix' && decision.fix && owner.workflow) return runtime.ledger.create(owner.id, owner.workflow, decision.fix);
+  if (decision.decision === 'fix' && decision.fix && owner.workflow) return runtime.ledger.create(owner.id, owner.workflow, { ...decision.fix, repository: item.proposal.repository });
   return undefined;
 }
 
@@ -123,6 +123,7 @@ export async function maintainPullRequests(runtime: Runtime, ownerId: string) {
       rationale: 'GitHub reports the PR as conflicting with the base branch.',
       acceptance: ['The PR applies cleanly to the current base', 'Host verification passes', 'The change is the same change the plan approved'],
       size: 'small',
+      repository: item.proposal.repository,
     }, { status: 'implementing', rebaseOf: { itemId: item.id, branch: item.branch!, prUrl: item.publication!.url, previousHead: pr.headRefOid } });
     opened.push(rebase);
     notes.push(`${item.publication!.url} conflicting → ${rebase.id}`);
@@ -179,7 +180,7 @@ both sides. abandon: the base already covers it or it no longer makes sense; say
 
 /** The owner is the project manager: it decides whether and how a conflict is resolved before anyone is hired. */
 async function ownerDecidesConflict(runtime: Runtime, item: WorkItem, source: WorkItem, worktree: string, files: string[], originalPatch: string) {
-  const owner = runtime.repositoryOwner(item.owner);
+  const owner = runtime.repositoryFor(item);
   const originalBase = (await git(worktree, ['rev-parse', `${source.landedCommit!}~1`])).trim();
   const baseChanges = (await git(worktree, ['log', '--stat', '--format=%h %s', `${originalBase}..origin/${owner.domain.baseBranch}`])).slice(0, 20_000);
   const brief = conflictBrief(source, files, originalPatch, baseChanges, await runtime.notebook(owner.id).orientation());
@@ -206,7 +207,7 @@ async function resolveConflicts(runtime: Runtime, item: WorkItem, source: WorkIt
 }
 
 async function replay(runtime: Runtime, item: WorkItem): Promise<WorkItem> {
-  const owner = runtime.repositoryOwner(item.owner);
+  const owner = runtime.repositoryFor(item);
   const source = await runtime.ledger.get(item.rebaseOf!.itemId);
   await git(owner.workspace, ['fetch', '-q', 'origin']);
   const { path, branch } = await createWorktree(owner, runtime.worktreesRoot, item.id);
@@ -238,7 +239,7 @@ function reviewResolutionBrief(source: WorkItem, originalPatch: string, rebasedP
 }
 
 async function reviewResolution(runtime: Runtime, item: WorkItem): Promise<WorkItem> {
-  const owner = runtime.repositoryOwner(item.owner);
+  const owner = runtime.repositoryFor(item);
   const source = await runtime.ledger.get(item.rebaseOf!.itemId);
   const implementerFamily = item.hires.filter(hire => hire.stage === 'implement' && hire.outcome === 'delivered').at(-1)?.family;
   const declaration = requireFreelancer(runtime.declarations, 'review');

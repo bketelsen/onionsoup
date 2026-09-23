@@ -34,8 +34,8 @@ conventions. Revise, with specific findings, otherwise. Replan is not available 
   ].join('\n\n');
 }
 
-export async function proposeDeskChanges(runtime: Runtime, ownerId: string, title: string, summary: string): Promise<DeskChangeResult> {
-  const owner = runtime.repositoryOwner(ownerId);
+export async function proposeDeskChanges(runtime: Runtime, ownerId: string, title: string, summary: string, repository?: string): Promise<DeskChangeResult> {
+  const owner = runtime.repositoryOwner(ownerId, repository);
   const desk = await ensureDesk(owner, runtime.desksRoot);
   if (!(await git(desk.path, ['status', '--porcelain'])).trim()) return { outcome: 'nothing-to-do', summary: 'The desk has no changes.' };
   await git(desk.path, ['fetch', '-q', 'origin']);

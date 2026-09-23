@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { isRepositoryOwner, isTruenasOwner, loadDeclarations, requireOwner, type Declarations, type IncusOwner, type OwnerDeclaration, type RepositoryOwner, type ResolvedOwner, type TruenasOwner } from './declarations.ts';
+import { isRepositoryOwner, isTruenasOwner, loadDeclarations, ownsRepositories, repositoryNames, repositoryShortName, requireOwner, type Declarations, type IncusOwner, type OwnerDeclaration, type RepositoryOwner, type ResolvedOwner, type TruenasOwner } from './declarations.ts';
 import { familyOf } from './families.ts';
 import { cliIncus, ManagedInstances, type IncusClient } from './incus.ts';
 import { Ledger, type HireRecord, type WorkItem } from './ledger.ts';
@@ -96,14 +96,37 @@ export class Runtime {
 
   owner(ownerId: string): ResolvedOwner {
     const owner = requireOwner(this.declarations, ownerId);
-    const fallback = join(this.stateDirectory, '..', owner.domain.kind === 'git-repository' ? 'checkouts' : 'evidence', owner.id);
+    const fallback = join(this.stateDirectory, '..', ownsRepositories(owner) ? 'checkouts' : 'evidence', owner.id);
     return { ...owner, workspace: owner.workspace ? resolve(this.declarations.root, owner.workspace) : fallback };
   }
 
-  repositoryOwner(ownerId: string): RepositoryOwner {
+  /**
+   * An owner as the owner of one repository. For a group, name the repository: the view has that repository as
+   * its domain, its checkout under the group's workspace and its own desk. A single-repository owner is itself.
+   */
+  repositoryOwner(ownerId: string, repository?: string): RepositoryOwner {
     const owner = this.owner(ownerId);
-    if (!isRepositoryOwner(owner)) throw new Error(`not_a_repository_owner: ${ownerId}`);
-    return owner;
+    if (isRepositoryOwner(owner)) {
+      if (repository && repository !== owner.domain.name) throw new Error(`not_your_repository: ${ownerId} owns ${owner.domain.name}, not ${repository}`);
+      return owner;
+    }
+    if (owner.domain.kind !== 'repository-group') throw new Error(`not_a_repository_owner: ${ownerId}`);
+    const names = owner.domain.repositories.map(member => member.name);
+    if (!repository) throw new Error(`which_repository: ${ownerId} owns ${names.join(', ')}; name one`);
+    const member = owner.domain.repositories.find(candidate => candidate.name === repository);
+    if (!member) throw new Error(`not_your_repository: ${repository} is not one of ${ownerId}'s repositories (${names.join(', ')})`);
+    const short = repositoryShortName(member.name);
+    return { ...owner, domain: { kind: 'git-repository', ...member }, workspace: join(owner.workspace, short), desk: join(this.desksRoot, owner.id, short) };
+  }
+
+  /** Every repository an owner owns, as single-repository views (empty for owners without repositories). */
+  repositoryViews(ownerId: string): RepositoryOwner[] {
+    return repositoryNames(this.owner(ownerId)).map(name => this.repositoryOwner(ownerId, name));
+  }
+
+  /** The repository a work item is in. */
+  repositoryFor(item: WorkItem): RepositoryOwner {
+    return this.repositoryOwner(item.owner, item.proposal.repository);
   }
 
   /**
@@ -120,7 +143,7 @@ export class Runtime {
   /** Where host code writes an owner's read-only snapshot: its workspace, unless the workspace is a repository. */
   evidenceDirectory(ownerId: string) {
     const owner = this.owner(ownerId);
-    return owner.domain.kind === 'git-repository' ? join(this.stateDirectory, '..', 'evidence', ownerId) : owner.workspace;
+    return ownsRepositories(owner) ? join(this.stateDirectory, '..', 'evidence', ownerId) : owner.workspace;
   }
 
   truenasOwner(ownerId: string): TruenasOwner {

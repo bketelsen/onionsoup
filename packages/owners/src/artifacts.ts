@@ -17,6 +17,7 @@ export const ProposedWork = z.object({
   rationale: z.string().describe('Why this matters, citing files or notebook sections'),
   acceptance: z.array(z.string()).min(1),
   size: z.enum(['small', 'medium']),
+  repository: z.string().optional().describe('Only for owners of several repositories: which one this work is in (owner/name)'),
 });
 export type ProposedWork = z.infer<typeof ProposedWork>;
 

@@ -1,7 +1,7 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tool, type Plugin } from '@opencode-ai/plugin';
-import { hasIncus, type OwnerDeclaration, type Persona } from './declarations.ts';
+import { hasIncus, repositoryShortName, type OwnerDeclaration, type Persona } from './declarations.ts';
 import { askOwner, formatAnswer } from './ask.ts';
 import { requestPublish } from './brokering.ts';
 import { proposeDeskChanges } from './desk-changes.ts';
@@ -12,7 +12,7 @@ import { expandHome, readEnvFile, truenasMcpEnvironment } from './truenas.ts';
 import { pickModel } from './families.ts';
 import type { Notebook } from './notebook.ts';
 import { configDirectory, stateDirectory } from './paths.ts';
-import { rosterText } from './roster.ts';
+import { domainSummary, rosterText } from './roster.ts';
 import { Runtime } from './runtime.ts';
 
 /**
@@ -62,8 +62,9 @@ function bashAction(rules: Record<string, string>, command: string) {
 
 /** The owner's own verification commands, with {tools} resolved; chats may run these without asking. */
 function verifyCommands(owner: OwnerDeclaration, toolsDirectory: string) {
-  if (owner.domain.kind !== 'git-repository') return [];
-  return owner.domain.verify.map(words => words.map(word => word.replaceAll('{tools}', toolsDirectory)).join(' '));
+  const verify = owner.domain.kind === 'git-repository' ? owner.domain.verify
+    : owner.domain.kind === 'repository-group' ? owner.domain.repositories.flatMap(repository => repository.verify) : [];
+  return [...new Set(verify.map(words => words.map(word => word.replaceAll('{tools}', toolsDirectory)).join(' ')))];
 }
 
 function agentPrompt(owner: OwnerDeclaration, persona: Persona, charter: string, roster: string, verify: readonly string[]) {
@@ -78,7 +79,7 @@ ${roster}
 </roster>
 
 How you work with the person in this chat:
-- You are the owner of this domain (${owner.domain.kind === 'git-repository' ? owner.domain.name : 'incus remotes'}). Reach for your onionsoup tools first:
+- You own ${domainSummary(owner)}.${owner.domain.kind === 'repository-group' ? ` Your desk has one worktree per repository (./${owner.domain.repositories.map(repository => repositoryShortName(repository.name)).join(', ./')}); name the repository when you open work or propose changes.` : ''} Reach for your onionsoup tools first:
   onionsoup_status (your open work and anything waiting on the person), onionsoup_notebook (your full notebook),
   onionsoup_evidence (what other owners recorded), onionsoup_ask (ask another owner a question about its domain),
   onionsoup_open_work (hand a change to freelancers with a plan the person approves), onionsoup_propose_changes (turn
@@ -372,11 +373,15 @@ const server: Plugin = async (input, options) => {
       }),
       onionsoup_propose_changes: tool({
         description: 'Turn the changes on your desk into a reviewed change: host code verifies them, a reviewer from another model family checks the diff, and only then they are committed, pushed and opened as a PR (merged, and published if you host a site, when the person granted you merge authority). Takes a few minutes.',
-        args: { title: tool.schema.string(), summary: tool.schema.string().describe('What changed and why, for the reviewer and the PR') },
+        args: {
+          title: tool.schema.string(),
+          summary: tool.schema.string().describe('What changed and why, for the reviewer and the PR'),
+          repository: tool.schema.string().optional().describe('Only if you own several repositories: which desk to propose from (owner/name)'),
+        },
         async execute(args, context) {
           const owner = requireOwner(context.agent);
           context.metadata({ title: `proposing: ${args.title}` });
-          const result = await proposeDeskChanges(runtime, owner.id, args.title, args.summary);
+          const result = await proposeDeskChanges(runtime, owner.id, args.title, args.summary, args.repository);
           return `${result.outcome}: ${result.summary}`;
         },
       }),
@@ -437,10 +442,12 @@ const server: Plugin = async (input, options) => {
           rationale: tool.schema.string(),
           acceptance: tool.schema.array(tool.schema.string()).min(1),
           size: tool.schema.enum(['small', 'medium']),
+          repository: tool.schema.string().optional().describe('Only if you own several repositories: which one (owner/name)'),
         },
         async execute(args, context) {
           const owner = requireOwner(context.agent);
           if (!owner.workflow) return `${owner.persona!.name} has no workflow for change work; raise it with the person instead.`;
+          runtime.repositoryOwner(owner.id, args.repository);
           const item = await runtime.ledger.create(owner.id, owner.workflow, args);
           const notebook = runtime.notebook(owner.id);
           await notebook.journal({ kind: 'work-opened', workItem: item.id, note: args.title, session: context.sessionID });

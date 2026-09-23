@@ -56,7 +56,9 @@ An owner is declared once (`owners/<id>.yaml`) and keeps one identity across ses
 
 - **Persona**: a name, title, source and voice (these owners are named from *Dune*). Identity, never authority.
 - **Charter** (`charters/<id>.md`): the person's statement of domain, goals and boundaries. It steers everything.
-- **Domain**: `git-repository` (verified by declared commands), `incus` (observe; create/delete behind gates),
+- **Domain**: `git-repository` (verified by declared commands), `repository-group` (several related repositories
+  owned together; each work item, desk and PR names its repository and gets that repository's checkout, desk and
+  verification), `incus` (observe; create/delete behind gates),
   `truenas` (through truenas-mcp, with hosted sites) or `github-org` (observed with gh). A repository owner may
   also hold an `incus` section, and a `deploy` section for where its code runs (the ship action).
 - **Duties**: what it does on its own, on a schedule (`every: 15m | 1d | 7d`). Kinds: `survey` (look and

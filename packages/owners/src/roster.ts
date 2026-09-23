@@ -4,6 +4,9 @@ type DomainSummary = (owner: OwnerDeclaration) => string;
 
 const DOMAIN_SUMMARIES: Record<OwnerDeclaration['domain']['kind'], DomainSummary> = {
   'git-repository': owner => (owner.domain.kind === 'git-repository' ? `the ${owner.domain.name} repository` : ''),
+  'repository-group': owner => (owner.domain.kind === 'repository-group'
+    ? `the ${owner.domain.name} repositories (${owner.domain.repositories.map(repository => repository.name).join(', ')})`
+    : ''),
   incus: owner => (owner.domain.kind === 'incus'
     ? `incus on ${owner.domain.remotes.map(remote => `${remote.name} (${remote.host}; ${remote.allow.join('/')})`).join(', ')}`
     : ''),
@@ -12,6 +15,11 @@ const DOMAIN_SUMMARIES: Record<OwnerDeclaration['domain']['kind'], DomainSummary
     ? `the TrueNAS NAS (${owner.domain.ssh.host})${owner.domain.sites.length ? `, hosting ${owner.domain.sites.map(site => `${site.id} (built from ${site.source})`).join(', ')}` : ''}`
     : ''),
 };
+
+/** What an owner owns, in a phrase: "the frostyard/snosi repository", "the TrueNAS NAS (…)". */
+export function domainSummary(owner: OwnerDeclaration) {
+  return DOMAIN_SUMMARIES[owner.domain.kind](owner);
+}
 
 function displayName(owner: OwnerDeclaration) {
   return owner.persona ? `${owner.persona.name}, ${owner.persona.title}` : `${owner.id} (no persona)`;

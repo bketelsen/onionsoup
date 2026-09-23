@@ -33,6 +33,27 @@ export const RepositoryDomain = z.object({
 });
 export type RepositoryDomain = z.infer<typeof RepositoryDomain>;
 
+/** The directory name a group member's checkout and desk use: the last part of owner/name. */
+export function repositoryShortName(name: string) {
+  return name.split('/').at(-1)!;
+}
+
+/**
+ * Several related repositories owned together (e.g. an image platform). Each work item names one of them;
+ * the runtime then treats the owner as that repository's owner, with its own checkout, desk and verification.
+ */
+export const RepositoryGroupDomain = z.object({
+  kind: z.literal('repository-group'),
+  /** The group's name, e.g. frostyard/image-platform. */
+  name: z.string(),
+  repositories: z.array(RepositoryDomain.omit({ kind: true })).min(2),
+}).superRefine((group, context) => {
+  const names = group.repositories.map(repository => repositoryShortName(repository.name));
+  const repeated = names.filter((name, index) => names.indexOf(name) !== index);
+  if (repeated.length) context.addIssue({ code: 'custom', path: ['repositories'], message: `repository names must differ after the owner: ${[...new Set(repeated)].join(', ')}` });
+});
+export type RepositoryGroupDomain = z.infer<typeof RepositoryGroupDomain>;
+
 export const IncusPermission = z.enum(['observe', 'create', 'delete']);
 export type IncusPermission = z.infer<typeof IncusPermission>;
 
@@ -132,7 +153,7 @@ export const OwnerDeclaration = z.object({
   id: z.string().regex(/^[a-z0-9-]+$/),
   persona: Persona.optional(),
   conversation: ConversationMode.optional(),
-  domain: z.discriminatedUnion('kind', [RepositoryDomain, IncusDomain, TruenasDomain, GithubOrgDomain]),
+  domain: z.discriminatedUnion('kind', [RepositoryDomain, RepositoryGroupDomain, IncusDomain, TruenasDomain, GithubOrgDomain]),
   /**
    * The directory the owner's sessions read: a checkout, or an evidence snapshot. The owner never writes it.
    * Optional: it defaults to <home>/checkouts/<id> for repositories and <home>/evidence/<id> otherwise.
@@ -161,8 +182,11 @@ export const OwnerDeclaration = z.object({
   mcp: z.record(z.string().regex(/^[a-z][a-z0-9]*$/), OwnerToolServer).default({}),
 });
 export type OwnerDeclaration = z.infer<typeof OwnerDeclaration>;
-/** An owner as the runtime uses it: its workspace resolved to a real directory. */
-export type ResolvedOwner = OwnerDeclaration & { workspace: string };
+/**
+ * An owner as the runtime uses it: its workspace resolved to a real directory. A group member's view also
+ * carries its own desk directory (desks/<owner>/<repository>).
+ */
+export type ResolvedOwner = OwnerDeclaration & { workspace: string; desk?: string };
 export type RepositoryOwner = ResolvedOwner & { domain: RepositoryDomain };
 export type IncusOwner = ResolvedOwner & { domain: IncusDomain };
 export type TruenasOwner = ResolvedOwner & { domain: TruenasDomain };
@@ -173,6 +197,18 @@ export function isTruenasOwner(owner: ResolvedOwner): owner is TruenasOwner {
 
 export function isRepositoryOwner(owner: ResolvedOwner): owner is RepositoryOwner {
   return owner.domain.kind === 'git-repository';
+}
+
+/** Owners whose workspace is checkouts rather than a snapshot: one repository, or a group of them. */
+export function ownsRepositories(owner: OwnerDeclaration) {
+  return owner.domain.kind === 'git-repository' || owner.domain.kind === 'repository-group';
+}
+
+/** The repositories an owner owns, by full name. */
+export function repositoryNames(owner: OwnerDeclaration) {
+  if (owner.domain.kind === 'git-repository') return [owner.domain.name];
+  if (owner.domain.kind === 'repository-group') return owner.domain.repositories.map(repository => repository.name);
+  return [];
 }
 
 /** An owner holds incus either as its whole domain or as an incus section beside a repository. */

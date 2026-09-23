@@ -5,7 +5,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual, promisify } from 'node:util';
 import { parse } from 'yaml';
-import { loadDeclarations, OwnerDeclaration, type Declarations } from './declarations.ts';
+import { loadDeclarations, OwnerDeclaration, repositoryNames, type Declarations } from './declarations.ts';
 import { familyOf } from './families.ts';
 import type { Runtime } from './runtime.ts';
 
@@ -33,9 +33,10 @@ function globToPattern(glob: string) {
   return new RegExp(`^${glob.replace(/[.+^${}()|[\]\\]/g, '\\$&').replaceAll('*', '.*')}$`);
 }
 
+/** A group is in scope only when every repository in it is; other domains by their key. */
 export function inScope(steward: OwnerDeclaration, domain: OwnerDeclaration['domain']) {
-  const key = domainKey(domain);
-  return (steward.manages?.owners ?? []).some(glob => globToPattern(glob).test(key));
+  const keys = domain.kind === 'repository-group' ? domain.repositories.map(repository => repository.name) : [domainKey(domain)];
+  return keys.every(key => (steward.manages?.owners ?? []).some(glob => globToPattern(glob).test(key)));
 }
 
 function requireSteward(declarations: Declarations, stewardId: string) {
@@ -59,6 +60,11 @@ export function checkOwnerWrite(declarations: Declarations, stewardId: string, c
   if (sameName) throw new Error(`refused: ${sameName.id} is already called ${sameName.persona!.name}`);
   const sameDomain = [...declarations.owners.values()].find(owner => owner.id !== candidate.id && owner.domain.kind === candidate.domain.kind && domainKey(owner.domain) === domainKey(candidate.domain));
   if (sameDomain) throw new Error(`refused: ${sameDomain.id} already owns ${domainKey(candidate.domain)}`);
+  const wanted = new Set(repositoryNames(candidate));
+  for (const owner of declarations.owners.values()) {
+    const taken = owner.id === candidate.id ? [] : repositoryNames(owner).filter(name => wanted.has(name));
+    if (taken.length) throw new Error(`refused: ${owner.id} already owns ${taken.join(', ')}; change or retire that owner first`);
+  }
   familyOf(declarations.families, candidate.model);
   if (candidate.workflow && !declarations.workflows.has(candidate.workflow)) throw new Error(`refused: unknown workflow ${candidate.workflow}`);
 }
