@@ -1,11 +1,12 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Learnings, OwnerAnswers, Survey } from './artifacts.ts';
-import { ResourceAsk } from './requests.ts';
+import { describeAsk, InstanceAsk } from './requests.ts';
 import { FOLLOW_UP_DESCRIPTIONS, requestInstance } from './brokering.ts';
 import { composeAskBrief, distillBrief, learningsBrief, ownerAnswerBrief, surveyBrief, workSoFarText } from './briefs.ts';
 import { hasIncus, type Duty, type OwnerDeclaration } from './declarations.ts';
 import { refreshIncusEvidence } from './incus.ts';
+import { refreshTruenasEvidence } from './truenas.ts';
 import { maintainPullRequests } from './rebase.ts';
 import { rosterText } from './roster.ts';
 import type { WorkItem } from './ledger.ts';
@@ -27,6 +28,7 @@ type Refresh = (runtime: Runtime, owner: OwnerDeclaration) => Promise<string>;
 const REFRESH: Record<OwnerDeclaration['domain']['kind'], Refresh> = {
   'git-repository': async (runtime, owner) => `commit ${(await refreshCheckout(runtime.repositoryOwner(owner.id))).slice(0, 12)}`,
   incus: async (runtime, owner) => refreshIncusEvidence(runtime.incus, runtime.incusOwner(owner.id), runtime.managed),
+  truenas: async (runtime, owner) => refreshTruenasEvidence(runtime.truenasOwner(owner.id).domain, runtime.evidenceDirectory(owner.id)),
 };
 
 /** Bring the owner's workspace up to date, plus its incus snapshot when it holds incus beside a repository. */
@@ -48,7 +50,7 @@ async function requestInstanceDuty(runtime: Runtime, owner: OwnerDeclaration, du
   const notebook = runtime.notebook(owner.id);
   const snapshot = await refreshWorkspace(runtime, owner);
   const brief = composeAskBrief(duty, await notebook.orientation(), snapshot, duty.requestTo, FOLLOW_UP_DESCRIPTIONS[duty.followUp] ?? duty.followUp);
-  const result = await runtime.hire(owner.id, { role: 'owner', model: owner.model, directory: owner.workspace, title: `${owner.id}: ${duty.id}`, brief, schema: ResourceAsk });
+  const result = await runtime.hire(owner.id, { role: 'owner', model: owner.model, directory: owner.workspace, title: `${owner.id}: ${duty.id}`, brief, schema: InstanceAsk });
   const request = await requestInstance(runtime, owner.id, duty.requestTo, result.value, duty.followUp);
   return { request, cost: result.cost };
 }
@@ -67,7 +69,7 @@ export async function wake(runtime: Runtime, ownerId: string, dutyId: string) {
   }
   if (duty.kind === 'request-instance') {
     const { request, cost } = await requestInstanceDuty(runtime, owner, duty);
-    const summary = `asked ${request.to} for ${request.ask.image}: ${request.ask.purpose} (${request.id})`;
+    const summary = `asked ${request.to} for ${describeAsk(request.ask)}: ${request.ask.purpose} (${request.id})`;
     return { survey: { summary, notebook: [], proposals: [] }, items: [], attention: [], request, cost };
   }
   const snapshot = await refreshWorkspace(runtime, owner);

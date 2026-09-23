@@ -3,8 +3,11 @@ import { join } from 'node:path';
 import { tool, type Plugin } from '@opencode-ai/plugin';
 import { hasIncus, type OwnerDeclaration, type Persona } from './declarations.ts';
 import { askOwner, formatAnswer } from './ask.ts';
+import { requestPublish } from './brokering.ts';
+import { expandHome, truenasMcpEnvironment } from './truenas.ts';
 import { pickModel } from './families.ts';
 import type { Notebook } from './notebook.ts';
+import { describeAsk } from './requests.ts';
 import { rosterText } from './roster.ts';
 import { Runtime } from './runtime.ts';
 
@@ -21,6 +24,8 @@ import { Runtime } from './runtime.ts';
 export const PLUGIN_LIMITS = { exchangeChars: 8_000, contextChars: 28_000 };
 
 const WATCHER_AGENT = 'onionsoup-watcher';
+/** MCP server name for the NAS owner's truenas-mcp; its tools are named nas_<tool>. */
+const NAS_MCP = 'nas';
 const WATCHER_MODELS = ['openai/gpt-5.6-luna-fast', 'github-copilot/claude-haiku-4.5'];
 
 /** Tools that change things; a completed call of one of these is always journaled. */
@@ -149,7 +154,7 @@ const server: Plugin = async (input, options) => {
     const requests = (await runtime.requests.list()).filter(request => (request.from === ownerId || request.to === ownerId) && !['deleted', 'declined', 'denied', 'failed'].includes(request.status));
     const lines = [
       ...items.map(item => `- work ${item.id}: ${item.status}: ${item.proposal.title}`),
-      ...requests.map(request => `- request ${request.id}: ${request.status}: ${request.from} → ${request.to} ${request.ask.image}`),
+      ...requests.map(request => `- request ${request.id}: ${request.status}: ${request.from} → ${request.to} ${describeAsk(request.ask)}`),
     ];
     return lines.join('\n') || '(nothing open)';
   }
@@ -209,16 +214,28 @@ const server: Plugin = async (input, options) => {
   return {
     async config(config) {
       const agents = (config.agent ??= {}) as Record<string, unknown>;
+      // A NAS owner reaches its NAS through truenas-mcp (read-only in chats), visible to that owner alone.
+      const nasOwner = owners.find(owner => owner.domain.kind === 'truenas');
+      if (nasOwner && nasOwner.domain.kind === 'truenas') {
+        const environment = await truenasMcpEnvironment(nasOwner.domain, false).catch(() => undefined);
+        if (environment) {
+          const servers = (config.mcp ??= {}) as Record<string, unknown>;
+          servers[NAS_MCP] = { type: 'local', command: [expandHome(nasOwner.domain.mcp.binary), 'serve'], environment, enabled: true };
+          const current = config.permission;
+          config.permission = { ...(typeof current === 'string' ? { '*': current } : current ?? {}), [`${NAS_MCP}_*`]: 'deny' } as never;
+        }
+      }
       for (const owner of owners) {
         const persona = owner.persona!;
         const charter = await runtime.text(`charters/${owner.id}.md`).catch(() => '(no charter yet)');
         const verify = verifyCommands(owner, runtime.toolsDirectory);
+        const permission = { ...conversationPermission(owner, verify), ...(owner.domain.kind === 'truenas' ? { [`${NAS_MCP}_*`]: 'allow' } : {}) };
         agents[persona.name] = {
           mode: 'primary',
           description: `${persona.title} (${persona.source})`,
           model: owner.model,
           prompt: agentPrompt(owner, persona, charter, rosterText(runtime.declarations, owner.id), verify),
-          permission: conversationPermission(owner, verify),
+          permission,
         };
       }
       agents[WATCHER_AGENT] = {
@@ -304,6 +321,15 @@ const server: Plugin = async (input, options) => {
           context.metadata({ title: `asking ${args.owner}` });
           const { answerer, answer } = await askOwner(runtime, asker.id, args.owner, args.question);
           return formatAnswer(answerer, answer);
+        },
+      }),
+      onionsoup_request_publish: tool({
+        description: 'Ask the owner that hosts one of your sites (e.g. homelab-wiki on the NAS) to publish it from your base branch. Publish only after changes are merged.',
+        args: { site: tool.schema.string(), purpose: tool.schema.string().describe('What changed and why it should go live') },
+        async execute(args, context) {
+          const owner = requireOwner(context.agent);
+          const request = await requestPublish(runtime, owner.id, args.site, args.purpose);
+          return `Opened ${request.id}. The host owner decides, then it is published (a standing grant may pre-approve it) and verified; check onionsoup_status.`;
         },
       }),
       onionsoup_open_work: tool({

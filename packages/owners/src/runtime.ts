@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { isRepositoryOwner, loadDeclarations, requireOwner, type Declarations, type IncusOwner, type OwnerDeclaration, type RepositoryOwner } from './declarations.ts';
+import { isRepositoryOwner, isTruenasOwner, loadDeclarations, requireOwner, type Declarations, type IncusOwner, type OwnerDeclaration, type RepositoryOwner, type TruenasOwner } from './declarations.ts';
 import { familyOf } from './families.ts';
 import { cliIncus, ManagedInstances, type IncusClient } from './incus.ts';
 import { Ledger, type HireRecord, type WorkItem } from './ledger.ts';
@@ -111,9 +111,16 @@ export class Runtime {
     return { ...owner, domain: { kind: 'incus', ...owner.incus }, workspace: this.evidenceDirectory(ownerId) };
   }
 
+  /** Where host code writes an owner's read-only snapshot: its workspace, unless the workspace is a repository. */
   evidenceDirectory(ownerId: string) {
     const owner = this.owner(ownerId);
-    return owner.domain.kind === 'incus' ? owner.workspace : join(this.stateDirectory, '..', 'evidence', ownerId);
+    return owner.domain.kind === 'git-repository' ? join(this.stateDirectory, '..', 'evidence', ownerId) : owner.workspace;
+  }
+
+  truenasOwner(ownerId: string): TruenasOwner {
+    const owner = this.owner(ownerId);
+    if (!isTruenasOwner(owner)) throw new Error(`not_a_truenas_owner: ${ownerId}`);
+    return owner;
   }
 
   notebook(ownerId: string) {

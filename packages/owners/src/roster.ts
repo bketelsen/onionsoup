@@ -7,6 +7,9 @@ const DOMAIN_SUMMARIES: Record<OwnerDeclaration['domain']['kind'], DomainSummary
   incus: owner => (owner.domain.kind === 'incus'
     ? `incus on ${owner.domain.remotes.map(remote => `${remote.name} (${remote.host}; ${remote.allow.join('/')})`).join(', ')}`
     : ''),
+  truenas: owner => (owner.domain.kind === 'truenas'
+    ? `the TrueNAS NAS (${owner.domain.ssh.host})${owner.domain.sites.length ? `, hosting ${owner.domain.sites.map(site => `${site.id} (built from ${site.source})`).join(', ')}` : ''}`
+    : ''),
 };
 
 function displayName(owner: OwnerDeclaration) {

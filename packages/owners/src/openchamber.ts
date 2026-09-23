@@ -26,9 +26,10 @@ async function desiredProjects(runtime: Runtime) {
   for (const declared of runtime.declarations.owners.values()) {
     if (!declared.persona) continue;
     const owner = runtime.owner(declared.id);
-    if (!isRepositoryOwner(owner)) continue;
-    const desk = await ensureDesk(owner, runtime.desksRoot);
-    desired.push({ id: projectId(desk.path), path: desk.path, label: declared.persona.name, icon: declared.persona.icon, color: declared.persona.color, defaultAgent: declared.persona.name });
+    // Repository owners chat in a desk worktree; others chat where their read-only snapshot lives.
+    const path = isRepositoryOwner(owner) ? (await ensureDesk(owner, runtime.desksRoot)).path : runtime.evidenceDirectory(owner.id);
+    await mkdir(path, { recursive: true });
+    desired.push({ id: projectId(path), path, label: declared.persona.name, icon: declared.persona.icon, color: declared.persona.color, defaultAgent: declared.persona.name });
   }
   return desired;
 }

@@ -90,7 +90,7 @@ async function incusRuntime() {
   const runtime = await Runtime.open({ declarations: 'examples/owners', state: await mkdtemp(join(tmpdir(), 'owners-incus-')) });
   const calls: string[][] = [];
   runtime.incus = { run: async args => { calls.push([...args]); return args[0] === 'list' || args[1] === 'list' ? '[]' : ''; } };
-  for (const ownerId of ['clippy', 'homelab']) await runtime.notebook(ownerId).ensure('# Charter\n');
+  for (const ownerId of ['clippy', 'homelab', 'moneo']) await runtime.notebook(ownerId).ensure('# Charter\n');
   return { runtime, calls };
 }
 
@@ -136,4 +136,15 @@ test('create and delete guards hold regardless of what an owner decides', async 
   await assert.rejects(deleteInstance(runtime.incus, owner, runtime.managed, 'minideb', 'onionsoup-not-mine'), /not_managed_by_onionsoup/);
   await assert.rejects(deleteInstance(runtime.incus, owner, runtime.managed, 'selfie', 'bobsled'), /remote_forbids_delete: selfie/);
   assert.deepEqual(calls, []);
+});
+
+test('a publish request from an owner that is not the site source is refused before anyone is asked', async () => {
+  const { runtime } = await incusRuntime();
+  await runtime.notebook('moneo').ensure('# Charter\n');
+  const { requestPublish, decide } = await import('../src/brokering.ts');
+  const request = await requestPublish(runtime, 'clippy', 'homelab-wiki', 'try to publish a site it does not own');
+  const decided = await decide(runtime, request.id);
+  assert.equal(decided.status, 'declined');
+  assert.match(decided.reason ?? '', /clippy is not the source of homelab-wiki/);
+  await assert.rejects(requestPublish(runtime, 'bellonda', 'no-such-site', 'x'), /no owner hosts site no-such-site/);
 });

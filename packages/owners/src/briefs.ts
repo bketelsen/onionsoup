@@ -1,7 +1,7 @@
 import type { Finding, Plan, ProposedWork } from './artifacts.ts';
 import type { Duty } from './declarations.ts';
 import type { Verification, WorkItem } from './ledger.ts';
-import type { ResourceRequest } from './requests.ts';
+import type { InstanceAsk, ResourceRequest } from './requests.ts';
 
 function block(label: string, body: string) {
   return `<${label}>\n${body.trim()}\n</${label}>`;
@@ -184,9 +184,9 @@ export function requestDecisionBrief(request: ResourceRequest, notebook: string,
     `Another owner, ${request.from}, asks you for an instance. Your workspace (read-only) reflects your domain at ${snapshot}.`,
     block('roster', roster || '(no other owners)'),
     block('request', [
-      `Image: ${request.ask.image}`,
+      `Image: ${(request.ask as InstanceAsk).image}`,
       `Purpose: ${request.ask.purpose}`,
-      `Expected duration: ${request.ask.expectedMinutes} minutes`,
+      `Expected duration: ${(request.ask as InstanceAsk).expectedMinutes} minutes`,
     ].join('\n')),
     block('notebook', notebook),
     `Decide as the owner of this domain. Accept only if the purpose is legitimate, a remote you may create on is
@@ -205,5 +205,17 @@ export function composeAskBrief(duty: Duty, notebook: string, snapshot: string, 
     `You need an instance from ${target}, the owner of the homelab's virtualization. Write the request: which
 image you need, what it is for (so ${target} can judge it; describe what will actually happen, above) and how
 many minutes you expect to need it. The runtime releases the instance afterwards.`,
+  ].join('\n\n');
+}
+
+export function publishDecisionBrief(request: ResourceRequest, site: { id: string; app: string; url: string; source: string }, notebook: string, snapshot: string, roster: string) {
+  return [
+    `${request.from} asks you to publish the site "${site.id}" (served by the TrueNAS app \`${site.app}\` at ${site.url}). Your workspace (read-only) reflects your NAS at ${snapshot}.`,
+    block('request', request.ask.kind === 'publish-site' ? request.ask.purpose : ''),
+    block('roster', roster || '(no other owners)'),
+    block('notebook', notebook),
+    `Decide as the owner of the NAS. Accept unless something in your snapshot makes publishing unsafe right now (the app is
+missing or failing, the pool is degraded, an alert affects the dataset). The runtime builds the site from ${site.source}'s
+repository, swaps it in atomically, restarts the app and verifies it, rolling back on failure. Decline with a reason otherwise.`,
   ].join('\n\n');
 }

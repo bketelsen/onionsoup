@@ -56,7 +56,10 @@ export async function deskState(runtime: Runtime, query: DeskQuery) {
   const pending = [
     ...items.filter(item => item.status === 'awaiting-plan-approval').map(item => ({ kind: 'plan', id: item.id, title: item.proposal.title, detail: item.plan?.summary ?? item.proposal.goal })),
     ...items.filter(item => item.status === 'awaiting-push-approval').map(item => ({ kind: 'push', id: item.id, title: item.proposal.title, detail: item.rebaseOf?.prUrl ?? '' })),
-    ...requests.filter(request => request.status === 'awaiting-create-approval').map(request => ({ kind: 'create', id: request.id, title: `Create ${request.decision?.remote}:${request.decision?.nameSuffix} (${request.decision?.image})`, detail: request.ask.purpose })),
+    ...requests.filter(request => request.status === 'awaiting-create-approval').map(request => ({
+      kind: 'create', id: request.id, detail: request.ask.purpose,
+      title: request.ask.kind === 'publish-site' ? `Publish ${request.ask.site} (from ${request.from})` : `Create ${request.decision?.remote}:${request.decision?.nameSuffix} (${request.decision?.image})`,
+    })),
     ...requests.filter(request => request.status === 'awaiting-delete-approval').map(request => ({ kind: 'delete', id: request.id, title: `Delete ${request.instance?.remote}:${request.instance?.name}`, detail: request.followUpResult?.summary ?? '' })),
   ];
   const work = items.filter(item => !DONE.has(item.status)).map(item => ({ id: item.id, status: item.status, title: item.proposal.title }));

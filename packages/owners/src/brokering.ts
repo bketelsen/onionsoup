@@ -1,11 +1,12 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { requestDecisionBrief } from './briefs.ts';
+import { publishDecisionBrief, requestDecisionBrief } from './briefs.ts';
+import { publishSite } from './publish-site.ts';
 import { rosterText } from './roster.ts';
 import { checkCreate, createInstance, deleteInstance, INCUS_LIMITS } from './incus.ts';
 import { refreshWorkspace } from './owner.ts';
-import { OwnerDecision, requireStatus, type ResourceAsk, type ResourceRequest } from './requests.ts';
+import { describeAsk, OwnerDecision, PublishDecision, requireStatus, type ResourceAsk, type ResourceRequest } from './requests.ts';
 import type { Runtime } from './runtime.ts';
 import { runSandboxed } from './sandbox.ts';
 
@@ -19,16 +20,64 @@ async function journalBoth(runtime: Runtime, request: ResourceRequest, kind: str
 
 /** An owner asks another owner for an instance. The request waits for the receiving owner's decision. */
 export async function requestInstance(runtime: Runtime, from: string, to: string, ask: ResourceAsk, followUp: string) {
-  runtime.incusOwner(to);
+  if (ask.kind === 'instance') runtime.incusOwner(to);
   const request = await runtime.requests.open(from, to, ask, followUp);
-  await journalBoth(runtime, request, 'request-opened', `${ask.image} for ${ask.purpose}`);
+  await journalBoth(runtime, request, 'request-opened', `${describeAsk(ask)} for ${ask.purpose}`);
   return request;
+}
+
+/** An owner asks the owner that hosts one of its sites to publish it. */
+export async function requestPublish(runtime: Runtime, from: string, siteId: string, purpose: string) {
+  const host = [...runtime.declarations.owners.values()].find(owner => owner.domain.kind === 'truenas' && owner.domain.sites.some(site => site.id === siteId));
+  if (!host) throw new Error(`no owner hosts site ${siteId}`);
+  return requestInstance(runtime, from, host.id, { kind: 'publish-site', site: siteId, purpose }, 'none');
+}
+
+/** A standing grant in the receiving owner's declaration counts as the person's approval. */
+function grantFor(runtime: Runtime, request: ResourceRequest) {
+  const receiver = runtime.owner(request.to);
+  const target = request.ask.kind === 'publish-site' ? request.ask.site : '';
+  return receiver.grants.find(grant => grant.to === request.from && grant.action === request.ask.kind && grant.target === target);
+}
+
+async function approvedOrAwaiting(runtime: Runtime, request: ResourceRequest, summary: string) {
+  const grant = grantFor(runtime, request);
+  if (!grant) {
+    await journalBoth(runtime, request, 'request-accepted', `${summary}; awaiting a person's approval`);
+    return { ...request, status: 'awaiting-create-approval' as const };
+  }
+  const by = `standing grant in ${request.to}'s declaration (${grant.action} ${grant.target} for ${grant.to})`;
+  await journalBoth(runtime, request, 'request-accepted', `${summary}; approved by ${by}`);
+  return { ...request, status: 'create-approved' as const, approvals: [...request.approvals, { step: 'create' as const, by, at: new Date().toISOString() }] };
+}
+
+async function decidePublish(runtime: Runtime, request: ResourceRequest) {
+  if (request.ask.kind !== 'publish-site') throw new Error('not_a_publish_request');
+  const owner = runtime.truenasOwner(request.to);
+  const site = owner.domain.sites.find(candidate => candidate.id === (request.ask as { site: string }).site);
+  if (!site || site.source !== request.from) {
+    const reason = site ? `runtime refused: ${request.from} is not the source of ${site.id}` : `runtime refused: unknown site ${request.ask.site}`;
+    await journalBoth(runtime, request, 'request-refused', reason);
+    return runtime.requests.save({ ...request, status: 'declined', reason });
+  }
+  const notebook = runtime.notebook(owner.id);
+  await notebook.ensure(await runtime.text(`charters/${owner.id}.md`));
+  const snapshot = await refreshWorkspace(runtime, owner);
+  const brief = publishDecisionBrief(request, site, await notebook.orientation(), snapshot, rosterText(runtime.declarations, owner.id));
+  const decision = (await runtime.hire(owner.id, { role: 'owner', model: owner.model, directory: owner.workspace, title: `${request.id}: decide publish`, brief, schema: PublishDecision })).value;
+  if (decision.decision === 'decline') {
+    await journalBoth(runtime, request, 'request-declined', decision.reply);
+    return runtime.requests.save({ ...request, status: 'declined', publishDecision: decision, reason: decision.reply });
+  }
+  return runtime.requests.save(await approvedOrAwaiting(runtime, { ...request, publishDecision: decision }, `publish ${site.id}`));
 }
 
 /** The receiving owner decides. The runtime then checks the decision against the domain's rules before a person sees it. */
 export async function decide(runtime: Runtime, requestId: string) {
   const request = await runtime.requests.get(requestId);
   requireStatus(request, 'pending-owner');
+  if (request.ask.kind === 'publish-site') return decidePublish(runtime, request);
+  const ask = request.ask;
   const owner = runtime.incusOwner(request.to);
   const notebook = runtime.notebook(owner.id);
   await notebook.ensure(await runtime.text(`charters/${owner.id}.md`));
@@ -46,8 +95,7 @@ export async function decide(runtime: Runtime, requestId: string) {
     await journalBoth(runtime, request, 'request-refused', reason);
     return runtime.requests.save({ ...request, status: 'declined', decision, reason });
   }
-  await journalBoth(runtime, request, 'request-accepted', `${decision.image} on ${decision.remote}; awaiting a person's create approval`);
-  return runtime.requests.save({ ...request, status: 'awaiting-create-approval', decision });
+  return runtime.requests.save(await approvedOrAwaiting(runtime, { ...request, decision }, `${decision.image} on ${decision.remote}`));
 }
 
 function approval(step: 'create' | 'delete', by: string) {
@@ -111,7 +159,20 @@ export const FOLLOW_UP_DESCRIPTIONS: Record<string, string> = {
   'distro-smoke': 'The host builds clippy as a static linux/amd64 binary in its sandbox (CGO_ENABLED=0), pushes only the binary into the instance, runs it once to render a PNG, and checks the PNG magic bytes. Nothing is installed in the instance and it needs no network.',
 };
 
+async function executePublish(runtime: Runtime, request: ResourceRequest) {
+  try {
+    const result = await publishSite(runtime, request);
+    await journalBoth(runtime, request, 'published', `${(request.ask as { site: string }).site} at ${result.commit.slice(0, 8)} (previous kept as ${result.previous})`);
+    return runtime.requests.save({ ...request, status: 'published', published: { ...result, at: new Date().toISOString() } });
+  } catch (error) {
+    const reason = `publish failed: ${error instanceof Error ? error.message.split('\n')[0] : error}`;
+    await journalBoth(runtime, request, 'publish-failed', reason);
+    return runtime.requests.save({ ...request, status: 'failed', reason });
+  }
+}
+
 async function executeCreate(runtime: Runtime, request: ResourceRequest) {
+  if (request.ask.kind === 'publish-site') return executePublish(runtime, request);
   const owner = runtime.incusOwner(request.to);
   const decision = request.decision!;
   try {

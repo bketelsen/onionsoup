@@ -8,11 +8,11 @@ import type { WorkItem } from './ledger.ts';
 import { distill, wake } from './owner.ts';
 import { Runtime } from './runtime.ts';
 import { askOwner, formatAnswer } from './ask.ts';
-import { approveCreate, approveDelete, denyRequest, processRequests } from './brokering.ts';
+import { approveCreate, approveDelete, denyRequest, processRequests, requestPublish } from './brokering.ts';
 import { DAEMON_LIMITS, daemon, recordDutyRun, tick, type TickLog } from './daemon.ts';
 import { publish } from './publish.ts';
 import { approvePush } from './rebase.ts';
-import type { ResourceRequest } from './requests.ts';
+import { describeAsk, type ResourceRequest } from './requests.ts';
 import { deskState } from './desk.ts';
 import { syncOpenChamber } from './openchamber.ts';
 import { ensureDesk } from './workspace.ts';
@@ -71,7 +71,7 @@ function requestLine(request: ResourceRequest) {
   const instance = request.instance ? `  ${request.instance.remote}:${request.instance.name}` : '';
   const result = request.followUpResult ? `  [${request.followUp}: ${request.followUpResult.ok ? 'ok' : 'FAILED'}: ${request.followUpResult.summary}]` : '';
   const why = request.reason ? `  (${request.reason})` : '';
-  return `${request.id}  ${request.status.padEnd(24)} ${request.from} → ${request.to}  ${request.ask.image}${instance}${result}${why}`;
+  return `${request.id}  ${request.status.padEnd(24)} ${request.from} → ${request.to}  ${describeAsk(request.ask)}${instance}${result}${why}`;
 }
 
 const tickLog: TickLog = {
@@ -170,6 +170,19 @@ const COMMANDS: Record<string, Command> = {
     const { answerer, answer, cost } = await askOwner(runtime, required(fromId, 'asking owner'), required(toName, 'answering owner'), required(options.note, '--note (the question)'));
     console.log(`${formatAnswer(answerer, answer)}\n(cost $${cost.toFixed(4)})`);
   },
+  async 'request-publish'(runtime, [fromId, siteId]) {
+    const request = await requestPublish(runtime, required(fromId, 'owner'), required(siteId, 'site'), options.note ?? 'publish the current base branch');
+    console.log(requestLine(request));
+    if (!options['no-advance']) {
+      const unlock = await runtime.lock().catch(() => undefined);
+      if (!unlock) return console.log(`  recorded. The runtime is ${await runtime.lockHolder()}; the daemon continues it.`);
+      try {
+        await processRequests(runtime, tickLog.request);
+      } finally {
+        await unlock();
+      }
+    }
+  },
   async 'sync-openchamber'(runtime) {
     const { changes, via } = await syncOpenChamber(runtime);
     console.log(changes.length ? `${changes.join('\n')}\n(saved via ${via})` : 'OpenChamber projects already match the owners');
@@ -233,7 +246,7 @@ if (!command) {
 }
 const runtime = await Runtime.open({ declarations: options.declarations!, state: options.state! });
 /** Commands that only read, or only record a person's decision, never take the runtime lock. */
-const LOCK_FREE = ['items', 'show', 'notebook', 'requests', 'approve', 'revise-plan', 'reject', 'resume', 'desk', 'desk-state', 'retract', 'ask', 'sync-openchamber', 'approve-push', 'approve-create', 'approve-delete', 'deny-request'];
+const LOCK_FREE = ['items', 'show', 'notebook', 'requests', 'approve', 'revise-plan', 'reject', 'resume', 'desk', 'desk-state', 'retract', 'ask', 'sync-openchamber', 'request-publish', 'approve-push', 'approve-create', 'approve-delete', 'deny-request'];
 try {
   const unlock = LOCK_FREE.includes(commandName!) ? async () => {} : await runtime.lock();
   try {

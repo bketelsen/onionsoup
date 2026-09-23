@@ -71,11 +71,41 @@ export const ConversationMode = z.object({
 });
 export type ConversationMode = z.infer<typeof ConversationMode>;
 
+/** A static site a NAS owner hosts: where it lives, which app serves it, and whose repository it is built from. */
+export const HostedSite = z.object({
+  id: z.string(),
+  path: z.string().describe('Dataset directory holding site/ and its site.prev-* copies'),
+  app: z.string().describe('TrueNAS app that bind-mounts site/'),
+  url: z.string().describe('Where the published index.html can be fetched to verify'),
+  source: z.string().describe('The owner whose repository the site is built from'),
+  build: z.array(z.string()).min(1).describe('Build command run in the source checkout; {tools} and {out} are substituted'),
+});
+export type HostedSite = z.infer<typeof HostedSite>;
+
+export const TruenasDomain = z.object({
+  kind: z.literal('truenas'),
+  mcp: z.object({ binary: z.string(), envFile: z.string(), tlsInsecure: z.boolean().default(false) }),
+  ssh: z.object({ host: z.string(), user: z.string() }),
+  sites: z.array(HostedSite).default([]),
+});
+export type TruenasDomain = z.infer<typeof TruenasDomain>;
+
+/**
+ * A standing approval the person grants in configuration: requests of this kind from this owner skip the
+ * per-request human gate and are recorded as approved by the grant.
+ */
+export const Grant = z.object({
+  to: z.string(),
+  action: z.enum(['publish-site']),
+  target: z.string(),
+});
+export type Grant = z.infer<typeof Grant>;
+
 export const OwnerDeclaration = z.object({
   id: z.string().regex(/^[a-z0-9-]+$/),
   persona: Persona.optional(),
   conversation: ConversationMode.optional(),
-  domain: z.discriminatedUnion('kind', [RepositoryDomain, IncusDomain]),
+  domain: z.discriminatedUnion('kind', [RepositoryDomain, IncusDomain, TruenasDomain]),
   /** The directory the owner's sessions read: a checkout, or an evidence snapshot. The owner never writes it. */
   workspace: z.string(),
   model: ModelRef,
@@ -85,10 +115,16 @@ export const OwnerDeclaration = z.object({
   workflow: z.string().optional(),
   duties: z.array(Duty),
   maxProposals: z.number().int().min(0).default(3),
+  grants: z.array(Grant).default([]),
 });
 export type OwnerDeclaration = z.infer<typeof OwnerDeclaration>;
 export type RepositoryOwner = OwnerDeclaration & { domain: RepositoryDomain };
 export type IncusOwner = OwnerDeclaration & { domain: IncusDomain };
+export type TruenasOwner = OwnerDeclaration & { domain: TruenasDomain };
+
+export function isTruenasOwner(owner: OwnerDeclaration): owner is TruenasOwner {
+  return owner.domain.kind === 'truenas';
+}
 
 export function isRepositoryOwner(owner: OwnerDeclaration): owner is RepositoryOwner {
   return owner.domain.kind === 'git-repository';

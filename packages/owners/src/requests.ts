@@ -26,17 +26,39 @@ export const RequestStatus = z.enum([
   'awaiting-delete-approval',
   'delete-approved',
   'deleted',
+  'published',
   'failed',
 ]);
 export type RequestStatus = z.infer<typeof RequestStatus>;
 
-export const ResourceAsk = z.object({
+export const InstanceAsk = z.object({
   kind: z.literal('instance'),
   image: z.string().describe('An incus image such as images:debian/13'),
   purpose: z.string(),
   expectedMinutes: z.number().int().positive(),
 });
+export type InstanceAsk = z.infer<typeof InstanceAsk>;
+
+/** Publish a site the receiving owner hosts, built from the requesting owner's repository. */
+export const PublishAsk = z.object({
+  kind: z.literal('publish-site'),
+  site: z.string(),
+  purpose: z.string(),
+});
+export type PublishAsk = z.infer<typeof PublishAsk>;
+
+export const ResourceAsk = z.discriminatedUnion('kind', [InstanceAsk, PublishAsk]);
 export type ResourceAsk = z.infer<typeof ResourceAsk>;
+
+export function describeAsk(ask: ResourceAsk) {
+  return ask.kind === 'instance' ? ask.image : `publish ${ask.site}`;
+}
+
+export const PublishDecision = z.object({
+  decision: z.enum(['accept', 'decline']),
+  reply: z.string().describe('What you tell the requesting owner, including why if you decline'),
+});
+export type PublishDecision = z.infer<typeof PublishDecision>;
 
 export const OwnerDecision = z.object({
   decision: z.enum(['accept', 'decline']),
@@ -55,6 +77,8 @@ export const ResourceRequest = z.object({
   status: RequestStatus,
   reason: z.string().optional(),
   decision: OwnerDecision.optional(),
+  publishDecision: PublishDecision.optional(),
+  published: z.object({ commit: z.string(), previous: z.string(), at: z.string() }).optional(),
   instance: z.object({ remote: z.string(), name: z.string() }).optional(),
   leaseIncludesDelete: z.boolean().default(false),
   /** What the requesting owner does with the instance once it exists; see FOLLOW_UPS. */
