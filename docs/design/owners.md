@@ -85,6 +85,10 @@ implementer's family (checked from recorded providers) → revise or replan with
 the owner's status, which also reports recent outcomes). The `maintain-prs` duty keeps published PRs mergeable and green:
 a conflict wakes the owner, which decides and briefs the implementer (the force-push waits for approval), and
 failing CI on a new head commit wakes the owner once to decide fix (a work item at the plan gate), flaky, or person.
+Owners hear how their work went: each daemon tick compares work items with what it last saw, journals changes the
+owner should act on (landed, failed, rejected, PR merged or closed), and queues a notice that the plugin posts into
+the chat the work was opened from, marked as coming from the runtime, so the owner decides the next step in front
+of the person.
 An owner with a `deploy` section and a `ship` grant ships its repository where it runs: fast-forward, verify in
 the sandbox, restart through a delayed systemd unit that health-checks and rolls back.
 

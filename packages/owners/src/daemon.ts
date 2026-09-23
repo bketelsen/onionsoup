@@ -2,7 +2,8 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { processRequests } from './brokering.ts';
-import { syncOpenChamber } from './openchamber.ts';
+import { chatDirectory, syncOpenChamber } from './openchamber.ts';
+import { noticeWorkChanges } from './notices.ts';
 import type { WorkItem, WorkStatus } from './ledger.ts';
 import { wake } from './owner.ts';
 import type { ResourceRequest } from './requests.ts';
@@ -90,6 +91,11 @@ export async function tick(runtime: Runtime, log: TickLog) {
   }
   await runDueDuties(runtime, log);
   await advanceRunnable(runtime, log);
+  try {
+    for (const notice of await noticeWorkChanges(runtime, ownerId => chatDirectory(runtime, ownerId))) log.duty(notice.owner, 'notice', `${notice.workItem} ${notice.change}${notice.origin ? ' (to its chat)' : ''}`);
+  } catch (error) {
+    log.error('notices', error);
+  }
 }
 
 /** Always on: tick forever. Work cut off by a stop is marked interrupted at the next start, never replayed. */

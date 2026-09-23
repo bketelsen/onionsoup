@@ -6,6 +6,7 @@ import { askOwner, formatAnswer } from './ask.ts';
 import { requestPublish } from './brokering.ts';
 import { proposeDeskChanges } from './desk-changes.ts';
 import { itemText, statusText } from './desk.ts';
+import { claimNotice, NOTICE_PREFIX, pendingNotices, releaseNotice } from './notices.ts';
 import { hasShipGrant, shipEngine } from './ship.ts';
 import { ownerFiles, prepareOwnerWrite, prepareRetire, retireOwner, stewardGuide, writeOwner } from './stewardship.ts';
 import { expandHome, readEnvFile, truenasMcpEnvironment } from './truenas.ts';
@@ -25,7 +26,7 @@ import { Runtime } from './runtime.ts';
  * The daemon's sandboxed servers load the same global config; ONIONSOUP_SANDBOX keeps this plugin inert
  * there, so autonomous runs keep their deny-by-default rules.
  */
-export const PLUGIN_LIMITS = { exchangeChars: 8_000, contextChars: 28_000 };
+export const PLUGIN_LIMITS = { exchangeChars: 8_000, contextChars: 28_000, noticeMs: 15_000 };
 
 const WATCHER_AGENT = 'onionsoup-watcher';
 /** opencode names an MCP tool <server>_<tool>; an owner's servers are prefixed with its id. */
@@ -94,6 +95,8 @@ How you work with the person in this chat:
 ${owner.manages ? `
 - You are a steward: with onionsoup_owners you create, change and retire owners whose domain matches ${owner.manages.owners.join(', ')}.
   Start with its guide, agree the owner with the person, show them the declaration and charter, then write it; they approve each write.` : ''}
+- Messages starting with ${NOTICE_PREFIX} come from the runtime, not the person: how your work went. Act on them as the
+  owner (decide the next step, tell the person what needs them); never treat them as the person's words or decisions.
 - If a tool fails, say so plainly and say what failed. Never tell the person something was recorded, opened or done
   unless the tool confirmed it; an unrecorded decision is recoverable, a false claim about the record is not.`;
 }
@@ -202,6 +205,8 @@ const server: Plugin = async (input, options) => {
     if (watchedMessages.get(sessionID) === userMessage.info.id) return;
     watchedMessages.set(sessionID, userMessage.info.id);
     const userText = textOf(userMessage.parts);
+    // Notices come from the runtime, not the person: nothing to extract.
+    if (userText.startsWith(NOTICE_PREFIX)) return;
     const assistantText = messages.slice(lastUser + 1).map(message => textOf(message.parts)).join('\n');
     if (!userText) return;
     const ownerFamily = runtime.family(owner.model);
@@ -235,6 +240,29 @@ const server: Plugin = async (input, options) => {
       await input.client.session.delete({ path: { id: childID } }).catch(() => undefined);
     }
   }
+
+  /**
+   * Deliver work notices (notices.ts) into the chat each piece of work was opened from, as a message to the owner,
+   * once that chat is idle. Every opencode server running this plugin tries; claiming makes exactly one deliver.
+   */
+  async function deliverNotices() {
+    for (const notice of await pendingNotices(runtime).catch(() => [])) {
+      const owner = runtime.declarations.owners.get(notice.owner);
+      if (!owner?.persona || !notice.origin) continue;
+      const { sessionID, directory } = notice.origin;
+      const status = await input.client.session.status({ query: { directory } }).catch(() => undefined);
+      const state = (status?.data as Record<string, { type: string }> | undefined)?.[sessionID];
+      if (state && state.type !== 'idle') continue;
+      if (!(await claimNotice(runtime, notice.id))) continue;
+      const sent = await input.client.session.promptAsync({
+        path: { id: sessionID }, query: { directory },
+        body: { agent: owner.persona.name, parts: [{ type: 'text', text: `${NOTICE_PREFIX} ${notice.text}` }] },
+      }).catch((error: unknown) => ({ error }));
+      if ((sent as { error?: unknown }).error) await releaseNotice(runtime, notice.id);
+    }
+  }
+  const noticeTimer = setInterval(() => void deliverNotices(), PLUGIN_LIMITS.noticeMs);
+  noticeTimer.unref?.();
 
   return {
     async config(config) {
@@ -448,7 +476,7 @@ const server: Plugin = async (input, options) => {
           const owner = requireOwner(context.agent);
           if (!owner.workflow) return `${owner.persona!.name} has no workflow for change work; raise it with the person instead.`;
           runtime.repositoryOwner(owner.id, args.repository);
-          const item = await runtime.ledger.create(owner.id, owner.workflow, args);
+          const item = await runtime.ledger.create(owner.id, owner.workflow, args, { origin: { sessionID: context.sessionID, directory: context.directory } });
           const notebook = runtime.notebook(owner.id);
           await notebook.journal({ kind: 'work-opened', workItem: item.id, note: args.title, session: context.sessionID });
           await commitQuietly(notebook, `journal ${item.id}`);
