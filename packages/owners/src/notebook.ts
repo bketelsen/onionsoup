@@ -33,8 +33,32 @@ export interface JournalEntry {
 export class Notebook {
   readonly directory: string;
 
-  constructor(readonly root: string, readonly ownerId: string) {
+  /**
+   * `charter` reads the owner's charter from the person's configuration: the notebook's CHARTER.md is only a copy
+   * (kept for its history), and a copy taken once goes stale the moment the person edits the charter.
+   */
+  constructor(readonly root: string, readonly ownerId: string, private readonly charter?: () => Promise<string>) {
     this.directory = join(root, ownerId);
+  }
+
+  /** The charter as the person wrote it now, falling back to the notebook's copy. */
+  async charterText() {
+    const copy = () => readFile(join(this.directory, 'CHARTER.md'), 'utf8').catch(() => '');
+    return this.charter ? this.charter().catch(copy) : copy();
+  }
+
+  /**
+   * The charter and the chosen registers, as briefs and chats read them. Registers still holding only their title
+   * are left out: an empty section is noise to a reader.
+   */
+  async read(registers: readonly (NotebookRegister | 'CHARTER')[]) {
+    const sections: string[] = [];
+    for (const register of registers) {
+      const text = register === 'CHARTER' ? await this.charterText() : await readFile(join(this.directory, `${register}.md`), 'utf8').catch(() => '');
+      if (text.trim().split('\n').filter(line => line.trim()).length <= 1) continue;
+      sections.push(`<<${register}.md>>\n${text}`);
+    }
+    return sections.join('\n\n').slice(0, NOTEBOOK_LIMITS.orientationChars);
   }
 
   async ensure(charter: string) {
@@ -43,17 +67,16 @@ export class Notebook {
       await git(this.root, ['init', '-q', '-b', 'main']);
     }
     await mkdir(join(this.directory, 'journal'), { recursive: true });
-    const created = [await this.writeIfMissing('CHARTER.md', charter)];
+    const created = [await this.writeIfChanged('CHARTER.md', charter)];
     for (const [register, title] of Object.entries(REGISTER_TITLES)) {
       created.push(await this.writeIfMissing(`${register}.md`, `# ${title}\n`));
     }
     await this.commit(created.some(Boolean) ? 'Scaffold notebook' : 'journal');
   }
 
+  /** Everything an owner reads about itself: the charter and every register. */
   async orientation() {
-    const files = ['CHARTER.md', ...Object.keys(REGISTER_TITLES).map(register => `${register}.md`)];
-    const sections = await Promise.all(files.map(async file => `<<${file}>>\n${await readFile(join(this.directory, file), 'utf8')}`));
-    return sections.join('\n\n').slice(0, NOTEBOOK_LIMITS.orientationChars);
+    return this.read(['CHARTER', ...(Object.keys(REGISTER_TITLES) as NotebookRegister[])]);
   }
 
   async apply(edits: readonly NotebookEdit[], message: string) {
@@ -79,6 +102,14 @@ export class Notebook {
     const { stdout } = await git(this.root, ['status', '--porcelain', this.ownerId]);
     if (!stdout.trim()) return;
     await git(this.root, ['commit', '-q', '-m', `${this.ownerId}: ${message}`]);
+  }
+
+  /** Keep the notebook's charter copy in step with the person's charter, so its history shows their edits. */
+  private async writeIfChanged(file: string, text: string) {
+    const path = join(this.directory, file);
+    if ((await readFile(path, 'utf8').catch(() => undefined)) === text) return false;
+    await writeFile(path, text);
+    return true;
   }
 
   private async writeIfMissing(file: string, content: string) {

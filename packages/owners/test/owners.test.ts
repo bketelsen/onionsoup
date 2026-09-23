@@ -330,3 +330,32 @@ test('owners hear how their work went: changes are journaled and queued for the 
   assert.equal(describeChange({ ...published, publication: { ...published.publication, state: 'merged' } }, 'landed|open')?.change, 'pr-merged');
   assert.equal(describeChange(published, 'landed|open'), undefined);
 });
+
+test('an owner reads its charter as the person wrote it now, and briefs carry only what each role needs', async () => {
+  const { mkdtemp: temp, writeFile: write, readFile: read, mkdir: makeDirectory } = await import('node:fs/promises');
+  const { Notebook } = await import('@onionsoup/owners');
+  const { implementBrief, reviewBrief } = await import('../src/briefs.ts');
+  const root = await temp(join(tmpdir(), 'owners-charter-'));
+  let charter = '# Charter: v1\n\n- the person merges\n';
+  const notebook = new Notebook(root, 'leto', async () => charter);
+  await notebook.ensure(charter);
+  charter = '# Charter: v2\n\n- Leto merges under his grant\n';
+  assert.match(await notebook.orientation(), /Leto merges under his grant/);
+  assert.doesNotMatch(await notebook.orientation(), /the person merges/);
+  assert.doesNotMatch(await notebook.orientation(), /<<MAP\.md>>/, 'an empty register is left out');
+  await notebook.ensure(charter);
+  assert.match(await read(join(root, 'leto', 'CHARTER.md'), 'utf8'), /v2/, 'the copy follows the person\'s edits');
+
+  await makeDirectory(join(root, 'leto'), { recursive: true });
+  await write(join(root, 'leto', 'FAILURES.md'), '# Failures\n\n## Aborted items\n\nthe implementer looped on echo\n');
+  await write(join(root, 'leto', 'WISDOM.md'), '# Wisdom\n\n- tests live in packages/*/test\n');
+  const knowledge = await notebook.read(['MAP', 'WISDOM', 'decisions']);
+  const item = { id: 'w-1', owner: 'leto', workflow: 'change', status: 'implementing' as const, implementations: [], verdicts: [], replans: 0, hires: [], humanNotes: [], createdAt: '', updatedAt: '',
+    proposal: { title: 'Isolate config', goal: 'mask the host config', rationale: 'Reopening: the last implementer looped on echo', acceptance: ['config unreachable'], size: 'small' as const } };
+  const plan = { summary: 's', steps: [{ description: 'do it', files: ['sandbox.ts'] }], tests: ['t'], risks: [], outOfScope: [], questionsForOwner: [] };
+  const brief = implementBrief(item, plan as never, knowledge, 'rubric');
+  assert.match(brief, /mask the host config/);
+  assert.match(brief, /tests live in packages/);
+  assert.doesNotMatch(brief, /looped on echo/, 'neither the rationale nor the failures log reaches the implementer');
+  assert.match(reviewBrief(item, plan as never, 'diff', [], knowledge, 'rubric'), /Why: Reopening/, 'the reviewer weighs the purpose');
+});

@@ -372,7 +372,8 @@ const server: Plugin = async (input, options) => {
         args: { register: tool.schema.enum(['all', 'CHARTER', 'MAP', 'WISDOM', 'FAILURES', 'decisions', 'open-questions']).default('all') },
         async execute(args, context) {
           const notebook = runtime.notebook(requireOwner(context.agent).id);
-          return args.register === 'all' ? notebook.orientation() : readFile(join(notebook.directory, `${args.register}.md`), 'utf8');
+          if (args.register === 'all') return notebook.orientation();
+          return args.register === 'CHARTER' ? notebook.charterText() : readFile(join(notebook.directory, `${args.register}.md`), 'utf8');
         },
       }),
       onionsoup_evidence: tool({

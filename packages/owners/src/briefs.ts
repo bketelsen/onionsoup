@@ -15,11 +15,15 @@ function list(items: readonly string[]) {
   return items.length ? items.map(item => `- ${item}`).join('\n') : '(none)';
 }
 
-function proposalText(proposal: ProposedWork) {
+/**
+ * The work as the owner proposed it. The rationale is the owner's reasoning (often the history that led here); a
+ * planner or reviewer weighs it, an implementer following an approved plan does not need it.
+ */
+function proposalText(proposal: ProposedWork, withRationale = true) {
   return [
     `Title: ${proposal.title}`,
     `Goal: ${proposal.goal}`,
-    `Why: ${proposal.rationale}`,
+    ...(withRationale ? [`Why: ${proposal.rationale}`] : []),
     `Acceptance:\n${list(proposal.acceptance)}`,
   ].join('\n');
 }
@@ -39,8 +43,9 @@ function findingsText(findings: readonly Finding[]) {
   return list(findings.map(finding => `[${finding.severity}] ${finding.file}: ${finding.issue} → ${finding.suggestion}`));
 }
 
+/** Host verification as a reader needs it: every command and its exit code, and the output of the ones that failed. */
 function verificationText(results: readonly Verification[]) {
-  return results.map(result => `$ ${result.command}  (exit ${result.exitCode})\n${result.output.trim()}`).join('\n\n');
+  return results.map(result => `$ ${result.command}  (exit ${result.exitCode})${result.exitCode === 0 ? '' : `\n${result.output.trim()}`}`).join('\n\n');
 }
 
 const NOTEBOOK_RULES = `Notebook edits: each edit targets one register (MAP, WISDOM, FAILURES, decisions, open-questions) and one "## section".
@@ -117,12 +122,17 @@ export function ownerAnswerBrief(item: WorkItem, questions: readonly string[], n
   ].join('\n\n');
 }
 
-export function implementBrief(item: WorkItem, plan: Plan, notebook: string, rubric: string) {
+/**
+ * What an implementer needs: the goal and acceptance, the approved plan, and what the owner knows about the domain
+ * (its map, conventions and the person's decisions). Not the owner's charter, failures or open questions: those are
+ * the owner's to manage.
+ */
+export function implementBrief(item: WorkItem, plan: Plan, knowledge: string, rubric: string) {
   const sections = [
     'You have been hired to implement one approved plan in this working tree. Make the change, add the tests the plan calls for, and run them. Do not commit.',
-    block('work', proposalText(item.proposal)),
+    block('work', proposalText(item.proposal, false)),
     block('approved-plan', planText(plan)),
-    block('owner-notebook', notebook),
+    ...(knowledge ? [block('owner-knowledge', knowledge)] : []),
     block('rubric', rubric),
   ];
   const approvalNotes = humanNotesText(item, 'approval');
@@ -146,7 +156,7 @@ export function reviewBrief(item: WorkItem, plan: Plan, patch: string, verificat
     block('diff', patch),
     block('host-verification', verificationText(verification)),
     block('conditions-of-approval', humanNotesText(item, 'approval') || '(none)'),
-    block('owner-notebook', notebook),
+    ...(notebook ? [block('owner-knowledge', notebook)] : []),
     block('rubric', rubric),
     'Decide: approve (ready to land), revise (the implementer should fix specific findings), or replan (the plan itself is wrong).',
   ].join('\n\n');

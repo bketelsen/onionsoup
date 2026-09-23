@@ -20,6 +20,11 @@ async function notebookFor(runtime: Runtime, item: WorkItem) {
   return runtime.notebook(item.owner).orientation();
 }
 
+/** The part of the owner's notebook an implementer or reviewer uses: the domain, its conventions, the person's decisions. */
+async function knowledgeFor(runtime: Runtime, item: WorkItem, withCharter = false) {
+  return runtime.notebook(item.owner).read([...(withCharter ? ['CHARTER' as const] : []), 'MAP', 'WISDOM', 'decisions']);
+}
+
 function transition(item: WorkItem, status: WorkStatus, reason?: string): WorkItem {
   return { ...item, status, reason };
 }
@@ -49,7 +54,7 @@ const implement: Step = async (runtime, item, workflow) => {
   const hired = await freelancer(runtime, 'implementation');
   const report = await runtime.hireFor(item, 'implement', 'implementation', {
     role: 'implementer', model: hired.model, directory: path, title: `${item.id}: implement ${item.implementations.length + 1}`,
-    brief: implementBrief(item, item.plan, await notebookFor(runtime, item), hired.rubric), schema: ImplementationReport,
+    brief: implementBrief(item, item.plan, await knowledgeFor(runtime, item), hired.rubric), schema: ImplementationReport,
   });
   const diff = await diffAgainstBase(owner, path);
   const verification = await verify(owner, path, runtime.toolsDirectory);
@@ -88,7 +93,7 @@ const review: Step = async (runtime, item, workflow) => {
   const verification = item.implementations.at(-1)?.verification ?? [];
   const verdict = await runtime.hireFor(item, 'review', 'review', {
     role: 'reviewer', model: hired.model, directory: item.worktree, title: `${item.id}: review ${item.verdicts.length + 1}`,
-    brief: reviewBrief(item, item.plan, diff.patch, verification, await notebookFor(runtime, item), hired.rubric), schema: Verdict,
+    brief: reviewBrief(item, item.plan, diff.patch, verification, await knowledgeFor(runtime, item, true), hired.rubric), schema: Verdict,
   });
   await runtime.notebook(item.owner).journal({ kind: 'review', workItem: item.id, model: hired.model, outcome: verdict.decision, note: verdict.summary });
   return DECISIONS[verdict.decision]({ ...item, verdicts: [...item.verdicts, verdict] }, workflow);

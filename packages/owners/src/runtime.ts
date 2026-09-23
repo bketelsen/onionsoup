@@ -153,7 +153,7 @@ export class Runtime {
   }
 
   notebook(ownerId: string) {
-    return new Notebook(this.notebooksRoot, ownerId);
+    return new Notebook(this.notebooksRoot, ownerId, () => this.text(`charters/${ownerId}.md`));
   }
 
   async text(relativePath: string) {
