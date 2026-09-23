@@ -3,6 +3,7 @@ import { RiArrowLeftLine, RiExternalLinkLine } from '@remixicon/react';
 import { api, navigate, useEvents } from '../api.ts';
 import type { InboxEntry, WorkItem } from '../types.ts';
 import { Decision } from './Decision.tsx';
+import { ItemActivity } from './ItemActivity.tsx';
 import { Badge, Empty, Section, statusTone, timeAgo } from './ui.tsx';
 
 /** One work item in full: what was proposed, the plan, who was hired, what verification and review said. */
@@ -17,7 +18,8 @@ export function ItemView({ itemId }: { itemId: string }) {
   const cost = item.hires.reduce((total, hire) => total + hire.cost, 0);
   const waiting = waitingOn(item);
   return (
-    <div className="flex-1 overflow-y-auto">
+    <div className="flex-1 flex min-h-0 min-w-0">
+    <div className="flex-1 overflow-y-auto min-w-0">
       <div className="max-w-3xl mx-auto p-6 flex flex-col gap-5">
         <button className="self-start inline-flex items-center gap-1 typography-meta text-muted-foreground hover:text-foreground" onClick={() => navigate('owner', item.owner)}>
           <RiArrowLeftLine className="size-3.5" />{item.owner}
@@ -109,6 +111,8 @@ export function ItemView({ itemId }: { itemId: string }) {
           </table>
         </Section>
       </div>
+    </div>
+    <ItemActivity item={item} />
     </div>
   );
 }

@@ -88,6 +88,12 @@ export function surfaceServer(state: SurfaceState, options: { webRoot: string; b
     }),
     route('GET', '/api/owners/:owner', async params => state.owner(params.owner!)),
     route('GET', '/api/items/:item', async params => state.item(params.item!)),
+    route('GET', '/api/items/:item/sessions', async params => state.itemSessions(params.item!)),
+    route('GET', '/api/items/:item/sessions/:session/messages', async params => {
+      const session = (await state.itemSessions(params.item!)).find(candidate => candidate.id === params.session);
+      if (!session) throw new HttpError(404, `no session ${params.session} for ${params.item}`);
+      return state.hireMessages(session.id);
+    }),
     route('POST', '/api/decide', async (_params, body) => {
       const input = await body();
       const outcome = await state.decide({

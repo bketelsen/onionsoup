@@ -4,6 +4,7 @@ import {
   domainSummary, itemText, publish, rejectPlan, revisePlan, type Runtime,
 } from '@onionsoup/owners';
 import type { OpencodeApi, PendingPermission, PendingQuestion } from './opencode.ts';
+import { readSessionMessages } from './hire-store.ts';
 import { ordered, SettingsStore } from './settings.ts';
 
 /**
@@ -52,6 +53,8 @@ export class SurfaceState {
     readonly opencode: OpencodeApi,
     private readonly resolveDirectory: (runtime: Runtime, ownerId: string) => Promise<string> = chatDirectory,
     settingsFile = join(runtime.stateDirectory, '..', 'surface', 'settings.json'),
+    /** How hire sessions' messages are read (opencode's store; replaceable in tests). */
+    readonly hireMessages: (sessionID: string) => unknown[] = sessionID => readSessionMessages(sessionID),
   ) {
     this.settings = new SettingsStore(settingsFile);
   }
@@ -125,6 +128,30 @@ export class SurfaceState {
   async item(itemId: string) {
     const item = await this.runtime.ledger.get(itemId);
     return { item, text: itemText(item), done: DONE.has(item.status) };
+  }
+
+  /**
+   * The sessions onionsoup ran for a work item (plan, owner answers, implementations, reviews, learnings), found by
+   * the title every hire gets ("<item>: <stage>") in the two places hires run: the owner's checkout and the item's
+   * worktree. Oldest first; each carries the directory it lives in.
+   */
+  async itemSessions(itemId: string) {
+    const item = await this.runtime.ledger.get(itemId);
+    const directories = new Set<string>();
+    try {
+      directories.add(this.runtime.repositoryFor(item).workspace);
+    } catch {
+      directories.add(this.runtime.owner(item.owner).workspace);
+    }
+    directories.add(item.worktree ?? join(this.runtime.worktreesRoot, item.owner, item.id));
+    const found = new Map<string, { id: string; title: string; directory: string; time: { created: number; updated: number } }>();
+    for (const directory of directories) {
+      const sessions = await this.opencode.listSessions(directory).catch(() => []) as { id: string; title?: string; directory?: string; time: { created: number; updated: number } }[];
+      for (const session of sessions) {
+        if (session.title?.startsWith(`${item.id}: `)) found.set(session.id, { id: session.id, title: session.title, directory: session.directory ?? directory, time: session.time });
+      }
+    }
+    return [...found.values()].sort((left, right) => left.time.created - right.time.created);
   }
 
   /** A person's decision on an engine gate. Returns a one-line outcome. */

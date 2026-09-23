@@ -35,7 +35,7 @@ export interface WorkItem {
   planApproval?: { by: string; at: string; note?: string };
   implementations: { report: { summary: string }; diffStat: string; verification: { command: string; exitCode: number; output: string }[] }[];
   verdicts: { decision: string; summary: string; findings: { severity?: string; file?: string; description?: string }[] }[];
-  hires: { stage: string; craft: string; model: string; family: string; outcome: string; cost: number; startedAt: string; finishedAt: string; error?: string }[];
+  hires: { stage: string; craft: string; model: string; family: string; sessionID: string; outcome: string; cost: number; startedAt: string; finishedAt: string; error?: string }[];
   humanNotes: { kind: string; by: string; note: string }[];
   branch?: string; landedCommit?: string;
   publication?: { url: string; state: string };

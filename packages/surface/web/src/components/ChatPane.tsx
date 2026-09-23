@@ -22,7 +22,7 @@ function turnsOf(messages: Message[]) {
   return turns;
 }
 
-function AssistantMessage({ message, directory, streaming }: { message: Message; directory: string; streaming: boolean }) {
+export function AssistantMessage({ message, directory, streaming }: { message: Message; directory: string; streaming: boolean }) {
   const parts = message.parts.filter(part => part.type === 'text' || part.type === 'reasoning' || part.type === 'tool');
   const lastTool = parts.map(part => part.type).lastIndexOf('tool');
   return (

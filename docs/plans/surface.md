@@ -93,6 +93,9 @@ Tick items as they land, with the commit.
 - [x] Merge to `main` and install `deploy/onionsoup-surface.service` (2026-09-23; OpenChamber retired)
 - [x] UI tests for the chat's event handling (chat/chatState.ts, pulled out of useChat) and the diff parser (chat/diff.ts)
 - [x] Decisions on the work item page itself (approve, send back, reject, force-push, publish)
+- [x] An activity rail on the work item page: every hire's session (found by its `<item>: <stage>` title), the selected
+      one drawn like a chat and refreshed while it runs, following the newest hire. Hire messages are read from
+      opencode's store, because opencode 1.18.32 cannot send back sessions that asked for structured output.
 
 ## Notes for whoever resumes
 
