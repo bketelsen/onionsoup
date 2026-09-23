@@ -9,7 +9,7 @@ import { distill, wake } from './owner.ts';
 import { Runtime } from './runtime.ts';
 import { askOwner, formatAnswer } from './ask.ts';
 import { approveCreate, approveDelete, denyRequest, processRequests, requestPublish } from './brokering.ts';
-import { DAEMON_LIMITS, daemon, recordDutyRun, tick, type TickLog } from './daemon.ts';
+import { DAEMON_LIMITS, daemon, drain, recordDutyRun, tick, type TickLog } from './daemon.ts';
 import { publish } from './publish.ts';
 import { approvePush } from './rebase.ts';
 import { describeAsk, type ResourceRequest } from './requests.ts';
@@ -219,6 +219,8 @@ const COMMANDS: Record<string, Command> = {
   },
   async tick(runtime) {
     await tick(runtime, tickLog);
+    // One tick from the command line holds the runtime until the work it started is done.
+    await drain();
   },
   async daemon(runtime) {
     const stop = new AbortController();

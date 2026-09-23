@@ -124,7 +124,9 @@ runtime acts on them, so decisions never race the daemon.
 ### Always on
 
 `npm run owners -- daemon` (installed as `deploy/onionsoup-owners.service`) ticks every minute: it re-reads the
-configuration, moves requests along, runs due duties, and advances work items. Deterministic
+configuration, moves requests along, runs due duties, advances work items, and raises work notices. Duties and
+work items run in the background beside the tick (one run per item, one item per owner, two of each at a time), so
+a long hire never holds up a 15-minute check or a waiting request. Deterministic
 checks wake a model only when one is needed, and that model is the owner. Work a stopped runtime was actually
 doing is marked interrupted and never replayed; a person resumes it.
 

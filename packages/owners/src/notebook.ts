@@ -9,6 +9,9 @@ const run = promisify(execFile);
 
 export const NOTEBOOK_LIMITS = { orientationChars: 24_000 };
 
+/** The last commit queued per notebooks repository; see Notebook.commit. */
+const COMMITS = new Map<string, Promise<void>>();
+
 const REGISTER_TITLES: Record<NotebookRegister, string> = {
   MAP: 'Map: layout of the domain',
   WISDOM: 'Wisdom: conventions and lessons that hold',
@@ -97,11 +100,30 @@ export class Notebook {
     return marker ? lines.filter(line => (JSON.parse(line) as { at: string }).at > marker) : lines;
   }
 
+  /**
+   * Every owner's notebook lives in one git repository, and duties and work items now run side by side: commits
+   * queue within this process, and wait out another process's lock (the plugin commits too).
+   */
   async commit(message: string) {
-    await git(this.root, ['add', '-A', this.ownerId]);
-    const { stdout } = await git(this.root, ['status', '--porcelain', this.ownerId]);
-    if (!stdout.trim()) return;
-    await git(this.root, ['commit', '-q', '-m', `${this.ownerId}: ${message}`]);
+    const previous = COMMITS.get(this.root) ?? Promise.resolve();
+    const next = previous.catch(() => undefined).then(() => this.commitNow(message));
+    COMMITS.set(this.root, next);
+    return next;
+  }
+
+  private async commitNow(message: string) {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await git(this.root, ['add', '-A', this.ownerId]);
+        const { stdout } = await git(this.root, ['status', '--porcelain', this.ownerId]);
+        if (!stdout.trim()) return;
+        await git(this.root, ['commit', '-q', '-m', `${this.ownerId}: ${message}`]);
+        return;
+      } catch (error) {
+        if (attempt >= 8 || !/index\.lock/.test(String((error as { stderr?: string }).stderr ?? error))) throw error;
+        await new Promise(resolve => setTimeout(resolve, 250 * (attempt + 1)));
+      }
+    }
   }
 
   /** Keep the notebook's charter copy in step with the person's charter, so its history shows their edits. */

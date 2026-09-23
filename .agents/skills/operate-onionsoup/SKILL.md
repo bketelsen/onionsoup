@@ -11,7 +11,8 @@ cause, and the fix is either applied through the normal gates or reported to the
 ## Where things are
 
 - **Engine:** `~/projects/onionsoup`, run as the user unit `onionsoup-owners.service`, which ticks every 60s:
-  re-read the configuration, process requests, run due duties, advance work items, raise work notices.
+  re-read the configuration, process requests, run due duties, advance work items, raise work notices. Duties and
+  work items run in the background, so the tick itself stays short; `owners tick` waits for what it started.
 - **Config:** `~/.config/onionsoup` (`ONIONSOUP_CONFIG`).
 - **State:** `~/.local/share/onionsoup` (`ONIONSOUP_HOME`). It holds `state/` (ledger, requests, locks,
   ci-triage, ship), `desks/<owner>`, `checkouts/`, `evidence/<owner>` and `tools/`.

@@ -359,3 +359,37 @@ test('an owner reads its charter as the person wrote it now, and briefs carry on
   assert.doesNotMatch(brief, /looped on echo/, 'neither the rationale nor the failures log reaches the implementer');
   assert.match(reviewBrief(item, plan as never, 'diff', [], knowledge, 'rubric'), /Why: Reopening/, 'the reviewer weighs the purpose');
 });
+
+test('long work runs beside the tick: once per key, within a cap, and a CLI tick can wait for it', async () => {
+  const { Background } = await import('@onionsoup/owners');
+  const background = new Background(2);
+  const finish: (() => void)[] = [];
+  const job = () => new Promise<void>(resolve => finish.push(resolve));
+  assert.equal(background.start('leto/w-1', job), true);
+  assert.equal(background.start('leto/w-1', job), false, 'the same item never runs twice at once');
+  assert.equal(background.start('murbella/w-2', job), true);
+  assert.equal(background.start('clippy/w-3', job), false, 'the cap holds');
+  assert.deepEqual(background.keys(), ['leto/w-1', 'murbella/w-2']);
+  let drained = false;
+  const waiting = background.drain().then(() => { drained = true; });
+  finish.forEach(resolve => resolve());
+  await waiting;
+  assert.equal(drained, true);
+  assert.equal(background.size, 0);
+  assert.equal(background.start('clippy/w-3', async () => { throw new Error('a failing job frees its slot'); }), true);
+  await background.drain();
+  assert.equal(background.size, 0);
+});
+
+test('notebook commits from work running side by side queue instead of colliding', async () => {
+  const { Notebook } = await import('@onionsoup/owners');
+  const { execFileSync } = await import('node:child_process');
+  const root = await mkdtemp(join(tmpdir(), 'owners-commits-'));
+  const books = ['leto', 'odrade', 'murbella'].map(owner => new Notebook(root, owner));
+  for (const book of books) await book.ensure('# Charter\n');
+  await Promise.all(books.flatMap(book => [1, 2, 3].map(async index => {
+    await book.journal({ kind: 'test', note: `entry ${index}` });
+    await book.commit(`entry ${index}`);
+  })));
+  assert.equal(execFileSync('git', ['-C', root, 'status', '--porcelain']).toString(), '', 'everything was committed');
+});

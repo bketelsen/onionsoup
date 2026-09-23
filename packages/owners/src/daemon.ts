@@ -10,7 +10,51 @@ import type { ResourceRequest } from './requests.ts';
 import type { Runtime } from './runtime.ts';
 import { advance } from './workflow.ts';
 
-export const DAEMON_LIMITS = { tickMs: 60_000, shutdownGraceMs: 5_000 };
+export const DAEMON_LIMITS = { tickMs: 60_000, shutdownGraceMs: 5_000, parallelItems: 2, parallelDuties: 2 };
+
+/**
+ * Long work runs beside the tick, not inside it: a work item's hires take many minutes, and while the tick waited
+ * on them no duty, request or notice moved (a 15-minute check once went an hour late). Each job has a key; a key
+ * runs at most once at a time, and each kind of job has a cap, so the machine is not buried in sandboxes.
+ */
+export class Background {
+  private readonly running = new Map<string, Promise<void>>();
+
+  constructor(private readonly limit: number) {}
+
+  has(key: string) {
+    return this.running.has(key);
+  }
+
+  get size() {
+    return this.running.size;
+  }
+
+  keys() {
+    return [...this.running.keys()];
+  }
+
+  /** Start `job` unless its key is running or the cap is reached; returns whether it started. */
+  start(key: string, job: () => Promise<void>) {
+    if (this.running.has(key) || this.running.size >= this.limit) return false;
+    const done = job().finally(() => this.running.delete(key));
+    this.running.set(key, done);
+    return true;
+  }
+
+  /** Wait for everything started so far (a one-off tick from the CLI must not return while work runs). */
+  async drain() {
+    while (this.running.size) await Promise.allSettled([...this.running.values()]);
+  }
+}
+
+const items = new Background(DAEMON_LIMITS.parallelItems);
+const duties = new Background(DAEMON_LIMITS.parallelDuties);
+
+/** Wait for background work the ticks started. */
+export async function drain() {
+  await Promise.all([items.drain(), duties.drain()]);
+}
 
 const UNIT_MS: Record<string, number> = { m: 60_000, h: 3_600_000, d: 86_400_000 };
 
@@ -48,26 +92,39 @@ async function runDueDuties(runtime: Runtime, log: TickLog) {
     for (const duty of owner.duties.filter(candidate => candidate.every)) {
       const key = `${owner.id}/${duty.id}`;
       const previous = lastRun[key] ? Date.parse(lastRun[key]) : 0;
-      if (Date.now() - previous < everyMs(duty.every!)) continue;
+      if (Date.now() - previous < everyMs(duty.every!) || duties.has(key)) continue;
+      const started = duties.start(key, async () => {
+        try {
+          const result = await wake(runtime, owner.id, duty.id);
+          log.duty(owner.id, duty.id, result.survey.summary);
+        } catch (error) {
+          log.error(key, error);
+        }
+      });
+      // A duty that could not start (the cap) stays due and starts on a later tick.
+      if (!started) continue;
       lastRun[key] = new Date().toISOString();
       await writeFile(statePath, JSON.stringify(lastRun, null, 2) + '\n');
-      try {
-        const result = await wake(runtime, owner.id, duty.id);
-        log.duty(owner.id, duty.id, result.survey.summary);
-      } catch (error) {
-        log.error(key, error);
-      }
     }
   }
 }
 
-async function advanceRunnable(runtime: Runtime, log: TickLog) {
-  for (const item of (await runtime.ledger.list()).filter(candidate => RUNNABLE.includes(candidate.status))) {
-    try {
-      await advance(runtime, item.id, log.item);
-    } catch (error) {
-      log.error(item.id, error);
-    }
+/**
+ * Advance runnable work items in the background, at most one per owner at a time: an owner's items share its
+ * checkout, where creating worktrees at once would collide.
+ */
+function advanceRunnable(runnable: readonly WorkItem[], runtime: Runtime, log: TickLog) {
+  const busyOwners = new Set(items.keys().map(key => key.split('/')[0]));
+  for (const item of runnable) {
+    if (busyOwners.has(item.owner) || items.has(`${item.owner}/${item.id}`)) continue;
+    const started = items.start(`${item.owner}/${item.id}`, async () => {
+      try {
+        await advance(runtime, item.id, log.item);
+      } catch (error) {
+        log.error(item.id, error);
+      }
+    });
+    if (started) busyOwners.add(item.owner);
   }
 }
 
@@ -84,7 +141,7 @@ export async function tick(runtime: Runtime, log: TickLog) {
     log.error('requests', error);
   }
   await runDueDuties(runtime, log);
-  await advanceRunnable(runtime, log);
+  advanceRunnable((await runtime.ledger.list()).filter(candidate => RUNNABLE.includes(candidate.status)), runtime, log);
   try {
     for (const notice of await noticeWorkChanges(runtime, ownerId => chatDirectory(runtime, ownerId))) log.duty(notice.owner, 'notice', `${notice.workItem} ${notice.change}${notice.origin ? ' (to its chat)' : ''}`);
   } catch (error) {
