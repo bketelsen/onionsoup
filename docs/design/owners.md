@@ -466,6 +466,36 @@ Findings so far:
   Debian 12 (a 371 KB PNG), and deleted the instance. Both notebooks
   journaled every step.
 
+### Talking to owners
+
+- Owners have personas: a Dune name and title, a source book, and a voice
+  (Bellonda keeps the homelab wiki; Miles Teg holds compute and
+  virtualization). Important domains get main characters; small ones get a
+  tertiary name or the repository's.
+- `packages/owners/src/plugin.ts` is an opencode plugin registered in the
+  global opencode config. It turns persona owners into primary agents, so a
+  person starts a chat with Bellonda in OpenChamber or the opencode TUI. It
+  appends the owner's notebook and open work to each turn and gives it
+  onionsoup tools (status, notebook, evidence, open work, record decision,
+  retract). It stays inert inside the daemon's sandboxes.
+- Conversation mode is a separate permission set: per-pattern allow, ask or
+  deny, where ask means the person approves in the chat. Owners reach for
+  their own tools first and can do anything else with approval, so a new
+  kind of task needs no onionsoup code. A person's own settings (such as
+  OpenChamber auto-accept) are respected.
+- Chat memory is deliberate: tool calls that were not auto-allowed are
+  journaled deterministically; after each exchange a watcher from another
+  model family extracts only the person's decisions, kept only if the quote
+  is verbatim. Everything lands in the journal as a candidate, and distill,
+  acting as curator, decides what enters the notebook. Retracted notes are
+  never recorded.
+- Every owner sees a generated roster of the other owners and their domains.
+- Each owner has a desk (a worktree on a desk branch) for chat work. The
+  Owner's Desk extension (`extensions/owners-desk`) shows the owner's
+  identity, what waits on the person (with approve and reject), open work,
+  what it noted from chats (with retract), and its notebook. It follows the
+  active agent and reads and decides only through the `owners` CLI.
+
 ## References
 
 - Replaces the direction of [composable agents](composable-agents.md) and

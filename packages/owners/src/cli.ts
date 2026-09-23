@@ -12,6 +12,7 @@ import { DAEMON_LIMITS, daemon, recordDutyRun, tick, type TickLog } from './daem
 import { publish } from './publish.ts';
 import { approvePush } from './rebase.ts';
 import type { ResourceRequest } from './requests.ts';
+import { deskState } from './desk.ts';
 import { ensureDesk } from './workspace.ts';
 import { advance, approvePlan, rejectPlan, resumeItem, revisePlan } from './workflow.ts';
 
@@ -26,6 +27,9 @@ const { values: options, positionals } = parseArgs({
     reason: { type: 'string' },
     'no-advance': { type: 'boolean', default: false },
     'with-delete': { type: 'boolean', default: false },
+    agent: { type: 'string' },
+    directory: { type: 'string' },
+    owner: { type: 'string' },
   },
 });
 
@@ -160,6 +164,15 @@ const COMMANDS: Record<string, Command> = {
     const name = owner.persona?.name ?? owner.id;
     console.log(`${name}'s desk: ${desk.path} (branch ${desk.branch})\nIn OpenChamber: add this folder as a project and set its default agent to ${name}.`);
   },
+  async 'desk-state'(runtime) {
+    console.log(JSON.stringify(await deskState(runtime, { agent: options.agent, directory: options.directory, owner: options.owner })));
+  },
+  async retract(runtime, [ownerId]) {
+    const notebook = runtime.notebook(required(ownerId, 'owner'));
+    await notebook.journal({ kind: 'retracted', note: required(options.note, '--note') });
+    await notebook.commit('retraction').catch(() => undefined);
+    console.log('retracted');
+  },
   async requests(runtime) {
     for (const request of await runtime.requests.list()) console.log(requestLine(request));
   },
@@ -210,7 +223,7 @@ if (!command) {
 }
 const runtime = await Runtime.open({ declarations: options.declarations!, state: options.state! });
 /** Commands that only read, or only record a person's decision, never take the runtime lock. */
-const LOCK_FREE = ['items', 'show', 'notebook', 'requests', 'approve', 'revise-plan', 'reject', 'resume', 'desk', 'approve-push', 'approve-create', 'approve-delete', 'deny-request'];
+const LOCK_FREE = ['items', 'show', 'notebook', 'requests', 'approve', 'revise-plan', 'reject', 'resume', 'desk', 'desk-state', 'retract', 'approve-push', 'approve-create', 'approve-delete', 'deny-request'];
 try {
   const unlock = LOCK_FREE.includes(commandName!) ? async () => {} : await runtime.lock();
   try {
