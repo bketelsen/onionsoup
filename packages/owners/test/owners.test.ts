@@ -293,3 +293,11 @@ test('a group owner owns several repositories, each with its own checkout, desk 
   await write(join(config, 'owners', 'platform.yaml'), repeated);
   await assert.rejects(runtime.reloadDeclarations(), /repository names must differ after the owner: lab/);
 });
+
+test('the implementer may run anything in its sandbox except commit, push, gh and sudo', async () => {
+  const { IMPLEMENTER_BASH } = await import('../src/opencode.ts');
+  const entries = Object.entries(IMPLEMENTER_BASH);
+  assert.deepEqual(entries[0], ['*', 'allow']);
+  for (const pattern of ['git commit*', 'git * push*', 'gh *', 'sudo *']) assert.equal(IMPLEMENTER_BASH[pattern], 'deny');
+  assert.ok(entries.slice(1).every(([, action]) => action === 'deny'), 'denies come after the allow, so they win');
+});

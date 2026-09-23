@@ -45,12 +45,21 @@ const READ_ONLY_BASH: Record<string, 'allow' | 'deny'> = {
   'go list*': 'allow',
 };
 
-const IMPLEMENTER_BASH: Record<string, 'allow' | 'deny'> = {
-  ...READ_ONLY_BASH,
-  'go build*': 'allow',
-  'go fmt*': 'allow',
-  'gofmt *': 'allow',
-  'go mod tidy*': 'allow',
+/**
+ * The implementer runs whatever its repository needs (npm, python, make, go…): the sandbox is the boundary (read-only
+ * root, only the worktree and caches writable, memory-capped, no host-only credentials). The sandbox can still read
+ * SSH keys and the gh login, so publishing stays with host code: no commits, pushes, gh or sudo. Last match wins.
+ */
+export const IMPLEMENTER_BASH: Record<string, 'allow' | 'deny'> = {
+  '*': 'allow',
+  'git commit*': 'deny',
+  'git * commit*': 'deny',
+  'git push*': 'deny',
+  'git * push*': 'deny',
+  'gh': 'deny',
+  'gh *': 'deny',
+  'sudo': 'deny',
+  'sudo *': 'deny',
 };
 
 function rolePermission(bash: Record<string, 'allow' | 'deny'>, edit: 'allow' | 'deny') {
@@ -67,7 +76,7 @@ const ROLE_AGENTS: Record<Role, { prompt: string; permission: ReturnType<typeof 
     permission: rolePermission(READ_ONLY_BASH, 'deny'),
   },
   implementer: {
-    prompt: 'You are a freelance implementer hired to carry out one approved plan in this working tree. Stay inside the plan. Do not commit.',
+    prompt: 'You are a freelance implementer hired to carry out one approved plan in this working tree. Stay inside the plan. You may run any command the repository needs (install dependencies, build, test) inside your sandbox; only this working tree and caches are writable. Do not commit, push, use gh or sudo: the runtime lands your work after review.',
     permission: rolePermission(IMPLEMENTER_BASH, 'allow'),
   },
   reviewer: {

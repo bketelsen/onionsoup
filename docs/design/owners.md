@@ -124,7 +124,9 @@ doing is marked interrupted and never replayed; a person resumes it.
 
 Every model-driven process and every verification runs in a memory-capped systemd scope (6 GB, no swap) inside
 bubblewrap with a read-only root; only the implementer writes, and only its worktree. Bash allowlists are a
-convenience, never the boundary. Owners never get CLIs that can mutate their domain (for example incus):
+convenience, never the boundary: the implementer may run any command its repository needs, except committing,
+pushing, `gh` and `sudo` (the sandbox can still read SSH keys and the gh login; landing is host code's job). A
+Go-only allowlist left from the first owner made implementers on other stacks spend their whole hire probing. Owners never get CLIs that can mutate their domain (for example incus):
 host code snapshots evidence read-only, and effects happen only in host code after approval.
 
 ## Lessons from building it
