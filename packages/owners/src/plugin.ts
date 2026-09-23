@@ -26,6 +26,14 @@ export const PLUGIN_LIMITS = { exchangeChars: 8_000, contextChars: 28_000 };
 const WATCHER_AGENT = 'onionsoup-watcher';
 /** MCP server name for the NAS owner's truenas-mcp; its tools are named nas_<tool>. */
 const NAS_MCP = 'nas';
+
+/** The NAS owner in chat: reads free, app lifecycle asks the person, anything destructive is denied (and hidden). Last match wins. */
+const NAS_CHAT_RULES: Record<string, string> = {
+  [`${NAS_MCP}_*`]: 'allow',
+  ...Object.fromEntries(['app_update', 'app_restart', 'app_start', 'app_stop', 'snapshot_create'].map(tool => [`${NAS_MCP}_truenas_${tool}`, 'ask'])),
+  ...Object.fromEntries(['dataset_create', 'dataset_delete', 'snapshot_delete', 'smb_create', 'smb_delete', 'nfs_create', 'nfs_delete', 'app_configure', 'app_update_all', 'alert_dismiss']
+    .map(tool => [`${NAS_MCP}_truenas_${tool}`, 'deny'])),
+};
 const WATCHER_MODELS = ['openai/gpt-5.6-luna-fast', 'github-copilot/claude-haiku-4.5'];
 
 /** Tools that change things; a completed call of one of these is always journaled. */
@@ -217,7 +225,8 @@ const server: Plugin = async (input, options) => {
       // A NAS owner reaches its NAS through truenas-mcp (read-only in chats), visible to that owner alone.
       const nasOwner = owners.find(owner => owner.domain.kind === 'truenas');
       if (nasOwner && nasOwner.domain.kind === 'truenas') {
-        const environment = await truenasMcpEnvironment(nasOwner.domain, false).catch(() => undefined);
+        // Write mode, with per-tool rules below: reads run freely, app lifecycle asks, destructive tools are denied.
+        const environment = await truenasMcpEnvironment(nasOwner.domain, true).catch(() => undefined);
         if (environment) {
           const servers = (config.mcp ??= {}) as Record<string, unknown>;
           servers[NAS_MCP] = { type: 'local', command: [expandHome(nasOwner.domain.mcp.binary), 'serve'], environment, enabled: true };
@@ -229,7 +238,7 @@ const server: Plugin = async (input, options) => {
         const persona = owner.persona!;
         const charter = await runtime.text(`charters/${owner.id}.md`).catch(() => '(no charter yet)');
         const verify = verifyCommands(owner, runtime.toolsDirectory);
-        const permission = { ...conversationPermission(owner, verify), ...(owner.domain.kind === 'truenas' ? { [`${NAS_MCP}_*`]: 'allow' } : {}) };
+        const permission = { ...conversationPermission(owner, verify), ...(owner.domain.kind === 'truenas' ? NAS_CHAT_RULES : {}) };
         agents[persona.name] = {
           mode: 'primary',
           description: `${persona.title} (${persona.source})`,

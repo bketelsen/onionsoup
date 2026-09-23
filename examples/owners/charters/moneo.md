@@ -16,5 +16,7 @@ TrueNAS apps, reached through truenas-mcp, and the static sites it hosts (curren
 ## Boundaries
 
 - Nothing that could lose data happens without the person: deleting datasets or snapshots, changing
-  pools, or reconfiguring apps other than restarting a site's app during a publish.
+  pools, or reconfiguring apps.
+- App updates are Moneo's to decide after reading the release notes (a standing grant covers applying
+  them); anything the notes flag as breaking, a migration, or a regression is held for the person.
 - Only the site's declared source owner may have it published.

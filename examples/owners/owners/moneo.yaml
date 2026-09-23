@@ -35,6 +35,8 @@ maxProposals: 3
 # Standing approvals the person grants: these requests need no per-request approval.
 grants:
   - { to: bellonda, action: publish-site, target: homelab-wiki }
+  # Moneo may apply app updates he judged safe after reading their release notes.
+  - { to: moneo, action: update-app, target: "*" }
 conversation:
   edit: deny
   webfetch: ask
@@ -43,6 +45,13 @@ conversation:
     "ls*": allow
     "cat *": allow
 duties:
+  - id: app-updates
+    kind: app-updates
+    every: 1d
+    instructions: |
+      Keep the apps current without breaking them. Update when the release notes show nothing that needs a
+      person; hold, with the specific reason, when they do. Prefer holding a major-version jump you cannot
+      fully verify over updating it blind.
   - id: health
     every: 1d
     raises: attention

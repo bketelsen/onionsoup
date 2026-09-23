@@ -148,3 +148,14 @@ test('a publish request from an owner that is not the site source is refused bef
   assert.match(decided.reason ?? '', /clippy is not the source of homelab-wiki/);
   await assert.rejects(requestPublish(runtime, 'bellonda', 'no-such-site', 'x'), /no owner hosts site no-such-site/);
 });
+
+test('an app update Moneo decided is approved by his standing grant without a person', async () => {
+  const { runtime } = await incusRuntime();
+  await runtime.notebook('moneo').ensure('# Charter\n');
+  const { decide } = await import('../src/brokering.ts');
+  const ask = { kind: 'update-app' as const, app: 'radarr', fromVersion: '1.4.15', toVersion: '1.4.17', purpose: 'patch release, no breaking changes', notesRead: [] };
+  const request = await runtime.requests.open('moneo', 'moneo', ask, 'none');
+  const decided = await decide(runtime, request.id);
+  assert.equal(decided.status, 'create-approved');
+  assert.match(decided.approvals.at(-1)!.by, /standing grant in moneo's declaration \(update-app \* for moneo\)/);
+});

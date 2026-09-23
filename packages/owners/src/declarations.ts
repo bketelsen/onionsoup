@@ -12,7 +12,7 @@ export const Duty = z.object({
    * survey: look at the domain and propose work. request-instance: ask another owner for an instance.
    * maintain-prs: keep the owner's published PRs mergeable (record merges, rebase conflicts).
    */
-  kind: z.enum(['survey', 'request-instance', 'maintain-prs']).default('survey'),
+  kind: z.enum(['survey', 'request-instance', 'maintain-prs', 'app-updates']).default('survey'),
   every: z.string().regex(/^\d+[mhd]$/).optional(),
   on: z.string().optional(),
   instructions: z.string(),
@@ -96,7 +96,8 @@ export type TruenasDomain = z.infer<typeof TruenasDomain>;
  */
 export const Grant = z.object({
   to: z.string(),
-  action: z.enum(['publish-site']),
+  action: z.enum(['publish-site', 'update-app']),
+  /** The site or app, or "*" for all of them. */
   target: z.string(),
 });
 export type Grant = z.infer<typeof Grant>;

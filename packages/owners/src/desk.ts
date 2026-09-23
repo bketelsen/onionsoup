@@ -1,6 +1,7 @@
 import { readFile, readdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { OwnerDeclaration } from './declarations.ts';
+import { describeAsk } from './requests.ts';
 import type { Runtime } from './runtime.ts';
 
 export const DESK_LIMITS = { notes: 40, registerChars: 20_000 };
@@ -58,7 +59,7 @@ export async function deskState(runtime: Runtime, query: DeskQuery) {
     ...items.filter(item => item.status === 'awaiting-push-approval').map(item => ({ kind: 'push', id: item.id, title: item.proposal.title, detail: item.rebaseOf?.prUrl ?? '' })),
     ...requests.filter(request => request.status === 'awaiting-create-approval').map(request => ({
       kind: 'create', id: request.id, detail: request.ask.purpose,
-      title: request.ask.kind === 'publish-site' ? `Publish ${request.ask.site} (from ${request.from})` : `Create ${request.decision?.remote}:${request.decision?.nameSuffix} (${request.decision?.image})`,
+      title: request.ask.kind === 'instance' ? `Create ${request.decision?.remote}:${request.decision?.nameSuffix} (${request.decision?.image})` : describeAsk(request.ask),
     })),
     ...requests.filter(request => request.status === 'awaiting-delete-approval').map(request => ({ kind: 'delete', id: request.id, title: `Delete ${request.instance?.remote}:${request.instance?.name}`, detail: request.followUpResult?.summary ?? '' })),
   ];

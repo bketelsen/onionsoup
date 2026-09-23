@@ -85,6 +85,8 @@ export interface HireRequest<T> {
   schema: z.ZodType<T>;
   /** A file the hire may append findings to while it works; read back even if the hire fails. */
   notesFile?: string;
+  /** Extra permission rules for this hire only (e.g. web fetch to read release notes). */
+  extraPermission?: Record<string, string>;
 }
 
 export interface HireResult<T> {
@@ -133,11 +135,11 @@ async function worktreeOf(directory: string) {
   }
 }
 
-function agentConfig(worktree: string, directory: string, notesFile: string | undefined) {
+function agentConfig(worktree: string, directory: string, notesFile: string | undefined, extra: Record<string, string> = {}) {
   return {
     agent: Object.fromEntries(Object.entries(ROLE_AGENTS).map(([role, definition]) => [
       `onionsoup-${role}`,
-      { mode: 'primary', prompt: definition.prompt, permission: withNotes(definition.permission, worktree, directory, notesFile) },
+      { mode: 'primary', prompt: definition.prompt, permission: { ...withNotes(definition.permission, worktree, directory, notesFile), ...extra } },
     ])),
   };
 }
@@ -155,13 +157,13 @@ interface SandboxedServer {
 }
 
 /** One opencode server per hire, inside a sandbox shaped for the role. */
-async function startServer(role: Role, directory: string, notesFile: string | undefined): Promise<SandboxedServer> {
+async function startServer(role: Role, directory: string, notesFile: string | undefined, extra?: Record<string, string>): Promise<SandboxedServer> {
   const port = await freePort();
   const notesWritable = notesFile ? [dirname(notesFile)] : [];
   const child = spawnSandboxed('opencode', ['serve', '--hostname=127.0.0.1', `--port=${port}`], {
     cwd: directory,
     writable: [...ROLE_WRITES[role](directory), ...notesWritable],
-    env: { OPENCODE_CONFIG_CONTENT: JSON.stringify(agentConfig(await worktreeOf(directory), directory, notesFile)) },
+    env: { OPENCODE_CONFIG_CONTENT: JSON.stringify(agentConfig(await worktreeOf(directory), directory, notesFile, extra)) },
   });
   const url = await new Promise<string>((resolve, reject) => {
     let output = '';
@@ -193,7 +195,7 @@ export class Freelancers {
   close() {}
 
   async hire<T>(request: HireRequest<T>): Promise<HireResult<T>> {
-    const server = await startServer(request.role, request.directory, request.notesFile);
+    const server = await startServer(request.role, request.directory, request.notesFile, request.extraPermission);
     try {
       return await this.hireOn(server.url, request);
     } finally {

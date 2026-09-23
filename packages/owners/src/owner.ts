@@ -7,6 +7,7 @@ import { composeAskBrief, distillBrief, learningsBrief, ownerAnswerBrief, survey
 import { hasIncus, type Duty, type OwnerDeclaration } from './declarations.ts';
 import { refreshIncusEvidence } from './incus.ts';
 import { refreshTruenasEvidence } from './truenas.ts';
+import { reviewAppUpdates } from './app-updates.ts';
 import { maintainPullRequests } from './rebase.ts';
 import { rosterText } from './roster.ts';
 import type { WorkItem } from './ledger.ts';
@@ -63,6 +64,10 @@ export async function wake(runtime: Runtime, ownerId: string, dutyId: string) {
   const { owner, notebook } = await prepare(runtime, ownerId);
   const duty = owner.duties.find(candidate => candidate.id === dutyId);
   if (!duty) throw new Error(`unknown_duty: ${ownerId}/${dutyId}`);
+  if (duty.kind === 'app-updates') {
+    const { summary, opened } = await reviewAppUpdates(runtime, ownerId, duty);
+    return { survey: { summary, notebook: [], proposals: [] }, items: [], attention: [], request: opened[0], cost: 0 };
+  }
   if (duty.kind === 'maintain-prs') {
     const { summary, opened } = await maintainPullRequests(runtime, ownerId);
     return { survey: { summary, notebook: [], proposals: [] }, items: opened, attention: [], request: undefined, cost: 0 };

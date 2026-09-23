@@ -27,6 +27,7 @@ export const RequestStatus = z.enum([
   'delete-approved',
   'deleted',
   'published',
+  'updated',
   'failed',
 ]);
 export type RequestStatus = z.infer<typeof RequestStatus>;
@@ -47,11 +48,27 @@ export const PublishAsk = z.object({
 });
 export type PublishAsk = z.infer<typeof PublishAsk>;
 
-export const ResourceAsk = z.discriminatedUnion('kind', [InstanceAsk, PublishAsk]);
+/** Update an app on the owner's own NAS, decided by the owner after reading its release notes. */
+export const UpdateAppAsk = z.object({
+  kind: z.literal('update-app'),
+  app: z.string(),
+  fromVersion: z.string(),
+  toVersion: z.string(),
+  purpose: z.string(),
+  notesRead: z.array(z.string()).default([]),
+});
+export type UpdateAppAsk = z.infer<typeof UpdateAppAsk>;
+
+export const ResourceAsk = z.discriminatedUnion('kind', [InstanceAsk, PublishAsk, UpdateAppAsk]);
 export type ResourceAsk = z.infer<typeof ResourceAsk>;
 
 export function describeAsk(ask: ResourceAsk) {
-  return ask.kind === 'instance' ? ask.image : `publish ${ask.site}`;
+  const descriptions: Record<ResourceAsk['kind'], () => string> = {
+    instance: () => (ask as InstanceAsk).image,
+    'publish-site': () => `publish ${(ask as PublishAsk).site}`,
+    'update-app': () => `update ${(ask as UpdateAppAsk).app} ${(ask as UpdateAppAsk).fromVersion} → ${(ask as UpdateAppAsk).toVersion}`,
+  };
+  return descriptions[ask.kind]();
 }
 
 export const PublishDecision = z.object({

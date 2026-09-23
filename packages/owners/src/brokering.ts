@@ -2,6 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { publishDecisionBrief, requestDecisionBrief } from './briefs.ts';
+import { updateApp } from './app-updates.ts';
 import { publishSite } from './publish-site.ts';
 import { rosterText } from './roster.ts';
 import { checkCreate, createInstance, deleteInstance, INCUS_LIMITS } from './incus.ts';
@@ -36,8 +37,13 @@ export async function requestPublish(runtime: Runtime, from: string, siteId: str
 /** A standing grant in the receiving owner's declaration counts as the person's approval. */
 function grantFor(runtime: Runtime, request: ResourceRequest) {
   const receiver = runtime.owner(request.to);
-  const target = request.ask.kind === 'publish-site' ? request.ask.site : '';
-  return receiver.grants.find(grant => grant.to === request.from && grant.action === request.ask.kind && grant.target === target);
+  const targets: Record<ResourceRequest['ask']['kind'], string> = {
+    instance: '',
+    'publish-site': request.ask.kind === 'publish-site' ? request.ask.site : '',
+    'update-app': request.ask.kind === 'update-app' ? request.ask.app : '',
+  };
+  const target = targets[request.ask.kind];
+  return receiver.grants.find(grant => grant.to === request.from && grant.action === request.ask.kind && (grant.target === target || grant.target === '*'));
 }
 
 async function approvedOrAwaiting(runtime: Runtime, request: ResourceRequest, summary: string) {
@@ -77,6 +83,8 @@ export async function decide(runtime: Runtime, requestId: string) {
   const request = await runtime.requests.get(requestId);
   requireStatus(request, 'pending-owner');
   if (request.ask.kind === 'publish-site') return decidePublish(runtime, request);
+  // The owner already decided (it read the release notes); only the approval remains.
+  if (request.ask.kind === 'update-app') return runtime.requests.save(await approvedOrAwaiting(runtime, request, describeAsk(request.ask)));
   const ask = request.ask;
   const owner = runtime.incusOwner(request.to);
   const notebook = runtime.notebook(owner.id);
@@ -171,8 +179,21 @@ async function executePublish(runtime: Runtime, request: ResourceRequest) {
   }
 }
 
+async function executeUpdate(runtime: Runtime, request: ResourceRequest) {
+  try {
+    const settled = await updateApp(runtime, request);
+    await journalBoth(runtime, request, 'app-updated', `${describeAsk(request.ask)}: ${settled}`);
+    return runtime.requests.save({ ...request, status: 'updated', reason: settled });
+  } catch (error) {
+    const reason = `update failed: ${error instanceof Error ? error.message.split('\n')[0] : error}`;
+    await journalBoth(runtime, request, 'attention', `${describeAsk(request.ask)}: ${reason}; a person should look`);
+    return runtime.requests.save({ ...request, status: 'failed', reason });
+  }
+}
+
 async function executeCreate(runtime: Runtime, request: ResourceRequest) {
   if (request.ask.kind === 'publish-site') return executePublish(runtime, request);
+  if (request.ask.kind === 'update-app') return executeUpdate(runtime, request);
   const owner = runtime.incusOwner(request.to);
   const decision = request.decision!;
   try {
