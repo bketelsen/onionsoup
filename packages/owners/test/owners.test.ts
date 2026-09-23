@@ -301,3 +301,32 @@ test('the implementer may run anything in its sandbox except commit, push, gh an
   for (const pattern of ['git commit*', 'git * push*', 'gh *', 'sudo *']) assert.equal(IMPLEMENTER_BASH[pattern], 'deny');
   assert.ok(entries.slice(1).every(([, action]) => action === 'deny'), 'denies come after the allow, so they win');
 });
+
+test('owners hear how their work went: changes are journaled and queued for the chat the work came from, once', async () => {
+  const { Runtime } = await import('@onionsoup/owners');
+  const { noticeWorkChanges, pendingNotices, claimNotice, describeChange } = await import('../src/notices.ts');
+  const runtime = await Runtime.open({ declarations: 'packages/owners/test/fixtures/owners', state: await mkdtemp(join(tmpdir(), 'owners-notices-')) });
+  await runtime.notebook('clippy').ensure('# Charter\n');
+  const proposal = { title: 'Fix it', goal: 'g', rationale: 'r', acceptance: ['a'], size: 'small' as const };
+  const item = await runtime.ledger.create('clippy', 'change', proposal, { origin: { sessionID: 'ses_1', directory: '/desks/clippy' } });
+  const chatDirectory = async (ownerId: string) => `/desks/${ownerId}`;
+
+  assert.deepEqual(await noticeWorkChanges(runtime, chatDirectory), [], 'the first run records the present and replays nothing');
+  await runtime.ledger.save({ ...item, status: 'planning' });
+  assert.deepEqual(await noticeWorkChanges(runtime, chatDirectory), [], 'progress the owner need not act on is not a notice');
+  await runtime.ledger.save({ ...item, status: 'failed', reason: 'MessageAbortedError: Aborted' });
+  const [notice] = await noticeWorkChanges(runtime, chatDirectory);
+  assert.equal(notice?.change, 'failed');
+  assert.match(notice!.text, /failed: MessageAbortedError: Aborted \(a hire ran out its time limit/);
+  assert.deepEqual(notice!.origin, { sessionID: 'ses_1', directory: '/desks/clippy' });
+  assert.deepEqual(await noticeWorkChanges(runtime, chatDirectory), [], 'a change is noticed once');
+  assert.equal((await pendingNotices(runtime)).length, 1);
+  assert.equal(await claimNotice(runtime, notice!.id), true);
+  assert.equal(await claimNotice(runtime, notice!.id), false, 'only one server delivers');
+  assert.equal((await pendingNotices(runtime)).length, 0);
+
+  const published = { ...item, status: 'landed' as const, branch: 'owners/x', publication: { url: 'https://github.com/x/y/pull/1', branch: 'owners/x', by: 'p', at: '', state: 'open' as const } };
+  assert.match(describeChange(published, 'reviewing|')!.text, /published as https:\/\/github.com\/x\/y\/pull\/1/);
+  assert.equal(describeChange({ ...published, publication: { ...published.publication, state: 'merged' } }, 'landed|open')?.change, 'pr-merged');
+  assert.equal(describeChange(published, 'landed|open'), undefined);
+});

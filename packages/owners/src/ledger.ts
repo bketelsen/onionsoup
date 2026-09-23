@@ -78,6 +78,8 @@ export const WorkItem = z.object({
   publication: Publication.optional(),
   /** Set on a rebase work item: which landed item's PR it brings up to date. */
   rebaseOf: z.object({ itemId: z.string(), branch: z.string(), prUrl: z.string(), previousHead: z.string() }).optional(),
+  /** The chat the work was opened from, so the owner hears there how it went. */
+  origin: z.object({ sessionID: z.string(), directory: z.string() }).optional(),
   /** The pid working on a step right now; unset when the item is merely queued (approved, resumed). */
   activeRunner: z.number().optional(),
   createdAt: z.string(),

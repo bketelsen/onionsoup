@@ -41,3 +41,7 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
 - **Charters are drafts written by Claude** for Bellonda, Miles Teg, Moneo and Leto. The person should rewrite
   them; they steer everything the owners do.
 - **Duties have no event triggers** yet (`on:` is declared but unused); everything is scheduled or chat-driven.
+- **Hires can loop until their time limit.** An implementer sometimes degenerates (hundreds of trivial commands such
+  as `echo`), and nothing notices before the 20-minute limit ends the hire. The owner now hears about the failure,
+  but a progress watchdog (stop a hire whose recent tool calls change nothing) or a retry with the other model family
+  would save the twenty minutes. Work opened by duties (not from a chat) is journaled but has no chat to be told in.
