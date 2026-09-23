@@ -1,0 +1,163 @@
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { RiAddLine, RiBookOpenLine, RiCloseLine, RiExternalLinkLine } from '@remixicon/react';
+import { api, navigate, opencodePayload, useEvents } from '../api.ts';
+import type { DeskState, InboxEntry, OwnerSummary, Session } from '../types.ts';
+import { ChatPane } from './ChatPane.tsx';
+import { Decision } from './Decision.tsx';
+import { Badge, BusyDots, Button, cx, Empty, OwnerIcon, Section, statusTone, timeAgo } from './ui.tsx';
+
+/** Sessions onionsoup itself ran in this directory (hires, reviews) are not the person's chats. */
+const ENGINE_TITLE = /^([a-z0-9-]+|w-\d{8}-[0-9a-f]+): /;
+
+const NOTE_LABELS: Record<string, string> = {
+  'chat-decision': 'Noted', 'chat-action': 'Did', 'work-opened': 'Opened work', 'plan-approved': 'Plan approved', 'plan-rejected': 'Plan rejected',
+  published: 'Published', 'publish-failed': 'Publish failed', asked: 'Asked', answered: 'Answered', attention: 'Needs you', 'ci-triage': 'CI triage',
+  'owner-created': 'Created owner', 'owner-updated': 'Updated owner', 'owner-retired': 'Retired owner', 'ship-started': 'Shipping', shipped: 'Shipped',
+};
+
+/** An owner's page: its chat in the middle, and beside it what waits, its threads, its work and what it has been doing. */
+export function OwnerView({ owner, inbox, sessionId, refresh }: { owner: OwnerSummary; inbox: InboxEntry[]; sessionId?: string; refresh: () => void }) {
+  const [desk, setDesk] = useState<DeskState>();
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [busySessions, setBusySessions] = useState<Record<string, boolean>>({});
+  const [directory, setDirectory] = useState('');
+  const [notebookOpen, setNotebookOpen] = useState(false);
+  const [showEngine, setShowEngine] = useState(false);
+
+  const loadDesk = useCallback(() => api<DeskState>(`/api/owners/${owner.id}`).then(setDesk, () => undefined), [owner.id]);
+  const loadSessions = useCallback(() => {
+    if (!owner.chat) return Promise.resolve();
+    return api<{ directory: string; sessions: Session[]; status: Record<string, { type: string }> }>(`/api/owners/${owner.id}/sessions`).then(result => {
+      setDirectory(result.directory);
+      setSessions(result.sessions.filter(session => !session.parentID).sort((left, right) => right.time.updated - left.time.updated));
+      setBusySessions(Object.fromEntries(Object.entries(result.status).map(([id, status]) => [id, status.type === 'busy' || status.type === 'retry'])));
+    }, () => undefined);
+  }, [owner.id, owner.chat]);
+
+  useEffect(() => { setDesk(undefined); setSessions([]); void loadDesk(); void loadSessions(); }, [loadDesk, loadSessions]);
+  useEvents(event => {
+    if (event.type === 'onionsoup' || event.type === 'reconnected') { void loadDesk(); void loadSessions(); return; }
+    const payload = opencodePayload(event.data);
+    if (payload.directory && directory && payload.directory !== directory) return;
+    if (payload.type === 'session.created' || payload.type === 'session.updated' || payload.type === 'session.deleted') void loadSessions();
+    if (payload.type === 'session.status') {
+      const { sessionID, status } = payload.properties as { sessionID: string; status: { type: string } };
+      setBusySessions(current => ({ ...current, [sessionID]: status.type === 'busy' || status.type === 'retry' }));
+    }
+  }, [directory, loadDesk, loadSessions]);
+
+  const chats = useMemo(() => sessions.filter(session => !ENGINE_TITLE.test(session.title)), [sessions]);
+  const engine = useMemo(() => sessions.filter(session => ENGINE_TITLE.test(session.title)), [sessions]);
+  const current = sessionId ?? chats[0]?.id;
+
+  const newChat = async () => {
+    const session = await api<Session>(`/api/owners/${owner.id}/sessions`, { method: 'POST', body: {} });
+    await loadSessions();
+    navigate('owner', owner.id, 'chat', session.id);
+  };
+
+  const waiting = inbox.filter(entry => entry.owner === owner.id);
+  return (
+    <div className="flex-1 flex flex-col min-w-0 min-h-0">
+      <header className="h-12 shrink-0 border-b border-border px-4 flex items-center gap-2 min-w-0">
+        <OwnerIcon icon={owner.icon} className="size-5 text-primary" />
+        <span className="typography-ui-header font-semibold">{owner.name}</span>
+        <span className="typography-meta text-muted-foreground truncate">{[owner.title, owner.source].filter(Boolean).join(' · ')}</span>
+        <span className="ml-auto typography-micro text-muted-foreground truncate hidden lg:inline">{owner.domain} · {owner.model}</span>
+      </header>
+      <div className="flex-1 flex min-h-0">
+        <main className="flex-1 flex flex-col min-w-0 min-h-0">
+          {!owner.chat && <div className="p-6"><Empty>{owner.name} has no persona, so there is no one to chat with. Its work and notebook are on the right.</Empty></div>}
+          {owner.chat && current && <ChatPane key={current} owner={owner} sessionId={current} directory={directory} />}
+          {owner.chat && !current && (
+            <div className="flex-1 flex flex-col items-center justify-center gap-3 text-muted-foreground">
+              <OwnerIcon icon={owner.icon} className="size-8" />
+              <div className="typography-ui-label">No chats with {owner.name} yet.</div>
+              <Button variant="primary" onClick={() => void newChat()}><RiAddLine className="size-4" />Start a chat</Button>
+            </div>
+          )}
+        </main>
+        <aside className="w-80 shrink-0 border-l border-border overflow-y-auto p-4 flex flex-col gap-5">
+          {waiting.length > 0 && (
+            <Section title={`Waiting on you (${waiting.length})`}>
+              {waiting.map(entry => <Decision key={`${entry.kind}:${entry.id}`} entry={entry} compact onDone={refresh} />)}
+            </Section>
+          )}
+          {owner.chat && (
+            <Section title="Chats" action={<Button variant="ghost" onClick={() => void newChat()} title="New chat"><RiAddLine className="size-4" /></Button>}>
+              {!chats.length && <Empty>None yet.</Empty>}
+              <div className="flex flex-col gap-0.5">
+                {chats.map(session => (
+                  <button key={session.id} onClick={() => navigate('owner', owner.id, 'chat', session.id)}
+                    className={cx('flex items-center gap-2 rounded-md px-2 py-1 text-left typography-meta', session.id === current ? 'bg-interactive-active text-foreground' : 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground')}>
+                    <span className="truncate flex-1">{session.title || 'Untitled'}</span>
+                    {busySessions[session.id] ? <BusyDots className="text-status-info" /> : <span className="shrink-0 text-[0.7rem]">{timeAgo(session.time.updated)}</span>}
+                  </button>
+                ))}
+              </div>
+              {engine.length > 0 && (
+                <button className="self-start typography-micro text-muted-foreground hover:text-foreground" onClick={() => setShowEngine(value => !value)}>
+                  {showEngine ? 'Hide' : 'Show'} {engine.length} engine sessions (hires, reviews)
+                </button>
+              )}
+              {showEngine && engine.map(session => (
+                <button key={session.id} onClick={() => navigate('owner', owner.id, 'chat', session.id)}
+                  className="flex items-center gap-2 rounded-md px-2 py-1 text-left typography-micro text-muted-foreground hover:bg-interactive-hover">
+                  <span className="truncate flex-1">{session.title}</span><span className="shrink-0">{timeAgo(session.time.updated)}</span>
+                </button>
+              ))}
+            </Section>
+          )}
+          <Section title="Work">
+            {desk && !desk.work.length && !desk.recent.length && <Empty>No work yet.</Empty>}
+            {desk?.work.map(item => (
+              <button key={item.id} onClick={() => navigate('item', item.id)} className="flex flex-col items-start gap-0.5 rounded-md border border-border p-2 text-left hover:bg-interactive-hover">
+                <span className="typography-meta text-foreground">{item.title}</span>
+                <Badge tone={statusTone(item.status)}>{item.status}</Badge>
+              </button>
+            ))}
+            {desk?.recent.map(item => (
+              <button key={item.id} onClick={() => navigate('item', item.id)} className="flex items-center gap-2 rounded-md px-2 py-1 text-left hover:bg-interactive-hover">
+                <Badge tone={statusTone(item.status)}>{item.status}</Badge>
+                <span className="typography-micro text-muted-foreground truncate flex-1">{item.title}</span>
+                {item.url && <a href={item.url} target="_blank" rel="noreferrer" onClick={event => event.stopPropagation()}><RiExternalLinkLine className="size-3.5 text-muted-foreground" /></a>}
+              </button>
+            ))}
+          </Section>
+          <Section title="Activity" action={<Button variant="ghost" onClick={() => setNotebookOpen(true)}><RiBookOpenLine className="size-3.5" />Notebook</Button>}>
+            {desk && !desk.notes.length && <Empty>Nothing yet.</Empty>}
+            <ol className="flex flex-col gap-2">
+              {desk?.notes.slice(0, 25).map((note, index) => (
+                <li key={index} className={cx('flex flex-col gap-0.5 border-l-2 pl-2', note.kind === 'attention' ? 'border-status-warning' : 'border-border', note.retracted && 'opacity-50 line-through')}>
+                  <span className="typography-micro text-muted-foreground">{NOTE_LABELS[note.kind] ?? note.kind} · {timeAgo(note.at)}</span>
+                  <span className="typography-meta text-foreground line-clamp-3 [overflow-wrap:anywhere]">{note.note}</span>
+                  {note.quote && <span className="typography-micro text-muted-foreground italic line-clamp-2">“{note.quote}”</span>}
+                </li>
+              ))}
+            </ol>
+          </Section>
+        </aside>
+      </div>
+      {notebookOpen && desk && <Notebook desk={desk} onClose={() => setNotebookOpen(false)} />}
+    </div>
+  );
+}
+
+function Notebook({ desk, onClose }: { desk: DeskState; onClose: () => void }) {
+  const registers = Object.entries(desk.registers).filter(([, text]) => text.trim());
+  const [tab, setTab] = useState(registers[0]?.[0] ?? '');
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-6" onClick={onClose}>
+      <div className="bg-background border border-border rounded-xl w-full max-w-3xl max-h-full flex flex-col" onClick={event => event.stopPropagation()}>
+        <div className="flex items-center gap-1 border-b border-border px-3 h-11">
+          <span className="typography-ui-label font-semibold mr-2">{desk.owner.name}'s notebook</span>
+          {registers.map(([name]) => (
+            <button key={name} onClick={() => setTab(name)} className={cx('px-2 py-1 rounded-md typography-meta', tab === name ? 'bg-interactive-active' : 'text-muted-foreground hover:bg-interactive-hover')}>{name}</button>
+          ))}
+          <button className="ml-auto text-muted-foreground hover:text-foreground" onClick={onClose}><RiCloseLine className="size-5" /></button>
+        </div>
+        <pre className="overflow-y-auto p-4 typography-meta whitespace-pre-wrap font-sans">{desk.registers[tab] ?? ''}</pre>
+      </div>
+    </div>
+  );
+}

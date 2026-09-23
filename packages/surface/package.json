@@ -28,6 +28,7 @@
     "@opencode-ai/sdk": "1.18.32"
   },
   "devDependencies": {
+    "@remixicon/react": "4.9.0",
     "@tailwindcss/vite": "4.3.3",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",

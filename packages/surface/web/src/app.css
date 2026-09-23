@@ -1,0 +1,16 @@
+@import "tailwindcss";
+@import "./styles/design-system.css";
+@import "./styles/typography.css";
+@import "./styles/themes.css";
+@source "./**/*.{ts,tsx}";
+
+@custom-variant dark (&:is(.dark *));
+
+html, body, #root { height: 100%; }
+body { background: var(--background); color: var(--foreground); }
+
+:where(button, [role="button"], a[href]):not(:disabled) { cursor: pointer; }
+:where(button, [role="button"]):disabled { cursor: not-allowed; opacity: 0.6; }
+
+/* Thin scrollbars, as in OpenChamber. */
+* { scrollbar-width: thin; scrollbar-color: var(--oc-scrollbar-thumb) transparent; }

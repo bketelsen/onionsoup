@@ -54,14 +54,14 @@ Tick items as they land, with the commit.
 - [x] Tests: endpoint tests against the fixture runtime and a fake opencode client
 
 ### 2. UI shell
-- [ ] Theme: OpenChamber tokens (design-system.css, typography.css), light and dark
-- [ ] Layout: owner rail (persona, icon, badges) | main pane | inbox drawer; hash routing
-- [ ] Live updates from `/api/events` with reconnect
+- [x] Theme: OpenChamber tokens (design-system.css, typography.css), light and dark
+- [x] Layout: owner rail (persona, icon, badges) | main pane | inbox drawer; hash routing
+- [x] Live updates from `/api/events` with reconnect
 
 ### 3. Owner and work views
-- [ ] Inbox with inline decisions and their context (plan, diff stat, verification, failed logs)
-- [ ] Owner page: identity, what waits, open and recent work, activity timeline (asks, CI triage, notes), notebook
-- [ ] Work item page: proposal, plan, hires, verification, reviews, PR link
+- [x] Inbox with inline decisions and their context (plan, diff stat, verification, failed logs)
+- [x] Owner page: identity, what waits, open and recent work, activity timeline (asks, CI triage, notes), notebook
+- [x] Work item page: proposal, plan, hires, verification, reviews, PR link
 
 ### 4. Chat
 - [ ] Study OpenChamber's chat: ChatMessage, MessageBody, message/parts, toolRenderers, PermissionCard,
