@@ -69,7 +69,7 @@ Tick items as they land, with the commit.
       QuestionCard, MarkdownRenderer; list what to port and what to simplify
 - [x] Message list: user and assistant turns, streaming text parts, markdown (marked + DOMPurify)
 - [x] Code highlighting (shiki, as OpenChamber) in markdown code blocks, loaded on demand
-- [ ] A real diff view for edits; highlighted bash commands in tool rows
+- [x] A real diff view for edits (edit, apply_patch, write); highlighted bash commands in tool rows
 - [x] Reasoning parts (collapsed), tool parts (one line, expandable output; renderers for bash, read, edit/write
       diffs, grep/glob, onionsoup tools)
 - [x] Permission cards (once / always / reject) and question cards inline

@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { RiArrowDownSLine, RiArrowRightSLine, RiArrowUpSLine, RiBrainLine, RiErrorWarningLine, RiInformationLine } from '@remixicon/react';
 import type { Message, Part } from '../types.ts';
 import { cx } from '../components/ui.tsx';
+import { HighlightedCode } from './Code.tsx';
+import { addedFile, DiffView, parseUnifiedDiff } from './DiffView.tsx';
 import { Markdown } from './Markdown.tsx';
 import { formatDuration, STATIC_TOOLS, toolDescription, ToolIcon, toolTitle } from './tools.tsx';
 
@@ -164,10 +166,13 @@ export function ToolPart({ part, directory }: { part: Part; directory: string })
     );
   }
 
-  const additions = typeof state.metadata?.additions === 'number' ? state.metadata.additions as number : undefined;
-  const deletions = typeof state.metadata?.deletions === 'number' ? state.metadata.deletions as number : undefined;
-  const editLike = ['edit', 'multiedit', 'apply_patch'].includes(tool);
+  const editLike = ['edit', 'multiedit', 'apply_patch', 'write'].includes(tool);
   const diff = typeof state.metadata?.diff === 'string' ? state.metadata.diff as string : undefined;
+  const files = editLike
+    ? (tool === 'write' ? (typeof input.content === 'string' ? [addedFile(String(input.filePath ?? input.path ?? ''), input.content)] : []) : diff ? parseUnifiedDiff(diff) : [])
+    : [];
+  const additions = files.length ? files.reduce((total, file) => total + file.additions, 0) : undefined;
+  const deletions = files.reduce((total, file) => total + file.deletions, 0);
   return (
     <div>
       <div role="button" tabIndex={0} onClick={() => setExpanded(!expanded)} className="group/tool flex gap-1.5 pr-2 pl-px py-1.5 rounded-xl items-center cursor-pointer">
@@ -180,7 +185,8 @@ export function ToolPart({ part, directory }: { part: Part; directory: string })
           <span className={cx('min-w-0 truncate', TOOL_ROW_DESCRIPTION)} title={description}>{description}</span>
           {editLike && additions !== undefined && (
             <span className="typography-meta flex-shrink-0 tabular-nums" style={{ fontSize: '0.8rem', lineHeight: 1 }}>
-              <span style={{ color: 'var(--status-success)' }}>+{additions}</span><span style={{ color: 'var(--tools-description)' }}>/</span><span style={{ color: 'var(--status-error)' }}>-{deletions ?? 0}</span>
+              <span style={{ color: 'var(--status-success)' }}>+{additions}</span>
+              {tool !== 'write' && <><span style={{ color: 'var(--tools-description)' }}>/</span><span style={{ color: 'var(--status-error)' }}>-{deletions}</span></>}
             </span>
           )}
         </div>
@@ -192,17 +198,15 @@ export function ToolPart({ part, directory }: { part: Part; directory: string })
               <div className="my-1">
                 <Scrollable className={cx('max-h-60', tool === 'bash' && 'p-0 rounded-none')}>
                   {tool === 'bash'
-                    ? <pre className="tool-input-text whitespace-pre-wrap break-words typography-code text-muted-foreground/90 m-0 p-0">{String(input.command ?? '')}</pre>
+                    ? <HighlightedCode code={String(input.command ?? '')} language="bash" className="tool-input-text whitespace-pre-wrap break-words typography-code text-muted-foreground/90 m-0 p-0" />
                     : <blockquote className="tool-input-text whitespace-pre-wrap break-words typography-meta italic text-muted-foreground/70">{stringifyInput(input)}</blockquote>}
                 </Scrollable>
               </div>
             )}
             {(state.status === 'completed' || (running && state.output)) && (
               <div>
-                {editLike && diff ? (
-                  <Scrollable className="p-1"><pre className="typography-code whitespace-pre m-0">{diff.split('\n').map((line, index) => (
-                    <div key={index} style={{ color: line.startsWith('+') && !line.startsWith('+++') ? 'var(--status-success)' : line.startsWith('-') && !line.startsWith('---') ? 'var(--status-error)' : line.startsWith('@@') ? 'var(--status-info)' : undefined }}>{line || ' '}</div>
-                  ))}</pre></Scrollable>
+                {editLike ? (
+                  <DiffView files={files} directory={directory} />
                 ) : state.output?.trim() ? (
                   tool === 'task'
                     ? <Markdown text={state.output} variant="tool" />
