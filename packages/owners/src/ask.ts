@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { OwnerDeclaration } from './declarations.ts';
+import { HireError } from './opencode.ts';
 import { incusEvidenceText, refreshWorkspace } from './owner.ts';
 import { rosterText } from './roster.ts';
 import type { Runtime } from './runtime.ts';
@@ -35,6 +36,14 @@ export function resolveOwnerId(runtime: Runtime, name: string) {
   return match.id;
 }
 
+/** An answer whose shape stayed wrong after a resend still carries its text: keep that rather than nothing. */
+export function salvageAnswer(error: unknown) {
+  const deliverable = error instanceof HireError ? error.deliverable as { answer?: unknown } | undefined : undefined;
+  if (typeof deliverable?.answer !== 'string' || !deliverable.answer.trim()) throw error;
+  const value: Answer = { answer: deliverable.answer, observed: [], inferred: [], unknown: ['The answer arrived malformed; only its main text survived, so its sources were lost.'] };
+  return { value, sessionID: (error as HireError).sessionID, cost: 0 };
+}
+
 /** One owner asks another. The answering owner runs in its own read-only sandbox with fresh evidence. */
 export async function askOwner(runtime: Runtime, fromId: string, toName: string, question: string) {
   const asker = runtime.owner(fromId);
@@ -44,7 +53,8 @@ export async function askOwner(runtime: Runtime, fromId: string, toName: string,
   await notebook.ensure(await runtime.text(`charters/${answerer.id}.md`).catch(() => `# Charter: ${answerer.id}\n`));
   const snapshot = await refreshWorkspace(runtime, answerer);
   const brief = askBrief(asker, question, await notebook.orientation(), snapshot, await incusEvidenceText(runtime, answerer), rosterText(runtime.declarations, answerer.id));
-  const result = await runtime.hire(answerer.id, { role: 'owner', model: answerer.model, directory: answerer.workspace, title: `${answerer.id}: answering ${asker.id}`, brief, schema: Answer });
+  const result = await runtime.hire(answerer.id, { role: 'owner', model: answerer.model, directory: answerer.workspace, title: `${answerer.id}: answering ${asker.id}`, brief, schema: Answer })
+    .catch(error => salvageAnswer(error));
   for (const [ownerId, kind] of [[asker.id, 'asked'], [answerer.id, 'answered']] as const) {
     const book = runtime.notebook(ownerId);
     await book.journal({ kind, note: `${asker.id} → ${answerer.id}: ${question.slice(0, 300)}`, outcome: result.value.answer.slice(0, 500) });

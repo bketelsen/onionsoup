@@ -61,6 +61,7 @@ const DECISIONS = {
   'approve-plan': ({ id }) => ['approve', id, '--no-advance'],
   'reject-plan': ({ id, reason }) => ['reject', id, '--reason', reason || 'rejected from the desk'],
   'approve-push': ({ id }) => ['approve-push', id, '--no-advance'],
+  publish: ({ id }) => ['publish', id],
   'approve-create': ({ id, withDelete }) => ['approve-create', id, ...(withDelete ? ['--with-delete'] : [])],
   'approve-delete': ({ id }) => ['approve-delete', id],
   'deny-request': ({ id, reason }) => ['deny-request', id, '--reason', reason || 'denied from the desk'],

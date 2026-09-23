@@ -174,3 +174,35 @@ test('the starter a new person begins from loads and its models belong to known 
   for (const freelancer of declarations.freelancers.values()) for (const model of freelancer.models) familyOf(declarations.families, model);
   assert.ok(declarations.workflows.get('change'));
 });
+
+test('status shows recent outcomes, and landed work that is not yet a PR waits on the person', async () => {
+  const { awaitingPublish, statusText } = await import('../src/desk.ts');
+  const now = new Date('2026-09-23T12:00:00Z');
+  const base = { owner: 'murbella', workflow: 'change', implementations: [], verdicts: [], replans: 0, hires: [], humanNotes: [], createdAt: '2026-09-23T09:30:00Z', updatedAt: '2026-09-23T09:40:00Z' };
+  const proposal = { title: 'Fix vscode sysext', goal: 'g', rationale: 'r', acceptance: ['a'], size: 'small' as const };
+  const landed = { ...base, id: 'w-1', proposal, status: 'landed' as const, branch: 'owners/w-1', landedCommit: 'a077b107d06000bd' };
+  const rebase = { ...landed, id: 'w-2', rebaseOf: { itemId: 'w-0', branch: 'owners/w-0', prUrl: 'https://github.com/x/y/pull/1', previousHead: 'abc' } };
+  const failed = { ...base, id: 'w-3', proposal: { ...proposal, title: 'Deploy action' }, status: 'failed' as const, reason: 'MessageAbortedError: Aborted' };
+  const old = { ...landed, id: 'w-4', updatedAt: '2026-09-01T00:00:00Z' };
+  const text = statusText([old, landed, rebase, failed], [], now);
+  assert.match(text, /^Open: nothing\./);
+  assert.match(text, /w-1: landed on owners\/w-1 \(a077b107d060\); not yet a PR: waiting on the person to publish it/);
+  assert.match(text, /w-3: failed: MessageAbortedError: Aborted: Deploy action/);
+  assert.doesNotMatch(text, /w-4/);
+  assert.deepEqual([landed, rebase, failed].filter(awaitingPublish).map(item => item.id), ['w-1']);
+});
+
+test('a deliverable with a list sent as a JSON string is repaired; a missing field is not invented', async () => {
+  const { parseDeliverable } = await import('../src/opencode.ts');
+  const { Answer, salvageAnswer } = await import('../src/ask.ts');
+  const { HireError } = await import('../src/opencode.ts');
+  const stringified = { answer: '[draft] firn is coupled', observed: '["AGENTS.md: firn consumes catalog.json"]', inferred: [], unknown: '[]' };
+  const repaired = parseDeliverable(Answer, stringified);
+  assert.ok(repaired.success);
+  assert.deepEqual(repaired.data, { answer: '[draft] firn is coupled', observed: ['AGENTS.md: firn consumes catalog.json'], inferred: [], unknown: [] });
+  assert.equal(parseDeliverable(Answer, { answer: 'a', observed: '["x"]' }).success, false);
+  assert.equal(parseDeliverable(Answer, { answer: 'a', observed: 'not json', inferred: [], unknown: [] }).success, false);
+  const salvaged = salvageAnswer(new HireError('deliverable_invalid', 'ses_1', { answer: 'firn is coupled', observed: 'x' }));
+  assert.equal(salvaged.value.answer, 'firn is coupled');
+  assert.throws(() => salvageAnswer(new HireError('deliverable_invalid', 'ses_1', { observed: 'x' })), /deliverable_invalid/);
+});

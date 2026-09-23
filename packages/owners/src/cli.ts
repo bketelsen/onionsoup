@@ -262,7 +262,7 @@ if (commandName === 'init') {
 }
 const runtime = await Runtime.open({ declarations: options.declarations!, state: options.state! });
 /** Commands that only read, or only record a person's decision, never take the runtime lock. */
-const LOCK_FREE = ['items', 'show', 'notebook', 'requests', 'approve', 'revise-plan', 'reject', 'resume', 'desk', 'desk-state', 'retract', 'ask', 'sync-openchamber', 'request-publish', 'propose', 'ship', 'approve-push', 'approve-create', 'approve-delete', 'deny-request'];
+const LOCK_FREE = ['items', 'show', 'notebook', 'requests', 'approve', 'publish', 'revise-plan', 'reject', 'resume', 'desk', 'desk-state', 'retract', 'ask', 'sync-openchamber', 'request-publish', 'propose', 'ship', 'approve-push', 'approve-create', 'approve-delete', 'deny-request'];
 try {
   const unlock = LOCK_FREE.includes(commandName!) ? async () => {} : await runtime.lock();
   try {

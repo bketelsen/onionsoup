@@ -1312,6 +1312,7 @@ input[type=text] { flex: 1; min-width: 120px; }
   var PENDING_ACTIONS = {
     plan: { approve: "approve-plan", refuse: "reject-plan", approveLabel: "Approve plan", refuseLabel: "Reject" },
     push: { approve: "approve-push", refuse: "", approveLabel: "Approve force-push", refuseLabel: "" },
+    publish: { approve: "publish", refuse: "", approveLabel: "Publish draft PR", refuseLabel: "" },
     create: { approve: "approve-create", refuse: "deny-request", approveLabel: "Approve create", refuseLabel: "Deny" },
     delete: { approve: "approve-delete", refuse: "deny-request", approveLabel: "Approve delete", refuseLabel: "Keep it" }
   };

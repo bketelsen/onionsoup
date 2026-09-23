@@ -1,7 +1,8 @@
 import { readFile, readdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { OwnerDeclaration } from './declarations.ts';
-import { describeAsk } from './requests.ts';
+import type { WorkItem } from './ledger.ts';
+import { describeAsk, type ResourceRequest } from './requests.ts';
 import type { Runtime } from './runtime.ts';
 
 export const DESK_LIMITS = { notes: 40, registerChars: 20_000, requests: 15 };
@@ -13,6 +14,11 @@ const NOTE_KINDS = new Set([
   'request-refused', 'instance-created', 'instance-deleted', 'follow-up', 'asked', 'answered',
 ]);
 const DONE = new Set(['landed', 'failed', 'rejected']);
+
+/** Landed on a local branch but not yet a PR: the person publishes it. Rebases update an existing PR instead. */
+export function awaitingPublish(item: WorkItem) {
+  return item.status === 'landed' && !item.publication && !item.rebaseOf;
+}
 
 interface JournalLine { at: string; kind: string; note?: string; quote?: string; outcome?: string; session?: string; workItem?: string; stage?: string }
 
@@ -60,6 +66,7 @@ export async function deskState(runtime: Runtime, query: DeskQuery) {
   const requests = (await runtime.requests.list()).filter(request => request.from === owner.id || request.to === owner.id);
   const pending = [
     ...items.filter(item => item.status === 'awaiting-plan-approval').map(item => ({ kind: 'plan', id: item.id, title: item.proposal.title, detail: item.plan?.summary ?? item.proposal.goal })),
+    ...items.filter(awaitingPublish).map(item => ({ kind: 'publish', id: item.id, title: item.proposal.title, detail: `Landed on ${item.branch}; publishing opens a draft PR.` })),
     ...items.filter(item => item.status === 'awaiting-push-approval').map(item => ({ kind: 'push', id: item.id, title: item.proposal.title, detail: item.rebaseOf?.prUrl ?? '' })),
     ...requests.filter(request => request.status === 'awaiting-create-approval').map(request => ({
       kind: 'create', id: request.id, detail: request.ask.purpose,
@@ -83,4 +90,40 @@ export async function deskState(runtime: Runtime, query: DeskQuery) {
     notes,
     registers,
   };
+}
+
+export const STATUS_LIMITS = { recentDays: 7, recentItems: 10 };
+
+/** Where a finished item ended up, in words an owner can repeat to the person. */
+function outcome(item: WorkItem) {
+  if (item.status === 'landed') {
+    if (item.publication) return `landed; PR ${item.publication.url} (${item.publication.state})`;
+    if (item.rebaseOf) return `landed; updated ${item.rebaseOf.prUrl}`;
+    return `landed on ${item.branch} (${item.landedCommit?.slice(0, 12)}); not yet a PR: waiting on the person to publish it`;
+  }
+  return `${item.status}${item.reason ? `: ${item.reason}` : ''}`;
+}
+
+/** An owner's work and requests: everything open, then what finished recently and how. */
+export function statusText(items: readonly WorkItem[], requests: readonly ResourceRequest[], now = new Date()) {
+  const since = now.getTime() - STATUS_LIMITS.recentDays * 24 * 60 * 60 * 1000;
+  const open = items.filter(item => !DONE.has(item.status));
+  const recent = items.filter(item => DONE.has(item.status) && Date.parse(item.updatedAt) >= since).slice(-STATUS_LIMITS.recentItems).reverse();
+  const live = requests.filter(request => !['deleted', 'declined', 'denied', 'failed'].includes(request.status));
+  const sections = [
+    open.length || live.length ? ['Open:', ...open.map(item => `- work ${item.id}: ${item.status}: ${item.proposal.title}`), ...live.map(request => `- request ${request.id}: ${request.status}: ${request.from} → ${request.to} ${describeAsk(request.ask)}`)] : ['Open: nothing.'],
+    recent.length ? [`Finished in the last ${STATUS_LIMITS.recentDays} days:`, ...recent.map(item => `- work ${item.id}: ${outcome(item)}: ${item.proposal.title}`)] : [],
+  ];
+  return sections.filter(section => section.length).map(section => section.join('\n')).join('\n\n');
+}
+
+/** One work item in full, for an owner asking about it by id. */
+export function itemText(item: WorkItem) {
+  const lines = [`${item.id}: ${item.proposal.title}`, `Status: ${DONE.has(item.status) ? outcome(item) : item.status}`, `Opened ${item.createdAt}; updated ${item.updatedAt}`, `Goal: ${item.proposal.goal}`];
+  if (item.plan) lines.push(`Plan: ${item.plan.summary}`, ...item.plan.steps.map((step, index) => `  ${index + 1}. ${step.description}`));
+  if (item.planApproval) lines.push(`Plan approved by ${item.planApproval.by} at ${item.planApproval.at}`);
+  item.implementations.forEach((implementation, index) => lines.push(`Implementation ${index + 1}: ${implementation.report.summary}`, `  verify: ${implementation.verification.map(result => `${result.command.slice(0, 60)}=${result.exitCode}`).join(', ')}`));
+  item.verdicts.forEach((verdict, index) => lines.push(`Review ${index + 1}: ${verdict.decision}: ${verdict.summary}`));
+  lines.push(`Hires: ${item.hires.map(hire => `${hire.stage} ${hire.model} ${hire.outcome}${hire.error ? ` (${hire.error.slice(0, 120)})` : ''}`).join('; ') || 'none'}`);
+  return lines.join('\n');
 }

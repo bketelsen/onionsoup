@@ -5,11 +5,11 @@ import { hasIncus, type OwnerDeclaration, type Persona } from './declarations.ts
 import { askOwner, formatAnswer } from './ask.ts';
 import { requestPublish } from './brokering.ts';
 import { proposeDeskChanges } from './desk-changes.ts';
+import { itemText, statusText } from './desk.ts';
 import { hasShipGrant, shipEngine } from './ship.ts';
 import { expandHome, readEnvFile, truenasMcpEnvironment } from './truenas.ts';
 import { pickModel } from './families.ts';
 import type { Notebook } from './notebook.ts';
-import { describeAsk } from './requests.ts';
 import { configDirectory, stateDirectory } from './paths.ts';
 import { rosterText } from './roster.ts';
 import { Runtime } from './runtime.ts';
@@ -167,13 +167,9 @@ const server: Plugin = async (input, options) => {
   }
 
   async function workSummary(ownerId: string) {
-    const items = (await runtime.ledger.list()).filter(item => item.owner === ownerId && !['landed', 'failed', 'rejected'].includes(item.status));
-    const requests = (await runtime.requests.list()).filter(request => (request.from === ownerId || request.to === ownerId) && !['deleted', 'declined', 'denied', 'failed'].includes(request.status));
-    const lines = [
-      ...items.map(item => `- work ${item.id}: ${item.status}: ${item.proposal.title}`),
-      ...requests.map(request => `- request ${request.id}: ${request.status}: ${request.from} → ${request.to} ${describeAsk(request.ask)}`),
-    ];
-    return lines.join('\n') || '(nothing open)';
+    const items = (await runtime.ledger.list()).filter(item => item.owner === ownerId);
+    const requests = (await runtime.requests.list()).filter(request => request.from === ownerId || request.to === ownerId);
+    return statusText(items, requests);
   }
 
   /** Quotes already noted as decisions in this chat, by the owner or an earlier watch. */
@@ -319,10 +315,14 @@ const server: Plugin = async (input, options) => {
 
     tool: {
       onionsoup_status: tool({
-        description: 'Your open work items and requests, including anything waiting on the person.',
-        args: {},
-        async execute(_args, context) {
-          return workSummary(requireOwner(context.agent).id);
+        description: 'Your open work items and requests (including anything waiting on the person), and work that finished recently with its outcome. Pass a work item id to see that item in full.',
+        args: { item: tool.schema.string().optional().describe('A work item id, e.g. w-20260923-31a48a') },
+        async execute(args, context) {
+          const owner = requireOwner(context.agent);
+          if (!args.item) return workSummary(owner.id);
+          const item = await runtime.ledger.get(args.item).catch(() => undefined);
+          if (!item || item.owner !== owner.id) return `No work item ${args.item} of yours. Your status:\n\n${await workSummary(owner.id)}`;
+          return itemText(item);
         },
       }),
       onionsoup_notebook: tool({

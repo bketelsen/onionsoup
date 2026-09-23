@@ -215,19 +215,31 @@ export class Freelancers {
     try {
       // Synchronous on purpose: opencode 1.18.32 cannot list a session's messages once a prompt carried
       // a json_schema format ("Expected OutputFormatJsonSchema"), so the reply must come from this call.
-      const reply = await client.session.prompt({
-        sessionID,
-        agent: `onionsoup-${request.role}`,
-        model: { providerID: providerID!, modelID: rest.join('/') },
-        format: { type: 'json_schema', schema: z.toJSONSchema(request.schema) as Record<string, unknown>, retryCount: 2 },
-        parts: [{ type: 'text', text: request.notesFile ? `${request.brief}\n\n${notesInstruction(request.notesFile)}` : request.brief }],
-      });
-      const info = reply.data?.info as AssistantInfo | undefined;
-      if (!info) throw new HireError(`no_assistant_reply: ${JSON.stringify(reply.error).slice(0, 300)}`, sessionID);
-      if (info.error) throw new HireError(`${info.error.name ?? 'error'}: ${info.error.data?.message ?? ''}`.trim(), sessionID);
-      const parsed = request.schema.safeParse(info.structured);
-      if (!parsed.success) throw new HireError(`deliverable_invalid: ${parsed.error.message.slice(0, 500)}`, sessionID);
-      return { value: parsed.data, sessionID, cost: info.cost ?? 0, startedAt, finishedAt: new Date().toISOString() };
+      const prompt = async (text: string) => {
+        const reply = await client.session.prompt({
+          sessionID,
+          agent: `onionsoup-${request.role}`,
+          model: { providerID: providerID!, modelID: rest.join('/') },
+          format: { type: 'json_schema', schema: z.toJSONSchema(request.schema) as Record<string, unknown>, retryCount: 2 },
+          parts: [{ type: 'text', text }],
+        });
+        const info = reply.data?.info as AssistantInfo | undefined;
+        if (!info) throw new HireError(`no_assistant_reply: ${JSON.stringify(reply.error).slice(0, 300)}`, sessionID);
+        if (info.error) throw new HireError(`${info.error.name ?? 'error'}: ${info.error.data?.message ?? ''}`.trim(), sessionID);
+        return info;
+      };
+      const first = await prompt(request.notesFile ? `${request.brief}\n\n${notesInstruction(request.notesFile)}` : request.brief);
+      let cost = first.cost ?? 0;
+      let parsed = parseDeliverable(request.schema, first.structured);
+      if (!parsed.success) {
+        // The work is done; only the shape is wrong. Ask once, in the same session, for the corrected deliverable.
+        log(`  … ${request.title}: deliverable did not match its schema; asking ${request.model} to resend it`);
+        const second = await prompt(resendInstruction(parsed.error));
+        cost += second.cost ?? 0;
+        parsed = parseDeliverable(request.schema, second.structured);
+        if (!parsed.success) throw new HireError(`deliverable_invalid: ${parsed.error.message.slice(0, 500)}`, sessionID, second.structured ?? first.structured);
+      }
+      return { value: parsed.data, sessionID, cost, startedAt, finishedAt: new Date().toISOString() };
     } finally {
       clearInterval(heartbeat);
       clearTimeout(deadline);
@@ -236,7 +248,39 @@ export class Freelancers {
 }
 
 export class HireError extends Error {
-  constructor(message: string, readonly sessionID: string) {
+  constructor(message: string, readonly sessionID: string, readonly deliverable?: unknown) {
     super(message);
   }
+}
+
+/**
+ * Models sometimes send a list or object field as a string holding its JSON ("[\"a\", \"b\"]"). Where the schema
+ * rejected a string for a list or object, parse that string back; nothing the schema accepted is touched.
+ */
+export function repairDeliverable(value: unknown, issues: readonly z.core.$ZodIssue[]): unknown {
+  if (!value || typeof value !== 'object') return value;
+  const repaired = structuredClone(value) as Record<PropertyKey, unknown>;
+  for (const issue of issues) {
+    if (issue.code !== 'invalid_type' || !['array', 'object'].includes(issue.expected) || issue.path.length === 0) continue;
+    const parent = issue.path.slice(0, -1).reduce<unknown>((node, key) => (node as Record<PropertyKey, unknown> | undefined)?.[key as PropertyKey], repaired) as Record<PropertyKey, unknown> | undefined;
+    const key = issue.path.at(-1) as PropertyKey;
+    const field = parent?.[key];
+    if (typeof field !== 'string') continue;
+    try {
+      const decoded: unknown = JSON.parse(field);
+      if ((issue.expected === 'array') === Array.isArray(decoded) && decoded !== null && typeof decoded === 'object') parent![key] = decoded;
+    } catch {
+      // Not JSON: leave it for the schema to reject.
+    }
+  }
+  return repaired;
+}
+
+export function parseDeliverable<T>(schema: z.ZodType<T>, value: unknown) {
+  const parsed = schema.safeParse(value);
+  return parsed.success ? parsed : schema.safeParse(repairDeliverable(value, parsed.error.issues));
+}
+
+function resendInstruction(error: z.ZodError) {
+  return `Your structured output did not match the required schema:\n${z.prettifyError(error)}\n\nSend the complete structured output again with these problems corrected. Lists must be JSON arrays (not strings containing JSON), and every required field must be present. Do not redo the work.`;
 }

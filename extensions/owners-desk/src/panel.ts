@@ -2,7 +2,7 @@ import { connectHost, type HostReadyContext } from '@openchamber/sdk';
 import { applyHostReady } from '@openchamber/sdk/ui';
 
 // Types mirror `owners desk-state` (packages/owners/src/desk.ts).
-interface Pending { kind: 'plan' | 'push' | 'create' | 'delete'; id: string; title: string; detail: string }
+interface Pending { kind: 'plan' | 'push' | 'publish' | 'create' | 'delete'; id: string; title: string; detail: string }
 interface Note { at: string; kind: string; note?: string; quote?: string; outcome?: string; stage?: string; retracted: boolean }
 interface DeskState {
   owners: { id: string; name: string; title: string }[];
@@ -157,6 +157,7 @@ function renderWho(state: DeskState, container: HTMLElement) {
 const PENDING_ACTIONS: Record<Pending['kind'], { approve: string; refuse: string; approveLabel: string; refuseLabel: string }> = {
   plan: { approve: 'approve-plan', refuse: 'reject-plan', approveLabel: 'Approve plan', refuseLabel: 'Reject' },
   push: { approve: 'approve-push', refuse: '', approveLabel: 'Approve force-push', refuseLabel: '' },
+  publish: { approve: 'publish', refuse: '', approveLabel: 'Publish draft PR', refuseLabel: '' },
   create: { approve: 'approve-create', refuse: 'deny-request', approveLabel: 'Approve create', refuseLabel: 'Deny' },
   delete: { approve: 'approve-delete', refuse: 'deny-request', approveLabel: 'Approve delete', refuseLabel: 'Keep it' },
 };

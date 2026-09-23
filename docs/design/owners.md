@@ -76,7 +76,8 @@ Freelancer profiles (`freelancers/*.yaml`) are crafts with a rubric and allowed 
 (`workflows/change.yaml`) is: plan (the owner answers the planner's questions) → the person approves or sends
 it back with notes → implement in a worktree → host-run verification → review by a model outside the
 implementer's family (checked from recorded providers) → revise or replan within limits → land as a commit on
-`owners/<item>` → `publish` opens a draft PR. The `maintain-prs` duty keeps published PRs mergeable and green:
+`owners/<item>` → `publish` opens a draft PR (landed but unpublished work waits on the person in the Desk and in
+the owner's status, which also reports recent outcomes). The `maintain-prs` duty keeps published PRs mergeable and green:
 a conflict wakes the owner, which decides and briefs the implementer (the force-push waits for approval), and
 failing CI on a new head commit wakes the owner once to decide fix (a work item at the plan gate), flaky, or person.
 An owner with a `deploy` section and a `ship` grant ships its repository where it runs: fast-forward, verify in
@@ -130,7 +131,9 @@ host code snapshots evidence read-only, and effects happen only in host code aft
 - The notebook loop works: after rejections were distilled, the next survey re-proposed the rejected idea in
   the corrected form, skipped the rejected busywork and did not duplicate landed work.
 - Deterministic checks first, then the owner: the rebase flow and app updates only wake a model when needed.
-- opencode details that bit: structured-output sessions cannot be listed back over HTTP (1.18.32); edit
+- opencode details that bit: structured-output sessions cannot be listed back over HTTP (1.18.32), and models
+  sometimes send a list as a JSON string, so a deliverable is repaired where safe and otherwise asked for once more
+  in the same session before it counts as failed; edit
   permissions match the path relative to the enclosing git worktree; OpenChamber runs extension services on Bun
   and its opencode with a server password that must not leak into sandboxed servers.
 - TrueNAS details that bit: `truenas_app_get` answers with a list, and an app is `STOPPED` between its old and
