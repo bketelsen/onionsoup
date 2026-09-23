@@ -1,5 +1,5 @@
 import { useRef, useState, type KeyboardEvent } from 'react';
-import { RiSendPlane2Line } from '@remixicon/react';
+import { RiSendPlane2Line, RiShieldCheckLine, RiShieldUserLine } from '@remixicon/react';
 import { cx } from '../components/ui.tsx';
 
 // The composer's look from OpenChamber (ChatInput.tsx, ComposerActionButtons.tsx, StopIcon.tsx; MIT, see
@@ -16,7 +16,9 @@ function StopIcon({ className }: { className?: string }) {
 
 const ICON_BUTTON = 'flex h-6 w-6 cursor-pointer items-center justify-center text-foreground transition-none outline-none focus:outline-none flex-shrink-0 disabled:cursor-not-allowed';
 
-export function Composer({ agent, busy, onSend, onStop }: { agent: string; busy: boolean; onSend: (text: string) => Promise<void>; onStop: () => void }) {
+export function Composer({ agent, busy, onSend, onStop, autoAccept, onToggleAutoAccept }: {
+  agent: string; busy: boolean; onSend: (text: string) => Promise<void>; onStop: () => void; autoAccept: boolean; onToggleAutoAccept: () => void;
+}) {
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const area = useRef<HTMLTextAreaElement>(null);
@@ -54,7 +56,16 @@ export function Composer({ agent, busy, onSend, onStop }: { agent: string; busy:
           <textarea ref={area} value={text} rows={1} placeholder={`Message ${agent}…`} onChange={event => { setText(event.target.value); grow(); }} onKeyDown={onKeyDown}
             className="bg-transparent outline-none resize-none w-full min-h-[52px] px-3 pt-4 pb-2 text-[length:var(--text-ui-label)] text-[var(--surface-elevated-foreground,var(--foreground))] placeholder:text-[var(--surface-muted-foreground)]" />
           <div data-chat-input-footer="true" className="bg-transparent flex-shrink-0 px-2.5 py-1.5 flex items-center justify-between gap-x-1.5">
-            <span className="typography-micro text-muted-foreground/70">{agent}</span>
+            <div className="flex items-center gap-x-1.5">
+              {/* OpenChamber's auto-accept toggle (PermissionAutoAcceptButton.tsx): shield-check when on, shield-user when off. */}
+              <button type="button" onClick={onToggleAutoAccept} onMouseDown={event => event.preventDefault()}
+                className={cx(ICON_BUTTON, 'rounded-md hover:bg-transparent')}
+                title={autoAccept ? 'Permissions in this chat are allowed automatically. Click to ask again.' : 'Permissions in this chat ask you. Click to allow them automatically.'}
+                aria-label={autoAccept ? 'Stop auto-accepting permissions' : 'Auto-accept permissions'}>
+                {autoAccept ? <RiShieldCheckLine className="h-[18px] w-[18px]" style={{ color: 'var(--status-info)' }} /> : <RiShieldUserLine className="h-[18px] w-[18px]" />}
+              </button>
+              <span className="typography-micro text-muted-foreground/70">{agent}{autoAccept && <span style={{ color: 'var(--status-info)' }}> · auto-accept</span>}</span>
+            </div>
             <div className="flex items-center gap-x-3">
               {busy && <button type="button" className={cx(ICON_BUTTON, 'text-[var(--status-error)] hover:text-[var(--status-error)]')} title="Stop" onClick={onStop}><StopIcon className="h-5 w-5" /></button>}
               <button type="submit" className={cx(ICON_BUTTON, canSend ? 'text-primary hover:text-primary' : 'opacity-30')} disabled={!canSend} title="Send">

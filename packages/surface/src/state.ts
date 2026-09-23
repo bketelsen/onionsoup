@@ -149,6 +149,40 @@ export class SurfaceState {
     await notebook.commit('retraction').catch(() => undefined);
   }
 
+  /**
+   * Answer "allow once" to pending permission prompts in chats the person set to auto-accept, including sub-chats of
+   * such a chat (a subagent's session inherits its parent's setting). Returns how many were answered.
+   */
+  async autoAnswer(directory: string) {
+    const { autoAccept } = await this.settings.read();
+    if (!Object.keys(autoAccept).length) return 0;
+    const pending = await this.opencode.permissions(directory);
+    if (!pending.length) return 0;
+    const sessions = await this.opencode.listSessions(directory).catch(() => []) as { id: string; parentID?: string }[];
+    const parent = new Map(sessions.map(session => [session.id, session.parentID]));
+    const accepted = (sessionID: string) => {
+      for (let current: string | undefined = sessionID, depth = 0; current && depth < 10; current = parent.get(current), depth++) {
+        if (autoAccept[current]) return true;
+      }
+      return false;
+    };
+    let answered = 0;
+    for (const permission of pending.filter(entry => accepted(entry.sessionID))) {
+      await this.opencode.replyPermission(directory, permission.id, 'once');
+      answered++;
+    }
+    return answered;
+  }
+
+  async autoAnswerAll() {
+    const { autoAccept } = await this.settings.read();
+    if (!Object.keys(autoAccept).length) return;
+    for (const owner of this.chatOwners()) {
+      const directory = await this.directory(owner.id).catch(() => undefined);
+      if (directory) await this.autoAnswer(directory);
+    }
+  }
+
   /** A cheap fingerprint of engine state, so the event stream can say "onionsoup changed" only when it did. */
   async fingerprint() {
     const items = await this.runtime.ledger.list();

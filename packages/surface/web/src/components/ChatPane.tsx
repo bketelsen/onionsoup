@@ -46,8 +46,8 @@ function AssistantMessage({ message, directory, streaming }: { message: Message;
 }
 
 /** One chat with an owner, drawn like OpenChamber's: bubbles for the person, a timeline of parts for the owner. */
-export function ChatPane({ owner, sessionId, directory, pending, onPendingDone }: {
-  owner: OwnerSummary; sessionId: string; directory: string; pending: InboxEntry[]; onPendingDone: () => void;
+export function ChatPane({ owner, sessionId, directory, pending, onPendingDone, autoAccept, onToggleAutoAccept }: {
+  owner: OwnerSummary; sessionId: string; directory: string; pending: InboxEntry[]; onPendingDone: () => void; autoAccept: boolean; onToggleAutoAccept: () => void;
 }) {
   const chat = useChat(owner.id, sessionId, directory);
   const scroller = useRef<HTMLDivElement>(null);
@@ -117,7 +117,7 @@ export function ChatPane({ owner, sessionId, directory, pending, onPendingDone }
               </div>
             </div>
           )}
-          <Composer agent={owner.name} busy={chat.busy} onSend={chat.send} onStop={() => void chat.abort()} />
+          <Composer agent={owner.name} busy={chat.busy} onSend={chat.send} onStop={() => void chat.abort()} autoAccept={autoAccept} onToggleAutoAccept={onToggleAutoAccept} />
         </div>
       </div>
     </div>

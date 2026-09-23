@@ -72,7 +72,9 @@ Tick items as they land, with the commit.
 - [x] A real diff view for edits (edit, apply_patch, write); highlighted bash commands in tool rows
 - [x] Reasoning parts (collapsed), tool parts (one line, expandable output; renderers for bash, read, edit/write
       diffs, grep/glob, onionsoup tools)
-- [x] Permission cards (once / always / reject) and question cards inline
+- [x] Permission cards (once / always / reject) and question cards inline (verified with a real prompt)
+- [x] Auto-accept per chat (OpenChamber's shield toggle): kept by the server, so it answers prompts even with no
+      browser open; sub-chats inherit it; switching it on answers prompts already waiting
 - [x] Composer: textarea, send, stop; the owner's agent is fixed per chat
 - [x] Threads per owner: list, new; live across reconnects (reload on reconnect)
 - [x] Rename threads (double-click in the list)

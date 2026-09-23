@@ -9,6 +9,7 @@ import { SurfaceState, surfaceServer, type OpencodeApi } from '@onionsoup/surfac
 
 function fakeOpencode() {
   const calls: unknown[][] = [];
+  const answeredPermissions = new Set<string>();
   const api: OpencodeApi = {
     listSessions: async directory => [{ id: 'ses_1', title: 'hello', directory }],
     createSession: async (directory, title, agent) => { calls.push(['create', directory, title, agent]); return { id: 'ses_2', title }; },
@@ -18,8 +19,11 @@ function fakeOpencode() {
     abort: async () => {},
     status: async () => ({}),
     health: async () => ({ ok: true }),
-    permissions: async directory => directory.endsWith('bellonda') ? [{ id: 'per_1', sessionID: 'ses_1', permission: 'edit', patterns: ['docs/x.md'], metadata: {}, always: [] }] : [],
-    replyPermission: async (directory, requestID, reply) => { calls.push(['permission', directory, requestID, reply]); },
+    permissions: async directory => directory.endsWith('bellonda') ? [
+      { id: 'per_1', sessionID: 'ses_1', permission: 'edit', patterns: ['docs/x.md'], metadata: {}, always: [] },
+      { id: 'per_2', sessionID: 'ses_other', permission: 'bash', patterns: ['rm -rf x'], metadata: {}, always: [] },
+    ].filter(entry => !answeredPermissions.has(entry.id)) : [],
+    replyPermission: async (directory, requestID, reply) => { calls.push(['permission', directory, requestID, reply]); answeredPermissions.add(requestID); },
     questions: async () => [],
     replyQuestion: async () => {},
     rejectQuestion: async () => {},
@@ -49,10 +53,10 @@ test('the surface lists owners with what waits on the person, and chat permissio
     const { status, body } = await call('GET', '/api/state');
     assert.equal(status, 200);
     const inbox = body.inbox as { kind: string; owner: string; title: string }[];
-    assert.deepEqual(inbox.map(entry => [entry.kind, entry.owner]).sort(), [['permission', 'bellonda'], ['plan', 'clippy']]);
+    assert.deepEqual(inbox.map(entry => [entry.kind, entry.owner]).sort(), [['permission', 'bellonda'], ['permission', 'bellonda'], ['plan', 'clippy']]);
     const owners = body.owners as { id: string; chat: boolean; waiting: number }[];
     assert.equal(owners.find(owner => owner.id === 'clippy')?.chat, false);
-    assert.equal(owners.find(owner => owner.id === 'bellonda')?.waiting, 1);
+    assert.equal(owners.find(owner => owner.id === 'bellonda')?.waiting, 2);
   } finally {
     server.close();
   }
@@ -94,6 +98,21 @@ test('a chat can be renamed through the surface', async () => {
     const renamed = await call('PATCH', '/api/owners/bellonda/sessions/ses_1', { title: 'Wiki publishing' });
     assert.deepEqual(renamed.body, { id: 'ses_1', title: 'Wiki publishing' });
     assert.equal((await call('PATCH', '/api/owners/bellonda/sessions/ses_1', { title: '  ' })).status, 400);
+  } finally {
+    server.close();
+  }
+});
+
+test('auto-accept answers the prompts of that chat and no other, including ones already waiting', async () => {
+  const { server, call, calls } = await start();
+  try {
+    assert.equal((await call('PUT', '/api/owners/bellonda/sessions/ses_1/auto-accept', { enabled: 'yes' })).status, 400);
+    const enabled = await call('PUT', '/api/owners/bellonda/sessions/ses_1/auto-accept', { enabled: true });
+    assert.deepEqual(enabled.body, { enabled: true, answered: 1 });
+    assert.deepEqual(calls.filter(entry => entry[0] === 'permission'), [['permission', '/desks/bellonda', 'per_1', 'once']]);
+    assert.deepEqual((await call('GET', '/api/owners/bellonda/sessions')).body.autoAccept, { ses_1: true });
+    await call('PUT', '/api/owners/bellonda/sessions/ses_1/auto-accept', { enabled: false });
+    assert.deepEqual((await call('GET', '/api/owners/bellonda/sessions')).body.autoAccept, {});
   } finally {
     server.close();
   }

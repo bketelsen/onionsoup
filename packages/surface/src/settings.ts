@@ -1,8 +1,11 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
-/** The person's surface preferences (owner order), kept by the server so every browser sees the same. */
-export interface SurfaceSettings { ownerOrder: string[] }
+/**
+ * The person's surface preferences, kept by the server so every browser sees the same: the owner order, and the
+ * chats whose permission prompts are answered "allow once" automatically (the person's choice, as in OpenChamber).
+ */
+export interface SurfaceSettings { ownerOrder: string[]; autoAccept: Record<string, boolean> }
 
 export class SettingsStore {
   constructor(private readonly file: string) {}
@@ -10,7 +13,8 @@ export class SettingsStore {
   async read(): Promise<SurfaceSettings> {
     const text = await readFile(this.file, 'utf8').catch(() => '{}');
     const parsed = JSON.parse(text) as Partial<SurfaceSettings>;
-    return { ownerOrder: Array.isArray(parsed.ownerOrder) ? parsed.ownerOrder.filter(id => typeof id === 'string') : [] };
+    const autoAccept = parsed.autoAccept && typeof parsed.autoAccept === 'object' ? Object.fromEntries(Object.entries(parsed.autoAccept).filter(([, on]) => on === true)) : {};
+    return { ownerOrder: Array.isArray(parsed.ownerOrder) ? parsed.ownerOrder.filter(id => typeof id === 'string') : [], autoAccept };
   }
 
   async update(change: Partial<SurfaceSettings>) {

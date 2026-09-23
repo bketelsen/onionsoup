@@ -22,6 +22,7 @@ export function OwnerView({ owner, inbox, sessionId, refresh }: { owner: OwnerSu
   const [busySessions, setBusySessions] = useState<Record<string, boolean>>({});
   const [directory, setDirectory] = useState('');
   const [sessionsError, setSessionsError] = useState('');
+  const [autoAccept, setAutoAccept] = useState<Record<string, boolean>>({});
   const [notebookOpen, setNotebookOpen] = useState(false);
   const [showEngine, setShowEngine] = useState(false);
   const [renaming, setRenaming] = useState<string>();
@@ -31,8 +32,9 @@ export function OwnerView({ owner, inbox, sessionId, refresh }: { owner: OwnerSu
   const loadDesk = useCallback(() => api<DeskState>(`/api/owners/${owner.id}`).then(setDesk, () => undefined), [owner.id]);
   const loadSessions = useCallback(() => {
     if (!owner.chat) return Promise.resolve();
-    return api<{ directory: string; sessions: Session[]; status: Record<string, { type: string }> }>(`/api/owners/${owner.id}/sessions`).then(result => {
+    return api<{ directory: string; sessions: Session[]; status: Record<string, { type: string }>; autoAccept: Record<string, boolean> }>(`/api/owners/${owner.id}/sessions`).then(result => {
       setDirectory(result.directory);
+      setAutoAccept(result.autoAccept ?? {});
       setSessions(result.sessions.filter(session => !session.parentID).sort((left, right) => right.time.updated - left.time.updated));
       setBusySessions(Object.fromEntries(Object.entries(result.status).map(([id, status]) => [id, status.type === 'busy' || status.type === 'retry'])));
       setSessionsError('');
@@ -91,7 +93,13 @@ export function OwnerView({ owner, inbox, sessionId, refresh }: { owner: OwnerSu
       <div className="flex-1 flex min-h-0">
         <main className="flex-1 flex flex-col min-w-0 min-h-0">
           {!owner.chat && <div className="p-6"><Empty>{owner.name} has no persona, so there is no one to chat with. Its work and notebook are on the right.</Empty></div>}
-          {owner.chat && current && directory && <ChatPane key={current} owner={owner} sessionId={current} directory={directory} pending={waiting.filter(entry => entry.sessionID === current && (entry.kind === 'permission' || entry.kind === 'question'))} onPendingDone={refresh} />}
+          {owner.chat && current && directory && <ChatPane key={current} owner={owner} sessionId={current} directory={directory} pending={waiting.filter(entry => entry.sessionID === current && (entry.kind === 'permission' || entry.kind === 'question'))} onPendingDone={refresh}
+            autoAccept={Boolean(autoAccept[current])}
+            onToggleAutoAccept={() => {
+              const enabled = !autoAccept[current];
+              setAutoAccept(previous => ({ ...previous, [current]: enabled }));
+              void api(`/api/owners/${owner.id}/sessions/${current}/auto-accept`, { method: 'PUT', body: { enabled } }).then(refresh, () => void loadSessions());
+            }} />}
           {owner.chat && !current && (
             <div className="flex-1 flex flex-col items-center justify-center gap-3 text-muted-foreground">
               <OwnerIcon icon={owner.icon} className="size-8" />

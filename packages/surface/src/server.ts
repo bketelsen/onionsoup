@@ -105,8 +105,19 @@ export function surfaceServer(state: SurfaceState, options: { webRoot: string; b
     }),
     route('GET', '/api/owners/:owner/sessions', async params => {
       const { directory } = await owned(params.owner!);
-      const [sessions, status] = await Promise.all([state.opencode.listSessions(directory), state.opencode.status(directory).catch(() => ({}))]);
-      return { directory, sessions, status };
+      const [sessions, status, settings] = await Promise.all([state.opencode.listSessions(directory), state.opencode.status(directory).catch(() => ({})), state.settings.read()]);
+      return { directory, sessions, status, autoAccept: settings.autoAccept };
+    }),
+    route('PUT', '/api/owners/:owner/sessions/:session/auto-accept', async (params, body) => {
+      const { directory } = await owned(params.owner!);
+      const enabled = (await body()).enabled;
+      if (typeof enabled !== 'boolean') throw new HttpError(400, 'enabled must be true or false');
+      const current = (await state.settings.read()).autoAccept;
+      const { [params.session!]: _previous, ...others } = current;
+      await state.settings.update({ autoAccept: enabled ? { ...others, [params.session!]: true } : others });
+      const answered = enabled ? await state.autoAnswer(directory) : 0;
+      broadcast('onionsoup', { reason: 'auto-accept' });
+      return { enabled, answered };
     }),
     route('POST', '/api/owners/:owner/sessions', async (params, body) => {
       const { directory, agent } = await owned(params.owner!);
@@ -195,7 +206,12 @@ export function surfaceServer(state: SurfaceState, options: { webRoot: string; b
 
   /** Relay opencode's events and announce engine changes, until the signal aborts. */
   const pump = (signal: AbortSignal) => {
-    void state.opencode.events(event => broadcast('opencode', event), signal);
+    void state.opencode.events(event => {
+      broadcast('opencode', event);
+      // A prompt in a chat the person set to auto-accept is answered at once.
+      const { directory, payload } = event as { directory?: string; payload?: { type?: string } };
+      if (payload?.type === 'permission.asked' && directory) void state.autoAnswer(directory).catch(() => undefined);
+    }, signal);
     let last = '';
     let lastReload = Date.now();
     const poll = setInterval(() => {
@@ -204,6 +220,8 @@ export function surfaceServer(state: SurfaceState, options: { webRoot: string; b
           lastReload = Date.now();
           await state.runtime.reloadDeclarations().catch(() => undefined);
         }
+        // Catch prompts whose event was missed (a reconnect, a restart).
+        await state.autoAnswerAll().catch(() => undefined);
         const fingerprint = await state.fingerprint().catch(() => last);
         if (fingerprint !== last) {
           if (last) broadcast('onionsoup', { reason: 'engine' });
