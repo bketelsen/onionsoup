@@ -6,8 +6,8 @@ what they learn, talk to each other, and get work done by hiring **freelancers**
 reviewers) under rules the runtime enforces: your approval for plans and destructive actions, verification by
 host code in a sandbox, and review by a different model family.
 
-You talk to owners in [OpenChamber](https://github.com/openchamber/openchamber) or the opencode TUI: start a
-chat with Bellonda, keeper of the homelab wiki, and she answers from her notebook, asks the owner of the NAS
+You talk to owners in the onionsoup **surface** (a web app built on opencode), or in
+[OpenChamber](https://github.com/openchamber/openchamber) or the opencode TUI: start a chat with Bellonda, keeper of the homelab wiki, and she answers from her notebook, asks the owner of the NAS
 when a question is his, and turns your decisions into reviewed changes.
 
 ## Quick start
@@ -17,6 +17,7 @@ npm ci
 npm run owners -- init                 # your owners live in ~/.config/onionsoup, not in this repository
 npm run owners -- sync-openchamber     # each owner gets a desk and an OpenChamber project
 npm run owners -- daemon               # always on: duties, requests, work items
+npm run surface:build && npm run surface   # owners, chats and your inbox at http://127.0.0.1:4747
 ```
 
 Register the plugin so owners become opencode agents (`~/.config/opencode/opencode.json`):
@@ -32,9 +33,10 @@ Then read [creating your own owners and tools](docs/extending.md).
 | Path | What it is |
 | --- | --- |
 | `packages/owners` | The engine: runtime, CLI (`npm run owners -- <command>`), opencode plugin, daemon |
+| `packages/surface` | The surface: a server over opencode and the engine, and a web UI for owners, their chats and one inbox |
 | `extensions/owners-desk` | The Owner's Desk: an OpenChamber panel for an owner's identity, gates, activity and notebook |
 | `examples/starter` | The configuration `owners init` copies: one example owner, freelancers, a workflow, rubrics |
-| `deploy/onionsoup-owners.service` | A systemd user unit for the daemon |
+| `deploy/` | systemd user units for the daemon and the surface |
 | `docs/` | [Design](docs/design/owners.md), [extending](docs/extending.md), [gaps](docs/gaps.md) |
 
 ## Commands

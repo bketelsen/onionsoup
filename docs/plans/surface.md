@@ -76,17 +76,22 @@ Tick items as they land, with the commit.
 - [x] Composer: textarea, send, stop; the owner's agent is fixed per chat
 - [x] Threads per owner: list, new; live across reconnects (reload on reconnect)
 - [x] Rename threads (double-click in the list)
-- [ ] Owner-to-owner asks and hires shown as links in the timeline, not as loose sessions
+- [x] Owner-to-owner asks and hires shown in the timeline (answers expand, work items link), engine sessions folded away
 
 ### 5. Integration
 - [x] Run it: `npm run surface`; `deploy/onionsoup-surface.service`
-- [ ] Docs: README, docs/extending.md (running the surface), design doc section
-- [ ] Decide what happens to `sync-openchamber` and the Owner's Desk extension (keep until the surface replaces them)
+- [x] Docs: README, docs/extending.md (running the surface), design doc section
+- [x] Decided: keep `sync-openchamber` and the Owner's Desk while OpenChamber is still in use; they cost nothing when it is not. Revisit after a few weeks of daily use of the surface.
 
 ### 6. Polish (after daily use)
 - [x] Unread and running indicators; notifications for new inbox items
 - [x] Keyboard navigation (Alt+↑/↓ owners, Alt+I inbox, / message)
 - [x] Very long chats open on their latest 30 turns; long outputs and diffs scroll in capped boxes
+
+### 7. Next (from daily use)
+- [ ] Merge to `main` and install `deploy/onionsoup-surface.service` once the person prefers it to OpenChamber
+- [ ] UI tests for the chat's event handling (useChat) and the diff parser
+- [ ] Decisions on the work item page itself (approve, send back, publish) instead of only from the inbox
 
 ## Notes for whoever resumes
 

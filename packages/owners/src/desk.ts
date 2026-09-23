@@ -11,7 +11,8 @@ const REGISTERS = ['MAP', 'WISDOM', 'decisions', 'open-questions', 'FAILURES'] a
 const NOTE_KINDS = new Set([
   'chat-decision', 'chat-action', 'retracted', 'work-opened', 'plan-approved', 'plan-rejected', 'published', 'publish-failed',
   'rebase-pushed', 'attention', 'app-held', 'app-update-proposed', 'app-updated', 'request-accepted', 'request-declined',
-  'request-refused', 'instance-created', 'instance-deleted', 'follow-up', 'asked', 'answered',
+  'request-refused', 'instance-created', 'instance-deleted', 'follow-up', 'asked', 'answered', 'ci-triage', 'owner-created',
+  'owner-updated', 'owner-retired', 'ship-started', 'shipped',
 ]);
 const DONE = new Set(['landed', 'failed', 'rejected']);
 

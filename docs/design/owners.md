@@ -30,9 +30,14 @@ deletes or destroys waits for a person unless the person granted standing approv
      gates: plan approval · create/delete · destructive actions (or a standing grant)
 ```
 
-The person talks to owners in [OpenChamber](https://github.com/openchamber/openchamber) (or the opencode TUI):
-each owner is an opencode agent, each has a desk project, and the **Owner's Desk** panel shows who the owner is,
-what waits on the person, its activity and its notebook.
+The person talks to owners in the **surface** (`packages/surface`), or in
+[OpenChamber](https://github.com/openchamber/openchamber) or the opencode TUI. Each owner is an opencode agent
+whose chats run in its desk (or evidence folder). The surface is organized around owners: a rail of owners with what
+waits and what runs, one inbox of every gate and chat permission with the decision in place, and per owner its chats
+(drawn like OpenChamber's, whose styles it borrows under MIT), work, activity and notebook. It is a small Node server
+that attaches to (or starts) an opencode server running the plugin, imports the engine directly, and relays
+opencode's events to the browser; the opencode password never reaches the browser. The **Owner's Desk** is the same
+view as an OpenChamber panel.
 
 ## Engine and configuration
 

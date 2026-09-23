@@ -157,9 +157,17 @@ export function OwnerView({ owner, inbox, sessionId, refresh }: { owner: OwnerSu
             <ol className="flex flex-col gap-2">
               {desk?.notes.slice(0, 25).map((note, index) => (
                 <li key={index} className={cx('flex flex-col gap-0.5 border-l-2 pl-2', note.kind === 'attention' ? 'border-status-warning' : 'border-border', note.retracted && 'opacity-50 line-through')}>
-                  <span className="typography-micro text-muted-foreground">{NOTE_LABELS[note.kind] ?? note.kind} · {timeAgo(note.at)}</span>
+                  <span className="typography-micro text-muted-foreground">
+                    {NOTE_LABELS[note.kind] ?? note.kind} · {timeAgo(note.at)}
+                    {note.workItem && <> · <button className="text-primary hover:underline" onClick={() => navigate('item', note.workItem!)}>{note.workItem}</button></>}
+                  </span>
                   <span className="typography-meta text-foreground line-clamp-3 [overflow-wrap:anywhere]">{note.note}</span>
                   {note.quote && <span className="typography-micro text-muted-foreground italic line-clamp-2">“{note.quote}”</span>}
+                  {note.outcome && note.kind !== 'chat-decision' && (
+                    ['asked', 'answered', 'ci-triage', 'attention', 'shipped', 'ship-started'].includes(note.kind)
+                      ? <details className="typography-micro text-muted-foreground"><summary className="cursor-pointer hover:text-foreground">{note.kind === 'asked' ? 'The answer' : 'Outcome'}</summary><div className="mt-1 whitespace-pre-wrap [overflow-wrap:anywhere] text-foreground/80">{note.outcome}</div></details>
+                      : <span className="typography-micro text-muted-foreground/80 line-clamp-1">{note.outcome}</span>
+                  )}
                 </li>
               ))}
             </ol>
