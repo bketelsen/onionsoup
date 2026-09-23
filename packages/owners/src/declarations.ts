@@ -18,6 +18,8 @@ export const Duty = z.object({
   instructions: z.string(),
   requestTo: z.string().optional(),
   followUp: z.string().optional(),
+  /** What a survey duty produces: work items for freelancers, or attention items for the person. */
+  raises: z.enum(['work', 'attention']).default('work'),
 });
 export type Duty = z.infer<typeof Duty>;
 
@@ -52,6 +54,9 @@ export const Persona = z.object({
   title: z.string(),
   source: z.string(),
   voice: z.string(),
+  /** OpenChamber project icon and color keys for the owner's desk. */
+  icon: z.enum(['code', 'terminal', 'rocket', 'flask', 'gamepad', 'briefcase', 'home', 'globe', 'leaf', 'shield', 'palette', 'server', 'phone', 'database', 'lightbulb', 'music', 'camera', 'book', 'heart']).default('briefcase'),
+  color: z.string().default('primary'),
 });
 export type Persona = z.infer<typeof Persona>;
 
@@ -74,6 +79,8 @@ export const OwnerDeclaration = z.object({
   /** The directory the owner's sessions read: a checkout, or an evidence snapshot. The owner never writes it. */
   workspace: z.string(),
   model: ModelRef,
+  /** Incus hosts a repository owner also holds (observe; create/delete behind approvals). */
+  incus: IncusDomain.omit({ kind: true }).optional(),
   /** Workflow for change work items; owners without one raise attention items instead. */
   workflow: z.string().optional(),
   duties: z.array(Duty),
@@ -87,8 +94,9 @@ export function isRepositoryOwner(owner: OwnerDeclaration): owner is RepositoryO
   return owner.domain.kind === 'git-repository';
 }
 
-export function isIncusOwner(owner: OwnerDeclaration): owner is IncusOwner {
-  return owner.domain.kind === 'incus';
+/** An owner holds incus either as its whole domain or as an incus section beside a repository. */
+export function hasIncus(owner: OwnerDeclaration) {
+  return owner.domain.kind === 'incus' || owner.incus !== undefined;
 }
 
 export const Craft = z.enum(['planning', 'implementation', 'review']);

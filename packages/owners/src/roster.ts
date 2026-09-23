@@ -20,7 +20,10 @@ function displayName(owner: OwnerDeclaration) {
 export function rosterText(declarations: Declarations, selfId: string) {
   const lines = [...declarations.owners.values()]
     .filter(owner => owner.id !== selfId)
-    .map(owner => `- ${displayName(owner)} [owner id: ${owner.id}]: owns ${DOMAIN_SUMMARIES[owner.domain.kind](owner)}.`);
-  return `Other owners in this homelab (consult their evidence with onionsoup_evidence, or ask them through the person; never operate their systems):
+    .map(owner => {
+      const incus = owner.incus ? `; and incus on ${owner.incus.remotes.map(remote => `${remote.name} (${remote.host}; ${remote.allow.join('/')})`).join(', ')}` : '';
+      return `- ${displayName(owner)} [owner id: ${owner.id}]: owns ${DOMAIN_SUMMARIES[owner.domain.kind](owner)}${incus}.`;
+    });
+  return `Other owners in this homelab (consult their evidence with onionsoup_evidence, ask them with onionsoup_ask; never operate their systems):
 ${lines.join('\n') || '(none)'}`;
 }

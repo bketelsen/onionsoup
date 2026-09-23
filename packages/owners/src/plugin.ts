@@ -1,7 +1,8 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tool, type Plugin } from '@opencode-ai/plugin';
-import type { OwnerDeclaration, Persona } from './declarations.ts';
+import { hasIncus, type OwnerDeclaration, type Persona } from './declarations.ts';
+import { askOwner, formatAnswer } from './ask.ts';
 import { pickModel } from './families.ts';
 import type { Notebook } from './notebook.ts';
 import { rosterText } from './roster.ts';
@@ -57,8 +58,9 @@ ${roster}
 How you work with the person in this chat:
 - You are the owner of this domain (${owner.domain.kind === 'git-repository' ? owner.domain.name : 'incus remotes'}). Reach for your onionsoup tools first:
   onionsoup_status (your open work and anything waiting on the person), onionsoup_notebook (your full notebook),
-  onionsoup_evidence (what other owners observed), onionsoup_open_work (hand a change to freelancers with a plan the person
-  approves), onionsoup_record_decision and onionsoup_retract.
+  onionsoup_evidence (what other owners recorded), onionsoup_ask (ask another owner a question about its domain),
+  onionsoup_open_work (hand a change to freelancers with a plan the person approves), onionsoup_record_decision and
+  onionsoup_retract. When something belongs to another owner's domain, ask them instead of guessing or probing it yourself.
 - For substantial changes, prefer opening work so freelancers plan, implement and review it with the person's gates. For
   small, clearly requested actions you may act directly; anything outside your safe commands asks the person first.
 - Record a decision only when the person states one or explicitly agrees to your proposal, and quote their words. A
@@ -128,6 +130,13 @@ const server: Plugin = async (input, options) => {
   const sessionOwner = new Map<string, OwnerDeclaration>();
   const journaledParts = new Set<string>();
   const watchedMessages = new Map<string, string>();
+
+  /** Owners can be named by id or by persona name. */
+  function resolveOwner(name: string) {
+    const match = [...runtime.declarations.owners.values()].find(owner => owner.id === name || owner.persona?.name.toLowerCase() === name.toLowerCase());
+    if (!match) throw new Error(`unknown owner: ${name}`);
+    return runtime.owner(match.id);
+  }
 
   function requireOwner(agent: string) {
     const owner = ownerByAgent.get(agent);
@@ -274,13 +283,27 @@ const server: Plugin = async (input, options) => {
         },
       }),
       onionsoup_evidence: tool({
-        description: "Another owner's latest observations of its domain (e.g. homelab-virt's incus snapshot, or a repository owner's MAP).",
-        args: { owner: tool.schema.string().describe('The owner id, e.g. homelab-virt') },
+        description: "Another owner's latest recorded observations: its incus snapshot if it holds incus, and its notebook MAP.",
+        args: { owner: tool.schema.string().describe('The owner id or persona name, e.g. homelab or Miles Teg') },
         async execute(args, context) {
           requireOwner(context.agent);
-          const other = runtime.owner(args.owner);
-          const snapshot = await readFile(join(other.workspace, 'SNAPSHOT.md'), 'utf8').catch(() => '');
-          return snapshot || readFile(join(runtime.notebook(other.id).directory, 'MAP.md'), 'utf8');
+          const other = resolveOwner(args.owner);
+          const snapshot = hasIncus(other) ? await readFile(join(runtime.evidenceDirectory(other.id), 'SNAPSHOT.md'), 'utf8').catch(() => '') : '';
+          const map = await readFile(join(runtime.notebook(other.id).directory, 'MAP.md'), 'utf8').catch(() => '');
+          return [snapshot && `<incus-snapshot>\n${snapshot}</incus-snapshot>`, map && `<${other.id}-map>\n${map}</${other.id}-map>`].filter(Boolean).join('\n\n') || `${other.id} has recorded no evidence yet.`;
+        },
+      }),
+      onionsoup_ask: tool({
+        description: 'Ask another owner a question about its domain. It answers from its own notebook and fresh evidence, separating observed, inferred and unknown. Takes a minute or two.',
+        args: {
+          owner: tool.schema.string().describe('The owner id or persona name, e.g. Miles Teg'),
+          question: tool.schema.string(),
+        },
+        async execute(args, context) {
+          const asker = requireOwner(context.agent);
+          context.metadata({ title: `asking ${args.owner}` });
+          const { answerer, answer } = await askOwner(runtime, asker.id, args.owner, args.question);
+          return formatAnswer(answerer, answer);
         },
       }),
       onionsoup_open_work: tool({

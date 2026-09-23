@@ -53,7 +53,8 @@ function sandboxCommand(command: string, args: readonly string[], options: Sandb
 export function spawnSandboxed(command: string, args: readonly string[], options: SandboxOptions): ChildProcess {
   return spawn('systemd-run', sandboxCommand(command, args, options), {
     // ONIONSOUP_SANDBOX tells the onionsoup opencode plugin (loaded from the global config) to stay inert.
-    env: { ...process.env, ...options.env, ONIONSOUP_SANDBOX: '1' },
+    // Tools that insist on a writable temp dir under $HOME get the sandbox's private /tmp instead.
+    env: { ...process.env, ANSIBLE_LOCAL_TEMP: '/tmp/ansible-local', ...options.env, ONIONSOUP_SANDBOX: '1' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 }

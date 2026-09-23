@@ -4,7 +4,7 @@ import { Learnings, OwnerAnswers, Survey } from './artifacts.ts';
 import { ResourceAsk } from './requests.ts';
 import { FOLLOW_UP_DESCRIPTIONS, requestInstance } from './brokering.ts';
 import { composeAskBrief, distillBrief, learningsBrief, ownerAnswerBrief, surveyBrief, workSoFarText } from './briefs.ts';
-import type { Duty, OwnerDeclaration } from './declarations.ts';
+import { hasIncus, type Duty, type OwnerDeclaration } from './declarations.ts';
 import { refreshIncusEvidence } from './incus.ts';
 import { maintainPullRequests } from './rebase.ts';
 import { rosterText } from './roster.ts';
@@ -29,8 +29,17 @@ const REFRESH: Record<OwnerDeclaration['domain']['kind'], Refresh> = {
   incus: async (runtime, owner) => refreshIncusEvidence(runtime.incus, runtime.incusOwner(owner.id), runtime.managed),
 };
 
+/** Bring the owner's workspace up to date, plus its incus snapshot when it holds incus beside a repository. */
 export async function refreshWorkspace(runtime: Runtime, owner: OwnerDeclaration) {
-  return REFRESH[owner.domain.kind](runtime, owner);
+  const label = await REFRESH[owner.domain.kind](runtime, owner);
+  if (owner.domain.kind === 'incus' || !owner.incus) return label;
+  return `${label}; ${await refreshIncusEvidence(runtime.incus, runtime.incusOwner(owner.id), runtime.managed)}`;
+}
+
+/** The owner's incus snapshot, for briefs whose session runs in a repository and cannot read the evidence folder. */
+export async function incusEvidenceText(runtime: Runtime, owner: OwnerDeclaration) {
+  if (!hasIncus(owner) || owner.domain.kind === 'incus') return '';
+  return readFile(join(runtime.evidenceDirectory(owner.id), 'SNAPSHOT.md'), 'utf8').catch(() => '');
 }
 
 /** A duty that asks another owner for an instance; the rest happens through the request's lifecycle. */
@@ -63,21 +72,23 @@ export async function wake(runtime: Runtime, ownerId: string, dutyId: string) {
   }
   const snapshot = await refreshWorkspace(runtime, owner);
   const history = (await runtime.ledger.list()).filter(item => item.owner === ownerId).slice(-SURVEY_LIMITS.recentWork);
-  const mode = owner.workflow ? 'work' : 'attention';
-  const brief = surveyBrief(duty, await notebook.orientation(), snapshot, owner.maxProposals, workSoFarText(history), mode, rosterText(runtime.declarations, ownerId));
+  const mode = owner.workflow && duty.raises === 'work' ? 'work' : 'attention';
+  const evidence = await incusEvidenceText(runtime, owner);
+  const brief = surveyBrief(duty, await notebook.orientation(), snapshot, owner.maxProposals, workSoFarText(history), mode, rosterText(runtime.declarations, ownerId))
+    + (evidence ? `\n\n<your-incus-snapshot>\n${evidence}\n</your-incus-snapshot>` : '');
   const result = await runtime.hire(ownerId, { role: 'owner', model: owner.model, directory: owner.workspace, title: `${ownerId}: ${dutyId}`, brief, schema: Survey });
   const survey = result.value;
   await notebook.apply(survey.notebook, `${dutyId} at ${snapshot}`);
   const proposals = survey.proposals.slice(0, owner.maxProposals);
   const items: WorkItem[] = [];
-  if (owner.workflow) {
-    for (const proposal of proposals) items.push(await runtime.ledger.create(ownerId, owner.workflow, proposal));
+  if (mode === 'work') {
+    for (const proposal of proposals) items.push(await runtime.ledger.create(ownerId, owner.workflow!, proposal));
   } else {
     for (const proposal of proposals) await notebook.journal({ kind: 'attention', note: `${proposal.title}: ${proposal.goal}` });
   }
   await notebook.journal({ kind: 'wake', note: `${dutyId}: ${survey.summary}`, model: owner.model, outcome: `${proposals.length} ${mode} items; $${result.cost.toFixed(4)}` });
   await notebook.commit(`journal ${dutyId}`);
-  return { survey, items, attention: owner.workflow ? [] : proposals, request: undefined, cost: result.cost };
+  return { survey, items, attention: mode === 'attention' ? proposals : [], request: undefined, cost: result.cost };
 }
 
 /** The owner answers a planner's questions, as a project manager would. */

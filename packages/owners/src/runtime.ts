@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { isIncusOwner, isRepositoryOwner, loadDeclarations, requireOwner, type Declarations, type IncusOwner, type OwnerDeclaration, type RepositoryOwner } from './declarations.ts';
+import { isRepositoryOwner, loadDeclarations, requireOwner, type Declarations, type IncusOwner, type OwnerDeclaration, type RepositoryOwner } from './declarations.ts';
 import { familyOf } from './families.ts';
 import { cliIncus, ManagedInstances, type IncusClient } from './incus.ts';
 import { Ledger, type HireRecord, type WorkItem } from './ledger.ts';
@@ -100,10 +100,20 @@ export class Runtime {
     return owner;
   }
 
+  /**
+   * An incus view of an owner: its incus configuration as the domain, and the directory host code writes
+   * its read-only snapshot into as the workspace. Pure incus owners are already this shape.
+   */
   incusOwner(ownerId: string): IncusOwner {
     const owner = this.owner(ownerId);
-    if (!isIncusOwner(owner)) throw new Error(`not_an_incus_owner: ${ownerId}`);
-    return owner;
+    if (owner.domain.kind === 'incus') return owner as IncusOwner;
+    if (!owner.incus) throw new Error(`not_an_incus_owner: ${ownerId}`);
+    return { ...owner, domain: { kind: 'incus', ...owner.incus }, workspace: this.evidenceDirectory(ownerId) };
+  }
+
+  evidenceDirectory(ownerId: string) {
+    const owner = this.owner(ownerId);
+    return owner.domain.kind === 'incus' ? owner.workspace : join(this.stateDirectory, '..', 'evidence', ownerId);
   }
 
   notebook(ownerId: string) {

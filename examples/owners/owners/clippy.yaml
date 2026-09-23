@@ -27,7 +27,7 @@ duties:
   - id: distro-smoke
     kind: request-instance
     every: 7d
-    requestTo: homelab-virt
+    requestTo: homelab
     followUp: distro-smoke
     instructions: |
       Confirm that clippy, built as a static Linux binary from master, runs on a clean Linux

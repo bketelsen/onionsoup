@@ -2,6 +2,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { processRequests } from './brokering.ts';
+import { syncOpenChamber } from './openchamber.ts';
 import type { WorkItem, WorkStatus } from './ledger.ts';
 import { wake } from './owner.ts';
 import type { ResourceRequest } from './requests.ts';
@@ -69,8 +70,14 @@ async function advanceRunnable(runtime: Runtime, log: TickLog) {
   }
 }
 
-/** One pass: requests first (people may be waiting on an instance), then due duties, then work items. */
+/** One pass: owners' OpenChamber projects, requests (people may be waiting on an instance), due duties, work items. */
 export async function tick(runtime: Runtime, log: TickLog) {
+  try {
+    const { changes } = await syncOpenChamber(runtime);
+    for (const change of changes) log.duty('openchamber', 'sync', change);
+  } catch (error) {
+    log.error('openchamber', error);
+  }
   try {
     await processRequests(runtime, log.request);
   } catch (error) {

@@ -90,7 +90,7 @@ async function incusRuntime() {
   const runtime = await Runtime.open({ declarations: 'examples/owners', state: await mkdtemp(join(tmpdir(), 'owners-incus-')) });
   const calls: string[][] = [];
   runtime.incus = { run: async args => { calls.push([...args]); return args[0] === 'list' || args[1] === 'list' ? '[]' : ''; } };
-  for (const ownerId of ['clippy', 'homelab-virt']) await runtime.notebook(ownerId).ensure('# Charter\n');
+  for (const ownerId of ['clippy', 'homelab']) await runtime.notebook(ownerId).ensure('# Charter\n');
   return { runtime, calls };
 }
 
@@ -99,7 +99,7 @@ test('an approved lease creates, runs the follow-up, and deletes without a secon
   const { runtime, calls } = await incusRuntime();
   FOLLOW_UPS['test-follow-up'] = async (_runtime, request) => ({ ok: true, summary: `used ${request.instance!.name}` });
   const ask = { kind: 'instance' as const, image: 'images:debian/13', purpose: 'smoke test', expectedMinutes: 10 };
-  const opened = await runtime.requests.open('clippy', 'homelab-virt', ask, 'test-follow-up');
+  const opened = await runtime.requests.open('clippy', 'homelab', ask, 'test-follow-up');
   const decision = { decision: 'accept' as const, reply: 'ok', remote: 'minideb', image: 'images:debian/13', nameSuffix: 'clippy-smoke' };
   await runtime.requests.save({ ...opened, status: 'awaiting-create-approval', decision });
   await approveCreate(runtime, opened.id, 'bjk', true);
@@ -108,7 +108,7 @@ test('an approved lease creates, runs the follow-up, and deletes without a secon
   assert.equal(done.status, 'deleted');
   assert.equal(done.followUpResult?.summary, 'used onionsoup-clippy-smoke');
   assert.deepEqual(calls.map(call => call.slice(0, 2)), [['launch', 'images:debian/13'], ['delete', '--force']]);
-  assert.deepEqual(await runtime.managed.list('homelab-virt'), []);
+  assert.deepEqual(await runtime.managed.list('homelab'), []);
 });
 
 test('without a lease the release waits for a delete approval', async () => {
@@ -116,7 +116,7 @@ test('without a lease the release waits for a delete approval', async () => {
   const { runtime } = await incusRuntime();
   FOLLOW_UPS['test-follow-up'] = async () => ({ ok: true, summary: 'fine' });
   const ask = { kind: 'instance' as const, image: 'images:debian/13', purpose: 'p', expectedMinutes: 5 };
-  const opened = await runtime.requests.open('clippy', 'homelab-virt', ask, 'test-follow-up');
+  const opened = await runtime.requests.open('clippy', 'homelab', ask, 'test-follow-up');
   await runtime.requests.save({ ...opened, status: 'awaiting-create-approval', decision: { decision: 'accept', reply: 'ok', remote: 'minideb', image: 'images:debian/13', nameSuffix: 'x' } });
   await approveCreate(runtime, opened.id, 'bjk', false);
   await processRequests(runtime);
@@ -129,7 +129,7 @@ test('without a lease the release waits for a delete approval', async () => {
 test('create and delete guards hold regardless of what an owner decides', async () => {
   const { checkCreate, deleteInstance } = await import('../src/incus.ts');
   const { runtime, calls } = await incusRuntime();
-  const owner = runtime.incusOwner('homelab-virt');
+  const owner = runtime.incusOwner('homelab');
   await assert.rejects(checkCreate(owner, runtime.managed, { remote: 'selfie', image: 'images:debian/13', nameSuffix: 'x' }), /remote_forbids_create: selfie/);
   await assert.rejects(checkCreate(owner, runtime.managed, { remote: 'minideb', image: 'images:alpine/edge', nameSuffix: 'x' }), /image_not_allowed/);
   await assert.rejects(checkCreate(owner, runtime.managed, { remote: 'minideb', image: 'images:debian/13', nameSuffix: 'Bad Name' }), /bad_instance_name/);
