@@ -86,3 +86,14 @@ test('the person\'s owner order is kept by the server and new owners follow it',
     server.close();
   }
 });
+
+test('a chat can be renamed through the surface', async () => {
+  const { server, call } = await start();
+  try {
+    const renamed = await call('PATCH', '/api/owners/bellonda/sessions/ses_1', { title: 'Wiki publishing' });
+    assert.deepEqual(renamed.body, { id: 'ses_1', title: 'Wiki publishing' });
+    assert.equal((await call('PATCH', '/api/owners/bellonda/sessions/ses_1', { title: '  ' })).status, 400);
+  } finally {
+    server.close();
+  }
+});

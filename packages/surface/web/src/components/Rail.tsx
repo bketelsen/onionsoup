@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { RiDraggable, RiInbox2Line } from '@remixicon/react';
+import { RiDraggable, RiInbox2Line, RiNotification3Line } from '@remixicon/react';
 import { navigate, useConnected } from '../api.ts';
 import type { SurfaceState } from '../types.ts';
 import { BusyDots, cx, OwnerIcon } from './ui.tsx';
@@ -9,6 +9,7 @@ export function Rail({ state, route, onReorder }: { state?: SurfaceState; route:
   const connected = useConnected();
   // Re-ordering with pointer events rather than HTML5 drag and drop: it behaves the same everywhere and needs no
   // drag image. A press becomes a drag after a few pixels; the click that ends a drag is swallowed.
+  const [notifications, setNotifications] = useState(() => (typeof Notification === 'undefined' ? 'denied' : Notification.permission));
   const [dragging, setDragging] = useState<string>();
   const [over, setOver] = useState<{ id: string; after: boolean }>();
   const press = useRef<{ id: string; y: number; moved: boolean }>(undefined);
@@ -62,7 +63,7 @@ export function Rail({ state, route, onReorder }: { state?: SurfaceState; route:
         <span className="typography-ui-header font-semibold">onionsoup</span>
         <span title={connected ? 'live' : 'reconnecting'} className={cx('ml-auto size-2 rounded-full', connected ? 'bg-status-success' : 'bg-status-warning animate-pulse')} />
       </div>
-      <div className="p-2 flex flex-col gap-0.5 overflow-y-auto">
+      <div className="p-2 flex flex-col gap-0.5 overflow-y-auto flex-1 min-h-0">
         <button onClick={() => navigate('inbox')}
           className={cx('flex items-center gap-2 rounded-md px-2 py-1.5 typography-ui-label', inboxActive ? 'bg-interactive-active text-foreground' : 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground')}>
           <RiInbox2Line className="size-4" />Inbox
@@ -87,6 +88,15 @@ export function Rail({ state, route, onReorder }: { state?: SurfaceState; route:
             {owner.waiting > 0 && <span className="rounded-full bg-primary text-primary-foreground px-1.5 typography-micro font-semibold">{owner.waiting}</span>}
           </button>
         ))}
+      </div>
+      <div className="mt-auto border-t border-border p-2 flex flex-col gap-1">
+        {typeof Notification !== 'undefined' && notifications !== 'granted' && (
+          <button className="flex items-center gap-2 rounded-md px-2 py-1 typography-micro text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
+            onClick={() => void Notification.requestPermission().then(setNotifications)}>
+            <RiNotification3Line className="size-3.5" />{notifications === 'denied' ? 'Notifications blocked by the browser' : 'Notify me when something waits'}
+          </button>
+        )}
+        <div className="px-2 typography-micro text-muted-foreground/60 text-[0.68rem]">Alt+↑↓ owners · Alt+I inbox · / message</div>
       </div>
     </nav>
   );

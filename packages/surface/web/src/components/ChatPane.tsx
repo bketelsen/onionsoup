@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { InboxEntry, Message, OwnerSummary } from '../types.ts';
 import { PermissionCard, QuestionCard } from '../chat/cards.tsx';
 import { Composer } from '../chat/Composer.tsx';
@@ -7,6 +7,9 @@ import { useChat } from '../chat/useChat.ts';
 import { Empty } from './ui.tsx';
 
 interface Turn { user?: Message; assistant: Message[] }
+
+/** Long chats open on their latest turns; earlier ones load on request, keeping the page light. */
+const TURN_PAGE = 30;
 
 /** A user message and the assistant messages that answer it. */
 function turnsOf(messages: Message[]) {
@@ -50,6 +53,8 @@ export function ChatPane({ owner, sessionId, directory, pending, onPendingDone }
   const scroller = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
   const turns = useMemo(() => turnsOf(chat.messages), [chat.messages]);
+  const [shownTurns, setShownTurns] = useState(TURN_PAGE);
+  const hidden = Math.max(0, turns.length - shownTurns);
 
   const onScroll = () => {
     const element = scroller.current;
@@ -69,7 +74,16 @@ export function ChatPane({ owner, sessionId, directory, pending, onPendingDone }
           <div ref={scroller} onScroll={onScroll} className="absolute inset-0 overflow-y-auto overflow-x-hidden z-0 chat-scroll" data-scroll-shadow="true" data-orientation="vertical">
             {!chat.loaded && <div className="chat-message-column pt-6"><Empty>Loading…</Empty></div>}
             {chat.loaded && !chat.messages.length && <div className="chat-message-column pt-6"><Empty>Say something to {owner.name}.</Empty></div>}
-            {turns.map((turn, index) => {
+            {hidden > 0 && (
+              <div className="chat-message-column pt-4 flex justify-center">
+                <button className="typography-meta text-muted-foreground hover:text-foreground rounded-md px-2 py-1 hover:bg-interactive-hover"
+                  onClick={() => { pinned.current = false; setShownTurns(count => count + TURN_PAGE); }}>
+                  Show {Math.min(hidden, TURN_PAGE)} earlier turns ({hidden} hidden)
+                </button>
+              </div>
+            )}
+            {turns.slice(hidden).map((turn, offset) => {
+              const index = offset + hidden;
               const live = index === turns.length - 1 && chat.busy;
               const done = !live && turn.assistant.length > 0;
               return (

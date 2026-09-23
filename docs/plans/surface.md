@@ -75,7 +75,7 @@ Tick items as they land, with the commit.
 - [x] Permission cards (once / always / reject) and question cards inline
 - [x] Composer: textarea, send, stop; the owner's agent is fixed per chat
 - [x] Threads per owner: list, new; live across reconnects (reload on reconnect)
-- [ ] Rename threads
+- [x] Rename threads (double-click in the list)
 - [ ] Owner-to-owner asks and hires shown as links in the timeline, not as loose sessions
 
 ### 5. Integration
@@ -84,9 +84,9 @@ Tick items as they land, with the commit.
 - [ ] Decide what happens to `sync-openchamber` and the Owner's Desk extension (keep until the surface replaces them)
 
 ### 6. Polish (after daily use)
-- [ ] Unread and running indicators; notifications for new inbox items
-- [ ] Keyboard navigation
-- [ ] Long outputs, big diffs, very long chats (virtualize)
+- [x] Unread and running indicators; notifications for new inbox items
+- [x] Keyboard navigation (Alt+↑/↓ owners, Alt+I inbox, / message)
+- [x] Very long chats open on their latest 30 turns; long outputs and diffs scroll in capped boxes
 
 ## Notes for whoever resumes
 

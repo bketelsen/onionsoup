@@ -23,6 +23,9 @@ export function OwnerView({ owner, inbox, sessionId, refresh }: { owner: OwnerSu
   const [directory, setDirectory] = useState('');
   const [notebookOpen, setNotebookOpen] = useState(false);
   const [showEngine, setShowEngine] = useState(false);
+  const [renaming, setRenaming] = useState<string>();
+  const [title, setTitle] = useState('');
+  const [seen, setSeen] = useState<Record<string, number>>(() => readSeen());
 
   const loadDesk = useCallback(() => api<DeskState>(`/api/owners/${owner.id}`).then(setDesk, () => undefined), [owner.id]);
   const loadSessions = useCallback(() => {
@@ -49,6 +52,24 @@ export function OwnerView({ owner, inbox, sessionId, refresh }: { owner: OwnerSu
   const chats = useMemo(() => sessions.filter(session => !ENGINE_TITLE.test(session.title)), [sessions]);
   const engine = useMemo(() => sessions.filter(session => ENGINE_TITLE.test(session.title)), [sessions]);
   const current = sessionId ?? chats[0]?.id;
+  // A chat is unread when it changed since the person last had it open (kept per browser: a convenience).
+  const currentUpdated = sessions.find(session => session.id === current)?.time.updated;
+  useEffect(() => {
+    if (!current || currentUpdated === undefined) return;
+    setSeen(previous => {
+      const next = { ...previous, [current]: Math.max(currentUpdated, Date.now()) };
+      writeSeen(next);
+      return next;
+    });
+  }, [current, currentUpdated]);
+
+  const rename = async (id: string) => {
+    const next = title.trim();
+    setRenaming(undefined);
+    if (!next) return;
+    await api(`/api/owners/${owner.id}/sessions/${id}`, { method: 'PATCH', body: { title: next } }).catch(() => undefined);
+    void loadSessions();
+  };
 
   const newChat = async () => {
     const session = await api<Session>(`/api/owners/${owner.id}/sessions`, { method: 'POST', body: {} });
@@ -87,10 +108,17 @@ export function OwnerView({ owner, inbox, sessionId, refresh }: { owner: OwnerSu
             <Section title="Chats" action={<Button variant="ghost" onClick={() => void newChat()} title="New chat"><RiAddLine className="size-4" /></Button>}>
               {!chats.length && <Empty>None yet.</Empty>}
               <div className="flex flex-col gap-0.5">
-                {chats.map(session => (
-                  <button key={session.id} onClick={() => navigate('owner', owner.id, 'chat', session.id)}
+                {chats.map(session => renaming === session.id ? (
+                  <input key={session.id} autoFocus value={title} onChange={event => setTitle(event.target.value)}
+                    onKeyDown={event => { if (event.key === 'Enter') void rename(session.id); if (event.key === 'Escape') setRenaming(undefined); }}
+                    onBlur={() => void rename(session.id)}
+                    className="rounded-md border border-interactive-border-focus bg-background px-2 py-1 typography-meta outline-none" />
+                ) : (
+                  <button key={session.id} onClick={() => navigate('owner', owner.id, 'chat', session.id)} onDoubleClick={() => { setRenaming(session.id); setTitle(session.title); }}
+                    title="Double-click to rename"
                     className={cx('flex items-center gap-2 rounded-md px-2 py-1 text-left typography-meta', session.id === current ? 'bg-interactive-active text-foreground' : 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground')}>
-                    <span className="truncate flex-1">{session.title || 'Untitled'}</span>
+                    {session.id !== current && session.time.updated > (seen[session.id] ?? BASELINE) && <span className="size-1.5 shrink-0 rounded-full bg-primary" title="New since you last looked" />}
+                    <span className={cx('truncate flex-1', session.id !== current && session.time.updated > (seen[session.id] ?? BASELINE) && 'text-foreground font-medium')}>{session.title || 'Untitled'}</span>
                     {busySessions[session.id] ? <BusyDots className="text-status-info" /> : <span className="shrink-0 text-[0.7rem]">{timeAgo(session.time.updated)}</span>}
                   </button>
                 ))}
@@ -160,4 +188,35 @@ function Notebook({ desk, onClose }: { desk: DeskState; onClose: () => void }) {
       </div>
     </div>
   );
+}
+
+const SEEN_KEY = 'onionsoup.seen';
+const BASELINE_KEY = 'onionsoup.seen-baseline';
+
+/** Chats that changed before this browser first opened the surface count as read. */
+const BASELINE = (() => {
+  try {
+    const known = Number(localStorage.getItem(BASELINE_KEY));
+    if (known) return known;
+    localStorage.setItem(BASELINE_KEY, String(Date.now()));
+  } catch {
+    // Without storage, everything before now is read.
+  }
+  return Date.now();
+})();
+
+function readSeen(): Record<string, number> {
+  try {
+    return JSON.parse(localStorage.getItem(SEEN_KEY) ?? '{}') as Record<string, number>;
+  } catch {
+    return {};
+  }
+}
+
+function writeSeen(seen: Record<string, number>) {
+  try {
+    localStorage.setItem(SEEN_KEY, JSON.stringify(seen));
+  } catch {
+    // Private windows may refuse storage; unread markers are only a convenience.
+  }
 }

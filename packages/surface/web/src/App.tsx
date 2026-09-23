@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
-import { api, opencodePayload, useEvents, useRoute } from './api.ts';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { api, navigate, opencodePayload, useEvents, useRoute } from './api.ts';
 import { InboxView } from './components/InboxView.tsx';
 import { ItemView } from './components/ItemView.tsx';
 import { OwnerView } from './components/OwnerView.tsx';
@@ -20,6 +20,47 @@ export function App() {
   useEvents(event => {
     if (event.type !== 'opencode' || REFRESH_TYPES.has(opencodePayload(event.data).type)) refresh();
   }, [refresh]);
+
+  // Tell the person when something new waits on them while the surface is in the background.
+  const known = useRef<Set<string>>(undefined);
+  useEffect(() => {
+    if (!state) return;
+    const keys = new Set(state.inbox.map(entry => `${entry.kind}:${entry.id}`));
+    const previous = known.current;
+    known.current = keys;
+    if (!previous || !document.hidden || typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+    for (const entry of state.inbox.filter(candidate => !previous.has(`${candidate.kind}:${candidate.id}`))) {
+      const name = state.owners.find(candidate => candidate.id === entry.owner)?.name ?? entry.owner;
+      const notification = new Notification(`${name}: ${entry.kind === 'permission' ? 'permission needed' : entry.kind === 'question' ? 'a question for you' : `${entry.kind} waiting`}`, { body: entry.title, tag: `${entry.kind}:${entry.id}` });
+      notification.onclick = () => {
+        window.focus();
+        if (entry.sessionID) navigate('owner', entry.owner, 'chat', entry.sessionID);
+        else navigate('inbox');
+      };
+    }
+  }, [state]);
+
+  // Keyboard: Alt+↑/↓ moves between owners, Alt+I opens the inbox, / focuses the message box.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const typing = event.target instanceof HTMLElement && (event.target.tagName === 'TEXTAREA' || event.target.tagName === 'INPUT');
+      if (event.altKey && (event.key === 'ArrowDown' || event.key === 'ArrowUp') && state?.owners.length) {
+        event.preventDefault();
+        const ids = state.owners.map(candidate => candidate.id);
+        const index = route[0] === 'owner' ? ids.indexOf(route[1] ?? '') : -1;
+        const next = event.key === 'ArrowDown' ? (index + 1) % ids.length : (index <= 0 ? ids.length - 1 : index - 1);
+        navigate('owner', ids[next]!);
+      } else if (event.altKey && event.key.toLowerCase() === 'i') {
+        event.preventDefault();
+        navigate('inbox');
+      } else if (event.key === '/' && !typing) {
+        const composer = document.querySelector<HTMLTextAreaElement>('form textarea');
+        if (composer) { event.preventDefault(); composer.focus(); }
+      }
+    };
+    addEventListener('keydown', onKey);
+    return () => removeEventListener('keydown', onKey);
+  }, [state, route]);
 
   const owner = route[0] === 'owner' ? state?.owners.find(candidate => candidate.id === route[1]) : undefined;
   return (
