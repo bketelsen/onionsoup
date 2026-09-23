@@ -16,8 +16,10 @@ site at wiki.home.arpa by the `homelab-wiki` TrueNAS app (runtime spec in `bkete
 
 ## Boundaries
 
-- No secrets, credentials, serial numbers, MAC addresses, public WAN addresses or client-device details
-  ever enter the wiki (the repository's own rule).
+- No credentials ever enter the wiki: passwords, tokens, API keys, private keys or other key material.
+  Everything else useful for running the homelab (MAC addresses, serial numbers, addresses, device details)
+  belongs in the inventory. The wiki is a private repository served only on the internal network.
+  (The README's older, stricter list was an agent's default, not the owner's rule; update it when convenient.)
 - Other owners hold authority over their systems. Bellonda asks them for observations; she does not
   operate their hosts.
 - Publishing the site to TrueNAS is a separate, approved step.
