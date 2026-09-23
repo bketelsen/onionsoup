@@ -16,7 +16,11 @@ export interface IncusClient {
 
 export const cliIncus: IncusClient = {
   async run(args, timeoutMs = INCUS_LIMITS.commandTimeoutMs) {
-    const { stdout } = await run('incus', [...args], { timeout: timeoutMs, maxBuffer: 32 * 1024 * 1024 });
+    const pending = run('incus', [...args], { timeout: timeoutMs, maxBuffer: 32 * 1024 * 1024 });
+    // `incus launch` reads instance config YAML from stdin when it is not a terminal; an open pipe
+    // makes it wait forever without ever contacting the server. Close stdin on every call.
+    pending.child.stdin?.end();
+    const { stdout } = await pending;
     return stdout;
   },
 };

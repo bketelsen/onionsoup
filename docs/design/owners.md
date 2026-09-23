@@ -451,7 +451,15 @@ Findings so far:
   that is not installed by anything.
 - Found along the way: a requesting owner guessed wrongly what the follow-up
   would do until the brief described it; opencode treats `/` as the worktree
-  outside Git, which changes how the findings-file rule must be written.
+  outside Git, which changes how the findings-file rule must be written;
+  `incus launch` reads instance YAML from stdin when it is not a terminal, so
+  an open stdin pipe made it wait forever without contacting the server (the
+  fake client in tests cannot see this). Every incus call now closes stdin.
+- First end-to-end run: clippy asked, homelab-virt accepted, a person
+  approved the create with the delete as a lease, and the runtime created
+  `minideb:onionsoup-clippy-smoke`, built clippy in the sandbox, ran it on
+  Debian 12 (a 371 KB PNG), and deleted the instance. Both notebooks
+  journaled every step.
 
 ## References
 
