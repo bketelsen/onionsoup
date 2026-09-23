@@ -1,0 +1,42 @@
+{
+  "name": "@onionsoup/surface",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The onionsoup surface: owners, their chats, and what waits on the person, on top of opencode.",
+  "engines": {
+    "node": ">=24"
+  },
+  "exports": {
+    ".": {
+      "onionsoup-source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "web/dist"
+  ],
+  "scripts": {
+    "web:build": "vite build web",
+    "web:dev": "vite web",
+    "web:typecheck": "tsc -p web/tsconfig.json"
+  },
+  "dependencies": {
+    "@onionsoup/owners": "0.1.0",
+    "@opencode-ai/sdk": "1.18.32"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "4.3.3",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.1",
+    "dompurify": "3.4.16",
+    "marked": "18.0.14",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "tailwindcss": "4.3.3",
+    "vite": "8.3.0"
+  }
+}

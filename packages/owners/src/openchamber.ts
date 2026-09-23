@@ -21,16 +21,24 @@ export function projectId(path: string) {
   return `path_${Buffer.from(path).toString('base64url')}`;
 }
 
+/**
+ * Where an owner's chats run: a repository owner's desk worktree (a group owner's folder of them), otherwise the
+ * folder its read-only snapshot lives in. Creates it if needed.
+ */
+export async function chatDirectory(runtime: Runtime, ownerId: string) {
+  const owner = runtime.owner(ownerId);
+  for (const view of runtime.repositoryViews(owner.id)) if (owner.domain.kind === 'repository-group') await ensureDesk(view, runtime.desksRoot);
+  const path = isRepositoryOwner(owner) ? (await ensureDesk(owner, runtime.desksRoot)).path
+    : owner.domain.kind === 'repository-group' ? join(runtime.desksRoot, owner.id) : runtime.evidenceDirectory(owner.id);
+  await mkdir(path, { recursive: true });
+  return path;
+}
+
 async function desiredProjects(runtime: Runtime) {
   const desired: ProjectEntry[] = [];
   for (const declared of runtime.declarations.owners.values()) {
     if (!declared.persona) continue;
-    const owner = runtime.owner(declared.id);
-    // Repository owners chat in a desk worktree (a group owner in a folder of them); others where their snapshot lives.
-    for (const view of runtime.repositoryViews(owner.id)) if (owner.domain.kind === 'repository-group') await ensureDesk(view, runtime.desksRoot);
-    const path = isRepositoryOwner(owner) ? (await ensureDesk(owner, runtime.desksRoot)).path
-      : owner.domain.kind === 'repository-group' ? join(runtime.desksRoot, owner.id) : runtime.evidenceDirectory(owner.id);
-    await mkdir(path, { recursive: true });
+    const path = await chatDirectory(runtime, declared.id);
     desired.push({ id: projectId(path), path, label: declared.persona.name, icon: declared.persona.icon, color: declared.persona.color, defaultAgent: declared.persona.name });
   }
   return desired;

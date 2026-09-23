@@ -34,25 +34,24 @@ Tick items as they land, with the commit.
 ### 0. Setup
 - [x] Worktree `~/projects/onionsoup-surface` on branch `surface`
 - [x] This plan
-- [ ] `packages/surface` skeleton; dependencies; root scripts (`surface`, `surface:build`, `surface:typecheck`),
+- [x] `packages/surface` skeleton; dependencies; root scripts (`surface`, `surface:build`, `surface:typecheck`),
       with the web build and typecheck part of `npm run verify`
-- [ ] `@onionsoup/owners` exports what the surface needs (deskState, statusText, itemText, decision functions,
+- [x] `@onionsoup/owners` exports what the surface needs (deskState, statusText, itemText, decision functions,
       Runtime paths)
 
 ### 1. Server
-- [ ] Config: port (default 4747), opencode URL and password (env), or start `opencode serve` itself
-- [ ] opencode client (SDK v2) and an SSE relay: `/api/events` forwards opencode events plus onionsoup events
+- [x] Config: port (default 4747), opencode URL and password (env), or start `opencode serve` itself
+- [x] opencode client (SDK v2) and an SSE relay: `/api/events` forwards opencode events plus onionsoup events
       (ledger and request changes, polled from state)
-- [ ] `/api/owners`: roster with persona, domain summary, badge counts (waiting on the person, running work)
-- [ ] `/api/inbox`: everything waiting on the person across owners (plans, pushes, publishes, create/delete,
+- [x] `/api/state`: owners (persona, domain summary, waiting and running counts) and the inbox: everything waiting on the person across owners (plans, pushes, publishes, create/delete,
       pending opencode permissions and questions)
-- [ ] `/api/owners/:id`: desk state (work, recent, activity, notes, notebook registers)
-- [ ] `/api/items/:id`: one work item in full
-- [ ] Decisions: approve/revise/reject plan, approve push, publish, approve/deny create and delete, retract a note
-- [ ] Sessions: list per owner (its chat directory), create, messages, prompt (async), abort
-- [ ] Permission and question replies
-- [ ] Serve `web/dist`; dev mode proxies to Vite
-- [ ] Tests: endpoint tests against the fixture runtime and a fake opencode client
+- [x] `/api/owners/:id`: desk state (work, recent, activity, notes, notebook registers)
+- [x] `/api/items/:id`: one work item in full
+- [x] Decisions: approve/revise/reject plan, approve push, publish, approve/deny create and delete, retract a note
+- [x] Sessions: list per owner (its chat directory), create, messages, prompt (async), abort
+- [x] Permission and question replies
+- [x] Serve `web/dist` (dev: Vite proxies `/api` to the server)
+- [x] Tests: endpoint tests against the fixture runtime and a fake opencode client
 
 ### 2. UI shell
 - [ ] Theme: OpenChamber tokens (design-system.css, typography.css), light and dark
@@ -86,6 +85,12 @@ Tick items as they land, with the commit.
 - [ ] Long outputs, big diffs, very long chats (virtualize)
 
 ## Notes for whoever resumes
+
+- Run against the live system without disturbing it: `SURFACE_PORT=4748 OPENCODE_URL=http://127.0.0.1:<port>
+  OPENCODE_SERVER_PASSWORD=… npm run surface` attaches to OpenChamber's opencode (find its port with
+  `ps -eo args | grep "opencode serve"`; the password is in that process's environment, never print it).
+- Session lists include engine sessions that ran in the same directory (hires titled `<owner>: …` or `w-…: …`);
+  the UI should group them apart from the person's chats.
 
 - The opencode server's HTTP API: `/event` (SSE), sessions and messages, `prompt_async`, `/permission` and
   `/question` replies. The typed client is `@opencode-ai/sdk/v2` (already a dependency of `@onionsoup/owners`).
