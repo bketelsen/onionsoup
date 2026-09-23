@@ -6,6 +6,7 @@ import { FOLLOW_UP_DESCRIPTIONS, requestInstance } from './brokering.ts';
 import { composeAskBrief, distillBrief, learningsBrief, ownerAnswerBrief, surveyBrief, workSoFarText } from './briefs.ts';
 import type { Duty, OwnerDeclaration } from './declarations.ts';
 import { refreshIncusEvidence } from './incus.ts';
+import { maintainPullRequests } from './rebase.ts';
 import type { WorkItem } from './ledger.ts';
 import type { Runtime } from './runtime.ts';
 import { refreshCheckout } from './workspace.ts';
@@ -50,6 +51,10 @@ export async function wake(runtime: Runtime, ownerId: string, dutyId: string) {
   const { owner, notebook } = await prepare(runtime, ownerId);
   const duty = owner.duties.find(candidate => candidate.id === dutyId);
   if (!duty) throw new Error(`unknown_duty: ${ownerId}/${dutyId}`);
+  if (duty.kind === 'maintain-prs') {
+    const { summary, opened } = await maintainPullRequests(runtime, ownerId);
+    return { survey: { summary, notebook: [], proposals: [] }, items: opened, attention: [], request: undefined, cost: 0 };
+  }
   if (duty.kind === 'request-instance') {
     const { request, cost } = await requestInstanceDuty(runtime, owner, duty);
     const summary = `asked ${request.to} for ${request.ask.image}: ${request.ask.purpose} (${request.id})`;

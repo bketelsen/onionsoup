@@ -32,6 +32,7 @@ export const WorkStatus = z.enum([
   'implementing',
   'reviewing',
   'landing',
+  'awaiting-push-approval',
   'landed',
   'failed',
   'rejected',
@@ -47,7 +48,13 @@ export const HumanNote = z.object({
 });
 export type HumanNote = z.infer<typeof HumanNote>;
 
-export const Publication = z.object({ url: z.string(), branch: z.string(), by: z.string(), at: z.string() });
+export const Publication = z.object({
+  url: z.string(),
+  branch: z.string(),
+  by: z.string(),
+  at: z.string(),
+  state: z.enum(['open', 'merged', 'closed']).default('open'),
+});
 export type Publication = z.infer<typeof Publication>;
 
 export const WorkItem = z.object({
@@ -69,6 +76,8 @@ export const WorkItem = z.object({
   hires: z.array(HireRecord).default([]),
   humanNotes: z.array(HumanNote).default([]),
   publication: Publication.optional(),
+  /** Set on a rebase work item: which landed item's PR it brings up to date. */
+  rebaseOf: z.object({ itemId: z.string(), branch: z.string(), prUrl: z.string(), previousHead: z.string() }).optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -77,7 +86,7 @@ export type WorkItem = z.infer<typeof WorkItem>;
 export class Ledger {
   constructor(readonly directory: string) {}
 
-  async create(owner: string, workflow: string, proposal: ProposedWork) {
+  async create(owner: string, workflow: string, proposal: ProposedWork, extra: Partial<WorkItem> = {}) {
     const now = new Date().toISOString();
     const item: WorkItem = WorkItem.parse({
       id: `w-${now.slice(0, 10).replaceAll('-', '')}-${randomUUID().slice(0, 6)}`,
@@ -85,6 +94,7 @@ export class Ledger {
       workflow,
       proposal,
       status: 'proposed',
+      ...extra,
       createdAt: now,
       updatedAt: now,
     });

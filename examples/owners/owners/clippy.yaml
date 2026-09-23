@@ -26,7 +26,7 @@ duties:
       you are deciding what matters. Avoid cosmetic churn and dependency upgrades Dependabot handles.
   - id: distro-smoke
     kind: request-instance
-    every: 1d
+    every: 7d
     requestTo: homelab-virt
     followUp: distro-smoke
     instructions: |
@@ -34,3 +34,9 @@ duties:
       distribution and writes a valid PNG. Ask the virtualization owner for a fresh instance of a
       current, widely used distribution. The runtime builds clippy, runs it there, checks the output,
       and releases the instance afterwards.
+  - id: maintain-prs
+    kind: maintain-prs
+    every: 1d
+    instructions: |
+      Keep the pull requests you published mergeable: record the ones that were merged or closed,
+      and rebase the ones that conflict with the base branch. Every force-push waits for a person.

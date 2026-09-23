@@ -8,8 +8,11 @@ export type ModelRef = z.infer<typeof ModelRef>;
 
 export const Duty = z.object({
   id: z.string(),
-  /** survey: look at the domain and propose work. request-instance: ask another owner for an instance. */
-  kind: z.enum(['survey', 'request-instance']).default('survey'),
+  /**
+   * survey: look at the domain and propose work. request-instance: ask another owner for an instance.
+   * maintain-prs: keep the owner's published PRs mergeable (record merges, rebase conflicts).
+   */
+  kind: z.enum(['survey', 'request-instance', 'maintain-prs']).default('survey'),
   every: z.string().regex(/^\d+[mhd]$/).optional(),
   on: z.string().optional(),
   instructions: z.string(),

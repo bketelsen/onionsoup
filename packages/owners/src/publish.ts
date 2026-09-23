@@ -44,7 +44,7 @@ export async function publish(runtime: Runtime, itemId: string, by: string) {
     '--body', prBody(item),
   ]);
   const url = stdout.trim().split('\n').at(-1) ?? '';
-  const published = { ...item, publication: { url, branch: item.branch, by, at: new Date().toISOString() } };
+  const published = { ...item, publication: { url, branch: item.branch, by, at: new Date().toISOString(), state: 'open' as const } };
   await runtime.notebook(item.owner).journal({ kind: 'published', workItem: item.id, outcome: url, note: `by ${by}` });
   await runtime.notebook(item.owner).commit(`journal ${item.id}`);
   return runtime.ledger.save(published);

@@ -4,6 +4,7 @@ import { requireFreelancer, requireWorkflow, type Craft, type WorkflowDeclaratio
 import { pickModel } from './families.ts';
 import type { HumanNote, WorkItem, WorkStatus } from './ledger.ts';
 import { answerQuestions, recordLearnings } from './owner.ts';
+import { advanceRebase, REBASE_WORKFLOW } from './rebase.ts';
 import type { Runtime } from './runtime.ts';
 import { commitWorktree, createWorktree, diffAgainstBase, refreshCheckout, resetWorktree, verificationPassed, verify } from './workspace.ts';
 
@@ -130,6 +131,7 @@ const TERMINAL: readonly WorkStatus[] = ['landed', 'failed'];
 /** Advance a work item until it reaches a human gate or ends. */
 export async function advance(runtime: Runtime, itemId: string, onProgress: (item: WorkItem) => void = () => {}) {
   let item = await runtime.ledger.get(itemId);
+  if (item.workflow === REBASE_WORKFLOW) return advanceRebase(runtime, itemId, onProgress);
   const workflow = requireWorkflow(runtime.declarations, item.workflow);
   if (item.status === 'interrupted') item = transition(item, item.planApproval ? 'implementing' : 'planning');
   let step = STEPS[item.status];
