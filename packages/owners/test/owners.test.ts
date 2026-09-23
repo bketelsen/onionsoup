@@ -593,3 +593,121 @@ test('a sandboxed process cannot read or write the host opencode config, and a r
     await rm(writeAttemptPath, { force: true });
   }
 });
+
+test('resolving a rebase conflict stages only the conflicted and reported files, leaving anything else and reporting it', async () => {
+  const { execFileSync } = await import('node:child_process');
+  const { writeFile, mkdir } = await import('node:fs/promises');
+  const { stageConflictResolution } = await import('../src/rebase.ts');
+  const root = await mkdtemp(join(tmpdir(), 'owners-rebase-conflict-'));
+  const git = (...args: string[]) => execFileSync('git', ['-C', root, '-c', 'user.name=t', '-c', 'user.email=t@t', ...args]).toString();
+  git('init', '-q', '-b', 'main');
+  await writeFile(join(root, 'conflict.txt'), 'line1\n');
+  await writeFile(join(root, 'package-lock.json'), '{"version": 1}\n');
+  git('add', '-A');
+  git('commit', '-qm', 'init');
+  git('checkout', '-qb', 'feature');
+  await writeFile(join(root, 'conflict.txt'), 'line1\nfeature-change\n');
+  git('add', '-A');
+  git('commit', '-qm', 'feature change');
+  const featureSha = git('rev-parse', 'HEAD').trim();
+  git('checkout', '-q', 'main');
+  await writeFile(join(root, 'conflict.txt'), 'line1\nmain-change\n');
+  git('add', '-A');
+  git('commit', '-qm', 'main change');
+  assert.throws(() => git('cherry-pick', featureSha), /error: could not apply/);
+  assert.match(git('status', '--porcelain'), /^UU conflict\.txt$/m, 'stopped mid cherry-pick on the expected conflict');
+
+  // The implementer resolves the conflict, but also leaves an npm-regenerated lockfile and a scratch directory behind.
+  await writeFile(join(root, 'conflict.txt'), 'line1\nfeature-change\nmain-change\n');
+  await writeFile(join(root, 'package-lock.json'), '{"version": 2}\n');
+  await mkdir(join(root, 'wt'));
+  await writeFile(join(root, 'wt', 'scratch.txt'), 'not part of the change\n');
+
+  const { staged, leftovers } = await stageConflictResolution(root, ['conflict.txt'], []);
+  assert.deepEqual(staged, ['conflict.txt'], 'only the conflicted file is staged');
+  assert.deepEqual(leftovers.sort(), ['package-lock.json', 'wt/'], 'the lockfile and scratch directory are reported, not staged');
+  assert.equal(git('diff', '--cached', '--name-only').trim(), 'conflict.txt', 'only the conflicted file is in the index');
+
+  git('-c', 'core.editor=true', 'cherry-pick', '--continue');
+  const committed = git('show', '--stat', '--format=', 'HEAD').trim().split('\n')[0]?.trim();
+  assert.equal(committed, 'conflict.txt | 1 +', 'the continued cherry-pick commits only the conflicted file');
+  assert.equal(git('status', '--porcelain').trim(), ' M package-lock.json\n?? wt/'.trim(), 'the lockfile and scratch directory remain, uncommitted');
+});
+
+test('resolving a rebase conflict also stages paths the implementer reports it touched', async () => {
+  const { execFileSync } = await import('node:child_process');
+  const { writeFile } = await import('node:fs/promises');
+  const { stageConflictResolution } = await import('../src/rebase.ts');
+  const root = await mkdtemp(join(tmpdir(), 'owners-rebase-conflict-reported-'));
+  const git = (...args: string[]) => execFileSync('git', ['-C', root, '-c', 'user.name=t', '-c', 'user.email=t@t', ...args]).toString();
+  git('init', '-q', '-b', 'main');
+  await writeFile(join(root, 'conflict.txt'), 'line1\n');
+  await writeFile(join(root, 'helper.ts'), 'export const x = 1;\n');
+  git('add', '-A');
+  git('commit', '-qm', 'init');
+  await writeFile(join(root, 'conflict.txt'), 'line1\nresolved\n');
+  await writeFile(join(root, 'helper.ts'), 'export const x = 2;\n');
+  await writeFile(join(root, 'unrelated.txt'), 'left behind\n');
+
+  const { staged, leftovers } = await stageConflictResolution(root, ['conflict.txt'], ['helper.ts']);
+  assert.deepEqual(staged.sort(), ['conflict.txt', 'helper.ts']);
+  assert.deepEqual(leftovers, ['unrelated.txt']);
+  assert.equal(git('diff', '--cached', '--name-only').trim().split('\n').sort().join(','), 'conflict.txt,helper.ts');
+});
+
+test('a filename with pathspec metacharacters or a leading dash is staged literally, never expanded', async () => {
+  const { execFileSync } = await import('node:child_process');
+  const { writeFile } = await import('node:fs/promises');
+  const { stageConflictResolution } = await import('../src/rebase.ts');
+  const root = await mkdtemp(join(tmpdir(), 'owners-rebase-conflict-literal-'));
+  const git = (...args: string[]) => execFileSync('git', ['-C', root, '-c', 'user.name=t', '-c', 'user.email=t@t', ...args]).toString();
+  git('init', '-q', '-b', 'main');
+  await writeFile(join(root, 'weird[a]star.txt'), 'line1\n');
+  await writeFile(join(root, '-dash.txt'), 'line1\n');
+  await writeFile(join(root, 'decoy.txt'), 'unrelated tracked file that a broadened glob could match\n');
+  git('add', '-A');
+  git('commit', '-qm', 'init');
+  await writeFile(join(root, 'weird[a]star.txt'), 'resolved\n');
+  await writeFile(join(root, '-dash.txt'), 'resolved\n');
+  await writeFile(join(root, 'decoy.txt'), 'should remain untouched\n');
+
+  const { staged, leftovers } = await stageConflictResolution(root, ['weird[a]star.txt', '-dash.txt'], []);
+  assert.deepEqual(staged.sort(), ['-dash.txt', 'weird[a]star.txt']);
+  assert.deepEqual(leftovers, ['decoy.txt'], 'the tracked decoy that a broadened pathspec could have matched is left out');
+  assert.equal(git('diff', '--cached', '--name-only').trim().split('\n').sort().join(','), '-dash.txt,weird[a]star.txt');
+});
+
+test('a non-conflicting change git already staged mid cherry-pick is not reported as a leftover', async () => {
+  const { execFileSync } = await import('node:child_process');
+  const { writeFile } = await import('node:fs/promises');
+  const { stageConflictResolution } = await import('../src/rebase.ts');
+  const root = await mkdtemp(join(tmpdir(), 'owners-rebase-conflict-partial-'));
+  const git = (...args: string[]) => execFileSync('git', ['-C', root, '-c', 'user.name=t', '-c', 'user.email=t@t', ...args]).toString();
+  git('init', '-q', '-b', 'main');
+  await writeFile(join(root, 'conflict.txt'), 'line1\n');
+  await writeFile(join(root, 'clean.txt'), 'line1\n');
+  git('add', '-A');
+  git('commit', '-qm', 'init');
+  git('checkout', '-qb', 'feature');
+  await writeFile(join(root, 'conflict.txt'), 'line1\nfeature-change\n');
+  await writeFile(join(root, 'clean.txt'), 'line1\nfeature-change\n');
+  git('add', '-A');
+  git('commit', '-qm', 'feature change');
+  const featureSha = git('rev-parse', 'HEAD').trim();
+  git('checkout', '-q', 'main');
+  await writeFile(join(root, 'conflict.txt'), 'line1\nmain-change\n');
+  git('add', '-A');
+  git('commit', '-qm', 'main change');
+  assert.throws(() => git('cherry-pick', featureSha), /error: could not apply/);
+  // git already auto-merged and staged clean.txt as part of the cherry-pick; only conflict.txt stopped it.
+  assert.match(git('status', '--porcelain'), /^M {2}clean\.txt$/m, 'the non-conflicting change is already staged');
+
+  await writeFile(join(root, 'conflict.txt'), 'line1\nfeature-change\nmain-change\n');
+  const { staged, leftovers } = await stageConflictResolution(root, ['conflict.txt'], []);
+  assert.deepEqual(staged, ['conflict.txt']);
+  assert.deepEqual(leftovers, [], 'the already-staged non-conflicting change is not reported as left out');
+
+  git('-c', 'core.editor=true', 'cherry-pick', '--continue');
+  const committedFiles = git('diff', '--name-only', 'HEAD~1', 'HEAD').trim().split('\n').sort();
+  assert.deepEqual(committedFiles, ['clean.txt', 'conflict.txt'], 'the non-conflicting staged change is committed along with the conflict resolution');
+});
