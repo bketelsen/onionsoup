@@ -1,9 +1,7 @@
 # Owners and freelancers
 
-Living document. Status: **proposed**. This is the design for the rewrite on
-the `owners` branch. Nothing here is built yet. It replaces the direction in
-[composable agents](composable-agents.md) and [the web operator surface](web.md)
-once it lands.
+Living document. This is onionsoup's design: persistent owners that hire
+freelancers and work under runtime-enforced gates.
 
 ## Overview
 
@@ -498,8 +496,6 @@ Findings so far:
 
 ## References
 
-- Replaces the direction of [composable agents](composable-agents.md) and
-  [the web operator surface](web.md).
 - Notebook model: Euclid brains in Captain Code,
   `docs/EUCLID.md` at <https://github.com/lemma-ventures/captaincode>.
 - Carried rules: [AGENTS.md](../../AGENTS.md).

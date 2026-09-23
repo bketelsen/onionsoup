@@ -2,7 +2,7 @@ import ts from 'typescript';
 import { readFile, readdir } from 'node:fs/promises';
 import { resolve, relative, dirname, join } from 'node:path';
 const workspaces = new Map();
-for (const group of ['packages', 'apps']) for (const name of await readdir(group)) {
+for (const group of ['packages']) for (const name of await readdir(group)) {
   const directory = resolve(group, name), manifest = JSON.parse(await readFile(join(directory, 'package.json'), 'utf8'));
   workspaces.set(manifest.name, { directory, manifest, group });
 }
