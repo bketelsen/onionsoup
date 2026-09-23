@@ -1,7 +1,7 @@
 // The Desk's local service. It never touches onionsoup state itself: every read and every decision goes
 // through the `owners` CLI, so the Desk records decisions exactly the way the command line does.
 import { execFile } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import http from 'node:http';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -30,10 +30,29 @@ function findOnionsoup() {
 
 const onionsoup = findOnionsoup();
 
+/**
+ * OpenChamber runs services on its own runtime (Bun), whose process.execPath cannot load onionsoup's tsx CLI.
+ * Find a real Node the way the systemd unit does: mise shims first, then PATH, then system locations.
+ */
+function findNode() {
+  const candidates = [
+    join(homedir(), '.local/share/mise/shims/node'),
+    ...(process.env.PATH ?? '').split(':').filter(Boolean).map(directory => join(directory, 'node')),
+    '/home/linuxbrew/.linuxbrew/bin/node',
+    '/usr/local/bin/node',
+    '/usr/bin/node',
+  ];
+  const node = candidates.find(candidate => existsSync(candidate));
+  if (!node) throw new Error('node not found (tried mise shims, PATH, brew and /usr)');
+  return node;
+}
+
+const node = findNode();
+
 async function owners(...args) {
   const cli = ['--conditions=onionsoup-source', '--import', 'tsx', 'packages/owners/src/cli.ts', ...args,
     '--declarations', onionsoup.declarations, '--state', onionsoup.state];
-  const { stdout } = await run(process.execPath, cli, { cwd: onionsoup.root, timeout: 60_000, maxBuffer: 8 * 1024 * 1024 });
+  const { stdout } = await run(node, cli, { cwd: onionsoup.root, timeout: 60_000, maxBuffer: 8 * 1024 * 1024 });
   return stdout;
 }
 
@@ -61,7 +80,7 @@ function readBody(req) {
 }
 
 async function handle(req, res, url) {
-  if (url.pathname === '/health') return json(res, 200, { ok: true, onionsoup: onionsoup.root });
+  if (url.pathname === '/health') return json(res, 200, { ok: true, onionsoup: onionsoup.root, node });
   if (url.pathname === '/state' && req.method === 'GET') {
     const args = ['desk-state'];
     for (const key of ['agent', 'directory', 'owner']) if (url.searchParams.get(key)) args.push(`--${key}`, url.searchParams.get(key));
