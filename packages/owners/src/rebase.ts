@@ -157,7 +157,7 @@ async function replay(runtime: Runtime, item: WorkItem): Promise<WorkItem> {
     ? { summary: 'Replayed cleanly; no conflicts.', filesChanged: [], deviationsFromPlan: [] }
     : await resolveConflicts(runtime, item, source, path, files);
   const diff = await diffAgainstBase(owner, path);
-  const verification = await verify(owner, path);
+  const verification = await verify(owner, path, runtime.toolsDirectory);
   const replayed = { ...item, worktree: path, branch, implementations: [...item.implementations, { report, diffStat: diff.stat, verification }] };
   await runtime.notebook(item.owner).journal({ kind: 'rebase', workItem: item.id, outcome: picked ? 'clean' : `resolved ${files.length} conflicted files`, note: diff.stat.split('\n').at(-1) });
   if (!verificationPassed(verification)) return transition(replayed, 'failed', 'verification_failed_after_rebase');

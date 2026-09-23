@@ -24,6 +24,10 @@ export interface JournalEntry {
   model?: string;
   outcome?: string;
   note?: string;
+  /** The person's exact words, for decisions noted from a chat. */
+  quote?: string;
+  /** The chat session an entry came from. */
+  session?: string;
 }
 
 export class Notebook {

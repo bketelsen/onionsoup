@@ -44,8 +44,32 @@ export const IncusDomain = z.object({
 });
 export type IncusDomain = z.infer<typeof IncusDomain>;
 
+export const PermissionAction = z.enum(['allow', 'ask', 'deny']);
+
+/** Who the owner is in conversation: a name, a title and a voice. Identity, not authority. */
+export const Persona = z.object({
+  name: z.string().regex(/^[A-Z][A-Za-z-]+( [A-Z][A-Za-z-]+)?$/),
+  title: z.string(),
+  source: z.string(),
+  voice: z.string(),
+});
+export type Persona = z.infer<typeof Persona>;
+
+/**
+ * Rules for chats with a person. The person is present, so "ask" is cheap: the owner reaches for its
+ * own tools first and anything else waits for the person's approval in the chat.
+ */
+export const ConversationMode = z.object({
+  bash: z.record(z.string(), PermissionAction).default({ '*': 'ask' }),
+  edit: PermissionAction.default('ask'),
+  webfetch: PermissionAction.default('ask'),
+});
+export type ConversationMode = z.infer<typeof ConversationMode>;
+
 export const OwnerDeclaration = z.object({
   id: z.string().regex(/^[a-z0-9-]+$/),
+  persona: Persona.optional(),
+  conversation: ConversationMode.optional(),
   domain: z.discriminatedUnion('kind', [RepositoryDomain, IncusDomain]),
   /** The directory the owner's sessions read: a checkout, or an evidence snapshot. The owner never writes it. */
   workspace: z.string(),

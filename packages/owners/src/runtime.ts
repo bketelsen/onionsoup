@@ -30,6 +30,9 @@ export class Runtime {
   readonly ledger: Ledger;
   readonly notebooksRoot: string;
   readonly worktreesRoot: string;
+  readonly desksRoot: string;
+  /** Owner-scoped tools (e.g. the mkdocs venv), referenced as {tools} in declarations. */
+  readonly toolsDirectory: string;
   readonly managed: ManagedInstances;
   readonly requests: Requests;
   /** Replaceable so tests never touch real incus. */
@@ -40,6 +43,8 @@ export class Runtime {
     this.ledger = new Ledger(join(stateDirectory, 'items'));
     this.notebooksRoot = join(stateDirectory, 'notebooks');
     this.worktreesRoot = join(stateDirectory, 'worktrees');
+    this.desksRoot = join(stateDirectory, '..', 'desks');
+    this.toolsDirectory = join(stateDirectory, '..', 'tools');
     this.managed = new ManagedInstances(join(stateDirectory, 'managed'));
     this.requests = new Requests(join(stateDirectory, 'requests'));
   }

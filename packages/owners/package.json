@@ -17,6 +17,7 @@
     "dist"
   ],
   "dependencies": {
+    "@opencode-ai/plugin": "1.18.32",
     "@opencode-ai/sdk": "1.18.32",
     "undici": "7.29.0",
     "yaml": "2.9.1",

@@ -51,13 +51,25 @@ export async function diffAgainstBase(owner: RepositoryOwner, worktree: string) 
 }
 
 /** Host-run verification, sandboxed and memory-capped: a freelancer's claim that tests pass is never evidence. */
-export async function verify(owner: RepositoryOwner, worktree: string): Promise<Verification[]> {
+export async function verify(owner: RepositoryOwner, worktree: string, toolsDirectory: string): Promise<Verification[]> {
   const results: Verification[] = [];
-  for (const [command, ...args] of owner.domain.verify) {
+  for (const words of owner.domain.verify) {
+    const [command, ...args] = words.map(word => word.replaceAll('{tools}', toolsDirectory));
     const outcome = await runSandboxed(command!, args, { cwd: worktree, writable: [worktree] });
-    results.push({ command: [command, ...args].join(' '), ...outcome });
+    results.push({ command: words.join(' '), ...outcome });
   }
   return results;
+}
+
+/** An owner's desk: its own worktree on a desk branch, where chats with a person do their work. */
+export async function ensureDesk(owner: RepositoryOwner, desksRoot: string) {
+  const path = join(desksRoot, owner.id);
+  const branch = `desk/${owner.id}`;
+  if (!existsSync(path)) {
+    await git(owner.workspace, ['fetch', '-q', 'origin']);
+    await git(owner.workspace, ['worktree', 'add', '-q', '-B', branch, path, `origin/${owner.domain.baseBranch}`]);
+  }
+  return { path, branch };
 }
 
 export function verificationPassed(results: readonly Verification[]) {

@@ -52,7 +52,7 @@ const implement: Step = async (runtime, item, workflow) => {
     brief: implementBrief(item, item.plan, await notebookFor(runtime, item), hired.rubric), schema: ImplementationReport,
   });
   const diff = await diffAgainstBase(owner, path);
-  const verification = await verify(owner, path);
+  const verification = await verify(owner, path, runtime.toolsDirectory);
   const implemented = { ...item, worktree: path, branch, implementations: [...item.implementations, { report, diffStat: diff.stat, verification }] };
   await runtime.notebook(item.owner).journal({ kind: 'implement', workItem: item.id, model: hired.model, outcome: verificationPassed(verification) ? 'verified' : 'verification-failed', note: diff.stat.split('\n').at(-1) });
   if (!diff.stat) return transition(implemented, 'failed', 'implementer_changed_nothing');

@@ -52,7 +52,8 @@ function sandboxCommand(command: string, args: readonly string[], options: Sandb
 
 export function spawnSandboxed(command: string, args: readonly string[], options: SandboxOptions): ChildProcess {
   return spawn('systemd-run', sandboxCommand(command, args, options), {
-    env: { ...process.env, ...options.env },
+    // ONIONSOUP_SANDBOX tells the onionsoup opencode plugin (loaded from the global config) to stay inert.
+    env: { ...process.env, ...options.env, ONIONSOUP_SANDBOX: '1' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 }

@@ -168,6 +168,10 @@ Only record what will change how future work is planned, implemented or reviewed
 export function distillBrief(journal: readonly string[], notebook: string) {
   return [
     'Fold your recent journal into your notebook. Keep registers short: merge duplicates, correct what the journal shows is wrong.',
+    `Journal kinds from chats with the person: "chat-decision" lines are CANDIDATES (a watcher or you noted them, each with the
+person's exact words in "quote"); record only real decisions, preferences and pronouncements, in decisions.md or WISDOM, and
+cite the quote. "retracted" lines mean the person said something noted was not a decision: never record it. "chat-action"
+lines are things you did with the person's approval; record them in MAP only where they change what exists.`,
     block('journal', journal.join('\n')),
     block('notebook', notebook),
     NOTEBOOK_RULES,
