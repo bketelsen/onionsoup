@@ -12,7 +12,7 @@ const ENGINE_TITLE = /^([a-z0-9-]+|w-\d{8}-[0-9a-f]+): /;
 const NOTE_LABELS: Record<string, string> = {
   'chat-decision': 'Noted', 'chat-action': 'Did', 'work-opened': 'Opened work', 'plan-approved': 'Plan approved', 'plan-rejected': 'Plan rejected',
   published: 'Published', 'publish-failed': 'Publish failed', asked: 'Asked', answered: 'Answered', attention: 'Needs you', 'ci-triage': 'CI triage',
-  'owner-created': 'Created owner', 'owner-updated': 'Updated owner', 'owner-retired': 'Retired owner', 'ship-started': 'Shipping', shipped: 'Shipped',
+  'work-status': 'Work update', 'owner-created': 'Created owner', 'owner-updated': 'Updated owner', 'owner-retired': 'Retired owner', 'ship-started': 'Shipping', shipped: 'Shipped',
 };
 
 /** An owner's page: its chat in the middle, and beside it what waits, its threads, its work and what it has been doing. */
@@ -164,7 +164,7 @@ export function OwnerView({ owner, inbox, sessionId, refresh }: { owner: OwnerSu
                   <span className="typography-meta text-foreground line-clamp-3 [overflow-wrap:anywhere]">{note.note}</span>
                   {note.quote && <span className="typography-micro text-muted-foreground italic line-clamp-2">“{note.quote}”</span>}
                   {note.outcome && note.kind !== 'chat-decision' && (
-                    ['asked', 'answered', 'ci-triage', 'attention', 'shipped', 'ship-started'].includes(note.kind)
+                    ['asked', 'answered', 'ci-triage', 'attention', 'shipped', 'ship-started', 'work-status'].includes(note.kind)
                       ? <details className="typography-micro text-muted-foreground"><summary className="cursor-pointer hover:text-foreground">{note.kind === 'asked' ? 'The answer' : 'Outcome'}</summary><div className="mt-1 whitespace-pre-wrap [overflow-wrap:anywhere] text-foreground/80">{note.outcome}</div></details>
                       : <span className="typography-micro text-muted-foreground/80 line-clamp-1">{note.outcome}</span>
                   )}
