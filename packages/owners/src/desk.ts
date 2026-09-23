@@ -40,7 +40,16 @@ export async function deskState(runtime: Runtime, query: DeskQuery) {
   ])));
   const entries = await journal(notebook.directory);
   const retracted = new Set(entries.filter(entry => entry.kind === 'retracted').map(entry => entry.note ?? ''));
-  const notes = entries.filter(entry => NOTE_KINDS.has(entry.kind) && entry.kind !== 'retracted').slice(-DESK_LIMITS.notes).reverse()
+  const seenQuotes: string[] = [];
+  const isDuplicate = (entry: JournalLine) => {
+    const quote = entry.quote?.trim();
+    if (entry.kind !== 'chat-decision' || !quote) return false;
+    const duplicate = seenQuotes.some(seen => seen.includes(quote) || quote.includes(seen));
+    seenQuotes.push(quote);
+    return duplicate;
+  };
+  const notes = entries.filter(entry => NOTE_KINDS.has(entry.kind) && entry.kind !== 'retracted').filter(entry => !isDuplicate(entry))
+    .slice(-DESK_LIMITS.notes).reverse()
     .map(entry => ({ ...entry, retracted: retracted.has(entry.note ?? '') }));
   const items = (await runtime.ledger.list()).filter(item => item.owner === owner.id);
   const requests = (await runtime.requests.list()).filter(request => request.from === owner.id || request.to === owner.id);

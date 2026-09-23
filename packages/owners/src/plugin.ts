@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tool, type Plugin } from '@opencode-ai/plugin';
 import type { OwnerDeclaration, Persona } from './declarations.ts';
@@ -37,7 +37,13 @@ function bashAction(rules: Record<string, string>, command: string) {
   return action;
 }
 
-function agentPrompt(owner: OwnerDeclaration, persona: Persona, charter: string, roster: string) {
+/** The owner's own verification commands, with {tools} resolved; chats may run these without asking. */
+function verifyCommands(owner: OwnerDeclaration, toolsDirectory: string) {
+  if (owner.domain.kind !== 'git-repository') return [];
+  return owner.domain.verify.map(words => words.map(word => word.replaceAll('{tools}', toolsDirectory)).join(' '));
+}
+
+function agentPrompt(owner: OwnerDeclaration, persona: Persona, charter: string, roster: string, verify: readonly string[]) {
   return `${persona.voice.trim()}
 
 <charter>
@@ -57,14 +63,16 @@ How you work with the person in this chat:
   small, clearly requested actions you may act directly; anything outside your safe commands asks the person first.
 - Record a decision only when the person states one or explicitly agrees to your proposal, and quote their words. A
   watcher also notes decisions after each exchange; you do not need to record everything.
-- Your notebook and current work are appended to your context each turn. Never put secrets into notes or files.
+- Your notebook and current work are appended to your context each turn. Never put secrets into notes or files.${verify.length ? `
+- Verify changes in your domain with these commands (they run without asking): ${verify.map(command => `\`${command}\``).join(', ')}.` : ''}
 - If a tool fails, say so plainly and say what failed. Never tell the person something was recorded, opened or done
   unless the tool confirmed it; an unrecorded decision is recoverable, a false claim about the record is not.`;
 }
 
-function conversationPermission(owner: OwnerDeclaration) {
+function conversationPermission(owner: OwnerDeclaration, verify: readonly string[]) {
   const mode = owner.conversation ?? { bash: { '*': 'ask' }, edit: 'ask', webfetch: 'ask' };
-  return { edit: mode.edit, bash: mode.bash, webfetch: mode.webfetch, external_directory: 'ask', doom_loop: 'ask' };
+  const bash = { ...mode.bash, ...Object.fromEntries(verify.map(command => [`${command}*`, 'allow'])) };
+  return { edit: mode.edit, bash, webfetch: mode.webfetch, external_directory: 'ask', doom_loop: 'ask' };
 }
 
 const WATCHER_PERMISSION = Object.fromEntries(
@@ -137,6 +145,16 @@ const server: Plugin = async (input, options) => {
     return lines.join('\n') || '(nothing open)';
   }
 
+  /** Quotes already noted as decisions in this chat, by the owner or an earlier watch. */
+  async function sessionQuotes(ownerId: string, sessionID: string) {
+    const directory = join(runtime.notebook(ownerId).directory, 'journal');
+    const files = (await readdir(directory).catch(() => [] as string[])).filter(name => name.endsWith('.jsonl'));
+    const lines = (await Promise.all(files.map(file => readFile(join(directory, file), 'utf8')))).join('').split('\n').filter(Boolean);
+    return lines.map(line => JSON.parse(line) as { kind: string; session?: string; quote?: string })
+      .filter(entry => entry.kind === 'chat-decision' && entry.session === sessionID && entry.quote)
+      .map(entry => entry.quote!.trim());
+  }
+
   async function watch(sessionID: string, owner: OwnerDeclaration) {
     const messages = ((await input.client.session.messages({ path: { id: sessionID } })).data ?? []) as unknown as SessionMessage[];
     const lastUser = messages.map(message => message.info.role).lastIndexOf('user');
@@ -166,8 +184,11 @@ const server: Plugin = async (input, options) => {
       const parsed = WatcherRecords.safeParse((reply.data?.info as { structured?: unknown } | undefined)?.structured);
       if (!parsed.success) return;
       const notebook = runtime.notebook(owner.id);
-      // A record whose quote is not really in the person's message is a hallucination: drop it.
-      for (const record of parsed.data.records.filter(candidate => candidate.quote.trim() && userText.includes(candidate.quote.trim()))) {
+      const alreadyNoted = await sessionQuotes(owner.id, sessionID);
+      const overlaps = (quote: string) => alreadyNoted.some(noted => noted.includes(quote) || quote.includes(noted));
+      // A quote not really in the person's message is a hallucination; one already noted in this session is a duplicate.
+      const fresh = parsed.data.records.filter(candidate => candidate.quote.trim() && userText.includes(candidate.quote.trim()) && !overlaps(candidate.quote.trim()));
+      for (const record of fresh) {
         await notebook.journal({ kind: 'chat-decision', outcome: record.kind, note: record.statement, quote: record.quote, session: sessionID, model });
       }
       await commitQuietly(notebook, 'chat decisions');
@@ -182,12 +203,13 @@ const server: Plugin = async (input, options) => {
       for (const owner of owners) {
         const persona = owner.persona!;
         const charter = await runtime.text(`charters/${owner.id}.md`).catch(() => '(no charter yet)');
+        const verify = verifyCommands(owner, runtime.toolsDirectory);
         agents[persona.name] = {
           mode: 'primary',
           description: `${persona.title} (${persona.source})`,
           model: owner.model,
-          prompt: agentPrompt(owner, persona, charter, rosterText(runtime.declarations, owner.id)),
-          permission: conversationPermission(owner),
+          prompt: agentPrompt(owner, persona, charter, rosterText(runtime.declarations, owner.id), verify),
+          permission: conversationPermission(owner, verify),
         };
       }
       agents[WATCHER_AGENT] = {
