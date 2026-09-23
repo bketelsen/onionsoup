@@ -50,11 +50,22 @@ function sandboxCommand(command: string, args: readonly string[], options: Sandb
   ];
 }
 
+/**
+ * Variables a host process (OpenChamber's opencode, a TUI) may carry that must not leak into a sandboxed
+ * opencode: an inherited server password makes the nested server reject our unauthenticated client.
+ */
+const HOST_ONLY_VARIABLES = new Set(['OPENCODE_SERVER_PASSWORD', 'OPENCODE_SERVER_USERNAME', 'OPENCODE_CONFIG', 'OPENCODE_CONFIG_DIR', 'OPENCODE_CONFIG_CONTENT']);
+
+function sandboxEnvironment(extra: NodeJS.ProcessEnv = {}) {
+  const inherited = Object.fromEntries(Object.entries(process.env).filter(([key]) => !HOST_ONLY_VARIABLES.has(key)));
+  // ONIONSOUP_SANDBOX tells the onionsoup opencode plugin (loaded from the global config) to stay inert.
+  // Tools that insist on a writable temp dir under $HOME get the sandbox's private /tmp instead.
+  return { ...inherited, ANSIBLE_LOCAL_TEMP: '/tmp/ansible-local', ...extra, ONIONSOUP_SANDBOX: '1' };
+}
+
 export function spawnSandboxed(command: string, args: readonly string[], options: SandboxOptions): ChildProcess {
   return spawn('systemd-run', sandboxCommand(command, args, options), {
-    // ONIONSOUP_SANDBOX tells the onionsoup opencode plugin (loaded from the global config) to stay inert.
-    // Tools that insist on a writable temp dir under $HOME get the sandbox's private /tmp instead.
-    env: { ...process.env, ANSIBLE_LOCAL_TEMP: '/tmp/ansible-local', ...options.env, ONIONSOUP_SANDBOX: '1' },
+    env: sandboxEnvironment(options.env),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 }
