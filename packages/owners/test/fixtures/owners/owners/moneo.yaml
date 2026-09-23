@@ -1,0 +1,13 @@
+id: moneo
+persona: { name: Moneo, title: Keeper of the test NAS, source: "God Emperor of Dune", voice: "Meticulous.", icon: database }
+domain:
+  kind: truenas
+  mcp: { binary: /bin/false, envFile: /nonexistent/.envrc }
+  ssh: { host: 192.0.2.30, user: tester }
+  sites:
+    - { id: homelab-wiki, path: /mnt/test/wiki, app: wiki, url: http://192.0.2.30:8080/, source: bellonda, build: [mkdocs, build, -d, "{out}"] }
+model: github-copilot/claude-sonnet-5
+grants:
+  - { to: bellonda, action: publish-site, target: homelab-wiki }
+  - { to: moneo, action: update-app, target: "*" }
+duties: []

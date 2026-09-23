@@ -1,34 +1,29 @@
 # Onionsoup
 
-Single-purpose agents for OSS maintenance and homelab work, composed into
-workflows. One job per agent. The shared job host is the API; the web app in
-`apps/web` is the operator surface. Read [docs/design/web.md](docs/design/web.md)
-first, then [docs/README.md](docs/README.md) for the rest.
+Owners: persistent agents that each own one domain, hire freelancers, and work under runtime-enforced gates.
+Read [docs/design/owners.md](docs/design/owners.md) first, then [docs/gaps.md](docs/gaps.md).
 
 `AGENTS.md` is canonical; `CLAUDE.md` and `GEMINI.md` are symlinks to it.
-Skills under `.agents/skills/` are reference material, not required reading.
 
-## Two rules that matter
+## Rules that matter
 
-1. **Browser and model input never select authority.** Paths, credentials,
-   commands, providers, models, SSH hosts and repositories come from operator
-   configuration. A request picks among configured things by ID.
-2. **Effects are explicit.** Anything that writes to GitHub, executes code, or
-   mutates a service stays behind a deliberate approval step and is recorded.
-   Read-only agents get no write tools.
-
-Everything else is ordinary engineering judgment.
+1. **Authority comes from configuration, never from model or chat input.** Repositories, hosts, credentials,
+   models and grants are declared in the person's config directory; a request picks among declared things.
+2. **Effects happen in host code, behind gates.** Plan approval, creates/deletes and destructive actions wait for
+   a person unless a standing grant in configuration says otherwise, and every use of a grant is journaled.
+3. **The sandbox is the boundary.** Model-driven processes and verification run in bwrap with a read-only root
+   inside a memory-capped systemd scope. Bash allowlists are a convenience, never a security boundary.
+4. **Freelancer claims are not evidence.** Host code runs verification; reviews come from another model family.
+5. **Deterministic first.** Periodic checks are host code; they wake a model (the owner) only when needed.
 
 ## Layout
 
-- `packages/*`: `@onionsoup/*` workspaces. Import only declared exports. Never
-  import root `src/` or an app from a package.
-- `apps/*`: thin hosts (job host, web, MCP servers, CLIs). CLIs are being retired
-  as the web app replaces them.
-- `src/`: legacy OSS-maintenance workflows (readiness, location, packet, proposal,
-  fixture, publication). Move a module into a package when the job host needs it.
-- Runtime limits (quotas, queue size, deadlines) are configuration with defaults,
-  not contracts. Relax them when they get in the way.
+- `packages/owners`: the engine (`@onionsoup/owners`): runtime, CLI, daemon, opencode plugin (`src/plugin.ts`).
+- `extensions/owners-desk`: the OpenChamber extension (service + panel, built with `npm run desk:build`).
+- `examples/starter`: the configuration `owners init` copies. A person's own owners never live in this repository
+  (`ONIONSOUP_CONFIG`, default `~/.config/onionsoup`); state lives in `ONIONSOUP_HOME`.
+- `packages/owners/test/fixtures/owners`: declarations the tests use.
+- Runtime limits are named constants with defaults, not contracts. Relax them when they get in the way.
 
 ## Code rules
 
@@ -60,24 +55,17 @@ reject them; fix them when you touch a file that has them.
   with defaults that a config can override, not literals in the logic.
 - **Components take one prop shape.** A UI renderer takes the whole result and
   destructures inside, so a registry can instantiate any of them the same way.
-- **Delete, don't deprecate.** When the web replaces a CLI or a module, remove
-  it and its tests in the same change. Historical records stay; dead code does
-  not.
+- **Delete, don't deprecate.** When something is replaced, remove it and its
+  tests in the same change. Git history keeps it; dead code does not stay.
 - **Tests exercise the seam, not the mock.** A test that only asserts what a
   fake returned proves nothing. Test through the public function with a
   scripted model or fixture and assert on persisted records.
 
 ## Working here
 
-- `npm run verify` builds, checks package boundaries and doc links, typechecks
-  and runs tests. Keep it green.
-- Provider and model are selected at the application edge; use `gpt-5.6-terra`
-  for development runs. See `packages/providers`.
-- Write readable code; the rules below are checked in review. Reformat dense
-  legacy files as you touch them.
-- Docs: one living design page per area under `docs/design/`. Update it when
-  reality changes. `docs/adr/`, `docs/specs/` and `docs/plans/records/` are
-  history from the proving phase; do not extend them. Historical evaluation
-  records keep their original findings.
-- Keep credentials, private keys, raw runs and local clones out of Git. Never
-  log credentials.
+- `npm run verify` builds, checks package boundaries and doc links, typechecks and runs tests. Keep it green.
+- The running daemon (`onionsoup-owners.service`) and OpenChamber's opencode load this code: restart them after
+  changes that should take effect.
+- Docs: one living design page (`docs/design/owners.md`), the gaps list and the extending guide. Update them when
+  reality changes.
+- Keep credentials, private keys, raw runs and local clones out of Git. Never log credentials.

@@ -1,0 +1,50 @@
+# An owner: a persistent agent that owns one domain. Copy this file to create your own.
+# `owners init` put it in your config directory; nothing here is specific to any machine.
+id: example
+persona:
+  name: Sheeana
+  title: Keeper of the example repository
+  source: "Chapterhouse: Dune"
+  icon: code          # OpenChamber project icon: code terminal rocket flask briefcase home globe leaf shield server database book ...
+  voice: |
+    You are Sheeana: calm, direct and curious. You understand your repository deeply and explain it plainly.
+    Let the character show in your judgement and a little in your phrasing; never let it cost accuracy.
+domain:
+  kind: git-repository
+  name: your-name/your-repository              # GitHub owner/name, used for draft PRs
+  remote: git@github.com:your-name/your-repository.git
+  baseBranch: main
+  verify:                                       # run by host code in the sandbox after every change
+    - [npm, test]
+# workspace defaults to <home>/checkouts/<id>; set it only to use an existing clone.
+model: github-copilot/claude-sonnet-5           # provider/model as opencode knows it
+workflow: change                                # plan -> your approval -> implement -> cross-family review -> land
+maxProposals: 3
+conversation:                                   # rules for chats with you: allow, ask (you approve in chat), deny
+  edit: ask
+  webfetch: ask
+  bash:
+    "*": ask
+    "git status*": allow
+    "git log*": allow
+    "git diff*": allow
+    "ls*": allow
+# Tools without onionsoup code: any MCP server, visible to this owner alone, with per-tool rules.
+# mcp:
+#   github:
+#     command: [github-mcp-server, stdio]
+#     envFile: ~/.config/onionsoup/secrets/github.env   # KEY=VALUE lines; values never logged
+#     rules: { "*": allow, create_pull_request: ask, delete_repository: deny }
+duties:
+  - id: survey                                  # look at the repository and propose work
+    every: 7d
+    instructions: |
+      Get to know the repository. Record its layout, conventions and open questions in your notebook,
+      then propose the most valuable small improvements.
+  - id: maintain-prs                            # deterministic: keep published PRs mergeable
+    kind: maintain-prs
+    every: 15m
+    instructions: Keep the pull requests you published mergeable.
+# Standing approvals you grant (they replace your per-request approval and are journaled as such):
+# grants:
+#   - { to: example, action: publish-site, target: my-site }

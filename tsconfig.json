@@ -12,15 +12,10 @@
     ]
   },
   "include": [
-    "src/**/*.ts",
-    "test/**/*.ts",
-    "scripts/**/*.ts",
-    "packages/**/*.ts",
-    "apps/**/*.ts"
+    "packages/**/*.ts"
   ],
   "exclude": [
     "**/dist/**",
-    ".build/**",
-    "apps/web/**"
+    ".build/**"
   ]
 }

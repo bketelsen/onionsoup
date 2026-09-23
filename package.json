@@ -7,57 +7,23 @@
     "node": ">=24"
   },
   "scripts": {
-    "triage": "node --conditions=onionsoup-source --import tsx src/cli.ts",
-    "demo": "node --conditions=onionsoup-source --import tsx src/cli.ts demo examples/incomplete-bug.json",
-    "test": "node --conditions=onionsoup-source --import tsx --test test/*.test.ts packages/*/test/*.test.ts",
-    "typecheck": "tsc --noEmit",
-    "verify": "npm run build && npm run check:packages && npm run check:docs && npm run check:capabilities && npm run typecheck && npm test",
-    "eval": "node --conditions=onionsoup-source --import tsx scripts/eval.ts",
-    "batch": "node --conditions=onionsoup-source --import tsx src/batch-cli.ts",
-    "inbox": "node --conditions=onionsoup-source --import tsx src/inbox-cli.ts",
-    "eval:location": "node --conditions=onionsoup-source --import tsx scripts/eval-location-search.ts",
-    "check:docs": "node scripts/check-docs.mjs",
-    "agents": "node --conditions=onionsoup-source --import tsx src/agents-cli.ts",
-    "capabilities:generate": "node --conditions=onionsoup-source --import tsx scripts/generate-capabilities.ts",
-    "check:capabilities": "node --conditions=onionsoup-source --import tsx scripts/generate-capabilities.ts --check",
-    "mcp": "node --conditions=onionsoup-source --import tsx src/mcp-cli.ts",
-    "prove:codex": "node --conditions=onionsoup-source --import tsx scripts/prove-codex-mcp.ts",
-    "repo-brief": "node --conditions=onionsoup-source --import tsx apps/brief-cli/src/main.ts",
-    "delivery": "node --conditions=onionsoup-source --import tsx apps/brief-worker/src/main.ts",
-    "mail-capture": "node --conditions=onionsoup-source --import tsx apps/mail-capture/src/main.ts",
-    "fixture": "node --conditions=onionsoup-source --import tsx src/fixture-runner/cli.ts",
-    "publication": "node --conditions=onionsoup-source --import tsx src/publication/cli.ts",
-    "project-change": "node --conditions=onionsoup-source --import tsx src/project-change/cli.ts",
+    "owners": "node --conditions=onionsoup-source --import tsx packages/owners/src/cli.ts",
     "build": "node scripts/build-workspaces.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node --conditions=onionsoup-source --import tsx --test packages/*/test/*.test.ts",
     "check:packages": "node scripts/check-packages.mjs",
-    "release:brief": "npm run build && node scripts/release-brief.mjs",
-    "pretest": "npm run build",
-    "mcp:brief": "node --conditions=onionsoup-source --import tsx apps/brief-mcp/src/main.ts",
-    "mcp:homelab": "node --conditions=onionsoup-source --import tsx apps/homelab-mcp/src/main.ts",
-    "prove:homelab": "npm run build && node --conditions=onionsoup-source --import tsx scripts/prove-homelab-mcp.ts",
-    "jobs": "npm run build && node apps/job-host/dist/main.js",
-    "web:dev": "npm run dev -w apps/web"
+    "check:docs": "node scripts/check-docs.mjs",
+    "verify": "npm run build && npm run check:packages && npm run check:docs && npm run typecheck && npm test",
+    "desk:build": "npm --prefix extensions/owners-desk run build"
   },
-  "dependencies": {
-    "@humanlayer/agentlayer-core": "0.0.36",
-    "@humanlayer/agentlayer-provider-auth": "0.0.36",
-    "@humanlayer/agentlayer-provider-github-copilot": "0.0.36",
-    "@humanlayer/agentlayer-provider-openai-codex": "0.0.36",
-    "@modelcontextprotocol/sdk": "1.30.0",
-    "ai": "6.0.191",
-    "nodemailer": "10.0.10",
-    "smtp-server": "3.19.13",
-    "zod": "4.3.6"
-  },
+  "dependencies": {},
   "devDependencies": {
     "@types/node": "^24.0.0",
-    "@types/nodemailer": "8.0.2",
-    "@types/smtp-server": "3.5.13",
     "tsx": "^4.20.0",
     "typescript": "5.9.3"
   },
   "workspaces": [
-    "packages/*",
-    "apps/*"
-  ]
+    "packages/*"
+  ],
+  "description": "Owners: persistent AI agents that own a domain, hire freelancers, and work under runtime-enforced gates."
 }

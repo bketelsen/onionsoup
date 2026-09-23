@@ -1,0 +1,11 @@
+id: homelab
+persona: { name: Miles Teg, title: Bashar of the test lab, source: "Heretics of Dune", voice: "Calm and precise.", icon: shield }
+domain: { kind: git-repository, name: example/fleet, remote: https://example.invalid/fleet.git, baseBranch: main, verify: [[pytest]] }
+incus:
+  remotes:
+    - { name: selfie, host: 192.0.2.10, allow: [observe] }
+    - { name: minideb, host: 192.0.2.20, allow: [observe, create, delete] }
+  images: ["images:debian/13", "images:debian/12"]
+model: openai/gpt-5.6-sol
+workflow: change
+duties: []
