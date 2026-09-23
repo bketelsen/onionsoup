@@ -632,3 +632,18 @@ html:not(.dark) .chat-scroll {
 .animate-status-logo {
   animation: oc-status-logo 4s steps(10, jump-none) infinite;
 }
+
+/* onionsoup: shiki's css-variables theme (chat/highlight.ts) coloured by the theme's syntax tokens. */
+:root {
+  --shiki-foreground: var(--syntax-foreground, var(--foreground));
+  --shiki-background: transparent;
+  --shiki-token-constant: var(--syntax-constant);
+  --shiki-token-string: var(--syntax-string);
+  --shiki-token-string-expression: var(--syntax-string);
+  --shiki-token-comment: var(--syntax-comment);
+  --shiki-token-keyword: var(--syntax-keyword);
+  --shiki-token-parameter: var(--syntax-parameter, var(--syntax-variable));
+  --shiki-token-function: var(--syntax-function);
+  --shiki-token-punctuation: var(--syntax-punctuation, var(--syntax-operator));
+  --shiki-token-link: var(--syntax-string);
+}
