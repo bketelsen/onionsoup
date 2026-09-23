@@ -1,6 +1,7 @@
 {
   "name": "@onionsoup/surface",
   "version": "0.1.0",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "description": "The onionsoup surface: owners, their chats, and what waits on the person, on top of opencode.",

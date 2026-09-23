@@ -52,3 +52,8 @@ owners approve-push <item> | request-publish <owner> <site> | desk <owner> | not
 
 `npm run verify` builds, checks package boundaries and docs, typechecks and runs the tests. Conventions for
 people and agents working on the code are in [AGENTS.md](AGENTS.md).
+
+## License
+
+[MIT](LICENSE). The surface's UI borrows styles and chat markup from
+[OpenChamber](https://github.com/openchamber/openchamber), also MIT; see `packages/surface/web/NOTICE`.
