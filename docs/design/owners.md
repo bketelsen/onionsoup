@@ -57,14 +57,15 @@ An owner is declared once (`owners/<id>.yaml`) and keeps one identity across ses
 - **Persona**: a name, title, source and voice (these owners are named from *Dune*). Identity, never authority.
 - **Charter** (`charters/<id>.md`): the person's statement of domain, goals and boundaries. It steers everything.
 - **Domain**: `git-repository` (verified by declared commands), `incus` (observe; create/delete behind gates),
-  or `truenas` (through truenas-mcp, with hosted sites). A repository owner may also hold an `incus` section.
+  `truenas` (through truenas-mcp, with hosted sites) or `github-org` (observed with gh). A repository owner may
+  also hold an `incus` section, and a `deploy` section for where its code runs (the ship action).
 - **Duties**: what it does on its own, on a schedule (`every: 15m | 1d | 7d`). Kinds: `survey` (look and
   propose work, or raise attention items), `maintain-prs` (deterministic), `request-instance`, `app-updates`.
 - **Conversation mode**: per-pattern `allow` / `ask` / `deny` rules for chats; `ask` means the person approves
   in the chat. Owners reach for their own tools first and can do anything else with approval.
 - **Tools**: onionsoup tools, plus any MCP servers declared in `mcp:` (visible to that owner alone, with
   per-tool rules). The NAS owner gets truenas-mcp this way.
-- **Grants**: standing approvals the person gives in configuration (`publish-site`, `update-app`, `merge`),
+- **Grants**: standing approvals the person gives in configuration (`publish-site`, `update-app`, `merge`, `ship`),
   journaled as "approved by standing grant" whenever they are used.
 - **Desk**: a worktree on a `desk/<id>` branch (or the evidence folder for non-repository owners) where chat
   work happens. Desk changes become a verified, reviewed PR through `onionsoup_propose_changes`.
@@ -75,8 +76,11 @@ Freelancer profiles (`freelancers/*.yaml`) are crafts with a rubric and allowed 
 (`workflows/change.yaml`) is: plan (the owner answers the planner's questions) → the person approves or sends
 it back with notes → implement in a worktree → host-run verification → review by a model outside the
 implementer's family (checked from recorded providers) → revise or replan within limits → land as a commit on
-`owners/<item>` → `publish` opens a draft PR. The `maintain-prs` duty keeps published PRs mergeable: a conflict
-wakes the owner, which decides and briefs the implementer, and the force-push waits for approval.
+`owners/<item>` → `publish` opens a draft PR. The `maintain-prs` duty keeps published PRs mergeable and green:
+a conflict wakes the owner, which decides and briefs the implementer (the force-push waits for approval), and
+failing CI on a new head commit wakes the owner once to decide fix (a work item at the plan gate), flaky, or person.
+An owner with a `deploy` section and a `ship` grant ships its repository where it runs: fast-forward, verify in
+the sandbox, restart through a delayed systemd unit that health-checks and rolls back.
 
 ### Notebooks and memory
 

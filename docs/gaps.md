@@ -8,10 +8,14 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
   push → PR → merge under a `merge` grant → publish if the owner is a site source) is built, and Bellonda holds a
   merge grant for her wiki, but it has not yet run end to end. Her `minideb` page and `selfie` correction are
   waiting on her desk: ask her to propose them.
-- **Leto cannot deploy onionsoup yet.** He can change the engine on his desk and open reviewed PRs, and create
-  owners in `~/.config/onionsoup` with approval, but after a merge nothing pulls the running checkout and
-  restarts the daemon and OpenChamber's opencode. A `deploy` action (pull, `npm ci`, verify, restart, roll back
-  on failure) behind a grant or approval would close this.
+- **Leto ships the daemon, not OpenChamber.** `onionsoup_ship` fast-forwards the running checkout, verifies it,
+  restarts the daemon with a health check and rolls back on failure, but OpenChamber's opencode (which loads the
+  plugin) still needs a person to restart it.
+- **snosi builds run only in CI.** mkosi needs root, so Murbella verifies with snosi's static checks and relies on
+  GitHub Actions for builds (CI failures wake her). Local builds would need a privileged build VM on minideb,
+  requested from Miles Teg like the smoke-test instances.
+- **Odrade observes but cannot assign.** She watches the Frostyard org and knows its owners, but there is no
+  "owner of owners" mechanism yet: she cannot hand work to Murbella or propose new owners except through the person.
 - **Autonomous runs cannot use owner MCP tools.** Declared `mcp:` servers are available in chats only; duties and
   hires in the sandbox do not get them (the NAS owner's snapshot and updates use host code instead).
 - **No budgets.** Per-owner cost caps and wake-rate limits are designed but not enforced, and cost is only tracked

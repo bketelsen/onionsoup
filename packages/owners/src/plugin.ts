@@ -5,6 +5,7 @@ import { hasIncus, type OwnerDeclaration, type Persona } from './declarations.ts
 import { askOwner, formatAnswer } from './ask.ts';
 import { requestPublish } from './brokering.ts';
 import { proposeDeskChanges } from './desk-changes.ts';
+import { hasShipGrant, shipEngine } from './ship.ts';
 import { expandHome, readEnvFile, truenasMcpEnvironment } from './truenas.ts';
 import { pickModel } from './families.ts';
 import type { Notebook } from './notebook.ts';
@@ -363,6 +364,17 @@ const server: Plugin = async (input, options) => {
           const owner = requireOwner(context.agent);
           context.metadata({ title: `proposing: ${args.title}` });
           const result = await proposeDeskChanges(runtime, owner.id, args.title, args.summary);
+          return `${result.outcome}: ${result.summary}`;
+        },
+      }),
+      onionsoup_ship: tool({
+        description: 'Deploy your repository where it runs: fast-forward the running checkout, install and verify it in the sandbox (rolling back on failure), then restart its services with a health check and automatic rollback. Needs a ship grant or the person\'s approval.',
+        args: {},
+        async execute(_args, context) {
+          const owner = requireOwner(context.agent);
+          const repository = runtime.repositoryOwner(owner.id);
+          if (!hasShipGrant(repository)) await context.ask({ permission: 'onionsoup_ship', patterns: [repository.domain.name], always: [], metadata: { repository: repository.domain.name } });
+          const result = await shipEngine(runtime, owner.id);
           return `${result.outcome}: ${result.summary}`;
         },
       }),

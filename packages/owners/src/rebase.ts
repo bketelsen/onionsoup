@@ -1,7 +1,9 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { z } from 'zod';
-import { ImplementationReport, Verdict } from './artifacts.ts';
+import { readFile, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { ImplementationReport, ProposedWork, Verdict } from './artifacts.ts';
 import { requireFreelancer } from './declarations.ts';
 import { pickModel } from './families.ts';
 import type { WorkItem, WorkStatus } from './ledger.ts';
@@ -39,6 +41,59 @@ async function settledPullRequest(url: string) {
 
 const PR_STATES: Record<string, 'open' | 'merged' | 'closed'> = { OPEN: 'open', MERGED: 'merged', CLOSED: 'closed' };
 
+export const CI_TRIAGE_LIMITS = { logChars: 12_000 };
+
+const Check = z.object({ name: z.string(), bucket: z.string(), link: z.string().default('') });
+
+async function failingChecks(url: string) {
+  const text = await run('gh', ['pr', 'checks', url, '--json', 'name,bucket,link']).then(result => result.stdout, error => (error as { stdout?: string }).stdout ?? '[]');
+  return z.array(Check).parse(JSON.parse(text || '[]')).filter(check => check.bucket === 'fail');
+}
+
+async function failedLogs(checks: readonly z.infer<typeof Check>[]) {
+  const runIds = [...new Set(checks.map(check => check.link.match(/\/actions\/runs\/(\d+)/)?.[1]).filter(Boolean))] as string[];
+  const logs: string[] = [];
+  for (const runId of runIds) {
+    const text = await run('gh', ['run', 'view', runId, '--log-failed'], { maxBuffer: 64 * 1024 * 1024 }).then(result => result.stdout, () => '');
+    logs.push(`run ${runId}:\n${text.slice(-CI_TRIAGE_LIMITS.logChars / Math.max(1, runIds.length))}`);
+  }
+  return logs.join('\n\n');
+}
+
+export const CiTriage = z.object({
+  decision: z.enum(['fix', 'flaky', 'person']),
+  reason: z.string(),
+  fix: ProposedWork.optional().describe('Required for fix: the work item to plan'),
+});
+
+async function readTriaged(runtime: Runtime, ownerId: string): Promise<Record<string, string>> {
+  return JSON.parse(await readFile(join(runtime.stateDirectory, `ci-triage-${ownerId}.json`), 'utf8').catch(() => '{}')) as Record<string, string>;
+}
+
+/** CI failed on a published PR's head commit: wake the owner once for that commit to decide fix, flaky or person. */
+async function triageFailingCi(runtime: Runtime, item: WorkItem, headSha: string) {
+  const triaged = await readTriaged(runtime, item.owner);
+  if (triaged[item.publication!.url] === headSha) return undefined;
+  const failing = await failingChecks(item.publication!.url);
+  if (!failing.length) return undefined;
+  const owner = runtime.owner(item.owner);
+  const notebook = runtime.notebook(owner.id);
+  const brief = [
+    `CI failed on your published PR ${item.publication!.url} ("${item.proposal.title}") at ${headSha.slice(0, 12)}.`,
+    `<failing-checks>\n${failing.map(check => `- ${check.name}: ${check.link}`).join('\n')}\n</failing-checks>`,
+    `<failed-logs>\n${await failedLogs(failing)}\n</failed-logs>`,
+    `<notebook>\n${await notebook.orientation()}\n</notebook>`,
+    'Decide as the owner: fix (describe the work to plan; the person approves the plan), flaky (not caused by the change; say why), or person (needs the person: secrets, infrastructure, policy).',
+  ].join('\n\n');
+  const decision = (await runtime.hire(owner.id, { role: 'owner', model: owner.model, directory: owner.workspace, title: `${owner.id}: CI triage`, brief, schema: CiTriage })).value;
+  triaged[item.publication!.url] = headSha;
+  await writeFile(join(runtime.stateDirectory, `ci-triage-${owner.id}.json`), JSON.stringify(triaged, null, 2) + '\n');
+  const kind = decision.decision === 'person' ? 'attention' : 'ci-triage';
+  await notebook.journal({ kind, workItem: item.id, outcome: decision.decision, note: `CI on ${item.publication!.url}: ${decision.reason}` });
+  if (decision.decision === 'fix' && decision.fix && owner.workflow) return runtime.ledger.create(owner.id, owner.workflow, decision.fix);
+  return undefined;
+}
+
 /** The maintain-prs duty: record merges and closes, and open a rebase work item for each conflicting PR. */
 export async function maintainPullRequests(runtime: Runtime, ownerId: string) {
   const items = (await runtime.ledger.list()).filter(item => item.owner === ownerId);
@@ -52,6 +107,14 @@ export async function maintainPullRequests(runtime: Runtime, ownerId: string) {
       await runtime.ledger.save({ ...item, publication: { ...item.publication!, state } });
       notes.push(`${item.publication!.url} ${state}`);
       continue;
+    }
+    const fix = await triageFailingCi(runtime, item, pr.headRefOid).catch(error => {
+      notes.push(`${item.publication!.url} CI triage failed: ${error instanceof Error ? error.message : error}`);
+      return undefined;
+    });
+    if (fix) {
+      opened.push(fix);
+      notes.push(`${item.publication!.url} CI failing → ${fix.id}`);
     }
     if (pr.mergeable !== 'CONFLICTING' || openRebases.has(item.id)) continue;
     const rebase = await runtime.ledger.create(ownerId, REBASE_WORKFLOW, {

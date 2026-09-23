@@ -14,6 +14,7 @@ import { publish } from './publish.ts';
 import { approvePush } from './rebase.ts';
 import { describeAsk, type ResourceRequest } from './requests.ts';
 import { proposeDeskChanges } from './desk-changes.ts';
+import { shipEngine } from './ship.ts';
 import { deskState } from './desk.ts';
 import { initConfig } from './init.ts';
 import { configDirectory, stateDirectory } from './paths.ts';
@@ -186,6 +187,10 @@ const COMMANDS: Record<string, Command> = {
       }
     }
   },
+  async ship(runtime, [ownerId]) {
+    const result = await shipEngine(runtime, required(ownerId, 'owner'));
+    console.log(`${result.outcome}: ${result.summary}`);
+  },
   async propose(runtime, [ownerId]) {
     const result = await proposeDeskChanges(runtime, required(ownerId, 'owner'), required(options.note, '--note (title)'), options.reason ?? options.note!);
     console.log(`${result.outcome}: ${result.summary}`);
@@ -257,7 +262,7 @@ if (commandName === 'init') {
 }
 const runtime = await Runtime.open({ declarations: options.declarations!, state: options.state! });
 /** Commands that only read, or only record a person's decision, never take the runtime lock. */
-const LOCK_FREE = ['items', 'show', 'notebook', 'requests', 'approve', 'revise-plan', 'reject', 'resume', 'desk', 'desk-state', 'retract', 'ask', 'sync-openchamber', 'request-publish', 'propose', 'approve-push', 'approve-create', 'approve-delete', 'deny-request'];
+const LOCK_FREE = ['items', 'show', 'notebook', 'requests', 'approve', 'revise-plan', 'reject', 'resume', 'desk', 'desk-state', 'retract', 'ask', 'sync-openchamber', 'request-publish', 'propose', 'ship', 'approve-push', 'approve-create', 'approve-delete', 'deny-request'];
 try {
   const unlock = LOCK_FREE.includes(commandName!) ? async () => {} : await runtime.lock();
   try {

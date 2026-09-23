@@ -90,14 +90,26 @@ export const TruenasDomain = z.object({
 });
 export type TruenasDomain = z.infer<typeof TruenasDomain>;
 
+/** A GitHub organization: observed read-only through gh; the owner watches over the org's repositories and owners. */
+export const GithubOrgDomain = z.object({
+  kind: z.literal('github-org'),
+  org: z.string(),
+  /** Repositories whose default-branch CI the snapshot checks; empty means all of them. */
+  watch: z.array(z.string()).default([]),
+});
+export type GithubOrgDomain = z.infer<typeof GithubOrgDomain>;
+
 /**
  * A standing approval the person grants in configuration: requests of this kind from this owner skip the
  * per-request human gate and are recorded as approved by the grant.
  */
 export const Grant = z.object({
   to: z.string(),
-  /** publish-site and update-app are requests to another owner; merge lets an owner merge its own reviewed PRs. */
-  action: z.enum(['publish-site', 'update-app', 'merge']),
+  /**
+   * publish-site and update-app are requests to another owner; merge lets an owner merge its own reviewed PRs;
+   * ship lets an owner deploy its repository where it runs.
+   */
+  action: z.enum(['publish-site', 'update-app', 'merge', 'ship']),
   /** The site or app, or "*" for all of them. */
   target: z.string(),
 });
@@ -120,7 +132,7 @@ export const OwnerDeclaration = z.object({
   id: z.string().regex(/^[a-z0-9-]+$/),
   persona: Persona.optional(),
   conversation: ConversationMode.optional(),
-  domain: z.discriminatedUnion('kind', [RepositoryDomain, IncusDomain, TruenasDomain]),
+  domain: z.discriminatedUnion('kind', [RepositoryDomain, IncusDomain, TruenasDomain, GithubOrgDomain]),
   /**
    * The directory the owner's sessions read: a checkout, or an evidence snapshot. The owner never writes it.
    * Optional: it defaults to <home>/checkouts/<id> for repositories and <home>/evidence/<id> otherwise.
@@ -134,6 +146,12 @@ export const OwnerDeclaration = z.object({
   duties: z.array(Duty),
   maxProposals: z.number().int().min(0).default(3),
   grants: z.array(Grant).default([]),
+  /** Where the owner's repository runs, for the ship action: the running checkout and the units to restart. */
+  deploy: z.object({
+    checkout: z.string(),
+    services: z.array(z.string()).min(1),
+    restartOpenChamber: z.boolean().default(false),
+  }).optional(),
   /** MCP tool servers this owner uses in chats, keyed by a short name. */
   mcp: z.record(z.string().regex(/^[a-z][a-z0-9]*$/), OwnerToolServer).default({}),
 });
