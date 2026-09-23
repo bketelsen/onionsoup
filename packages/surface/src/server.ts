@@ -75,8 +75,8 @@ export function surfaceServer(state: SurfaceState, options: { webRoot: string; b
 
   const routes: Route[] = [
     route('GET', '/api/state', async () => {
-      const inbox = await state.inbox();
-      return { owners: await state.owners(inbox), inbox };
+      const [inbox, opencode] = await Promise.all([state.inbox(), state.opencode.health()]);
+      return { owners: await state.owners(inbox), inbox, opencode };
     }),
     route('GET', '/api/settings', async () => state.settings.read()),
     route('PUT', '/api/settings/owner-order', async (_params, body) => {

@@ -15,7 +15,7 @@ export interface InboxEntry {
   permission?: PendingPermission; question?: PendingQuestion;
 }
 
-export interface SurfaceState { owners: OwnerSummary[]; inbox: InboxEntry[] }
+export interface SurfaceState { owners: OwnerSummary[]; inbox: InboxEntry[]; opencode?: { ok: boolean; error?: string } }
 
 export interface JournalNote { at: string; kind: string; note?: string; quote?: string; outcome?: string; stage?: string; session?: string; workItem?: string; retracted?: boolean }
 

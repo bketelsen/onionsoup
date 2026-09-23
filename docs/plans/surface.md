@@ -98,9 +98,11 @@ Tick items as they land, with the commit.
 - The chat's visual spec extracted from OpenChamber (class names, CSS, per-tool icons and titles) was saved at the
   session scratchpad as openchamber-chat-spec.md; the source of truth is `~/projects/openchamber/packages/ui/src/components/chat`.
 
-- Run against the live system without disturbing it: `SURFACE_PORT=4748 OPENCODE_URL=http://127.0.0.1:<port>
-  OPENCODE_SERVER_PASSWORD=… npm run surface` attaches to OpenChamber's opencode (find its port with
-  `ps -eo args | grep "opencode serve"`; the password is in that process's environment, never print it).
+- Run it with its own opencode (the default: no OPENCODE_URL). Attaching to OpenChamber's opencode breaks whenever
+  OpenChamber restarts, because its opencode comes back on a new port with a new password; the surface then shows
+  a banner instead of chats. Sessions live in opencode's shared store, so both UIs see the same chats either way.
+  What each server knows only in memory stays with it: a chat's live stream and its pending permissions show where
+  that chat is running.
 - Session lists include engine sessions that ran in the same directory (hires titled `<owner>: …` or `w-…: …`);
   the UI should group them apart from the person's chats.
 

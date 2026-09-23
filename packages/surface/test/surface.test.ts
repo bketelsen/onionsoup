@@ -17,6 +17,7 @@ function fakeOpencode() {
     prompt: async (directory, sessionID, agent, text) => { calls.push(['prompt', directory, sessionID, agent, text]); },
     abort: async () => {},
     status: async () => ({}),
+    health: async () => ({ ok: true }),
     permissions: async directory => directory.endsWith('bellonda') ? [{ id: 'per_1', sessionID: 'ses_1', permission: 'edit', patterns: ['docs/x.md'], metadata: {}, always: [] }] : [],
     replyPermission: async (directory, requestID, reply) => { calls.push(['permission', directory, requestID, reply]); },
     questions: async () => [],

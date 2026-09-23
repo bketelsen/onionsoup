@@ -15,6 +15,8 @@ export interface OpencodeApi {
   prompt(directory: string, sessionID: string, agent: string, text: string): Promise<void>;
   abort(directory: string, sessionID: string): Promise<void>;
   status(directory: string): Promise<Record<string, unknown>>;
+  /** Whether the opencode server answers at all. */
+  health(): Promise<{ ok: boolean; error?: string }>;
   permissions(directory: string): Promise<PendingPermission[]>;
   replyPermission(directory: string, requestID: string, reply: 'once' | 'always' | 'reject', message?: string): Promise<void>;
   questions(directory: string): Promise<PendingQuestion[]>;
@@ -110,6 +112,14 @@ function opencodeApi(url: string, headers: Record<string, string>): OpencodeApi 
     },
     async status(directory) {
       return (unwrap(await client.session.status({ directory }), 'session_status') ?? {}) as Record<string, unknown>;
+    },
+    async health() {
+      try {
+        const response = await fetch(`${url}/global/health`, { headers, signal: AbortSignal.timeout(3_000) });
+        return response.ok ? { ok: true } : { ok: false, error: `opencode at ${url} answered HTTP ${response.status}` };
+      } catch (error) {
+        return { ok: false, error: `opencode at ${url} is unreachable (${error instanceof Error ? error.message : error})` };
+      }
     },
     async permissions(directory) {
       return (unwrap(await client.permission.list({ directory }), 'permission_list') ?? []) as PendingPermission[];

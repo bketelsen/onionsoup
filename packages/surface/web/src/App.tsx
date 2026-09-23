@@ -64,7 +64,13 @@ export function App() {
 
   const owner = route[0] === 'owner' ? state?.owners.find(candidate => candidate.id === route[1]) : undefined;
   return (
-    <div className="h-full flex bg-background text-foreground">
+    <div className="h-full flex flex-col bg-background text-foreground">
+      {state?.opencode && !state.opencode.ok && (
+        <div role="alert" className="shrink-0 px-4 py-2 typography-meta border-b border-[var(--status-error-border)] bg-[var(--status-error-background)] text-[var(--status-error)]">
+          Chats are unavailable: {state.opencode.error}. If the surface is attached to OpenChamber's opencode, restarting OpenChamber moves it; restart the surface, or run it with its own opencode (the default).
+        </div>
+      )}
+      <div className="flex-1 flex min-h-0">
       <Rail state={state} route={route} onReorder={order => {
         setState(current => current && { ...current, owners: order.map(id => current.owners.find(owner => owner.id === id)!).filter(Boolean) });
         void api('/api/settings/owner-order', { method: 'PUT', body: { order } }).catch(() => refresh());
@@ -72,6 +78,7 @@ export function App() {
       {route[0] === 'item' && route[1] ? <ItemView itemId={route[1]} />
         : owner ? <OwnerView key={owner.id} owner={owner} inbox={state?.inbox ?? []} sessionId={route[2] === 'chat' ? route[3] : undefined} refresh={refresh} />
           : <InboxView state={state} refresh={refresh} />}
+      </div>
     </div>
   );
 }

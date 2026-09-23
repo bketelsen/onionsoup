@@ -21,6 +21,7 @@ export function OwnerView({ owner, inbox, sessionId, refresh }: { owner: OwnerSu
   const [sessions, setSessions] = useState<Session[]>([]);
   const [busySessions, setBusySessions] = useState<Record<string, boolean>>({});
   const [directory, setDirectory] = useState('');
+  const [sessionsError, setSessionsError] = useState('');
   const [notebookOpen, setNotebookOpen] = useState(false);
   const [showEngine, setShowEngine] = useState(false);
   const [renaming, setRenaming] = useState<string>();
@@ -34,7 +35,8 @@ export function OwnerView({ owner, inbox, sessionId, refresh }: { owner: OwnerSu
       setDirectory(result.directory);
       setSessions(result.sessions.filter(session => !session.parentID).sort((left, right) => right.time.updated - left.time.updated));
       setBusySessions(Object.fromEntries(Object.entries(result.status).map(([id, status]) => [id, status.type === 'busy' || status.type === 'retry'])));
-    }, () => undefined);
+      setSessionsError('');
+    }, failure => setSessionsError(failure instanceof Error ? failure.message : String(failure)));
   }, [owner.id, owner.chat]);
 
   useEffect(() => { setDesk(undefined); setSessions([]); void loadDesk(); void loadSessions(); }, [loadDesk, loadSessions]);
@@ -106,7 +108,8 @@ export function OwnerView({ owner, inbox, sessionId, refresh }: { owner: OwnerSu
           )}
           {owner.chat && (
             <Section title="Chats" action={<Button variant="ghost" onClick={() => void newChat()} title="New chat"><RiAddLine className="size-4" /></Button>}>
-              {!chats.length && <Empty>None yet.</Empty>}
+              {sessionsError && <div className="typography-meta text-[var(--status-error)] [overflow-wrap:anywhere]">Could not load chats: {sessionsError}</div>}
+              {!chats.length && !sessionsError && <Empty>None yet.</Empty>}
               <div className="flex flex-col gap-0.5">
                 {chats.map(session => renaming === session.id ? (
                   <input key={session.id} autoFocus value={title} onChange={event => setTitle(event.target.value)}
