@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { isRepositoryOwner, isTruenasOwner, loadDeclarations, requireOwner, type Declarations, type IncusOwner, type OwnerDeclaration, type RepositoryOwner, type TruenasOwner } from './declarations.ts';
+import { isRepositoryOwner, isTruenasOwner, loadDeclarations, requireOwner, type Declarations, type IncusOwner, type OwnerDeclaration, type RepositoryOwner, type ResolvedOwner, type TruenasOwner } from './declarations.ts';
 import { familyOf } from './families.ts';
 import { cliIncus, ManagedInstances, type IncusClient } from './incus.ts';
 import { Ledger, type HireRecord, type WorkItem } from './ledger.ts';
@@ -89,9 +89,10 @@ export class Runtime {
       : `STALE: pid ${holder.pid} (\`owners ${holder.command}\`) is gone; remove ${lockPath} and run \`owners recover\``;
   }
 
-  owner(ownerId: string): OwnerDeclaration {
+  owner(ownerId: string): ResolvedOwner {
     const owner = requireOwner(this.declarations, ownerId);
-    return { ...owner, workspace: resolve(this.declarations.root, owner.workspace) };
+    const fallback = join(this.stateDirectory, '..', owner.domain.kind === 'git-repository' ? 'checkouts' : 'evidence', owner.id);
+    return { ...owner, workspace: owner.workspace ? resolve(this.declarations.root, owner.workspace) : fallback };
   }
 
   repositoryOwner(ownerId: string): RepositoryOwner {

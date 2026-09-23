@@ -46,7 +46,7 @@ test('work stranded mid-stage is marked interrupted, not replayed', async () => 
 });
 
 test('example declarations load and reference known models', async () => {
-  const declarations = await loadDeclarations('examples/owners');
+  const declarations = await loadDeclarations('packages/owners/test/fixtures/owners');
   const clippy = declarations.owners.get('clippy');
   assert.ok(clippy);
   for (const freelancer of declarations.freelancers.values()) {
@@ -57,7 +57,7 @@ test('example declarations load and reference known models', async () => {
 
 test('a person can send a plan back with feedback, or reject it, and both are recorded', async () => {
   const { Runtime, revisePlan, rejectPlan } = await import('@onionsoup/owners');
-  const runtime = await Runtime.open({ declarations: 'examples/owners', state: await mkdtemp(join(tmpdir(), 'owners-state-')) });
+  const runtime = await Runtime.open({ declarations: 'packages/owners/test/fixtures/owners', state: await mkdtemp(join(tmpdir(), 'owners-state-')) });
   await runtime.notebook('clippy').ensure('# Charter\n');
   const proposal = { title: 't', goal: 'g', rationale: 'r', acceptance: ['a'], size: 'small' as const };
   const plan = { summary: 's', steps: [{ description: 'd', files: ['main.go'] }], tests: ['t'], risks: [], outOfScope: [], questionsForOwner: [] };
@@ -87,7 +87,7 @@ test('survey context says when landed work is not yet on the base branch', async
 
 async function incusRuntime() {
   const { Runtime } = await import('@onionsoup/owners');
-  const runtime = await Runtime.open({ declarations: 'examples/owners', state: await mkdtemp(join(tmpdir(), 'owners-incus-')) });
+  const runtime = await Runtime.open({ declarations: 'packages/owners/test/fixtures/owners', state: await mkdtemp(join(tmpdir(), 'owners-incus-')) });
   const calls: string[][] = [];
   runtime.incus = { run: async args => { calls.push([...args]); return args[0] === 'list' || args[1] === 'list' ? '[]' : ''; } };
   for (const ownerId of ['clippy', 'homelab', 'moneo']) await runtime.notebook(ownerId).ensure('# Charter\n');
@@ -164,4 +164,13 @@ test('a section body that repeats its own heading does not double the heading', 
   const result = editSection('# Map\n', { register: 'MAP', mode: 'append', section: 'Storage layout', text: '## Storage layout\n\n- fast: NVMe pool' });
   assert.equal(result.match(/## Storage layout/g)?.length, 1);
   assert.match(result, /## Storage layout\n\n- fast: NVMe pool\n$/);
+});
+
+test('the starter a new person begins from loads and its models belong to known families', async () => {
+  const declarations = await loadDeclarations('examples/starter');
+  const example = declarations.owners.get('example');
+  assert.ok(example?.persona);
+  familyOf(declarations.families, example.model);
+  for (const freelancer of declarations.freelancers.values()) for (const model of freelancer.models) familyOf(declarations.families, model);
+  assert.ok(declarations.workflows.get('change'));
 });

@@ -1,0 +1,8 @@
+# provider/model -> model family. Cross-family review is checked against this table.
+families:
+  - family: anthropic
+    match: ["anthropic/*", "github-copilot/claude-*"]
+  - family: openai
+    match: ["openai/*", "github-copilot/gpt-*"]
+  - family: google
+    match: ["google/*", "github-copilot/gemini-*"]

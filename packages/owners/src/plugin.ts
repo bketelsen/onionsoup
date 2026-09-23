@@ -4,10 +4,11 @@ import { tool, type Plugin } from '@opencode-ai/plugin';
 import { hasIncus, type OwnerDeclaration, type Persona } from './declarations.ts';
 import { askOwner, formatAnswer } from './ask.ts';
 import { requestPublish } from './brokering.ts';
-import { expandHome, truenasMcpEnvironment } from './truenas.ts';
+import { expandHome, readEnvFile, truenasMcpEnvironment } from './truenas.ts';
 import { pickModel } from './families.ts';
 import type { Notebook } from './notebook.ts';
 import { describeAsk } from './requests.ts';
+import { configDirectory, stateDirectory } from './paths.ts';
 import { rosterText } from './roster.ts';
 import { Runtime } from './runtime.ts';
 
@@ -24,6 +25,11 @@ import { Runtime } from './runtime.ts';
 export const PLUGIN_LIMITS = { exchangeChars: 8_000, contextChars: 28_000 };
 
 const WATCHER_AGENT = 'onionsoup-watcher';
+/** opencode names an MCP tool <server>_<tool>; an owner's servers are prefixed with its id. */
+function toolServerKey(ownerId: string, name: string) {
+  return `${ownerId.replace(/[^a-z0-9]/g, '')}_${name}`;
+}
+
 /** MCP server name for the NAS owner's truenas-mcp; its tools are named nas_<tool>. */
 const NAS_MCP = 'nas';
 
@@ -132,7 +138,7 @@ async function commitQuietly(notebook: Notebook, message: string) {
 
 const server: Plugin = async (input, options) => {
   if (process.env.ONIONSOUP_SANDBOX === '1') return {};
-  const runtime = await Runtime.open({ declarations: String(options?.declarations), state: String(options?.state) });
+  const runtime = await Runtime.open({ declarations: String(options?.declarations ?? configDirectory()), state: String(options?.state ?? stateDirectory()) });
   const owners = [...runtime.declarations.owners.values()].filter(owner => owner.persona);
   const ownerByAgent = new Map(owners.map(owner => [owner.persona!.name, runtime.owner(owner.id)]));
   // Persona owners can be chatted with before their first duty ever runs, so their notebooks must exist.
@@ -222,6 +228,20 @@ const server: Plugin = async (input, options) => {
   return {
     async config(config) {
       const agents = (config.agent ??= {}) as Record<string, unknown>;
+      const servers = (config.mcp ??= {}) as Record<string, unknown>;
+      const hiddenFromEveryone: Record<string, string> = {};
+      const ownerToolRules = new Map<string, Record<string, string>>();
+      for (const owner of owners) {
+        const rules: Record<string, string> = {};
+        for (const [name, server] of Object.entries(owner.mcp)) {
+          const key = toolServerKey(owner.id, name);
+          const fromFile = server.envFile ? await readEnvFile(server.envFile).catch(() => ({})) : {};
+          servers[key] = { type: 'local', command: server.command.map(expandHome), environment: { ...fromFile, ...server.environment }, enabled: true };
+          hiddenFromEveryone[`${key}_*`] = 'deny';
+          for (const [tool, action] of Object.entries(server.rules)) rules[tool === '*' ? `${key}_*` : `${key}_${tool}`] = action;
+        }
+        ownerToolRules.set(owner.id, rules);
+      }
       // A NAS owner reaches its NAS through truenas-mcp (read-only in chats), visible to that owner alone.
       const nasOwner = owners.find(owner => owner.domain.kind === 'truenas');
       if (nasOwner && nasOwner.domain.kind === 'truenas') {
@@ -230,15 +250,14 @@ const server: Plugin = async (input, options) => {
         if (environment) {
           const servers = (config.mcp ??= {}) as Record<string, unknown>;
           servers[NAS_MCP] = { type: 'local', command: [expandHome(nasOwner.domain.mcp.binary), 'serve'], environment, enabled: true };
-          const current = config.permission;
-          config.permission = { ...(typeof current === 'string' ? { '*': current } : current ?? {}), [`${NAS_MCP}_*`]: 'deny' } as never;
+          hiddenFromEveryone[`${NAS_MCP}_*`] = 'deny';
         }
       }
       for (const owner of owners) {
         const persona = owner.persona!;
         const charter = await runtime.text(`charters/${owner.id}.md`).catch(() => '(no charter yet)');
         const verify = verifyCommands(owner, runtime.toolsDirectory);
-        const permission = { ...conversationPermission(owner, verify), ...(owner.domain.kind === 'truenas' ? NAS_CHAT_RULES : {}) };
+        const permission = { ...conversationPermission(owner, verify), ...(owner.domain.kind === 'truenas' ? NAS_CHAT_RULES : {}), ...ownerToolRules.get(owner.id) };
         agents[persona.name] = {
           mode: 'primary',
           description: `${persona.title} (${persona.source})`,
@@ -247,6 +266,9 @@ const server: Plugin = async (input, options) => {
           permission,
         };
       }
+      // Owner tool servers are denied to every agent; each owner's own rules re-allow its servers (last match wins).
+      const current = config.permission;
+      config.permission = { ...(typeof current === 'string' ? { '*': current } : current ?? {}), ...hiddenFromEveryone } as never;
       agents[WATCHER_AGENT] = {
         mode: 'primary',
         hidden: true,

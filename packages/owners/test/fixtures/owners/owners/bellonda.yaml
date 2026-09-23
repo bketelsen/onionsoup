@@ -1,0 +1,6 @@
+id: bellonda
+persona: { name: Bellonda, title: Keeper of the test wiki, source: "Chapterhouse: Dune", voice: "Exact.", icon: book }
+domain: { kind: git-repository, name: example/wiki, remote: https://example.invalid/wiki.git, baseBranch: main, verify: [[mkdocs, build, --strict]] }
+model: github-copilot/claude-sonnet-5
+workflow: change
+duties: []

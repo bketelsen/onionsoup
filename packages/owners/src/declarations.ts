@@ -102,13 +102,29 @@ export const Grant = z.object({
 });
 export type Grant = z.infer<typeof Grant>;
 
+/**
+ * A tool server an owner uses in chats: any MCP server, visible to this owner alone. Rules map the server's
+ * tool names (or "*") to allow, ask (the person approves in the chat) or deny (the tool is hidden).
+ * This is how owners get new tools without onionsoup code.
+ */
+export const OwnerToolServer = z.object({
+  command: z.array(z.string()).min(1),
+  envFile: z.string().optional().describe('KEY=VALUE file (e.g. an .envrc) whose values become the server environment'),
+  environment: z.record(z.string(), z.string()).default({}),
+  rules: z.record(z.string(), PermissionAction).default({ '*': 'ask' }),
+});
+export type OwnerToolServer = z.infer<typeof OwnerToolServer>;
+
 export const OwnerDeclaration = z.object({
   id: z.string().regex(/^[a-z0-9-]+$/),
   persona: Persona.optional(),
   conversation: ConversationMode.optional(),
   domain: z.discriminatedUnion('kind', [RepositoryDomain, IncusDomain, TruenasDomain]),
-  /** The directory the owner's sessions read: a checkout, or an evidence snapshot. The owner never writes it. */
-  workspace: z.string(),
+  /**
+   * The directory the owner's sessions read: a checkout, or an evidence snapshot. The owner never writes it.
+   * Optional: it defaults to <home>/checkouts/<id> for repositories and <home>/evidence/<id> otherwise.
+   */
+  workspace: z.string().optional(),
   model: ModelRef,
   /** Incus hosts a repository owner also holds (observe; create/delete behind approvals). */
   incus: IncusDomain.omit({ kind: true }).optional(),
@@ -117,17 +133,21 @@ export const OwnerDeclaration = z.object({
   duties: z.array(Duty),
   maxProposals: z.number().int().min(0).default(3),
   grants: z.array(Grant).default([]),
+  /** MCP tool servers this owner uses in chats, keyed by a short name. */
+  mcp: z.record(z.string().regex(/^[a-z][a-z0-9]*$/), OwnerToolServer).default({}),
 });
 export type OwnerDeclaration = z.infer<typeof OwnerDeclaration>;
-export type RepositoryOwner = OwnerDeclaration & { domain: RepositoryDomain };
-export type IncusOwner = OwnerDeclaration & { domain: IncusDomain };
-export type TruenasOwner = OwnerDeclaration & { domain: TruenasDomain };
+/** An owner as the runtime uses it: its workspace resolved to a real directory. */
+export type ResolvedOwner = OwnerDeclaration & { workspace: string };
+export type RepositoryOwner = ResolvedOwner & { domain: RepositoryDomain };
+export type IncusOwner = ResolvedOwner & { domain: IncusDomain };
+export type TruenasOwner = ResolvedOwner & { domain: TruenasDomain };
 
-export function isTruenasOwner(owner: OwnerDeclaration): owner is TruenasOwner {
+export function isTruenasOwner(owner: ResolvedOwner): owner is TruenasOwner {
   return owner.domain.kind === 'truenas';
 }
 
-export function isRepositoryOwner(owner: OwnerDeclaration): owner is RepositoryOwner {
+export function isRepositoryOwner(owner: ResolvedOwner): owner is RepositoryOwner {
   return owner.domain.kind === 'git-repository';
 }
 

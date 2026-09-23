@@ -14,6 +14,8 @@ import { publish } from './publish.ts';
 import { approvePush } from './rebase.ts';
 import { describeAsk, type ResourceRequest } from './requests.ts';
 import { deskState } from './desk.ts';
+import { initConfig } from './init.ts';
+import { configDirectory, stateDirectory } from './paths.ts';
 import { syncOpenChamber } from './openchamber.ts';
 import { ensureDesk } from './workspace.ts';
 import { advance, approvePlan, rejectPlan, resumeItem, revisePlan } from './workflow.ts';
@@ -23,8 +25,8 @@ const run = promisify(execFile);
 const { values: options, positionals } = parseArgs({
   allowPositionals: true,
   options: {
-    declarations: { type: 'string', default: 'examples/owners' },
-    state: { type: 'string', default: '.local/owners/state' },
+    declarations: { type: 'string', default: configDirectory() },
+    state: { type: 'string', default: stateDirectory() },
     note: { type: 'string' },
     reason: { type: 'string' },
     'no-advance': { type: 'boolean', default: false },
@@ -240,9 +242,13 @@ function required(value: string | undefined, name: string) {
 
 const [commandName, ...args] = positionals;
 const command = COMMANDS[commandName ?? ''];
-if (!command) {
+if (!command && commandName !== 'init') {
   console.error(`usage: owners <${Object.keys(COMMANDS).join('|')}> …`);
   process.exit(2);
+}
+if (commandName === 'init') {
+  await initConfig(options.declarations!);
+  process.exit(0);
 }
 const runtime = await Runtime.open({ declarations: options.declarations!, state: options.state! });
 /** Commands that only read, or only record a person's decision, never take the runtime lock. */

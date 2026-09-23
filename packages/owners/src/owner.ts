@@ -4,7 +4,7 @@ import { Learnings, OwnerAnswers, Survey } from './artifacts.ts';
 import { describeAsk, InstanceAsk } from './requests.ts';
 import { FOLLOW_UP_DESCRIPTIONS, requestInstance } from './brokering.ts';
 import { composeAskBrief, distillBrief, learningsBrief, ownerAnswerBrief, surveyBrief, workSoFarText } from './briefs.ts';
-import { hasIncus, type Duty, type OwnerDeclaration } from './declarations.ts';
+import { hasIncus, type Duty, type OwnerDeclaration, type ResolvedOwner } from './declarations.ts';
 import { refreshIncusEvidence } from './incus.ts';
 import { refreshTruenasEvidence } from './truenas.ts';
 import { reviewAppUpdates } from './app-updates.ts';
@@ -46,7 +46,7 @@ export async function incusEvidenceText(runtime: Runtime, owner: OwnerDeclaratio
 }
 
 /** A duty that asks another owner for an instance; the rest happens through the request's lifecycle. */
-async function requestInstanceDuty(runtime: Runtime, owner: OwnerDeclaration, duty: Duty) {
+async function requestInstanceDuty(runtime: Runtime, owner: ResolvedOwner, duty: Duty) {
   if (!duty.requestTo || !duty.followUp) throw new Error(`duty_missing_request_target: ${owner.id}/${duty.id}`);
   const notebook = runtime.notebook(owner.id);
   const snapshot = await refreshWorkspace(runtime, owner);
