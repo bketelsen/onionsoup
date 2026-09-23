@@ -18,7 +18,6 @@ import { shipEngine } from './ship.ts';
 import { deskState } from './desk.ts';
 import { initConfig } from './init.ts';
 import { configDirectory, stateDirectory } from './paths.ts';
-import { syncOpenChamber } from './openchamber.ts';
 import { ensureDesk } from './workspace.ts';
 import { advance, approvePlan, rejectPlan, resumeItem, revisePlan } from './workflow.ts';
 
@@ -170,7 +169,7 @@ const COMMANDS: Record<string, Command> = {
       const desk = await ensureDesk(owner, runtime.desksRoot);
       console.log(`${owner.persona?.name ?? owner.id}'s desk for ${owner.domain.name}: ${desk.path} (branch ${desk.branch})`);
     }
-    console.log('sync-openchamber (or the daemon) adds the desk to OpenChamber with the owner as its default agent.');
+    console.log('Chat with the owner in the surface (npm run surface); its chats run in this desk.');
   },
   async ask(runtime, [fromId, toName]) {
     const { answerer, answer, cost } = await askOwner(runtime, required(fromId, 'asking owner'), required(toName, 'answering owner'), required(options.note, '--note (the question)'));
@@ -196,10 +195,6 @@ const COMMANDS: Record<string, Command> = {
   async propose(runtime, [ownerId]) {
     const result = await proposeDeskChanges(runtime, required(ownerId, 'owner'), required(options.note, '--note (title)'), options.reason ?? options.note!, options.repository);
     console.log(`${result.outcome}: ${result.summary}`);
-  },
-  async 'sync-openchamber'(runtime) {
-    const { changes, via } = await syncOpenChamber(runtime);
-    console.log(changes.length ? `${changes.join('\n')}\n(saved via ${via})` : 'OpenChamber projects already match the owners');
   },
   async 'desk-state'(runtime) {
     console.log(JSON.stringify(await deskState(runtime, { agent: options.agent, directory: options.directory, owner: options.owner })));
@@ -264,7 +259,7 @@ if (commandName === 'init') {
 }
 const runtime = await Runtime.open({ declarations: options.declarations!, state: options.state! });
 /** Commands that only read, or only record a person's decision, never take the runtime lock. */
-const LOCK_FREE = ['items', 'show', 'notebook', 'requests', 'approve', 'publish', 'revise-plan', 'reject', 'resume', 'desk', 'desk-state', 'retract', 'ask', 'sync-openchamber', 'request-publish', 'propose', 'ship', 'approve-push', 'approve-create', 'approve-delete', 'deny-request'];
+const LOCK_FREE = ['items', 'show', 'notebook', 'requests', 'approve', 'publish', 'revise-plan', 'reject', 'resume', 'desk', 'desk-state', 'retract', 'ask', 'request-publish', 'propose', 'ship', 'approve-push', 'approve-create', 'approve-delete', 'deny-request'];
 try {
   const unlock = LOCK_FREE.includes(commandName!) ? async () => {} : await runtime.lock();
   try {

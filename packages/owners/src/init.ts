@@ -27,7 +27,7 @@ export async function initConfig(directory: string) {
 Next:
   1. Edit ${join(directory, 'owners/example.yaml')} (or copy it) and write the charter in ${join(directory, 'charters')}.
   2. Register the plugin in ~/.config/opencode/opencode.json: "plugin": ["file://<onionsoup>/packages/owners/src/plugin.ts"]
-  3. npm run owners -- sync-openchamber   (creates each owner's desk and OpenChamber project)
+  3. npm run surface:build && npm run surface   (chat with your owners at http://127.0.0.1:4747)
   4. npm run owners -- daemon            (or install deploy/onionsoup-owners.service)
 State will live in ${homeDirectory()}.`);
 }

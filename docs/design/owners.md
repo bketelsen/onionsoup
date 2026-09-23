@@ -30,14 +30,13 @@ deletes or destroys waits for a person unless the person granted standing approv
      gates: plan approval · create/delete · destructive actions (or a standing grant)
 ```
 
-The person talks to owners in the **surface** (`packages/surface`), or in
-[OpenChamber](https://github.com/openchamber/openchamber) or the opencode TUI. Each owner is an opencode agent
-whose chats run in its desk (or evidence folder). The surface is organized around owners: a rail of owners with what
-waits and what runs, one inbox of every gate and chat permission with the decision in place, and per owner its chats
-(drawn like OpenChamber's, whose styles it borrows under MIT), work, activity and notebook. It is a small Node server
-that attaches to (or starts) an opencode server running the plugin, imports the engine directly, and relays
-opencode's events to the browser; the opencode password never reaches the browser. The **Owner's Desk** is the same
-view as an OpenChamber panel.
+The person talks to owners in the **surface** (`packages/surface`) or the opencode TUI. Each owner is an opencode
+agent whose chats run in its desk (or evidence folder). The surface is organized around owners: a rail of owners
+with what waits and what runs, one inbox of every gate and chat permission with the decision in place, and per owner
+its chats (drawn like OpenChamber's, whose styles it borrows under MIT), work, activity and notebook. It is a small
+Node server that starts its own opencode (which loads the plugin), imports the engine directly, relays opencode's
+events to the browser, and keeps the person's settings (owner order, per-chat auto-accept); the opencode password
+never reaches the browser. OpenChamber and its Owner's Desk panel came first and were retired for it.
 
 ## Engine and configuration
 
@@ -124,8 +123,8 @@ runtime acts on them, so decisions never race the daemon.
 
 ### Always on
 
-`npm run owners -- daemon` (installed as `deploy/onionsoup-owners.service`) ticks every minute: it syncs each
-owner's OpenChamber project, moves requests along, runs due duties, and advances work items. Deterministic
+`npm run owners -- daemon` (installed as `deploy/onionsoup-owners.service`) ticks every minute: it re-reads the
+configuration, moves requests along, runs due duties, and advances work items. Deterministic
 checks wake a model only when one is needed, and that model is the owner. Work a stopped runtime was actually
 doing is marked interrupted and never replayed; a person resumes it.
 
@@ -150,7 +149,7 @@ host code snapshots evidence read-only, and effects happen only in host code aft
 - opencode details that bit: structured-output sessions cannot be listed back over HTTP (1.18.32), and models
   sometimes send a list as a JSON string, so a deliverable is repaired where safe and otherwise asked for once more
   in the same session before it counts as failed; edit
-  permissions match the path relative to the enclosing git worktree; OpenChamber runs extension services on Bun
-  and its opencode with a server password that must not leak into sandboxed servers.
+  permissions match the path relative to the enclosing git worktree; an opencode started with a server password
+  (OpenChamber's, the surface's) must not leak it into sandboxed servers.
 - TrueNAS details that bit: `truenas_app_get` answers with a list, and an app is `STOPPED` between its old and
   new containers, so updates follow the upgrade job, not snapshots of the app's state.

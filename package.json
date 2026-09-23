@@ -14,7 +14,6 @@
     "check:packages": "node scripts/check-packages.mjs",
     "check:docs": "node scripts/check-docs.mjs",
     "verify": "npm run build && npm run check:packages && npm run check:docs && npm run typecheck && npm run surface:typecheck && npm run surface:build && npm test",
-    "desk:build": "npm --prefix extensions/owners-desk run build",
     "surface": "node --conditions=onionsoup-source --import tsx packages/surface/src/main.ts",
     "surface:build": "npm --workspace @onionsoup/surface run web:build",
     "surface:typecheck": "npm --workspace @onionsoup/surface run web:typecheck"

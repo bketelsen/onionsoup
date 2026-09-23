@@ -11,13 +11,13 @@ cause, and the fix is either applied through the normal gates or reported to the
 ## Where things are
 
 - **Engine:** `~/projects/onionsoup`, run as the user unit `onionsoup-owners.service`, which ticks every 60s:
-  sync OpenChamber, process requests, run due duties, advance work items.
+  re-read the configuration, process requests, run due duties, advance work items, raise work notices.
 - **Config:** `~/.config/onionsoup` (`ONIONSOUP_CONFIG`).
 - **State:** `~/.local/share/onionsoup` (`ONIONSOUP_HOME`). It holds `state/` (ledger, requests, locks,
   ci-triage, ship), `desks/<owner>`, `checkouts/`, `evidence/<owner>` and `tools/`.
 - **Notebooks:** under state, one Git repo per owner. Read one with `npm run owners -- notebook <id>`.
-- **Plugin:** `packages/owners/src/plugin.ts`, loaded by OpenChamber's opencode. A change takes effect only
-  when the person restarts it.
+- **Plugin:** `packages/owners/src/plugin.ts`, loaded by the surface's opencode (`onionsoup-surface.service`,
+  http://127.0.0.1:4747). A change takes effect only when the surface restarts.
 
 ## Steps
 

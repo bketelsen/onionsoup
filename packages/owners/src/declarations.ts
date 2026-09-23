@@ -75,7 +75,7 @@ export const Persona = z.object({
   title: z.string(),
   source: z.string(),
   voice: z.string(),
-  /** OpenChamber project icon and color keys for the owner's desk. */
+  /** Icon and color keys for the owner in the surface. */
   icon: z.enum(['code', 'terminal', 'rocket', 'flask', 'gamepad', 'briefcase', 'home', 'globe', 'leaf', 'shield', 'palette', 'server', 'phone', 'database', 'lightbulb', 'music', 'camera', 'book', 'heart']).default('briefcase'),
   color: z.string().default('primary'),
 });
@@ -171,7 +171,6 @@ export const OwnerDeclaration = z.object({
   deploy: z.object({
     checkout: z.string(),
     services: z.array(z.string()).min(1),
-    restartOpenChamber: z.boolean().default(false),
   }).optional(),
   /**
    * Stewardship: this owner may create, change and retire owners whose domain (repository, org or host name)

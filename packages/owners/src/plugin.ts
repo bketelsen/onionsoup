@@ -18,7 +18,7 @@ import { Runtime } from './runtime.ts';
 
 /**
  * onionsoup as an opencode plugin: every owner with a persona becomes an agent a person can chat with
- * (in OpenChamber or the opencode TUI). The owner reaches for its own tools first; anything else follows
+ * (in the onionsoup surface or the opencode TUI). The owner reaches for its own tools first; anything else follows
  * its conversation-mode rules, where "ask" means the person approves in the chat. What the owner does is
  * journaled deterministically; what the person decides is picked out by a small watcher model and
  * journaled as a candidate, and the owner's distill decides what enters the notebook.
@@ -444,7 +444,7 @@ const server: Plugin = async (input, options) => {
             await context.ask({ permission: 'onionsoup_owner_change', patterns: [`${verb} ${prepared.candidate.id}`], always: [], metadata: { action: verb, owner: prepared.candidate.id, files: Object.keys(prepared.files) } });
             const commit = await writeOwner(runtime, steward.id, prepared);
             const name = prepared.candidate.persona?.name ?? prepared.candidate.id;
-            return `${prepared.created ? 'Created' : 'Updated'} ${name} (config commit ${commit}). The daemon picks it up within a minute: desk, OpenChamber project and duties. The person restarts OpenChamber's opencode to chat with ${name}${prepared.created ? ', and should rewrite the charter' : ''}.`;
+            return `${prepared.created ? 'Created' : 'Updated'} ${name} (config commit ${commit}). The daemon picks up its duties within a minute, and its desk is made when its chat first opens. The person restarts the surface (systemctl --user restart onionsoup-surface) to chat with ${name}${prepared.created ? ', and should rewrite the charter' : ''}.`;
           }
           const owner = await prepareRetire(runtime, steward.id, required(args.id, 'id'));
           context.metadata({ title: `retire owner ${owner.id}` });

@@ -82,7 +82,7 @@ Tick items as they land, with the commit.
 ### 5. Integration
 - [x] Run it: `npm run surface`; `deploy/onionsoup-surface.service`
 - [x] Docs: README, docs/extending.md (running the surface), design doc section
-- [x] Decided: keep `sync-openchamber` and the Owner's Desk while OpenChamber is still in use; they cost nothing when it is not. Revisit after a few weeks of daily use of the surface.
+- [x] Removed `sync-openchamber` and the Owner's Desk extension once OpenChamber was retired (2026-09-23).
 
 ### 6. Polish (after daily use)
 - [x] Unread and running indicators; notifications for new inbox items

@@ -19,15 +19,16 @@ Then register the plugin with opencode, so your owners become agents you can cha
 ```
 
 Requirements: Node 24, opencode (logged in to the providers your owners use), `bwrap` and `systemd-run`
-(the sandbox), Git and `gh`. OpenChamber is optional but recommended.
+(the sandbox), Git and `gh`.
 
 ## Create an owner
 
 1. Copy `owners/example.yaml` to `owners/<id>.yaml` and edit it: persona, domain, model, conversation rules,
    duties. Write `charters/<id>.md` yourself: it steers everything the owner does.
-2. Run `npm run owners -- sync-openchamber` (the daemon re-reads your configuration and does this every minute): the owner gets a desk and an
-   OpenChamber project with itself as the default agent.
-3. Restart opencode (or OpenChamber's opencode) so the plugin picks up the new agent.
+2. The daemon re-reads your configuration every minute and starts the owner's duties; its desk is made when its
+   chat first opens.
+3. Restart the surface (`systemctl --user restart onionsoup-surface`, or the opencode you use) so the plugin picks up
+   the new agent.
 4. Talk to it. Run its duties with `npm run owners -- wake <id> <duty>`, or leave it to the daemon.
 
 ### Own several repositories together
@@ -87,8 +88,6 @@ systemctl --user daemon-reload && systemctl --user enable --now onionsoup-owners
 The surface (`npm run surface:build && npm run surface`, or `deploy/onionsoup-surface.service`) serves your owners,
 their chats and one inbox of everything waiting on you at http://127.0.0.1:4747. It starts its own opencode, or
 attaches to one given `OPENCODE_URL`.
-
-Install the Owner's Desk in OpenChamber (Settings → Extensions → Add → `extensions/owners-desk`).
 
 ## What needs engine code
 

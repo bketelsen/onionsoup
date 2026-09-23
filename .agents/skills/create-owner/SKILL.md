@@ -1,12 +1,12 @@
 ---
 name: create-owner
-description: Creates a new onionsoup owner (declaration, charter draft, desk, OpenChamber project) in the person's config directory. Use whenever asked to create, add, hire or declare an owner, or to put someone in charge of a repository, org, host or service.
+description: Creates a new onionsoup owner (declaration, charter draft, desk) in the person's config directory. Use whenever asked to create, add, hire or declare an owner, or to put someone in charge of a repository, org, host or service.
 ---
 
 # Create an owner
 
-Done means the new owner validates, has a desk and an OpenChamber project, its config is committed in the
-person's config repo, and the person knows to restart OpenChamber's opencode and rewrite the charter.
+Done means the new owner validates, its config is committed in the person's config repo, and the person knows to
+restart the surface (so the plugin loads the new agent) and to rewrite the charter.
 
 A steward (an owner with `manages:`, such as Odrade for Frostyard) does this through its `onionsoup_owners` tool,
 which validates, asks the person and commits; steps 7 and 9 are then done for it.
@@ -43,10 +43,10 @@ is the reference; the schema is `packages/owners/src/declarations.ts`.
 8. For git-repository owners, run each verify command once in the sandbox via a `wake` or a manual check. Every
    command must pass on the base branch, or every change the owner makes will fail verification.
 9. Provision the owner and commit:
-   - Run `npm run owners -- sync-openchamber`, which creates the desk and OpenChamber project (the daemon also
-     does this every minute).
+   - The daemon picks the owner up within a minute; its desk is made when its chat first opens.
    - Commit in the config repo: `git -C ~/.config/onionsoup add -A && git -C ~/.config/onionsoup commit -m "Add <Name> (<domain>)"`.
-10. Tell the person to restart OpenChamber's opencode so the plugin loads the new agent, and to rewrite the charter.
+10. Tell the person to restart the surface (`systemctl --user restart onionsoup-surface`) so the plugin loads the new
+    agent, and to rewrite the charter.
 
 ## Pitfalls
 

@@ -19,7 +19,8 @@ Read [docs/design/owners.md](docs/design/owners.md) first, then [docs/gaps.md](d
 ## Layout
 
 - `packages/owners`: the engine (`@onionsoup/owners`): runtime, CLI, daemon, opencode plugin (`src/plugin.ts`).
-- `extensions/owners-desk`: the OpenChamber extension (service + panel, built with `npm run desk:build`).
+- `packages/surface`: the surface (`@onionsoup/surface`): a server over opencode and the engine, and the web UI in
+  `web/` (React, Vite, Tailwind; styles borrowed from OpenChamber under MIT, see `web/NOTICE`).
 - `examples/starter`: the configuration `owners init` copies. A person's own owners never live in this repository
   (`ONIONSOUP_CONFIG`, default `~/.config/onionsoup`); state lives in `ONIONSOUP_HOME`.
 - `packages/owners/test/fixtures/owners`: declarations the tests use.
@@ -64,8 +65,8 @@ reject them; fix them when you touch a file that has them.
 ## Working here
 
 - `npm run verify` builds, checks package boundaries and doc links, typechecks and runs tests. Keep it green.
-- The running daemon (`onionsoup-owners.service`) and OpenChamber's opencode load this code: restart them after
-  changes that should take effect.
+- The running daemon (`onionsoup-owners.service`) and the surface (`onionsoup-surface.service`, whose opencode loads
+  the plugin) run this code: restart them after changes that should take effect, when no work or chat is running.
 - Docs: one living design page (`docs/design/owners.md`), the gaps list and the extending guide. Update them when
   reality changes.
 - Keep credentials, private keys, raw runs and local clones out of Git. Never log credentials.

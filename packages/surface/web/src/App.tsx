@@ -67,7 +67,7 @@ export function App() {
     <div className="h-full flex flex-col bg-background text-foreground">
       {state?.opencode && !state.opencode.ok && (
         <div role="alert" className="shrink-0 px-4 py-2 typography-meta border-b border-[var(--status-error-border)] bg-[var(--status-error-background)] text-[var(--status-error)]">
-          Chats are unavailable: {state.opencode.error}. If the surface is attached to OpenChamber's opencode, restarting OpenChamber moves it; restart the surface, or run it with its own opencode (the default).
+          Chats are unavailable: {state.opencode.error}. If the surface is attached to another opencode (OPENCODE_URL), that opencode may have moved or stopped; restart the surface, or run it with its own opencode (the default).
         </div>
       )}
       <div className="flex-1 flex min-h-0">

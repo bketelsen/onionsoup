@@ -6,7 +6,7 @@ description: Takes an onionsoup engine change from idea to running in production
 # Ship an onionsoup change
 
 Done means the change is merged to `main`, running in `onionsoup-owners.service`, healthy, and the person has
-been told if OpenChamber's opencode needs a restart.
+been told if the surface needs a restart.
 
 ## Steps
 
@@ -27,7 +27,8 @@ been told if OpenChamber's opencode needs a restart.
    - `systemctl --user status onionsoup-owners` should be active on the new commit (`git -C ~/projects/onionsoup log -1`).
    - Your journal should show `shipped`, not `attention`.
 6. If the change touched `plugin.ts` or anything it imports (tools, personas, the watcher), tell the person to
-   restart OpenChamber's opencode. Ship cannot restart it.
+   restart the surface (`onionsoup-surface.service`), unless it is in your deploy services. Ship does not restart it
+   otherwise, because a restart cuts off replies in progress.
 
 ## Pitfalls
 

@@ -10,7 +10,7 @@ export { publish } from './publish.ts';
 export { approvePush } from './rebase.ts';
 export { approveCreate, approveDelete, denyRequest } from './brokering.ts';
 export { awaitingPublish, deskState, itemText, statusText } from './desk.ts';
-export { chatDirectory } from './openchamber.ts';
+export { chatDirectory } from './chats.ts';
 export { configDirectory, stateDirectory } from './paths.ts';
 export { describeAsk, type ResourceRequest } from './requests.ts';
 export { domainSummary } from './roster.ts';

@@ -8,9 +8,9 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
   push → PR → merge under a `merge` grant → publish if the owner is a site source) is built, and Bellonda holds a
   merge grant for her wiki, but it has not yet run end to end. Her `minideb` page and `selfie` correction are
   waiting on her desk: ask her to propose them.
-- **Leto ships the daemon, not OpenChamber.** `onionsoup_ship` fast-forwards the running checkout, verifies it,
-  restarts the daemon with a health check and rolls back on failure, but OpenChamber's opencode (which loads the
-  plugin) still needs a person to restart it.
+- **Shipping and the surface.** `onionsoup_ship` restarts the services in the owner's `deploy` section with a health
+  check. The surface's opencode loads the plugin, so plugin changes need `onionsoup-surface` restarted too; listing
+  it in `deploy.services` makes ship do it, at the cost of cutting off any reply in progress.
 - **snosi builds run only in CI.** mkosi needs root, so Murbella verifies with snosi's static checks and relies on
   GitHub Actions for builds (CI failures wake her). Local builds would need a privileged build VM on minideb,
   requested from Miles Teg like the smoke-test instances.
@@ -27,10 +27,9 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
 
 - **The Desk polls** every 20 seconds and has no push. It cannot open itself, and a job cited in chat cannot link
   to its page.
-- **Notifications:** nothing tells the person that something waits on them except the Desk badge.
-- **Personas are thin in the UI:** OpenChamber shows the agent name and an automatic color; the Desk shows initials.
-  No portraits.
-- **Plugin changes need an opencode restart** in OpenChamber, and the daemon needs a restart for engine changes.
+- **Personas are thin in the UI:** the surface shows a name and an icon. No portraits.
+- **Plugin changes need the surface restarted** (its opencode loads the plugin), and the daemon needs a restart for
+  engine changes.
 
 ## Runtime
 

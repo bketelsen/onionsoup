@@ -71,6 +71,6 @@ export async function shipEngine(runtime: Runtime, ownerId: string): Promise<Shi
   const notebook = runtime.notebook(owner.id);
   await notebook.journal({ kind: 'ship-started', note: `${previous.slice(0, 12)} → ${target.slice(0, 12)}; restarting ${owner.deploy.services.join(', ')} in ${SHIP_LIMITS.restartDelaySeconds}s` });
   await notebook.commit('journal ship').catch(() => undefined);
-  const openchamber = owner.deploy.restartOpenChamber ? '' : ' OpenChamber\'s opencode loads the plugin: the person restarts it to pick up plugin changes.';
-  return { outcome: 'shipped', summary: `Verified ${target.slice(0, 12)}; restarting ${owner.deploy.services.join(', ')} with a health check and automatic rollback.${openchamber}`, from: previous, to: target };
+  const surface = owner.deploy.services.includes('onionsoup-surface.service') ? '' : ' The surface\'s opencode loads the plugin: the person restarts onionsoup-surface to pick up plugin changes.';
+  return { outcome: 'shipped', summary: `Verified ${target.slice(0, 12)}; restarting ${owner.deploy.services.join(', ')} with a health check and automatic rollback.${surface}`, from: previous, to: target };
 }
