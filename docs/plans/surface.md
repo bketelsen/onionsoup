@@ -1,8 +1,7 @@
 # Plan: an onionsoup surface
 
-Status: in progress on branch `surface`, in the worktree `~/projects/onionsoup-surface` (kept apart from the running
-checkout `~/projects/onionsoup`, which Leto ships into). Merge to `main` when the surface can replace OpenChamber for
-daily use.
+Status: merged to `main` on 2026-09-23 and running as `onionsoup-surface.service` on http://127.0.0.1:4747. It
+replaced OpenChamber, which the person retired the same day. Remaining items are features, not blockers.
 
 ## Why
 
@@ -91,7 +90,7 @@ Tick items as they land, with the commit.
 - [x] Very long chats open on their latest 30 turns; long outputs and diffs scroll in capped boxes
 
 ### 7. Next (from daily use)
-- [ ] Merge to `main` and install `deploy/onionsoup-surface.service` once the person prefers it to OpenChamber
+- [x] Merge to `main` and install `deploy/onionsoup-surface.service` (2026-09-23; OpenChamber retired)
 - [ ] UI tests for the chat's event handling (useChat) and the diff parser
 - [ ] Decisions on the work item page itself (approve, send back, publish) instead of only from the inbox
 
