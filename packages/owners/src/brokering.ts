@@ -2,6 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { requestDecisionBrief } from './briefs.ts';
+import { rosterText } from './roster.ts';
 import { checkCreate, createInstance, deleteInstance, INCUS_LIMITS } from './incus.ts';
 import { refreshWorkspace } from './owner.ts';
 import { OwnerDecision, requireStatus, type ResourceAsk, type ResourceRequest } from './requests.ts';
@@ -32,7 +33,7 @@ export async function decide(runtime: Runtime, requestId: string) {
   const notebook = runtime.notebook(owner.id);
   await notebook.ensure(await runtime.text(`charters/${owner.id}.md`));
   const snapshot = await refreshWorkspace(runtime, owner);
-  const brief = requestDecisionBrief(request, await notebook.orientation(), snapshot);
+  const brief = requestDecisionBrief(request, await notebook.orientation(), snapshot, rosterText(runtime.declarations, owner.id));
   const decision = (await runtime.hire(owner.id, { role: 'owner', model: owner.model, directory: owner.workspace, title: `${request.id}: decide`, brief, schema: OwnerDecision })).value;
   if (decision.decision === 'decline') {
     await journalBoth(runtime, request, 'request-declined', decision.reply);

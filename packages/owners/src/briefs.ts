@@ -72,10 +72,11 @@ const PROPOSAL_MODES = {
    what a person should do. Raise nothing if nothing needs attention. Never suggest you will change anything yourself.`,
 };
 
-export function surveyBrief(duty: Duty, notebook: string, snapshot: string, maxProposals: number, workSoFar: string, mode: keyof typeof PROPOSAL_MODES = 'work') {
+export function surveyBrief(duty: Duty, notebook: string, snapshot: string, maxProposals: number, workSoFar: string, mode: keyof typeof PROPOSAL_MODES = 'work', roster = '') {
   return [
     `Duty: ${duty.id}. Your workspace (read-only) reflects your domain at ${snapshot}.`,
     block('instructions', duty.instructions),
+    block('roster', roster || '(no other owners)'),
     block('notebook', notebook),
     block('work-so-far', `${workSoFar}\nDo not re-propose landed work. A rejected item may come back only if you change it to answer the person's reason.`),
     `You are a project manager: you do not implement. Read your workspace as much as you need. Then:
@@ -178,9 +179,10 @@ lines are things you did with the person's approval; record them in MAP only whe
   ].join('\n\n');
 }
 
-export function requestDecisionBrief(request: ResourceRequest, notebook: string, snapshot: string) {
+export function requestDecisionBrief(request: ResourceRequest, notebook: string, snapshot: string, roster = '') {
   return [
     `Another owner, ${request.from}, asks you for an instance. Your workspace (read-only) reflects your domain at ${snapshot}.`,
+    block('roster', roster || '(no other owners)'),
     block('request', [
       `Image: ${request.ask.image}`,
       `Purpose: ${request.ask.purpose}`,

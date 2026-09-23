@@ -4,6 +4,7 @@ import { tool, type Plugin } from '@opencode-ai/plugin';
 import type { OwnerDeclaration, Persona } from './declarations.ts';
 import { pickModel } from './families.ts';
 import type { Notebook } from './notebook.ts';
+import { rosterText } from './roster.ts';
 import { Runtime } from './runtime.ts';
 
 /**
@@ -36,12 +37,16 @@ function bashAction(rules: Record<string, string>, command: string) {
   return action;
 }
 
-function agentPrompt(owner: OwnerDeclaration, persona: Persona, charter: string) {
+function agentPrompt(owner: OwnerDeclaration, persona: Persona, charter: string, roster: string) {
   return `${persona.voice.trim()}
 
 <charter>
 ${charter.trim()}
 </charter>
+
+<roster>
+${roster}
+</roster>
 
 How you work with the person in this chat:
 - You are the owner of this domain (${owner.domain.kind === 'git-repository' ? owner.domain.name : 'incus remotes'}). Reach for your onionsoup tools first:
@@ -181,7 +186,7 @@ const server: Plugin = async (input, options) => {
           mode: 'primary',
           description: `${persona.title} (${persona.source})`,
           model: owner.model,
-          prompt: agentPrompt(owner, persona, charter),
+          prompt: agentPrompt(owner, persona, charter, rosterText(runtime.declarations, owner.id)),
           permission: conversationPermission(owner),
         };
       }

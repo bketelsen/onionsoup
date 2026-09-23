@@ -7,6 +7,7 @@ import { composeAskBrief, distillBrief, learningsBrief, ownerAnswerBrief, survey
 import type { Duty, OwnerDeclaration } from './declarations.ts';
 import { refreshIncusEvidence } from './incus.ts';
 import { maintainPullRequests } from './rebase.ts';
+import { rosterText } from './roster.ts';
 import type { WorkItem } from './ledger.ts';
 import type { Runtime } from './runtime.ts';
 import { refreshCheckout } from './workspace.ts';
@@ -63,7 +64,7 @@ export async function wake(runtime: Runtime, ownerId: string, dutyId: string) {
   const snapshot = await refreshWorkspace(runtime, owner);
   const history = (await runtime.ledger.list()).filter(item => item.owner === ownerId).slice(-SURVEY_LIMITS.recentWork);
   const mode = owner.workflow ? 'work' : 'attention';
-  const brief = surveyBrief(duty, await notebook.orientation(), snapshot, owner.maxProposals, workSoFarText(history), mode);
+  const brief = surveyBrief(duty, await notebook.orientation(), snapshot, owner.maxProposals, workSoFarText(history), mode, rosterText(runtime.declarations, ownerId));
   const result = await runtime.hire(ownerId, { role: 'owner', model: owner.model, directory: owner.workspace, title: `${ownerId}: ${dutyId}`, brief, schema: Survey });
   const survey = result.value;
   await notebook.apply(survey.notebook, `${dutyId} at ${snapshot}`);
