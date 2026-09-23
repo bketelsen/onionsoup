@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { mkdtemp } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -392,4 +393,203 @@ test('notebook commits from work running side by side queue instead of colliding
     await book.commit(`entry ${index}`);
   })));
   assert.equal(execFileSync('git', ['-C', root, 'status', '--porcelain']).toString(), '', 'everything was committed');
+});
+
+/** Sets ONIONSOUP_HOME to a fresh directory for the duration of one test, and restores it after. */
+async function withPrivateHome<T>(run: () => Promise<T> | T): Promise<T> {
+  const previous = process.env.ONIONSOUP_HOME;
+  process.env.ONIONSOUP_HOME = await mkdtemp(join(tmpdir(), 'owners-sandbox-home-'));
+  try {
+    return await run();
+  } finally {
+    if (previous === undefined) delete process.env.ONIONSOUP_HOME;
+    else process.env.ONIONSOUP_HOME = previous;
+  }
+}
+
+test('a hostile caller environment cannot override the private opencode config and state paths', async () => {
+  await withPrivateHome(async () => {
+    const { sandboxEnvironment, privateXdgRoots } = await import('../src/sandbox.ts');
+    const { config, state } = privateXdgRoots();
+    const previousInherited = { XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME, XDG_STATE_HOME: process.env.XDG_STATE_HOME, OPENCODE_CONFIG_DIR: process.env.OPENCODE_CONFIG_DIR };
+    process.env.XDG_CONFIG_HOME = '/host/inherited-config';
+    process.env.XDG_STATE_HOME = '/host/inherited-state';
+    process.env.OPENCODE_CONFIG_DIR = '/host/inherited-opencode-config';
+    try {
+      const environment = sandboxEnvironment({ XDG_CONFIG_HOME: '/caller/hostile-config', XDG_STATE_HOME: '/caller/hostile-state', OPENCODE_CONFIG_DIR: '/caller/hostile-opencode-config' });
+      assert.equal(environment.XDG_CONFIG_HOME, config, 'the private root wins over a hostile caller value');
+      assert.equal(environment.XDG_STATE_HOME, state, 'the private root wins over a hostile caller value');
+      assert.equal(environment.OPENCODE_CONFIG_DIR, join(config, 'opencode'), 'the private root wins over a hostile caller value');
+    } finally {
+      for (const [key, value] of Object.entries(previousInherited)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  });
+});
+
+test('a caller-supplied OPENCODE_CONFIG_CONTENT survives sandboxEnvironment even while hostile protected paths do not', async () => {
+  await withPrivateHome(async () => {
+    const { sandboxEnvironment, privateXdgRoots } = await import('../src/sandbox.ts');
+    const { config } = privateXdgRoots();
+    const agentConfig = JSON.stringify({ plugin: ['file:///onionsoup/plugin.js'] });
+    const environment = sandboxEnvironment({
+      OPENCODE_CONFIG_CONTENT: agentConfig,
+      OPENCODE_CONFIG_DIR: '/caller/hostile-opencode-config',
+    });
+    assert.equal(environment.OPENCODE_CONFIG_CONTENT, agentConfig, 'a hire\'s own per-session agent config must reach the sandboxed opencode');
+    assert.equal(environment.OPENCODE_CONFIG_DIR, join(config, 'opencode'), 'the private root still wins over a hostile caller path');
+  });
+});
+
+test('a sandboxed command binds private config/state and legitimate caches, never the masked host paths, with masks last', async () => {
+  await withPrivateHome(async () => {
+    const { sandboxCommand, privateXdgRoots, MASKED_HOST_PATHS } = await import('../src/sandbox.ts');
+    const { config, state } = privateXdgRoots();
+    const findingsDirectory = join(homedir(), 'a-findings-directory');
+    const args = sandboxCommand('true', [], { cwd: '/tmp', writable: [findingsDirectory] });
+    const writableBinds: string[] = [];
+    for (let index = 0; index < args.length - 2; index += 1) {
+      if (args[index] === '--bind-try') writableBinds.push(args[index + 2]!);
+    }
+    for (const path of [config, state, join(homedir(), '.cache'), join(homedir(), '.npm'), join(homedir(), 'go'), findingsDirectory]) {
+      assert.ok(writableBinds.includes(path), `${path} should be a writable bind`);
+    }
+    for (const masked of MASKED_HOST_PATHS) assert.ok(!writableBinds.includes(masked), `${masked} must never be a writable bind`);
+
+    const lastBindIndex = args.lastIndexOf('--bind-try');
+    const firstMaskIndex = args.indexOf('--tmpfs', lastBindIndex);
+    assert.ok(firstMaskIndex > lastBindIndex, 'every writable bind must come before the host config/state masks');
+    for (const masked of MASKED_HOST_PATHS) {
+      const maskIndex = args.indexOf(masked);
+      assert.equal(args[maskIndex - 1], '--tmpfs');
+      assert.ok(maskIndex > lastBindIndex, `${masked} must be masked after the last writable bind`);
+    }
+  });
+});
+
+test('a writable path that equals, contains or is contained by a masked host path is rejected; a sibling is not', async () => {
+  await withPrivateHome(async () => {
+    const { sandboxCommand } = await import('../src/sandbox.ts');
+    const masked = join(homedir(), '.config/opencode');
+    const attempt = (path: string) => () => sandboxCommand('true', [], { cwd: '/tmp', writable: [path] });
+    assert.throws(attempt(masked), /writable_path_masks_host_opencode/, 'the exact masked path is rejected');
+    assert.throws(attempt(join(homedir(), '.config')), /writable_path_masks_host_opencode/, 'a covering ancestor is rejected');
+    assert.throws(attempt(`${masked}/`), /writable_path_masks_host_opencode/, 'a trailing slash cannot bypass the mask');
+    assert.throws(attempt(join(homedir(), '.config/foo/../opencode')), /writable_path_masks_host_opencode/, 'a ".." segment cannot bypass the mask');
+    assert.doesNotThrow(attempt(join(homedir(), '.config/opencode2')), 'a sibling name must not be rejected');
+  });
+});
+
+test('a sandboxed npm ci succeeds in a minimal fixture, with private XDG roots and the worktree writable', async () => {
+  await withPrivateHome(async () => {
+    const { runSandboxed, privateXdgRoots } = await import('../src/sandbox.ts');
+    const { writeFile, readFile } = await import('node:fs/promises');
+    // A minimal package + lockfile with no dependencies: fast, network-free, and it still exercises a real
+    // npm binary running inside bwrap.
+    const fixture = await mkdtemp(join(tmpdir(), 'owners-npmci-'));
+    await writeFile(join(fixture, 'package.json'), JSON.stringify({ name: 'onionsoup-sandbox-fixture', version: '0.0.0', private: true }));
+    await writeFile(join(fixture, 'package-lock.json'), JSON.stringify({
+      name: 'onionsoup-sandbox-fixture', version: '0.0.0', lockfileVersion: 3, requires: true,
+      packages: { '': { name: 'onionsoup-sandbox-fixture', version: '0.0.0' } },
+    }));
+    const result = await runSandboxed('npm', ['ci', '--no-audit', '--no-fund'], { cwd: fixture, writable: [fixture] });
+    assert.equal(result.exitCode, 0, result.output);
+    // Have the sandbox itself write a marker, then read it back on the host: proves the worktree bind
+    // is really writable from inside bwrap, not merely readable through the read-only root bind.
+    const written = await runSandboxed('sh', ['-c', 'echo sandbox-wrote-this > sandbox-wrote-here.txt'], { cwd: fixture, writable: [fixture] });
+    assert.equal(written.exitCode, 0, written.output);
+    assert.equal((await readFile(join(fixture, 'sandbox-wrote-here.txt'), 'utf8')).trim(), 'sandbox-wrote-this');
+
+    // The private XDG roots must be writable too, not merely pointed to by an env var: this is the exact
+    // failure the previous attempt shipped (paths configured but never bound, so every sandboxed process broke).
+    const { config, state } = privateXdgRoots();
+    const probe = await runSandboxed('sh', ['-c', `echo config-ok > "$0/probe.txt" && echo state-ok > "$1/probe.txt"`, config, state], { cwd: fixture, writable: [fixture] });
+    assert.equal(probe.exitCode, 0, probe.output);
+    assert.equal((await readFile(join(config, 'probe.txt'), 'utf8')).trim(), 'config-ok');
+    assert.equal((await readFile(join(state, 'probe.txt'), 'utf8')).trim(), 'state-ok');
+  });
+});
+
+test('PLUGIN_URL resolves to an existing sibling plugin from source, and agentConfig loads it explicitly', async () => {
+  const { PLUGIN_URL: sourceUrl, agentConfig } = await import('../src/opencode.ts');
+  assert.match(sourceUrl, /plugin\.ts$/);
+  await assert.doesNotReject(import('node:fs/promises').then(fs => fs.access(new URL(sourceUrl))));
+  // Removing `plugin: [PLUGIN_URL]` from agentConfig would leave the host's now-masked global config as the
+  // sandboxed server's only source of plugins: assert the real per-hire config actually carries it.
+  assert.deepEqual(agentConfig('/tmp', '/tmp', undefined).plugin, [sourceUrl]);
+});
+
+test('the built plugin.js exists next to the built opencode.js, and its agentConfig loads it explicitly', async () => {
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  await promisify(execFile)('npm', ['run', 'build'], { cwd: join(import.meta.dirname, '..', '..', '..') });
+  const distUrl = new URL('../dist/opencode.js', import.meta.url);
+  const { PLUGIN_URL: builtUrl, agentConfig: builtAgentConfig } = await import(distUrl.href) as {
+    PLUGIN_URL: string;
+    agentConfig: (worktree: string, directory: string, notesFile: string | undefined) => { plugin: string[] };
+  };
+  assert.match(builtUrl, /plugin\.js$/);
+  await assert.doesNotReject(import('node:fs/promises').then(fs => fs.access(new URL(builtUrl))));
+  assert.deepEqual(builtAgentConfig('/tmp', '/tmp', undefined).plugin, [builtUrl]);
+});
+
+/**
+ * The real sandbox and paid-hire smoke test: proves — deterministically, through `runSandboxed` itself, not
+ * a model's self-report — that a sandboxed process cannot read a host-config sentinel and cannot create a
+ * file in the host's real opencode config directory, then completes a real planner hire through the
+ * explicitly loaded plugin. It needs a real bwrap sandbox and a paid model call, so it is opt-in and skipped
+ * by default. A person (or the owner, from an unsandboxed shell) runs it once by hand before shipping this
+ * change, the same shape as the ship action's person-approval gate; this is not evidence the implementer or
+ * reviewer loop can produce or corroborate.
+ */
+test('a sandboxed process cannot read or write the host opencode config, and a real hire still completes through the explicit plugin (opt-in, needs ONIONSOUP_REAL_SANDBOX_SMOKE=1 and a paid model)', { skip: process.env.ONIONSOUP_REAL_SANDBOX_SMOKE !== '1' && 'set ONIONSOUP_REAL_SANDBOX_SMOKE=1 and run by hand before shipping' }, async () => {
+  const { writeFile, rm, access, mkdir } = await import('node:fs/promises');
+  const { randomUUID } = await import('node:crypto');
+  const { runSandboxed } = await import('../src/sandbox.ts');
+  const { homeDirectory } = await import('../src/paths.ts');
+  const { Freelancers } = await import('../src/opencode.ts');
+  const hostConfigDirectory = join(homedir(), '.config/opencode');
+  const sentinelPath = join(hostConfigDirectory, 'onionsoup-smoke-sentinel.txt');
+  const writeAttemptPath = join(hostConfigDirectory, 'onionsoup-smoke-write-attempt.txt');
+  const sentinel = randomUUID();
+  // Fail loudly, not silently, if the fixture itself cannot be created: a caught write here would let this
+  // test pass even though it never proved anything.
+  await writeFile(sentinelPath, sentinel);
+  await rm(writeAttemptPath, { force: true });
+  const scratch = await mkdtemp(join(tmpdir(), 'owners-smoke-scratch-'));
+  try {
+    // Deterministic probes first: a real sandboxed command tries to read the sentinel and tries to create a
+    // file in the host config directory. No model is asked to self-report either result.
+    const readAttempt = await runSandboxed('sh', ['-c', `cat "$0" > "$1/read-attempt.txt" 2>&1 || true`, sentinelPath, scratch], { cwd: scratch, writable: [scratch] });
+    assert.equal(readAttempt.exitCode, 0, readAttempt.output);
+    const { readFile } = await import('node:fs/promises');
+    const readOutput = await readFile(join(scratch, 'read-attempt.txt'), 'utf8').catch(() => '');
+    assert.doesNotMatch(readOutput, new RegExp(sentinel), 'the sandbox must not be able to read the host config sentinel');
+
+    const writeAttempt = await runSandboxed('sh', ['-c', `echo written-from-sandbox > "$0"`, writeAttemptPath], { cwd: scratch, writable: [scratch] });
+    assert.notEqual(writeAttempt.exitCode, 0, 'writing into the masked host opencode config directory must fail from inside the sandbox');
+    await assert.rejects(access(writeAttemptPath), 'the sandbox must not have created a file in the host opencode config directory');
+
+    // Only after the deterministic proof: complete a real hire through the explicitly loaded plugin.
+    const freelancers = await Freelancers.start();
+    // Under ONIONSOUP_HOME, not host /tmp: the sandbox masks /tmp with its own --tmpfs, so a directory that
+    // is not itself a writable bind (host /tmp included) is invisible inside bwrap and --chdir fails.
+    const sessionRoot = join(homeDirectory(), 'sandbox-smoke-sessions');
+    await mkdir(sessionRoot, { recursive: true });
+    const directory = await mkdtemp(join(sessionRoot, 'owners-smoke-'));
+    const result = await freelancers.hire({
+      role: 'planner',
+      model: process.env.ONIONSOUP_REAL_SANDBOX_SMOKE_MODEL ?? 'github-copilot/claude-sonnet-5',
+      directory,
+      title: 'sandbox smoke',
+      brief: 'Say "isolated" in the "summary" field and nothing else.',
+      schema: (await import('zod')).z.object({ summary: (await import('zod')).z.string() }),
+    });
+    assert.match(result.value.summary, /isolated/i, 'a real planner hire must still complete through the explicitly loaded plugin');
+  } finally {
+    await rm(sentinelPath, { force: true });
+    await rm(writeAttemptPath, { force: true });
+  }
 });

@@ -33,6 +33,12 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
 
 ## Runtime
 
+- **Sandbox: provider credentials are still readable.** Masking the host opencode config/state closed the plugin
+  path (`~/.config/opencode`), but `~/.local/share/opencode/auth.json` stays writable in every sandbox because
+  hires must keep authenticating; a credential proxy that hides the real tokens from the sandboxed process is the
+  next step.
+- **Sandbox: no network isolation.** After the credential proxy, outbound network access from a sandboxed process
+  is still unrestricted; an allowlist or a proxy is the follow-up.
 - **Attention items are write-only:** raised to the journal and Desk, with no acknowledge or resolve.
 - **App updates cannot roll back:** truenas-mcp exposes no rollback, so a failed update is raised for the person.
 - **Held app updates are only re-read on a new version** or after 7 days; a person cannot say "this app's

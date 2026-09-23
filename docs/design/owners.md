@@ -34,9 +34,10 @@ The person talks to owners in the **surface** (`packages/surface`) or the openco
 agent whose chats run in its desk (or evidence folder). The surface is organized around owners: a rail of owners
 with what waits and what runs, one inbox of every gate and chat permission with the decision in place, and per owner
 its chats (drawn like OpenChamber's, whose styles it borrows under MIT), work, activity and notebook. It is a small
-Node server that starts its own opencode (which loads the plugin), imports the engine directly, relays opencode's
-events to the browser, and keeps the person's settings (owner order, per-chat auto-accept); the opencode password
-never reaches the browser. OpenChamber and its Owner's Desk panel came first and were retired for it.
+Node server that starts its own opencode (which loads the plugin from the person's real, host config — see the
+threat model below), imports the engine directly, relays opencode's events to the browser, and keeps the
+person's settings (owner order, per-chat auto-accept); the opencode password never reaches the browser.
+OpenChamber and its Owner's Desk panel came first and were retired for it.
 
 ## Engine and configuration
 
@@ -139,6 +140,31 @@ pushing, `gh` and `sudo` (the sandbox can still read SSH keys and the gh login; 
 Go-only allowlist left from the first owner made implementers on other stacks spend their whole hire probing. Owners never get CLIs that can mutate their domain (for example incus):
 host code snapshots evidence read-only, and effects happen only in host code after approval.
 
+### Threat model: what a sandboxed process can and cannot reach
+
+`~/.config/opencode` is loaded as plugins by any host opencode process that reads the person's real config —
+the surface's own unsandboxed opencode is the one currently running: anything written there runs on the host,
+outside any sandbox, the first time that opencode restarts. Every sandboxed process (`runSandboxed`,
+`spawnSandboxed`, so workspace verification, shipping, distro smoke, hosted-site builds and freelancer hires) gets
+a private `XDG_CONFIG_HOME`/`XDG_STATE_HOME`/`OPENCODE_CONFIG_DIR` under `ONIONSOUP_HOME` instead, bound writable
+inside the sandbox; the host's real `~/.config/opencode` and `~/.local/state/opencode` are masked with
+`--tmpfs`, placed after every writable bind so a requested bind cannot reopen them. Environment protection is
+authoritative: those three variables are stripped from both the inherited and the caller-supplied environment,
+then set last. A sandboxed opencode server is told to load the onionsoup plugin explicitly (a `file://` URL next
+to the compiled or source module), since it can no longer find it through the now-masked global config.
+
+What is still reachable in the sandbox, plainly, in one direction:
+- **Masked:** the host's real opencode config and state directories (`~/.config/opencode`,
+  `~/.local/state/opencode`) — this item's fix.
+- **Still reachable, deliberately, until the credential-proxy follow-up:** `~/.local/share/opencode` (and
+  `XDG_DATA_HOME` generally) stays writable, because `auth.json` lives there and hires must keep authenticating.
+- **Still reachable, out of scope for this item:** the network (no outbound isolation yet), SSH keys, the `gh`
+  login, and provider credentials in `auth.json` are all readable by anything that runs inside the sandbox.
+
+A person (or the owner, from an unsandboxed shell) runs the sandbox's opt-in real-bwrap smoke test once by hand
+before shipping a change to this boundary — the same shape as the ship action's person-approval gate, not a claim
+the implementer or reviewer loop can make or corroborate.
+
 ## Lessons from building it
 
 - Bash allowlists are not a sandbox: a "read-only" owner wrote probe tests with `cat > file` and ran one that
@@ -152,6 +178,8 @@ host code snapshots evidence read-only, and effects happen only in host code aft
   sometimes send a list as a JSON string, so a deliverable is repaired where safe and otherwise asked for once more
   in the same session before it counts as failed; edit
   permissions match the path relative to the enclosing git worktree; an opencode started with a server password
-  (OpenChamber's, the surface's) must not leak it into sandboxed servers.
+  (the surface's) must not leak it into sandboxed servers; a sandboxed opencode's
+  `OPENCODE_CONFIG_CONTENT` plugin entries are only resolved against a source path (not just any directory), so
+  the sandboxed plugin is loaded as an absolute `file://` URL, not a path relative to the sandbox's cwd.
 - TrueNAS details that bit: `truenas_app_get` answers with a list, and an app is `STOPPED` between its old and
   new containers, so updates follow the upgrade job, not snapshots of the app's state.
