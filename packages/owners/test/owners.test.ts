@@ -159,3 +159,9 @@ test('an app update Moneo decided is approved by his standing grant without a pe
   assert.equal(decided.status, 'create-approved');
   assert.match(decided.approvals.at(-1)!.by, /standing grant in moneo's declaration \(update-app \* for moneo\)/);
 });
+
+test('a section body that repeats its own heading does not double the heading', () => {
+  const result = editSection('# Map\n', { register: 'MAP', mode: 'append', section: 'Storage layout', text: '## Storage layout\n\n- fast: NVMe pool' });
+  assert.equal(result.match(/## Storage layout/g)?.length, 1);
+  assert.match(result, /## Storage layout\n\n- fast: NVMe pool\n$/);
+});

@@ -95,11 +95,18 @@ export class Notebook {
   }
 }
 
+/** Models often start a section's text with the section's own heading; the register already has it. */
+function withoutRepeatedHeading(text: string, section: string) {
+  const lines = text.trim().split('\n');
+  const first = lines[0]?.replace(/^#+\s*/, '').trim();
+  return /^#+\s/.test(lines[0] ?? '') && first === section.trim() ? lines.slice(1).join('\n').trim() : text.trim();
+}
+
 export function editSection(markdown: string, edit: NotebookEdit) {
   const heading = `## ${edit.section.trim()}`;
   const lines = markdown.split('\n');
   const start = lines.findIndex(line => line.trim() === heading);
-  const body = edit.text.trim();
+  const body = withoutRepeatedHeading(edit.text, edit.section);
   if (start < 0) return `${markdown.trimEnd()}\n\n${heading}\n\n${body}\n`;
   const next = lines.findIndex((line, index) => index > start && line.startsWith('## '));
   const end = next < 0 ? lines.length : next;

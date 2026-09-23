@@ -112,21 +112,44 @@ export async function reviewAppUpdates(runtime: Runtime, ownerId: string, duty: 
   return { summary: `updates proposed: ${opened.map(request => (request.ask as { app: string }).app).join(', ') || 'none'}; held: ${held.join(', ') || 'none'}`, opened };
 }
 
-/** Host code only, after approval: update through the TrueNAS API and wait until the app runs the new version. */
+interface AppStatus { state?: string; version?: string; upgrade_available?: boolean }
+
+/** truenas_app_get answers with a list holding the app. */
+async function appStatus(runtime: Runtime, ownerId: string, app: string): Promise<AppStatus> {
+  const owner = runtime.truenasOwner(ownerId);
+  const text = await withTruenas(owner.domain, false, call => call('truenas_app_get', { name: app }));
+  const parsed = JSON.parse(text) as AppStatus | AppStatus[];
+  return (Array.isArray(parsed) ? parsed[0] : parsed) ?? {};
+}
+
+function describeStatus(status: AppStatus) {
+  return `state ${status.state ?? '?'}, version ${status.version ?? '?'}`;
+}
+
+function isSettled(status: AppStatus, toVersion: string) {
+  return status.state === 'RUNNING' && (status.version === toVersion || status.upgrade_available === false);
+}
+
+/**
+ * Host code only, after approval: update through the TrueNAS API and wait until the app runs the new version.
+ * Idempotent: an app already on the target version (a retry after a restart) is recorded, not updated again.
+ */
 export async function updateApp(runtime: Runtime, request: ResourceRequest) {
   if (request.ask.kind !== 'update-app') throw new Error('not_an_update_request');
   const { app, toVersion } = request.ask;
-  const owner = runtime.truenasOwner(request.to);
-  await withTruenas(owner.domain, true, call => call('truenas_app_update', { name: app }));
+  const before = await appStatus(runtime, request.to, app);
+  if (before.version === toVersion && before.upgrade_available === false && before.state === 'RUNNING') return `already on ${toVersion}; ${describeStatus(before)}`;
+  if (before.version !== toVersion) {
+    await withTruenas(runtime.truenasOwner(request.to).domain, true, call => call('truenas_app_update', { name: app }));
+  }
   const deadline = Date.now() + APP_UPDATE_LIMITS.updateWaitMs;
-  let last = 'no status yet';
+  let last = describeStatus(before);
   while (Date.now() < deadline) {
     await sleep(APP_UPDATE_LIMITS.pollMs);
-    const details = await withTruenas(owner.domain, false, call => call('truenas_app_get', { name: app })).catch(error => `{"error":${JSON.stringify(String(error))}}`);
-    const parsed = JSON.parse(details) as { state?: string; version?: string; upgrade_available?: boolean };
-    last = `state ${parsed.state ?? '?'}, version ${parsed.version ?? '?'}`;
-    if (parsed.state === 'RUNNING' && (parsed.version === toVersion || parsed.upgrade_available === false)) return last;
-    if (parsed.state === 'CRASHED' || parsed.state === 'STOPPED') throw new Error(`app ${app} is ${parsed.state} after the update (${last})`);
+    const status = await appStatus(runtime, request.to, app).catch(() => ({} as AppStatus));
+    last = describeStatus(status);
+    if (isSettled(status, toVersion)) return last;
+    if (status.state === 'CRASHED' || status.state === 'STOPPED') throw new Error(`app ${app} is ${status.state} after the update (${last})`);
   }
   throw new Error(`app ${app} did not settle on ${toVersion} (${last})`);
 }
