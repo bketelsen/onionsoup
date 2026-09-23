@@ -1,9 +1,13 @@
+import { execFile } from 'node:child_process';
 import { dirname, join, relative } from 'node:path';
+import { promisify } from 'node:util';
 import { createOpencodeClient } from '@opencode-ai/sdk/v2/client';
 import { Agent } from 'undici';
 import { z } from 'zod';
 import type { ModelRef } from './declarations.ts';
 import { freePort, spawnSandboxed, stopSandboxed } from './sandbox.ts';
+
+const run = promisify(execFile);
 
 export const HIRE_LIMITS = { heartbeatMs: 30_000, timeoutMs: 20 * 60_000, serverStartMs: 30_000 };
 
@@ -106,26 +110,34 @@ const ROLE_WRITES: Record<Role, (directory: string) => string[]> = {
   reviewer: () => [],
 };
 
-/**
- * Carve one writable notes file out of an otherwise read-only role. Later rules win in opencode.
- * Edit rules match the path relative to the session's git worktree ("/" outside git); external_directory
- * rules match an absolute glob.
- */
-function withNotes(permission: ReturnType<typeof rolePermission>, directory: string, notesFile: string | undefined) {
+/** Carve one writable notes file out of an otherwise read-only role. Later rules win in opencode. */
+function withNotes(permission: ReturnType<typeof rolePermission>, worktree: string, directory: string, notesFile: string | undefined) {
   if (!notesFile) return permission;
+  // opencode matches edit rules against the path relative to the enclosing git worktree, which may be a
+  // parent repository of the session directory (a gitignored folder is still inside it), or "/" outside git.
+  const keys = new Set([relative(worktree, notesFile), relative(directory, notesFile), relative('/', notesFile)]);
   return {
     ...permission,
-    // Relative to the session's git worktree; outside git, opencode's worktree is "/".
-    edit: { '*': permission.edit, [relative(directory, notesFile)]: 'allow', [relative('/', notesFile)]: 'allow' },
+    edit: { '*': permission.edit, ...Object.fromEntries([...keys].map(key => [key, 'allow'])) },
     external_directory: { '*': 'deny', [join(dirname(notesFile), '*')]: 'allow' },
   };
 }
 
-function agentConfig(directory: string, notesFile: string | undefined) {
+/** The git worktree opencode will use for a session directory: the enclosing repository's root, or "/". */
+async function worktreeOf(directory: string) {
+  try {
+    const { stdout } = await run('git', ['-C', directory, 'rev-parse', '--show-toplevel']);
+    return stdout.trim() || '/';
+  } catch {
+    return '/';
+  }
+}
+
+function agentConfig(worktree: string, directory: string, notesFile: string | undefined) {
   return {
     agent: Object.fromEntries(Object.entries(ROLE_AGENTS).map(([role, definition]) => [
       `onionsoup-${role}`,
-      { mode: 'primary', prompt: definition.prompt, permission: withNotes(definition.permission, directory, notesFile) },
+      { mode: 'primary', prompt: definition.prompt, permission: withNotes(definition.permission, worktree, directory, notesFile) },
     ])),
   };
 }
@@ -149,7 +161,7 @@ async function startServer(role: Role, directory: string, notesFile: string | un
   const child = spawnSandboxed('opencode', ['serve', '--hostname=127.0.0.1', `--port=${port}`], {
     cwd: directory,
     writable: [...ROLE_WRITES[role](directory), ...notesWritable],
-    env: { OPENCODE_CONFIG_CONTENT: JSON.stringify(agentConfig(directory, notesFile)) },
+    env: { OPENCODE_CONFIG_CONTENT: JSON.stringify(agentConfig(await worktreeOf(directory), directory, notesFile)) },
   });
   const url = await new Promise<string>((resolve, reject) => {
     let output = '';

@@ -455,6 +455,11 @@ Findings so far:
   `incus launch` reads instance YAML from stdin when it is not a terminal, so
   an open stdin pipe made it wait forever without contacting the server (the
   fake client in tests cannot see this). Every incus call now closes stdin.
+- The findings-file rule needed a third form: opencode matches edit rules
+  against the enclosing git worktree, and a gitignored folder inside another
+  repository (the evidence snapshot under this repo's `.local/`) belongs to
+  that repository. The runtime now asks git for the worktree root. OpenAI
+  models edit through `apply_patch`, which uses the same rule.
 - First end-to-end run: clippy asked, homelab-virt accepted, a person
   approved the create with the delete as a lease, and the runtime created
   `minideb:onionsoup-clippy-smoke`, built clippy in the sandbox, ran it on

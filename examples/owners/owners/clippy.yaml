@@ -26,6 +26,7 @@ duties:
       you are deciding what matters. Avoid cosmetic churn and dependency upgrades Dependabot handles.
   - id: distro-smoke
     kind: request-instance
+    every: 1d
     requestTo: homelab-virt
     followUp: distro-smoke
     instructions: |

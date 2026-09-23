@@ -11,8 +11,11 @@ After=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=%h/projects/onionsoup
-ExecStart=%h/.local/share/mise/installs/node/24.19.0/bin/node --conditions=onionsoup-source --import tsx packages/owners/src/cli.ts daemon
-Environment=PATH=%h/.opencode/bin:%h/.local/share/mise/installs/node/24.19.0/bin:/usr/local/bin:/usr/bin:/bin
+# systemd does not read ~/.bashrc, so PATH is spelled out. mise shims resolve node, go and gh to the
+# versions mise selects without shell activation; brew is a fallback. The runtime also needs opencode,
+# git, incus, bwrap and systemd-run (the last four are in /usr/bin here).
+Environment=PATH=%h/.local/share/mise/shims:%h/.local/bin:%h/.opencode/bin:/home/linuxbrew/.linuxbrew/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/.local/share/mise/shims/node --conditions=onionsoup-source --import tsx packages/owners/src/cli.ts daemon
 Restart=on-failure
 RestartSec=30
 # A stop marks in-flight work interrupted; nothing is replayed on the next start.
