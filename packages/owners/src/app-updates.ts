@@ -130,26 +130,44 @@ function isSettled(status: AppStatus, toVersion: string) {
   return status.state === 'RUNNING' && (status.version === toVersion || status.upgrade_available === false);
 }
 
+interface UpgradeJob { id: number; state: string; error?: string | null; arguments?: unknown[] }
+
+async function upgradeJobs(runtime: Runtime, ownerId: string, app: string): Promise<UpgradeJob[]> {
+  const owner = runtime.truenasOwner(ownerId);
+  const text = await withTruenas(owner.domain, false, call => call('truenas_jobs_list', { method: 'app.upgrade', limit: 50 }));
+  const jobs = JSON.parse(text) as UpgradeJob[];
+  return jobs.filter(job => Array.isArray(job.arguments) && job.arguments[0] === app);
+}
+
+const ACTIVE_JOB = new Set(['WAITING', 'RUNNING']);
+
 /**
- * Host code only, after approval: update through the TrueNAS API and wait until the app runs the new version.
- * Idempotent: an app already on the target version (a retry after a restart) is recorded, not updated again.
+ * Host code only, after approval: update through the TrueNAS API, follow TrueNAS's upgrade job to the end, and
+ * confirm the app runs the new version. An app is STOPPED between its old and new containers, so only the job's
+ * outcome and the app's state after it count. Idempotent: an app already on the target is recorded, and an
+ * upgrade job already running for the app is followed instead of starting a second one.
  */
 export async function updateApp(runtime: Runtime, request: ResourceRequest) {
   if (request.ask.kind !== 'update-app') throw new Error('not_an_update_request');
   const { app, toVersion } = request.ask;
   const before = await appStatus(runtime, request.to, app);
-  if (before.version === toVersion && before.upgrade_available === false && before.state === 'RUNNING') return `already on ${toVersion}; ${describeStatus(before)}`;
-  if (before.version !== toVersion) {
-    await withTruenas(runtime.truenasOwner(request.to).domain, true, call => call('truenas_app_update', { name: app }));
+  if (isSettled(before, toVersion) && before.version === toVersion) return `already on ${toVersion}; ${describeStatus(before)}`;
+  let jobId = (await upgradeJobs(runtime, request.to, app)).find(job => ACTIVE_JOB.has(job.state))?.id;
+  if (jobId === undefined) {
+    const started = JSON.parse(await withTruenas(runtime.truenasOwner(request.to).domain, true, call => call('truenas_app_update', { name: app }))) as { job_id?: number };
+    jobId = started.job_id;
   }
   const deadline = Date.now() + APP_UPDATE_LIMITS.updateWaitMs;
   let last = describeStatus(before);
   while (Date.now() < deadline) {
     await sleep(APP_UPDATE_LIMITS.pollMs);
+    const job = jobId === undefined ? undefined : (await upgradeJobs(runtime, request.to, app).catch(() => [])).find(candidate => candidate.id === jobId);
+    if (job?.state === 'FAILED' || job?.state === 'ABORTED') throw new Error(`TrueNAS upgrade job ${jobId} ${job.state}: ${String(job.error ?? '').slice(0, 300)}`);
+    if (job && ACTIVE_JOB.has(job.state)) continue;
     const status = await appStatus(runtime, request.to, app).catch(() => ({} as AppStatus));
     last = describeStatus(status);
-    if (isSettled(status, toVersion)) return last;
-    if (status.state === 'CRASHED' || status.state === 'STOPPED') throw new Error(`app ${app} is ${status.state} after the update (${last})`);
+    if (isSettled(status, toVersion)) return `${last} (job ${jobId ?? '?'})`;
+    if (job?.state === 'SUCCESS' && (status.state === 'CRASHED' || status.state === 'STOPPED')) throw new Error(`upgrade job ${jobId} succeeded but ${app} is ${status.state} (${last})`);
   }
-  throw new Error(`app ${app} did not settle on ${toVersion} (${last})`);
+  throw new Error(`app ${app} did not settle on ${toVersion} (${last}, job ${jobId ?? '?'})`);
 }

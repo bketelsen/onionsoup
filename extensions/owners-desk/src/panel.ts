@@ -10,6 +10,7 @@ interface DeskState {
   pending: Pending[];
   work: { id: string; status: string; title: string }[];
   recent: { id: string; status: string; title: string; url?: string }[];
+  activity: { id: string; status: string; title: string; from: string; to: string; detail?: string; at: string }[];
   notes: Note[];
   registers: Record<string, string>;
 }
@@ -18,7 +19,10 @@ const REFRESH_MS = 20_000;
 const REGISTER_TABS: [string, string][] = [['MAP', 'Map'], ['WISDOM', 'Wisdom'], ['decisions', 'Decisions'], ['open-questions', 'Open questions'], ['FAILURES', 'Failures']];
 const NOTE_LABELS: Record<string, string> = {
   'chat-decision': 'Noted', 'chat-action': 'Did', 'work-opened': 'Opened work', 'plan-approved': 'Plan approved',
-  'plan-rejected': 'Plan rejected', published: 'Published', 'rebase-pushed': 'Rebased', attention: 'Raised',
+  'plan-rejected': 'Plan rejected', published: 'Published', 'publish-failed': 'Publish failed', 'rebase-pushed': 'Rebased',
+  attention: 'Needs you', 'app-held': 'Held update', 'app-update-proposed': 'Proposed update', 'app-updated': 'Updated app',
+  'request-accepted': 'Accepted request', 'request-declined': 'Declined request', 'request-refused': 'Refused request',
+  'instance-created': 'Created instance', 'instance-deleted': 'Deleted instance', 'follow-up': 'Follow-up', asked: 'Asked', answered: 'Answered',
 };
 
 const STYLE = `
@@ -199,6 +203,17 @@ function renderWork(state: DeskState, container: HTMLElement) {
   }
 }
 
+function renderActivity(state: DeskState, container: HTMLElement) {
+  container.append(element('h2', '', 'Requests'));
+  if (!state.activity.length) container.append(element('div', 'empty', 'No requests yet.'));
+  for (const request of state.activity) {
+    const card = element('div', 'card');
+    card.append(element('div', '', request.title), element('div', 'status', `${request.status} · ${request.from} → ${request.to} · ${when(request.at)}`));
+    if (request.detail) card.append(element('div', 'quote', request.detail));
+    container.append(card);
+  }
+}
+
 function renderNotes(state: DeskState, container: HTMLElement) {
   container.append(element('h2', '', 'Noted from your chats and work'));
   if (!state.notes.length) container.append(element('div', 'empty', 'Nothing noted yet.'));
@@ -242,7 +257,7 @@ function render(state: DeskState) {
     root.append(desk);
     return;
   }
-  for (const section of [renderWho, renderPending, renderWork, renderNotes, renderNotebook]) {
+  for (const section of [renderWho, renderPending, renderWork, renderActivity, renderNotes, renderNotebook]) {
     const part = element('section');
     section(state, part);
     desk.append(part);

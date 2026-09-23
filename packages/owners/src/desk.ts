@@ -4,10 +4,14 @@ import type { OwnerDeclaration } from './declarations.ts';
 import { describeAsk } from './requests.ts';
 import type { Runtime } from './runtime.ts';
 
-export const DESK_LIMITS = { notes: 40, registerChars: 20_000 };
+export const DESK_LIMITS = { notes: 40, registerChars: 20_000, requests: 15 };
 
 const REGISTERS = ['MAP', 'WISDOM', 'decisions', 'open-questions', 'FAILURES'] as const;
-const NOTE_KINDS = new Set(['chat-decision', 'chat-action', 'retracted', 'work-opened', 'plan-approved', 'plan-rejected', 'published', 'rebase-pushed', 'attention']);
+const NOTE_KINDS = new Set([
+  'chat-decision', 'chat-action', 'retracted', 'work-opened', 'plan-approved', 'plan-rejected', 'published', 'publish-failed',
+  'rebase-pushed', 'attention', 'app-held', 'app-update-proposed', 'app-updated', 'request-accepted', 'request-declined',
+  'request-refused', 'instance-created', 'instance-deleted', 'follow-up', 'asked', 'answered',
+]);
 const DONE = new Set(['landed', 'failed', 'rejected']);
 
 interface JournalLine { at: string; kind: string; note?: string; quote?: string; outcome?: string; session?: string; workItem?: string; stage?: string }
@@ -64,6 +68,10 @@ export async function deskState(runtime: Runtime, query: DeskQuery) {
     ...requests.filter(request => request.status === 'awaiting-delete-approval').map(request => ({ kind: 'delete', id: request.id, title: `Delete ${request.instance?.remote}:${request.instance?.name}`, detail: request.followUpResult?.summary ?? '' })),
   ];
   const work = items.filter(item => !DONE.has(item.status)).map(item => ({ id: item.id, status: item.status, title: item.proposal.title }));
+  const activity = requests.slice(-DESK_LIMITS.requests).reverse().map(request => ({
+    id: request.id, status: request.status, title: describeAsk(request.ask), from: request.from, to: request.to,
+    detail: request.reason ?? request.followUpResult?.summary ?? request.ask.purpose, at: request.updatedAt,
+  }));
   const recent = items.filter(item => DONE.has(item.status)).slice(-5).reverse().map(item => ({ id: item.id, status: item.status, title: item.proposal.title, url: item.publication?.url }));
   return {
     owners,
@@ -71,6 +79,7 @@ export async function deskState(runtime: Runtime, query: DeskQuery) {
     pending,
     work,
     recent,
+    activity,
     notes,
     registers,
   };

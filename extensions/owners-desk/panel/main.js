@@ -1167,8 +1167,20 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
     "plan-approved": "Plan approved",
     "plan-rejected": "Plan rejected",
     published: "Published",
+    "publish-failed": "Publish failed",
     "rebase-pushed": "Rebased",
-    attention: "Raised"
+    attention: "Needs you",
+    "app-held": "Held update",
+    "app-update-proposed": "Proposed update",
+    "app-updated": "Updated app",
+    "request-accepted": "Accepted request",
+    "request-declined": "Declined request",
+    "request-refused": "Refused request",
+    "instance-created": "Created instance",
+    "instance-deleted": "Deleted instance",
+    "follow-up": "Follow-up",
+    asked: "Asked",
+    answered: "Answered"
   };
   var STYLE = `
 :root { color-scheme: light dark; }
@@ -1343,6 +1355,16 @@ input[type=text] { flex: 1; min-width: 120px; }
       container.append(line);
     }
   }
+  function renderActivity(state, container) {
+    container.append(element("h2", "", "Requests"));
+    if (!state.activity.length) container.append(element("div", "empty", "No requests yet."));
+    for (const request of state.activity) {
+      const card = element("div", "card");
+      card.append(element("div", "", request.title), element("div", "status", `${request.status} \xB7 ${request.from} \u2192 ${request.to} \xB7 ${when(request.at)}`));
+      if (request.detail) card.append(element("div", "quote", request.detail));
+      container.append(card);
+    }
+  }
   function renderNotes(state, container) {
     container.append(element("h2", "", "Noted from your chats and work"));
     if (!state.notes.length) container.append(element("div", "empty", "Nothing noted yet."));
@@ -1387,7 +1409,7 @@ input[type=text] { flex: 1; min-width: 120px; }
       root.append(desk);
       return;
     }
-    for (const section of [renderWho, renderPending, renderWork, renderNotes, renderNotebook]) {
+    for (const section of [renderWho, renderPending, renderWork, renderActivity, renderNotes, renderNotebook]) {
       const part = element("section");
       section(state, part);
       desk.append(part);
