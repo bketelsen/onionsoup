@@ -34,12 +34,15 @@ test('work stranded mid-stage is marked interrupted, not replayed', async () => 
   const ledger = new Ledger(await mkdtemp(join(tmpdir(), 'owners-')));
   const proposal = { title: 't', goal: 'g', rationale: 'r', acceptance: ['a'], size: 'small' as const };
   const running = await ledger.create('clippy', 'change', proposal);
-  await ledger.save({ ...running, status: 'implementing' });
+  await ledger.save({ ...running, status: 'implementing', activeRunner: 424242 });
+  const queued = await ledger.create('clippy', 'change', proposal);
+  await ledger.save({ ...queued, status: 'implementing' });
   const waiting = await ledger.create('clippy', 'change', proposal);
   await ledger.save({ ...waiting, status: 'awaiting-plan-approval' });
   assert.equal(await ledger.markInterrupted(), 1);
   assert.equal((await ledger.get(running.id)).status, 'interrupted');
   assert.equal((await ledger.get(waiting.id)).status, 'awaiting-plan-approval');
+  assert.equal((await ledger.get(queued.id)).status, 'implementing', 'approved but never started stays queued');
 });
 
 test('example declarations load and reference known models', async () => {

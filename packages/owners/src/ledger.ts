@@ -78,6 +78,8 @@ export const WorkItem = z.object({
   publication: Publication.optional(),
   /** Set on a rebase work item: which landed item's PR it brings up to date. */
   rebaseOf: z.object({ itemId: z.string(), branch: z.string(), prUrl: z.string(), previousHead: z.string() }).optional(),
+  /** The pid working on a step right now; unset when the item is merely queued (approved, resumed). */
+  activeRunner: z.number().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -122,12 +124,14 @@ export class Ledger {
     return updated;
   }
 
-  /** Work left mid-stage by a crashed or stopped runtime is marked, never replayed. */
+  /**
+   * Work a stopped runtime left mid-step is marked, never replayed. Only items a process was actually
+   * working on count; approved or resumed items that nothing had started yet stay queued.
+   */
   async markInterrupted() {
-    const active: WorkStatus[] = ['planning', 'implementing', 'reviewing', 'landing'];
-    const stranded = (await this.list()).filter(item => active.includes(item.status));
+    const stranded = (await this.list()).filter(item => item.activeRunner !== undefined);
     for (const item of stranded) {
-      await this.save({ ...item, status: 'interrupted', reason: `runtime stopped while ${item.status}` });
+      await this.save({ ...item, status: 'interrupted', activeRunner: undefined, reason: `runtime stopped while ${item.status}` });
     }
     return stranded.length;
   }

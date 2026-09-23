@@ -214,14 +214,14 @@ export async function advanceRebase(runtime: Runtime, itemId: string, onProgress
   if (item.status === 'interrupted') item = transition(item, 'implementing');
   let step = REBASE_STEPS[item.status];
   while (step) {
-    const current = await runtime.ledger.save(item);
+    const current = await runtime.ledger.save({ ...item, activeRunner: process.pid });
     try {
       item = await step(runtime, current);
     } catch (error) {
       const status = error instanceof Abandoned ? 'rejected' : 'failed';
       item = transition(current, status, error instanceof Error ? error.message.split('\n')[0] : String(error));
     }
-    item = await runtime.ledger.save(item);
+    item = await runtime.ledger.save({ ...item, activeRunner: undefined });
     onProgress(item);
     step = REBASE_STEPS[item.status];
   }

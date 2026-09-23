@@ -136,14 +136,14 @@ export async function advance(runtime: Runtime, itemId: string, onProgress: (ite
   if (item.status === 'interrupted') item = transition(item, item.planApproval ? 'implementing' : 'planning');
   let step = STEPS[item.status];
   while (step) {
-    const current = item.status === 'proposed' ? transition(item, 'planning') : item;
+    const current = { ...(item.status === 'proposed' ? transition(item, 'planning') : item), activeRunner: process.pid };
     item = await runtime.ledger.save(current);
     try {
       item = await step(runtime, current, workflow);
     } catch (error) {
       item = transition(current, 'failed', error instanceof Error ? error.message : String(error));
     }
-    item = await runtime.ledger.save(item);
+    item = await runtime.ledger.save({ ...item, activeRunner: undefined });
     onProgress(item);
     step = STEPS[item.status];
   }
