@@ -34,7 +34,7 @@ Then read [creating your own owners and tools](docs/extending.md).
 | `packages/owners` | The engine: runtime, CLI (`npm run owners -- <command>`), opencode plugin, daemon |
 | `packages/surface` | The surface: a server over opencode and the engine, and a web UI for owners, their chats and one inbox |
 | `examples/starter` | The configuration `owners init` copies: one example owner, freelancers, a workflow, rubrics |
-| `deploy/` | systemd user units for the daemon and the surface |
+| `deploy/` | systemd user units for the daemon, surface and calendar briefings |
 | `docs/` | [Design](docs/design/owners.md), [extending](docs/extending.md), [gaps](docs/gaps.md) |
 
 ## Commands
