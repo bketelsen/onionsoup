@@ -8,7 +8,7 @@ import { requireFreelancer } from './declarations.ts';
 import { pickModel } from './families.ts';
 import type { WorkItem, WorkStatus } from './ledger.ts';
 import type { Runtime } from './runtime.ts';
-import { createWorktree, diffAgainstBase, git, verificationPassed, verify } from './workspace.ts';
+import { createWorktree, diffAgainstBase, git, gitWithLiteralPathspecs, verificationPassed, verify } from './workspace.ts';
 
 const run = promisify(execFile);
 
@@ -147,6 +147,44 @@ async function hasConflictMarkers(worktree: string) {
   return grep.stdout.trim().length > 0;
 }
 
+/**
+ * Every path git sees changed in the worktree or untracked, outside what conflict resolution staged, so it can
+ * be reported instead of silently swept in. A path whose only change is already staged (the non-conflicting
+ * part of an in-progress cherry-pick, committed by the `cherry-pick --continue` that follows) is not a
+ * leftover: it was never left out of the commit.
+ */
+async function unstagedPaths(worktree: string, staged: ReadonlySet<string>) {
+  const { stdout } = await run('git', ['-C', worktree, 'status', '--porcelain', '-z'], { maxBuffer: 32 * 1024 * 1024 });
+  const fields = stdout.split('\0').filter(Boolean);
+  const leftovers: string[] = [];
+  for (let index = 0; index < fields.length; index += 1) {
+    const entry = fields[index]!;
+    const path = entry.slice(3);
+    if (/^[RC]/.test(entry)) index += 1; // a rename or copy record is followed by the old path in its own field
+    const worktreeStatus = entry[1];
+    const isUntracked = entry.startsWith('??');
+    const hasUncommittedWorktreeChange = isUntracked || worktreeStatus !== ' ';
+    if (hasUncommittedWorktreeChange && !staged.has(path)) leftovers.push(path);
+  }
+  return leftovers;
+}
+
+/**
+ * Stage only the paths a conflict resolution actually concerns: the originally conflicted files plus whatever
+ * the implementer reports it touched. `git add -A` would sweep in anything else left in the worktree, tracked
+ * or not (a regenerated lockfile from verification, a scratch directory) — never a complete approved change,
+ * unlike `commitWorktree`. Pathspec magic is disabled so a conflicted or reported filename containing `*`,
+ * `?`, `[]` or a leading `-` matches only itself, never anything else in the worktree. A path that no longer
+ * matches anything (a hallucinated report) is skipped rather than failing the whole stage, since `git add --`
+ * is otherwise all-or-nothing across its pathspecs.
+ */
+export async function stageConflictResolution(worktree: string, files: readonly string[], filesChanged: readonly string[]) {
+  const staged = new Set([...files, ...filesChanged]);
+  for (const path of staged) await gitWithLiteralPathspecs(worktree, ['add', '--', path]).catch(() => undefined);
+  const leftovers = await unstagedPaths(worktree, staged);
+  return { staged: [...staged], leftovers };
+}
+
 function resolveBrief(item: WorkItem, source: WorkItem, files: readonly string[], originalPatch: string) {
   return [
     'You have been hired to finish a cherry-pick that stopped on conflicts. The working tree is mid cherry-pick.',
@@ -201,9 +239,10 @@ async function resolveConflicts(runtime: Runtime, item: WorkItem, source: WorkIt
     brief: `${resolveBrief(item, source, files, originalPatch)}\n\n<owner-guidance>\n${decision.guidance}\n</owner-guidance>`, schema: ImplementationReport,
   });
   if (await hasConflictMarkers(worktree)) throw new Error('conflict_markers_remain');
-  await git(worktree, ['add', '-A']);
+  const { leftovers } = await stageConflictResolution(worktree, files, report.filesChanged);
   await git(worktree, ['-c', 'core.editor=true', 'cherry-pick', '--continue']);
-  return report;
+  if (!leftovers.length) return report;
+  return { ...report, summary: `${report.summary}\n\nLeft out of the commit (not part of this conflict resolution): ${leftovers.join(', ')}` };
 }
 
 async function replay(runtime: Runtime, item: WorkItem): Promise<WorkItem> {

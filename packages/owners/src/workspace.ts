@@ -15,6 +15,12 @@ export async function git(directory: string, args: string[]) {
   return stdout;
 }
 
+/** As `git`, but with pathspec magic and globbing turned off: every path argument matches only itself, literally. */
+export async function gitWithLiteralPathspecs(directory: string, args: string[]) {
+  const { stdout } = await run('git', ['--literal-pathspecs', '-C', directory, ...args], { maxBuffer: 32 * 1024 * 1024 });
+  return stdout;
+}
+
 /** Bring the owner's checkout to the tip of its base branch. The owner's checkout is never edited. */
 export async function refreshCheckout(owner: RepositoryOwner) {
   if (!existsSync(join(owner.workspace, '.git'))) {
