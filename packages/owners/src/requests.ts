@@ -54,6 +54,7 @@ export const UpdateAppAsk = z.object({
   app: z.string(),
   fromVersion: z.string(),
   toVersion: z.string(),
+  imageUpdates: z.boolean().optional(),
   purpose: z.string(),
   notesRead: z.array(z.string()).default([]),
 });
