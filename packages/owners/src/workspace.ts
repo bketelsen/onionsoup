@@ -67,6 +67,22 @@ export async function verify(owner: RepositoryOwner, worktree: string, toolsDire
   return results;
 }
 
+/**
+ * Verification judges only what the change can contain. Files git ignores (dependencies a hire installed, build
+ * output) never reach a commit, so they are removed first: a repository check that walks the filesystem would
+ * otherwise fail on, say, a README inside node_modules. Untracked files that are not ignored stay: they are part
+ * of an uncommitted change.
+ */
+export async function removeIgnoredFiles(worktree: string) {
+  await git(worktree, ['clean', '-q', '-f', '-d', '-X']);
+}
+
+/** After a commit, make the worktree exactly that commit, so verification sees what will be pushed. */
+export async function matchHead(worktree: string) {
+  await git(worktree, ['reset', '-q', '--hard', 'HEAD']);
+  await git(worktree, ['clean', '-q', '-f', '-d', '-x']);
+}
+
 /** An owner's desk: its own worktree on a desk branch, where chats with a person do their work. */
 export async function ensureDesk(owner: RepositoryOwner, desksRoot: string) {
   const path = owner.desk ?? join(desksRoot, owner.id);

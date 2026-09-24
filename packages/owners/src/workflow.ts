@@ -7,7 +7,7 @@ import type { HumanNote, WorkItem, WorkStatus } from './ledger.ts';
 import { answerQuestions, recordLearnings } from './owner.ts';
 import { advanceRebase, REBASE_WORKFLOW } from './rebase.ts';
 import type { Runtime } from './runtime.ts';
-import { commitWorktree, createWorktree, diffAgainstBase, git, refreshCheckout, resetWorktree, verificationPassed, verify } from './workspace.ts';
+import { commitWorktree, createWorktree, diffAgainstBase, git, refreshCheckout, removeIgnoredFiles, resetWorktree, verificationPassed, verify } from './workspace.ts';
 
 type Step = (runtime: Runtime, item: WorkItem, workflow: WorkflowDeclaration) => Promise<WorkItem>;
 
@@ -69,6 +69,7 @@ const implement: Step = async (runtime, item, workflow) => {
     brief: implementBrief(item, item.plan, await knowledgeFor(runtime, item), hired.rubric), schema: ImplementationReport,
   });
   const diff = await diffAgainstBase(owner, path, item.repairOf?.previousHead);
+  await removeIgnoredFiles(path);
   const verification = await verify(owner, path, runtime.toolsDirectory);
   const implemented = { ...item, worktree: path, branch, implementations: [...item.implementations, { report, diffStat: diff.stat, verification }] };
   await runtime.notebook(item.owner).journal({ kind: 'implement', workItem: item.id, model: hired.model, outcome: verificationPassed(verification) ? 'verified' : 'verification-failed', note: diff.stat.split('\n').at(-1) });
