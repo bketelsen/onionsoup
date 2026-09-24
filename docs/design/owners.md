@@ -98,7 +98,9 @@ owner should act on (landed, failed, rejected, PR merged or closed), and queues 
 the chat the work was opened from, marked as coming from the runtime, so the owner decides the next step in front
 of the person.
 An owner with a `deploy` section and a `ship` grant ships its repository where it runs: fast-forward, verify in
-the sandbox, restart through a delayed systemd unit that health-checks and rolls back.
+the sandbox, restart through a delayed systemd unit that health-checks and rolls back. Both verification and
+health-check failures reset to the previous revision, reinstall dependencies, and rebuild engine and browser
+artifacts. Rollback failures are journaled as attention; the watchdog leaves services stopped if rebuilding fails.
 
 ### Notebooks and memory
 
@@ -126,20 +128,46 @@ split into observed, inferred and unknown) and open requests to each other:
 
 | Request | From → to | After the receiving owner accepts |
 | --- | --- | --- |
+| `work` | any → repository owner with a workflow | receiver accepts or declines; accepted work enters its ordinary plan gate, and the request tracks the linked work through merge or failure |
 | `instance` | any → incus owner | person approves create (optionally the delete too), runtime creates, follow-up runs, delete |
 | `publish-site` | site source → NAS owner | grant or person, then build · stage · swap · restart app · verify byte for byte · roll back on failure |
-| `update-app` | NAS owner → itself | grant or person, then update through the API and follow the TrueNAS job to the end |
+| `update-app` | NAS owner → itself | grant or person, then upgrade the catalog or pull and redeploy images; follow the specific TrueNAS job to success |
+
+App requests preserve image-update intent even when the catalog version is unchanged. Catalog upgrades use
+truenas-mcp; image-only updates use the declared SSH connection to run `sudo -n midclt call app.pull_images`
+with redeploy enabled (the SSH account needs permission for that command). Completion requires the tracked
+job to succeed, the app to run at the target version, and image updates to clear. If a catalog upgrade leaves
+image updates pending, a second tracked job pulls them; temporary polling failures retry within the deadline. Read-only recovery can confirm
+a known successful job without starting another update. See the [TrueNAS API](https://api.truenas.com/v25.10/api_methods_app.pull_images.html).
 
 People only record decisions (approve, reject, revise-plan, resume, approve-create, approve-push, …); the
 runtime acts on them. Ledger updates use per-record kernel locks across daemon, CLI and surface processes.
 Learning hires append their records to the latest item, preserving publication and person decisions made while
 the hire runs.
+Request decisions and runner cleanup update the latest
+record under a cross-process lock. Each active request step records its operation identity and checkpoints before effects.
+After a stopped runtime, recovery adopts an Incus instance only when its request tag matches, confirms deletion by absence,
+checks a published site's saved index digest only after its restart and serving check were recorded, and checks an app's recorded job and final state. Uncertain outcomes remain
+`interrupted` in the inbox: the person can check again, retry after inspection with a reason, or stop the request.
+Instance retry first checks for an existing tagged instance; stopping a provisioned instance retains its delete gate.
+A failed NAS job can be replaced on an explicit retry, while an active or successful recorded job remains attached.
+Effect-free owner decisions and work-status checks retry with exponential backoff (three attempts by default), then
+ask the person. Each tick detects dead request runners while preserving live CLI claims; read-only reconciliation
+runs in the bounded request pool, so unavailable hosts cannot hold up the tick. Neither
+recovery nor a follow-up silently replays an unknown effect.
+
+`onionsoup_request_work` delegates to a declared repository owner. Acceptance creates one durable linked work item, with
+all normal plan, verification, review and publication gates. Both owners hear completion, and declined or failed work raises
+attention for both so the person can redirect it. Attention discovery imports only the previous seven days on its first run (the cutoff is persisted; older journal
+history remains intact). It then indexes appended bytes, caches unchanged files, and skips malformed records without
+breaking the inbox. Attention items can be acknowledged, resolved with an outcome, or reopened through `onionsoup_attention`. The inbox exposes acknowledge
+and resolve controls and keeps acknowledged items visible until resolved.
 
 ### Always on
 
 `npm run owners -- daemon` (installed as `deploy/onionsoup-owners.service`) ticks every minute: it re-reads the
-configuration, moves requests along, runs due duties, advances work items, and raises work notices. Duties and
-work items run in the background beside the tick (one run per item, one item per owner, two of each at a time), so
+configuration, moves requests along, runs due duties, advances work items, and raises work notices. Requests, duties and
+work items run in the background beside the tick (one run per item, one item per owner, two of each at a time; requests reserve both participating owners and serialize shared resources), so
 a long hire never holds up a 15-minute check or a waiting request. Deterministic
 checks wake a model only when one is needed, and that model is the owner. Work a stopped runtime was actually
 doing is marked interrupted and never replayed; every tick also checks external runner claims so a stopped

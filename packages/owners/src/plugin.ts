@@ -1,3 +1,6 @@
+import { listAttention, changeAttention } from './attention.ts';
+import { requestWork } from './delegation.ts';
+import { ProposedWork } from './artifacts.ts';
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tool, type Plugin } from '@opencode-ai/plugin';
@@ -356,6 +359,36 @@ const server: Plugin = async (input, options) => {
     },
 
     tool: {
+      onionsoup_request_work: tool({
+        description: 'Ask another declared owner to change its repository. The receiver accepts or declines, and accepted work uses the ordinary plan approval gate.',
+        args: {
+          owner: tool.schema.string(), title: tool.schema.string(), goal: tool.schema.string(),
+          rationale: tool.schema.string(), acceptance: tool.schema.array(tool.schema.string()).min(1),
+          repository: tool.schema.string().optional(), size: tool.schema.enum(['small', 'medium']),
+        },
+        async execute(args, context) {
+          const sender = requireOwner(context.agent);
+          const receiver = resolveOwner(args.owner);
+          const proposal = ProposedWork.parse(args);
+          return JSON.stringify(await requestWork(runtime, sender.id, receiver.id, proposal));
+        },
+      }),
+      onionsoup_attention: tool({
+        description: 'List your attention items, or acknowledge, resolve, or reopen one with a reason. Resolution records an outcome; it does not authorize effects.',
+        args: {
+          id: tool.schema.string().optional(),
+          action: tool.schema.enum(['list', 'acknowledge', 'resolve', 'reopen']).default('list'),
+          reason: tool.schema.string().optional(),
+        },
+        async execute(args, context) {
+          const owner = requireOwner(context.agent);
+          const entries = (await listAttention(runtime)).filter(entry => entry.owner === owner.id);
+          if (args.action === 'list') return JSON.stringify(entries);
+          if (!entries.some(entry => entry.id === args.id)) throw new Error('attention_not_yours');
+          const statuses = { acknowledge: 'acknowledged', resolve: 'resolved', reopen: 'open' } as const;
+          return JSON.stringify(await changeAttention(runtime, args.id!, statuses[args.action], owner.id, args.reason ?? ''));
+        },
+      }),
       onionsoup_status: tool({
         description: 'Your open work items and requests (including anything waiting on the person), and work that finished recently with its outcome. Pass a work item id to see that item in full.',
         args: { item: tool.schema.string().optional().describe('A work item id, e.g. w-20260923-31a48a') },

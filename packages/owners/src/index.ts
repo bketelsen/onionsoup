@@ -17,3 +17,7 @@ export { chatDirectory } from './chats.ts';
 export { configDirectory, stateDirectory } from './paths.ts';
 export { describeAsk, type ResourceRequest } from './requests.ts';
 export { domainSummary } from './roster.ts';
+
+export { listAttention, changeAttention, type Attention } from './attention.ts';
+export { requestWork } from './delegation.ts';
+export { recoverRequest, reconcileRequest } from './request-recovery.ts';

@@ -1,18 +1,19 @@
+import { canReconcileRequest, reconcileRequest } from './request-recovery.ts';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { processRequests } from './brokering.ts';
+import { processRequest, requestCanRun } from './brokering.ts';
 import { chatDirectory } from './chats.ts';
 import { noticeWorkChanges } from './notices.ts';
 import { distill, distillIsDue } from './memory.ts';
 import type { WorkItem, WorkStatus } from './ledger.ts';
 import { wake } from './owner.ts';
-import type { ResourceRequest } from './requests.ts';
+import { requestRunnerIsAlive, type ResourceRequest } from './requests.ts';
 import type { Runtime } from './runtime.ts';
 import { advance } from './workflow.ts';
 
 export const DAEMON_LIMITS = {
-  tickMs: 60_000, shutdownGraceMs: 5_000, parallelItems: 2, parallelDuties: 2, parallelMemory: 1,
+  tickMs: 60_000, shutdownGraceMs: 5_000, parallelItems: 2, parallelDuties: 2, parallelMemory: 1, parallelRequests: 2,
 };
 
 /**
@@ -51,13 +52,16 @@ export class Background {
   }
 }
 
+const requests = new Background(DAEMON_LIMITS.parallelRequests);
+const requestOwners = new Set<string>();
+
 const items = new Background(DAEMON_LIMITS.parallelItems);
 const duties = new Background(DAEMON_LIMITS.parallelDuties);
 const memories = new Background(DAEMON_LIMITS.parallelMemory);
 
 /** Wait for background work the ticks started. */
 export async function drain() {
-  await Promise.all([items.drain(), duties.drain(), memories.drain()]);
+  await Promise.all([items.drain(), duties.drain(), memories.drain(), requests.drain()]);
 }
 
 const UNIT_MS: Record<string, number> = { m: 60_000, h: 3_600_000, d: 86_400_000 };
@@ -89,7 +93,7 @@ export async function recordDutyRun(runtime: Runtime, ownerId: string, dutyId: s
   await writeFile(statePath, JSON.stringify(lastRun, null, 2) + '\n');
 }
 
-async function runDueDuties(runtime: Runtime, log: TickLog) {
+async function runDueDuties(runtime: Runtime, log: TickLog, reserved: ReadonlySet<string>) {
   const statePath = join(runtime.stateDirectory, 'duties.json');
   const lastRun = await readDutyState(statePath);
   for (const owner of runtime.declarations.owners.values()) {
@@ -97,6 +101,7 @@ async function runDueDuties(runtime: Runtime, log: TickLog) {
     for (const duty of owner.duties.filter(candidate => candidate.every)) {
       const key = `${owner.id}/${duty.id}`;
       const previous = lastRun[key] ? Date.parse(lastRun[key]) : 0;
+      if (reserved.has(owner.id)) continue;
       if (Date.now() - previous < everyMs(duty.every!) || duties.has(key)) continue;
       const started = duties.start(key, async () => {
         try {
@@ -118,11 +123,11 @@ async function runDueDuties(runtime: Runtime, log: TickLog) {
  * Advance runnable work items in the background, at most one per owner at a time: an owner's items share its
  * checkout, where creating worktrees at once would collide.
  */
-function advanceRunnable(runnable: readonly WorkItem[], runtime: Runtime, log: TickLog) {
+function advanceRunnable(runnable: readonly WorkItem[], runtime: Runtime, log: TickLog, reserved: ReadonlySet<string>) {
   const busyOwners = new Set(items.keys().map(key => key.split('/')[0]));
   for (const item of runnable) {
     if (memories.has(item.owner)) continue;
-    if (busyOwners.has(item.owner) || items.has(`${item.owner}/${item.id}`)) continue;
+    if (reserved.has(item.owner) || busyOwners.has(item.owner) || items.has(`${item.owner}/${item.id}`)) continue;
     const started = items.start(`${item.owner}/${item.id}`, async () => {
       try {
         await advance(runtime, item.id, log.item);
@@ -158,6 +163,58 @@ export async function scheduleMemory(runtime: Runtime, log: TickLog, unavailable
   }
 }
 
+/** Requests sharing either owner serialize; different owners progress up to the configured cap. */
+async function runRequests(runtime: Runtime, log: TickLog) {
+  const busyOwners = new Set([...items.keys(), ...duties.keys()].map(key => key.split('/')[0]));
+  for (const ownerId of memories.keys()) busyOwners.add(ownerId);
+  for (const item of await runtime.ledger.list()) {
+    if (item.activeRunner !== undefined && requestRunnerIsAlive(item.activeRunner)) busyOwners.add(item.owner);
+  }
+  const pendingRequests = await runtime.requests.list();
+  for (const request of pendingRequests) {
+    if (request.operation?.runner === undefined || !requestRunnerIsAlive(request.operation.runner)) continue;
+    busyOwners.add(request.from);
+    busyOwners.add(request.to);
+  }
+  for (const request of pendingRequests) {
+    if (request.status === 'work-running') {
+      try {
+        await processRequest(runtime, request.id, log.request);
+      } catch (error) {
+        log.error(request.id, error);
+      }
+      continue;
+    }
+    if (!requestCanRun(request) && !canReconcileRequest(request)) continue;
+    const owners = new Set([request.from, request.to]);
+    if ([...owners].some(owner => requestOwners.has(owner) || busyOwners.has(owner))) continue;
+    requests.start(request.id, async () => {
+      for (const owner of owners) requestOwners.add(owner);
+      try {
+        if (canReconcileRequest(request)) {
+          const reconciled = await reconcileRequest(runtime, request.id);
+          if (reconciled.status !== request.status) log.request(reconciled);
+        }
+        await processRequest(runtime, request.id, log.request);
+      } catch (error) {
+        log.error(request.id, error);
+      } finally {
+        for (const owner of owners) requestOwners.delete(owner);
+      }
+    });
+  }
+}
+
+async function reservedRequestOwners(runtime: Runtime) {
+  const reserved = new Set(requestOwners);
+  for (const request of await runtime.requests.list()) {
+    if (!request.operation?.runner || !requestRunnerIsAlive(request.operation.runner)) continue;
+    reserved.add(request.from);
+    reserved.add(request.to);
+  }
+  return reserved;
+}
+
 /** One pass: configuration, requests (people may be waiting on an instance), due duties, work items, notices. */
 export async function tick(runtime: Runtime, log: TickLog) {
   const stranded = await runtime.ledger.markInterrupted();
@@ -168,13 +225,22 @@ export async function tick(runtime: Runtime, log: TickLog) {
     log.error('configuration (keeping the last good one)', error);
   }
   try {
-    await processRequests(runtime, log.request);
+    await runtime.requests.markInterrupted();
+    await runRequests(runtime, log);
   } catch (error) {
     log.error('requests', error);
   }
-  await runDueDuties(runtime, log);
-  advanceRunnable((await runtime.ledger.list()).filter(candidate => RUNNABLE.includes(candidate.status) && !candidate.activeRunner), runtime, log);
-  await scheduleMemory(runtime, log);
+  let reserved: ReadonlySet<string>;
+  try {
+    reserved = await reservedRequestOwners(runtime);
+  } catch (error) {
+    log.error('request reservations', error);
+    return; // Retry next tick when the owner reservations can be read safely.
+  }
+  await runDueDuties(runtime, log, reserved);
+  const runnable = (await runtime.ledger.list()).filter(candidate => RUNNABLE.includes(candidate.status) && !candidate.activeRunner);
+  advanceRunnable(runnable, runtime, log, reserved);
+  await scheduleMemory(runtime, log, reserved);
   try {
     for (const notice of await noticeWorkChanges(runtime, ownerId => chatDirectory(runtime, ownerId))) log.duty(notice.owner, 'notice', `${notice.workItem} ${notice.change}${notice.origin ? ' (to its chat)' : ''}`);
   } catch (error) {

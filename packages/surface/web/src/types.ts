@@ -10,8 +10,9 @@ export interface QuestionInfo { question: string; header: string; options: { lab
 export interface PendingQuestion { id: string; sessionID: string; questions: QuestionInfo[] }
 
 export interface InboxEntry {
-  kind: 'plan' | 'push' | 'publish' | 'create' | 'delete' | 'permission' | 'question';
+  kind: 'plan' | 'push' | 'publish' | 'create' | 'delete' | 'permission' | 'question' | 'attention' | 'request-recovery';
   id: string; owner: string; title: string; detail: string; at?: string; sessionID?: string;
+  attentionStatus?: string;
   permission?: PendingPermission; question?: PendingQuestion;
 }
 

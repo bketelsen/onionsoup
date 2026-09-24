@@ -6,6 +6,7 @@ import { Badge, Button, cx, OwnerIcon, timeAgo } from './ui.tsx';
 
 const KIND_LABELS: Record<InboxEntry['kind'], string> = {
   plan: 'Plan to approve', push: 'Force-push to approve', publish: 'Ready to publish', create: 'Create request', delete: 'Delete request',
+  attention: 'Attention', 'request-recovery': 'Request interrupted',
   permission: 'Permission', question: 'Question',
 };
 
@@ -58,6 +59,15 @@ export function Decision({ entry, owner, onDone, compact }: { entry: InboxEntry;
         </div>
       ))}
       <div className="flex flex-wrap items-center gap-1.5">
+        {entry.kind === 'attention' && <>
+          {entry.attentionStatus !== 'acknowledged' && <Button disabled={busy || !text.trim()} onClick={() => void decide('acknowledge-attention', { reason: text })}>Acknowledge</Button>}
+          <Button variant="primary" disabled={busy || !text.trim()} onClick={() => void decide('resolve-attention', { reason: text })}>Resolve</Button>
+        </>}
+        {entry.kind === 'request-recovery' && <>
+          <Button disabled={busy} onClick={() => void decide('reconcile-request')}>Check outcome</Button>
+          <Button variant="primary" disabled={busy || !text.trim()} onClick={() => void decide('retry-request', { reason: text })}>Retry after inspection</Button>
+          <Button variant="destructive" disabled={busy || !text.trim()} onClick={() => void decide('cancel-request', { reason: text })}>Stop request</Button>
+        </>}
         {entry.kind === 'plan' && <>
           <Button variant="primary" disabled={busy} onClick={() => void decide('approve-plan', { note: text || undefined })}>Approve plan</Button>
           <Button disabled={busy || !text.trim()} title="Send the plan back with your note" onClick={() => void decide('revise-plan', { note: text })}>Send back</Button>
@@ -87,8 +97,8 @@ export function Decision({ entry, owner, onDone, compact }: { entry: InboxEntry;
         </>}
         {entry.sessionID && <Button variant="ghost" onClick={openChat}><RiChat3Line className="size-3.5" />Open chat</Button>}
       </div>
-      {(entry.kind === 'plan' || entry.kind === 'create') && (
-        <input value={text} onChange={event => setText(event.target.value)} placeholder={entry.kind === 'plan' ? 'Note (sent with approval, required to send back or reject)' : 'Reason (for deny)'}
+      {(['plan', 'create', 'attention', 'request-recovery'].includes(entry.kind)) && (
+        <input value={text} onChange={event => setText(event.target.value)} placeholder={entry.kind === 'plan' ? 'Note (sent with approval, required to send back or reject)' : 'Reason or observed outcome'}
           className="rounded-md border border-border bg-background px-2 py-1 typography-meta outline-none focus:border-interactive-border-focus" />
       )}
       {error && <div className="typography-meta text-status-error">{error}</div>}

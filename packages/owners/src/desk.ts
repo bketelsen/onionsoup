@@ -1,3 +1,5 @@
+import { parseJournalRecord, type JournalRecord } from './journal-record.ts';
+import { listAttention } from './attention.ts';
 import { readFile, readdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { OwnerDeclaration } from './declarations.ts';
@@ -9,6 +11,8 @@ export const DESK_LIMITS = { notes: 40, registerChars: 20_000, requests: 15 };
 
 const REGISTERS = ['MAP', 'WISDOM', 'decisions', 'open-questions', 'FAILURES'] as const;
 const NOTE_KINDS = new Set([
+  'delete-approved', 'request-denied', 'create-failed', 'delete-failed',
+  'attention-decision', 'request-recovery', 'request-recovered', 'request-completed', 'create-approved', 'request-opened',
   'chat-decision', 'chat-action', 'retracted', 'work-opened', 'plan-approved', 'plan-rejected', 'published', 'publish-failed',
   'rebase-pushed', 'attention', 'app-held', 'app-update-proposed', 'app-updated', 'request-accepted', 'request-declined',
   'request-refused', 'instance-created', 'instance-deleted', 'follow-up', 'asked', 'answered', 'ci-triage', 'owner-created',
@@ -21,12 +25,15 @@ export function awaitingPublish(item: WorkItem) {
   return item.status === 'landed' && !item.publication && !item.rebaseOf;
 }
 
-interface JournalLine { at: string; kind: string; note?: string; quote?: string; outcome?: string; session?: string; workItem?: string; stage?: string }
+
 
 async function journal(directory: string) {
   const files = (await readdir(join(directory, 'journal')).catch(() => [])).filter(name => name.endsWith('.jsonl')).sort();
   const lines = (await Promise.all(files.map(file => readFile(join(directory, 'journal', file), 'utf8')))).join('').split('\n').filter(Boolean);
-  return lines.map(line => JSON.parse(line) as JournalLine);
+  return lines.flatMap(line => {
+    const entry = parseJournalRecord(line);
+    return entry ? [entry] : [];
+  });
 }
 
 function pickOwner(runtime: Runtime, query: DeskQuery) {
@@ -53,7 +60,7 @@ export async function deskState(runtime: Runtime, query: DeskQuery) {
   const entries = await journal(notebook.directory);
   const retracted = new Set(entries.filter(entry => entry.kind === 'retracted').map(entry => entry.note ?? ''));
   const seenQuotes: string[] = [];
-  const isDuplicate = (entry: JournalLine) => {
+  const isDuplicate = (entry: JournalRecord) => {
     const quote = entry.quote?.trim();
     if (entry.kind !== 'chat-decision' || !quote) return false;
     const duplicate = seenQuotes.some(seen => seen.includes(quote) || quote.includes(seen));
@@ -78,7 +85,7 @@ export async function deskState(runtime: Runtime, query: DeskQuery) {
   const work = items.filter(item => !DONE.has(item.status)).map(item => ({ id: item.id, status: item.status, title: item.proposal.title }));
   const activity = requests.slice(-DESK_LIMITS.requests).reverse().map(request => ({
     id: request.id, status: request.status, title: describeAsk(request.ask), from: request.from, to: request.to,
-    detail: request.reason ?? request.followUpResult?.summary ?? request.ask.purpose, at: request.updatedAt,
+    detail: `${request.workItem ? `Work ${request.workItem}: ` : ''}${request.reason ?? request.followUpResult?.summary ?? request.ask.purpose}`, at: request.updatedAt,
   }));
   const recent = items.filter(item => DONE.has(item.status)).slice(-5).reverse().map(item => ({ id: item.id, status: item.status, title: item.proposal.title, url: item.publication?.url }));
   return {
@@ -90,6 +97,7 @@ export async function deskState(runtime: Runtime, query: DeskQuery) {
     activity,
     notes,
     registers,
+    attention: (await listAttention(runtime)).filter(entry => entry.owner === owner.id),
   };
 }
 
@@ -110,9 +118,11 @@ export function statusText(items: readonly WorkItem[], requests: readonly Resour
   const since = now.getTime() - STATUS_LIMITS.recentDays * 24 * 60 * 60 * 1000;
   const open = items.filter(item => !DONE.has(item.status));
   const recent = items.filter(item => DONE.has(item.status) && Date.parse(item.updatedAt) >= since).slice(-STATUS_LIMITS.recentItems).reverse();
-  const live = requests.filter(request => !['deleted', 'declined', 'denied', 'failed'].includes(request.status));
+  const live = requests.filter(request => !['deleted', 'declined', 'denied', 'failed', 'published', 'updated', 'completed'].includes(request.status));
+  const finishedRequests = requests.filter(request => !live.includes(request) && Date.parse(request.updatedAt) >= since).slice(-STATUS_LIMITS.recentItems).reverse();
   const sections = [
-    open.length || live.length ? ['Open:', ...open.map(item => `- work ${item.id}: ${item.status}: ${item.proposal.title}`), ...live.map(request => `- request ${request.id}: ${request.status}: ${request.from} → ${request.to} ${describeAsk(request.ask)}`)] : ['Open: nothing.'],
+    open.length || live.length ? ['Open:', ...open.map(item => `- work ${item.id}: ${item.status}: ${item.proposal.title}`), ...live.map(request => `- request ${request.id}: ${request.status}: ${request.from} → ${request.to} ${describeAsk(request.ask)}${request.workItem ? `; work ${request.workItem}` : ''}`)] : ['Open: nothing.'],
+    finishedRequests.length ? ['Recent requests:', ...finishedRequests.map(request => `- ${request.id}: ${request.status}: ${describeAsk(request.ask)}${request.workItem ? `; work ${request.workItem}` : ''}${request.reason ? `; ${request.reason}` : ''}`)] : [],
     recent.length ? [`Finished in the last ${STATUS_LIMITS.recentDays} days:`, ...recent.map(item => `- work ${item.id}: ${outcome(item)}: ${item.proposal.title}`)] : [],
   ];
   return sections.filter(section => section.length).map(section => section.join('\n')).join('\n\n');
