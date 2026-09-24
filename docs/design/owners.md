@@ -135,7 +135,8 @@ split into observed, inferred and unknown) and open requests to each other:
 App requests preserve image-update intent even when the catalog version is unchanged. Catalog upgrades use
 truenas-mcp; image-only updates use the declared SSH connection to run `sudo -n midclt call app.pull_images`
 with redeploy enabled (the SSH account needs permission for that command). Completion requires the tracked
-job to succeed, the app to run at the target version, and image updates to clear. Read-only recovery can confirm
+job to succeed, the app to run at the target version, and image updates to clear. If a catalog upgrade leaves
+image updates pending, a second tracked job pulls them; temporary polling failures retry within the deadline. Read-only recovery can confirm
 a known successful job without starting another update. See the [TrueNAS API](https://api.truenas.com/v25.10/api_methods_app.pull_images.html).
 
 People only record decisions (approve, reject, revise-plan, resume, approve-create, approve-push, …); the

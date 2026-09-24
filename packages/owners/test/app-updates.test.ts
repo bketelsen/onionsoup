@@ -34,28 +34,38 @@ function scriptNas(runtime: Runtime, options: {
   existing?: boolean;
   missingJob?: boolean;
   startError?: boolean;
+  method?: string;
+  transientPoll?: boolean;
 }) {
   let statusReads = 0;
   let jobReads = 0;
   let hasStarted = options.existing ?? false;
+  let method = options.method ?? 'app.pull_images';
+  let hasPollFailed = false;
   const writes: string[] = [];
   runtime.truenasSsh = async (_domain, command) => {
     writes.push(command);
     if (options.startError) throw new Error('image_pull_denied');
     hasStarted = true;
+    method = 'app.pull_images';
     return '42';
   };
   runtime.truenas = async (_domain, _writes, use) => use(async (tool, args) => {
     const handlers: Record<string, () => unknown> = {
       truenas_app_get: () => [options.states[Math.min(statusReads++, options.states.length - 1)]],
       truenas_jobs_list: () => {
-        assert.ok(['app.upgrade', 'app.pull_images'].includes(String(args?.method)));
+        assert.equal(args?.method, undefined);
+        if (hasStarted && options.transientPoll && !hasPollFailed) {
+          hasPollFailed = true;
+          throw new Error('temporary_connection_failure');
+        }
         if (!hasStarted || options.missingJob) return [];
         const states = options.jobs ?? ['RUNNING', 'SUCCESS'];
-        return [{ id: 42, state: states[Math.min(jobReads++, states.length - 1)], arguments: ['radarr'] }];
+        return [{ id: 42, method, state: states[Math.min(jobReads++, states.length - 1)], arguments: ['radarr'] }];
       },
       truenas_app_update: () => {
         writes.push(tool);
+        method = 'app.upgrade';
         hasStarted = true;
         return { job_id: 42 };
       },
@@ -84,21 +94,22 @@ test('image-only approved request pulls and redeploys images, follows job, then 
 
 test('update completion requires a successful job and image completion, not just equal versions', async () => {
   for (const scenario of [
-    { name: 'failed job', states: [app(true), app(false)], jobs: ['FAILED'] },
-    { name: 'missing job', states: [app(true), app(false)], missingJob: true },
-    { name: 'images still pending', states: [app(true)], jobs: ['SUCCESS'] },
-    { name: 'image command failed', states: [app(true)], startError: true },
+    { name: 'failed job', states: [app(true), app(false)], jobs: ['FAILED'], reason: /app_upgrade_failed/ },
+    { name: 'missing job', states: [app(true), app(false)], missingJob: true, reason: /app_upgrade_unsettled/ },
+    { name: 'images still pending', states: [app(true)], jobs: ['SUCCESS'], reason: /app_upgrade_unsettled/ },
+    { name: 'image command failed', states: [app(true)], startError: true, reason: /image_pull_denied/ },
   ]) {
     const runtime = await nasRuntime();
     const request = await approvedUpdate(runtime);
-    scriptNas(runtime, scenario);
+    const writes = scriptNas(runtime, scenario);
     const previous = { ...APP_UPDATE_LIMITS };
     Object.assign(APP_UPDATE_LIMITS, { pollMs: 1, updateWaitMs: 12 });
     try {
       await processRequests(runtime);
       const failed = await runtime.requests.get(request.id);
       assert.equal(failed.status, 'failed', scenario.name);
-      assert.match(failed.reason!, /failed/, scenario.name);
+      assert.match(failed.reason!, scenario.reason, scenario.name);
+      assert.equal(writes.length, 1);
     } finally {
       Object.assign(APP_UPDATE_LIMITS, previous);
     }
@@ -108,7 +119,7 @@ test('update completion requires a successful job and image completion, not just
 test('catalog update reuses an existing job and recovery checks recorded success read-only', async () => {
   const runtime = await nasRuntime();
   const request = await approvedUpdate(runtime, { toVersion: '2', imageUpdates: false });
-  const writes = scriptNas(runtime, { states: [app(false), app(false, '2')], existing: true });
+  const writes = scriptNas(runtime, { states: [app(false), app(false, '2')], existing: true, method: 'app.upgrade' });
   const previous = APP_UPDATE_LIMITS.pollMs;
   APP_UPDATE_LIMITS.pollMs = 1;
   let recorded: number | undefined;
@@ -146,4 +157,74 @@ test('duty preserves image intent in the persisted update request', async () => 
   const persisted = await runtime.requests.get(reviewed.opened[0]!.id);
   assert.equal(persisted.ask.kind, 'update-app');
   if (persisted.ask.kind === 'update-app') assert.equal(persisted.ask.imageUpdates, true);
+});
+
+
+test('catalog starter executes the upgrade and transient poll failures do not abandon its job', async () => {
+  const runtime = await nasRuntime();
+  const request = await approvedUpdate(runtime, { toVersion: '2', imageUpdates: false });
+  const writes = scriptNas(runtime, {
+    states: [app(false), app(false, '2')], transientPoll: true,
+  });
+  const previous = APP_UPDATE_LIMITS.pollMs;
+  APP_UPDATE_LIMITS.pollMs = 1;
+  try {
+    await processRequests(runtime);
+    assert.equal((await runtime.requests.get(request.id)).status, 'updated');
+    assert.deepEqual(writes, ['truenas_app_update']);
+  } finally {
+    APP_UPDATE_LIMITS.pollMs = previous;
+  }
+});
+
+test('mixed catalog and image update checkpoints both jobs and pulls images left after upgrade', async () => {
+  const runtime = await nasRuntime();
+  const request = await approvedUpdate(runtime, { toVersion: '2' });
+  const writes: string[] = [];
+  let version = '1';
+  let hasImages = true;
+  const jobs: { id: number; method: string; state: string; arguments: string[] }[] = [];
+  runtime.truenas = async (_domain, _writes, use) => use(async tool => {
+    const handlers: Record<string, () => unknown> = {
+      truenas_app_get: () => [app(hasImages, version)],
+      truenas_jobs_list: () => jobs,
+      truenas_app_update: () => {
+        writes.push('upgrade');
+        version = '2';
+        jobs.push({ id: 42, method: 'app.upgrade', state: 'SUCCESS', arguments: ['radarr'] });
+        return { job_id: 42 };
+      },
+    };
+    return JSON.stringify(handlers[tool]!());
+  });
+  runtime.truenasSsh = async () => {
+    writes.push('pull');
+    hasImages = false;
+    jobs.push({ id: 43, method: 'app.pull_images', state: 'SUCCESS', arguments: ['radarr'] });
+    return '43';
+  };
+  const previous = APP_UPDATE_LIMITS.pollMs;
+  APP_UPDATE_LIMITS.pollMs = 1;
+  const checkpointed: number[] = [];
+  try {
+    const settled = await updateApp(runtime, request, { onJobStarted: async jobId => { checkpointed.push(jobId); } });
+    await runtime.requests.save({ ...request, status: 'updated', reason: settled });
+    assert.deepEqual(writes, ['upgrade', 'pull']);
+    assert.deepEqual(checkpointed, [42, 43]);
+    assert.match((await runtime.requests.get(request.id)).reason!, /version 2, image updates false/);
+    assert.match((await reconcileAppUpdate(runtime, request, 43))!, /job 43/);
+  } finally {
+    APP_UPDATE_LIMITS.pollMs = previous;
+  }
+});
+
+test('absent image evidence cannot silently confirm an image update', async () => {
+  const runtime = await nasRuntime();
+  const request = await approvedUpdate(runtime);
+  runtime.truenas = async (_domain, _writes, use) => use(async tool => JSON.stringify(
+    tool === 'truenas_jobs_list'
+      ? [{ id: 42, method: 'app.pull_images', state: 'SUCCESS', arguments: ['radarr'] }]
+      : [{ name: 'radarr', state: 'RUNNING', version: '1' }],
+  ));
+  assert.equal(await reconcileAppUpdate(runtime, request, 42), undefined);
 });
