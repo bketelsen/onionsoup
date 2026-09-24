@@ -30,6 +30,7 @@ import { domainSummary, orgText, rosterText } from './roster.ts';
 import { Runtime } from './runtime.ts';
 import { engineCommit, FrictionEvents, FrictionInput, reportFriction } from './friction.ts';
 import { REPOSITORY_WRITING } from './repository-writing.ts';
+import { prepareToolArguments } from './tool-arguments.ts';
 
 /**
  * onionsoup as an opencode plugin: every owner with a persona becomes an agent a person can chat with
@@ -394,6 +395,7 @@ const server: Plugin = async (input, options) => {
   noticeTimer.unref?.();
 
   return {
+    'tool.execute.before': prepareToolArguments,
     async config(config) {
       const agents = (config.agent ??= {}) as Record<string, unknown>;
       const servers = (config.mcp ??= {}) as Record<string, unknown>;

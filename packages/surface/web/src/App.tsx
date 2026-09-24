@@ -7,6 +7,7 @@ import { Rail } from './components/Rail.tsx';
 import { FrictionView } from './components/FrictionView.tsx';
 import { InitiativePage } from './components/InitiativeView.tsx';
 import { OrgView } from './components/OrgView.tsx';
+import { InboxErrors } from './components/InboxErrors.tsx';
 import type { SurfaceState } from './types.ts';
 
 const REFRESH_TYPES = new Set(['permission.asked', 'permission.replied', 'question.asked', 'question.replied', 'question.rejected', 'session.status']);
@@ -14,7 +15,13 @@ const REFRESH_TYPES = new Set(['permission.asked', 'permission.replied', 'questi
 export function App() {
   const route = useRoute();
   const [state, setState] = useState<SurfaceState>();
-  const refresh = useCallback(() => { void api<SurfaceState>('/api/state').then(setState, () => undefined); }, []);
+  const [refreshError, setRefreshError] = useState('');
+  const refresh = useCallback(() => {
+    void api<SurfaceState>('/api/state').then(snapshot => {
+      setState(snapshot);
+      setRefreshError('');
+    }, failure => setRefreshError(failure instanceof Error ? failure.message : String(failure)));
+  }, []);
   useEffect(() => {
     refresh();
     const timer = setInterval(refresh, 30_000);
@@ -68,6 +75,7 @@ export function App() {
   const owner = route[0] === 'owner' ? state?.owners.find(candidate => candidate.id === route[1]) : undefined;
   return (
     <div className="h-full flex flex-col bg-background text-foreground">
+      <InboxErrors errors={state?.inboxErrors ?? []} refreshError={refreshError} />
       {state?.opencode && !state.opencode.ok && (
         <div role="alert" className="shrink-0 px-4 py-2 typography-meta border-b border-[var(--status-error-border)] bg-[var(--status-error-background)] text-[var(--status-error)]">
           Chats are unavailable: {state.opencode.error}. If the surface is attached to another opencode (OPENCODE_URL), that opencode may have moved or stopped; restart the surface, or run it with its own opencode (the default).

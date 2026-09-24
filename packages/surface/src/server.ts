@@ -101,8 +101,8 @@ export function surfaceServer(state: SurfaceState, options: { webRoot: string; b
 
   const routes: Route[] = [
     route('GET', '/api/state', async () => {
-      const [inbox, opencode] = await Promise.all([state.inbox(), state.opencode.health()]);
-      return { owners: await state.owners(inbox), inbox, opencode, frictionCount: (await state.friction()).length };
+      const [{ inbox, inboxErrors }, opencode] = await Promise.all([state.inboxSnapshot(), state.opencode.health()]);
+      return { owners: await state.owners(inbox), inbox, inboxErrors, opencode, frictionCount: (await state.friction()).length };
     }),
     route('GET', '/api/friction', async () => codedRoute(FRICTION_HTTP_STATUS, () => state.friction())),
     route('GET', '/api/friction/:id', async params => codedRoute(FRICTION_HTTP_STATUS, () => state.frictionRecord(params.id!))),

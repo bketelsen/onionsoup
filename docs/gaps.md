@@ -80,6 +80,14 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
 
 ## Workarounds to revisit
 
+- **opencode webfetch permissions reject omitted defaults (seen in 1.18.32).** Its permission metadata includes
+  an undefined `timeout` when the model omits it, so JSON encoding rejects both the event and permission list.
+  The plugin's `tool.execute.before` hook materializes the upstream defaults (markdown, 30 seconds) in the
+  original arguments. Explicit arguments and permission rules stay intact. Remove this workaround once
+  a webfetch with no timeout or format produces a readable pending permission on a newer opencode.
+  Existing requests already stuck in memory need the chat stopped and retried after the surface reloads
+  the fixed plugin; changing the hook cannot repair an already-created permission.
+
 - **opencode cannot return structured-output sessions (seen in 1.18.32).** Once a prompt carries a `json_schema`
   format, listing that session's messages over HTTP fails with `BadRequest: Expected OutputFormatJsonSchema`.
   Every hire asks for structured output, so two things work around it:

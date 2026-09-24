@@ -5,12 +5,31 @@ import { createElement } from 'react';
 import { FrictionDetail } from '../web/src/components/FrictionView.tsx';
 import { InitiativeView } from '../web/src/components/InitiativeView.tsx';
 import { OrgTree } from '../web/src/components/OrgView.tsx';
+import { InboxErrors } from '../web/src/components/InboxErrors.tsx';
 import type { FrictionRecord, PublicInitiative } from '../web/src/types.ts';
 import { applyChatEvent, orderedMessages, type Messages } from '../web/src/chat/chatState.ts';
 import { addedFile, languageOf, parseUnifiedDiff } from '../web/src/chat/diff.ts';
 import type { Message, Part } from '../web/src/types.ts';
 
 const SESSION = 'ses_1';
+
+test('partial inbox failures name the affected owner and operation without hiding available gates', () => {
+  const html = renderToStaticMarkup(createElement(InboxErrors, { errors: [
+    { owner: '<script>owner</script>', code: 'permission_list_failed' },
+    { owner: 'homelab', code: 'question_list_failed' },
+    { owner: 'leto', code: 'chat_directory_failed' },
+  ] }));
+  assert.match(html, /role="alert"/);
+  assert.match(html, /&lt;script&gt;owner&lt;\/script&gt;/);
+  assert.match(html, /Pending permissions could not be loaded/);
+  assert.match(html, /Pending questions could not be loaded/);
+  assert.match(html, /chat directory could not be opened/);
+  assert.doesNotMatch(html, /<script>/);
+  assert.equal(renderToStaticMarkup(createElement(InboxErrors, { errors: [] })), '');
+  const stale = renderToStaticMarkup(createElement(InboxErrors, { errors: [], refreshError: 'HTTP 500' }));
+  assert.match(stale, /role="alert"/);
+  assert.match(stale, /Pending approvals may be missing; displayed items may be stale/);
+});
 
 test('friction details render persisted HTML as inert text and link to the saved chat', () => {
   const record: FrictionRecord = { version: 1, id: 'fr_012345678901234567890123', owner: 'bellonda',
