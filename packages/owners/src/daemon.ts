@@ -15,7 +15,7 @@ import type { Runtime } from './runtime.ts';
 import { advance } from './workflow.ts';
 
 export const DAEMON_LIMITS = {
-  tickMs: 60_000, shutdownGraceMs: 5_000, parallelItems: 2, parallelDuties: 2, parallelMemory: 1, parallelRequests: 2,
+  tickMs: 60_000, shutdownGraceMs: 5_000, parallelItems: 4, parallelDuties: 2, parallelMemory: 1, parallelRequests: 2,
   parallelReviews: 1,
 };
 
