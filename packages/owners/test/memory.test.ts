@@ -3,7 +3,7 @@ import { mkdtemp, readFile, readdir, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { Runtime } from '../src/runtime.ts';
-import { distill, distillIsDue, memoryStatus, requestDistill } from '../src/memory.ts';
+import { distill, distillIsDue, memoryFingerprint, memoryStatus, requestDistill } from '../src/memory.ts';
 import { drain, scheduleMemory, type TickLog } from '../src/daemon.ts';
 import type { HireRequest } from '../src/opencode.ts';
 
@@ -215,4 +215,16 @@ test('disabled automation without a queued request never promises a retry', asyn
   script.run = async () => { throw new Error('unavailable'); };
   await assert.rejects(distill(runtime, 'clippy'), /unavailable/);
   assert.equal((await memoryStatus(runtime, 'clippy')).nextAttemptAt, undefined);
+});
+
+test('an idle memory queue has a stable fingerprint and no invented initial schedule', async () => {
+  const { runtime } = await fixture();
+  assert.equal((await memoryStatus(runtime, 'clippy')).nextAttemptAt, undefined);
+  await requestDistill(runtime, 'clippy', 'person');
+  const queuedAt = (await memoryStatus(runtime, 'clippy')).nextAttemptAt;
+  assert.ok(queuedAt);
+  const before = await memoryFingerprint(runtime);
+  await new Promise(resolve => setTimeout(resolve, 5));
+  assert.deepEqual(await memoryFingerprint(runtime), before);
+  assert.equal((await memoryStatus(runtime, 'clippy')).nextAttemptAt, queuedAt);
 });

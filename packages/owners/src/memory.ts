@@ -68,8 +68,9 @@ export async function memoryStatus(runtime: Runtime, ownerId: string): Promise<M
   const interval = state.status === 'failed' ? owner.memory.retryMs
     : state.hasMore ? owner.memory.batchDelayMs : owner.memory.everyMs;
   const isImmediate = requests.length > 0 && (state.status === 'idle' || requestedAt > attemptedAt);
-  const nextAttemptAt = owner.memory.enabled || requests.length
-    ? new Date(isImmediate ? Date.now() : attemptedAt + interval).toISOString() : undefined;
+  const nextAttempt = isImmediate ? requestedAt : state.lastAttempt ? attemptedAt + interval : undefined;
+  const nextAttemptAt = (owner.memory.enabled || requests.length) && nextAttempt !== undefined
+    ? new Date(nextAttempt).toISOString() : undefined;
   return { ...state, queued: requests.length > 0, automatic: owner.memory.enabled, nextAttemptAt };
 }
 

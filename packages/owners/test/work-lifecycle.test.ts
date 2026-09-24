@@ -387,7 +387,8 @@ test('a malformed CI fix is recorded once and raised for a person', async () => 
     assert.equal((await maintainPullRequests(runtime, 'clippy')).opened.length, 0);
   });
   assert.equal(hires, 1);
-  const entries = (await runtime.notebook('clippy').journalSince(undefined)).map(line => JSON.parse(line));
+  const snapshot = await runtime.notebook('clippy').journalSnapshot(runtime.owner('clippy').memory);
+  const entries = snapshot.lines.map(line => JSON.parse(line));
   assert.ok(entries.some(entry => entry.kind === 'attention' && entry.note.includes('ci_fix_missing_workflow_or_proposal')));
   assert.equal(JSON.parse(await readFile(join(runtime.stateDirectory, 'ci-triage-clippy.json'), 'utf8'))['https://github.com/example/clippy/pull/1'], head);
 });

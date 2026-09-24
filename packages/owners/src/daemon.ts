@@ -137,6 +137,9 @@ function advanceRunnable(runnable: readonly WorkItem[], runtime: Runtime, log: T
 /** Memory hires run beside the tick, after the owner's existing work has finished. */
 export async function scheduleMemory(runtime: Runtime, log: TickLog, unavailable: ReadonlySet<string> = new Set()) {
   const busy = new Set([...items.keys(), ...duties.keys()].map(key => key.split('/')[0]));
+  for (const item of await runtime.ledger.list()) {
+    if (item.activeRunner) busy.add(item.owner);
+  }
   for (const ownerId of runtime.declarations.owners.keys()) {
     if (busy.has(ownerId) || unavailable.has(ownerId) || memories.has(ownerId)) continue;
     try {
