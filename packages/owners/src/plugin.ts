@@ -8,14 +8,14 @@ import { readdir, readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { tool, type Plugin } from '@opencode-ai/plugin';
-import { directReports, hasIncus, managerOf, repositoryShortName, type OwnerDeclaration, type Persona } from './declarations.ts';
+import { directReports, hasIncus, isDirectReport, managerOf, repositoryShortName, type OwnerDeclaration, type Persona } from './declarations.ts';
 import { askOwner, formatAnswer } from './ask.ts';
 import { requestPublish } from './brokering.ts';
 import { proposeDeskChanges } from './desk-changes.ts';
-import { initiativeSection, initiativesText, initiativeText, itemText, statusText } from './desk.ts';
+import { initiativeSection, initiativesText, initiativeText, itemText, reportsWorkText, statusText } from './desk.ts';
 import { parseInitiativeDraft } from './initiatives.ts';
 import {
-  cancelAssignment, draftInitiative, initiativeView, initiativeViews, isManagersItem, raiseToManager, resolveEscalation, STEER_ACTIONS,
+  cancelAssignment, draftInitiative, initiativeView, initiativeViews, raiseToManager, resolveEscalation, STEER_ACTIONS,
   steerReportItem, submitInitiative, updateInitiative,
 } from './org-work.ts';
 import type { ChatOrigin } from './chat-origin.ts';
@@ -92,8 +92,9 @@ const MANAGER_GUIDE = `
 - You manage direct reports. For cross-repository change, draft an initiative with onionsoup_initiative (assignments to
   your reports, ordered with after), agree it with the person, then submit it. The person approves the breakdown once;
   the runtime then sends each assignment to its report as its dependencies merge, and you hear here how each piece goes.
-  Where a report granted you approve-plans, you are hired to review its plans; onionsoup_status reads your reports'
-  assigned work, and onionsoup_steer approves or sends back a plan, cancels the work, or leaves the report a note.
+  Where a report granted you approve-plans, you are hired to review its plans. onionsoup_status shows all your reports'
+  work, assigned or not; onionsoup_steer approves or sends back a plan, cancels the work, or leaves the report a note
+  on work your initiatives assigned.
   Reports push back with escalations; answer them and resolve them (onionsoup_initiative resolve-escalation).`;
 
 const REPORT_GUIDE = `
@@ -264,10 +265,12 @@ const server: Plugin = async (input, options) => {
   }
 
   async function workSummary(ownerId: string) {
-    const items = (await runtime.ledger.list()).filter(item => item.owner === ownerId);
+    const allItems = await runtime.ledger.list();
+    const items = allItems.filter(item => item.owner === ownerId);
     const requests = (await runtime.requests.list()).filter(request => request.from === ownerId || request.to === ownerId);
     const initiatives = initiativeSection(await initiativeViews(runtime), ownerId);
-    return [statusText(items, requests), initiatives].filter(Boolean).join('\n\n');
+    const reports = reportsWorkText(allItems, directReports(runtime.declarations, ownerId).map(report => report.id));
+    return [statusText(items, requests), initiatives, reports].filter(Boolean).join('\n\n');
   }
 
   /** Quotes already noted as decisions in this chat, by the owner or an earlier watch. */
@@ -591,13 +594,13 @@ const server: Plugin = async (input, options) => {
         },
       }),
       onionsoup_status: tool({
-        description: 'Your open work items and requests (including anything waiting on the person), your initiatives if you manage owners, and work that finished recently with its outcome. Pass a work item id to see that item in full (yours, or work your reports do for your initiatives).',
+        description: 'Your open work items and requests (including anything waiting on the person), your initiatives if you manage owners, and work that finished recently with its outcome. Pass a work item id to see that item in full (yours, or any work of your direct reports).',
         args: { item: tool.schema.string().optional().describe('A work item id, e.g. w-20260923-31a48a') },
         async execute(args, context) {
           const owner = requireOwner(context.agent);
           if (!args.item) return workSummary(owner.id);
           const item = await runtime.ledger.get(args.item).catch(() => undefined);
-          const isVisible = item && (item.owner === owner.id || await isManagersItem(runtime, owner.id, item.id));
+          const isVisible = item && (item.owner === owner.id || isDirectReport(runtime.declarations, owner.id, item.owner));
           if (!item || !isVisible) return `No work item ${args.item} of yours or your reports'. Your status:\n\n${await workSummary(owner.id)}`;
           return itemText(item);
         },
