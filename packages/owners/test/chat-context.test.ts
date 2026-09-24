@@ -205,7 +205,16 @@ test('plugin rereads recent activity on every system transform and its watcher n
     messages: async () => ({ data: fake.messages.get('person') }),
     create: async () => { watcherCreates += 1; throw new Error('watcher_must_not_wake'); },
   } };
-  const hooks = await plugin.server({ client } as unknown as Parameters<Plugin>[0], { declarations, state });
+  const originalSandbox = process.env.ONIONSOUP_SANDBOX;
+  let hooks: Awaited<ReturnType<typeof plugin.server>>;
+  try {
+    delete process.env.ONIONSOUP_SANDBOX;
+    hooks = await plugin.server({ client } as unknown as Parameters<Plugin>[0], { declarations, state });
+  } finally {
+    if (originalSandbox === undefined) delete process.env.ONIONSOUP_SANDBOX;
+    else process.env.ONIONSOUP_SANDBOX = originalSandbox;
+  }
+  assert.equal(process.env.ONIONSOUP_SANDBOX, originalSandbox);
   await hooks['chat.message']!({ sessionID: 'person', agent: 'Miles Teg' }, {} as never);
   await hooks.event!({ event: { type: 'session.idle', properties: { sessionID: 'person' } } });
   assert.equal(watcherCreates, 1, 'ordinary person messages reach the watcher hire seam');
