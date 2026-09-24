@@ -3,6 +3,8 @@ import { RiArrowLeftLine, RiExternalLinkLine } from '@remixicon/react';
 import { api, navigate, useEvents } from '../api.ts';
 import type { InboxEntry, WorkItem } from '../types.ts';
 import { Decision } from './Decision.tsx';
+import { WorkRecovery } from './WorkRecovery.tsx';
+import { ReviewFindings } from './ReviewFindings.tsx';
 import { ItemActivity } from './ItemActivity.tsx';
 import { Badge, Empty, Section, statusTone, timeAgo } from './ui.tsx';
 
@@ -47,6 +49,7 @@ export function ItemView({ itemId }: { itemId: string }) {
             {waiting.kind === 'plan' && <span className="typography-micro text-muted-foreground">The plan is below; your note goes with an approval, and is required to send it back or reject it.</span>}
           </div>
         )}
+        <WorkRecovery item={item} onDone={() => void load()} />
         <Section title="Proposal">
           <div className="typography-markdown flex flex-col gap-1">
             <p><strong>Goal.</strong> {item.proposal.goal}</p>
@@ -91,7 +94,7 @@ export function ItemView({ itemId }: { itemId: string }) {
         {item.verdicts.map((verdict, index) => (
           <Section key={index} title={`Review ${index + 1}`}>
             <div className="typography-markdown"><Badge tone={verdict.decision === 'approve' ? 'success' : 'warning'}>{verdict.decision}</Badge> {verdict.summary}</div>
-            {verdict.findings.length > 0 && <ul className="list-disc pl-5 typography-meta">{verdict.findings.map((finding, position) => <li key={position}>{finding.severity ? `[${finding.severity}] ` : ''}{finding.file ? `${finding.file}: ` : ''}{finding.description}</li>)}</ul>}
+            <ReviewFindings verdict={verdict} />
           </Section>
         ))}
         <Section title="Hires">

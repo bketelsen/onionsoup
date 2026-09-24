@@ -5,6 +5,7 @@ import { isRepositoryOwner, isTruenasOwner, loadDeclarations, ownsRepositories, 
 import { familyOf } from './families.ts';
 import { cliIncus, ManagedInstances, type IncusClient } from './incus.ts';
 import { Ledger, type HireRecord, type WorkItem } from './ledger.ts';
+import { ssh, withTruenas } from './truenas.ts';
 import { Notebook } from './notebook.ts';
 import { Requests } from './requests.ts';
 import { Freelancers, HireError, type HireRequest } from './opencode.ts';
@@ -37,6 +38,9 @@ export class Runtime {
   readonly requests: Requests;
   /** Replaceable so tests never touch real incus. */
   incus: IncusClient = cliIncus;
+  /** Replaceable transport so request tests never touch a real NAS. */
+  truenas = withTruenas;
+  truenasSsh = ssh;
   private pool: Freelancers | undefined;
 
   private constructor(public declarations: Declarations, readonly stateDirectory: string) {

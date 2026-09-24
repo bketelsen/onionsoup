@@ -4,12 +4,18 @@ import { api, navigate, opencodePayload, useEvents } from '../api.ts';
 import type { DeskState, InboxEntry, OwnerSummary, Session } from '../types.ts';
 import { ChatPane } from './ChatPane.tsx';
 import { Decision } from './Decision.tsx';
+import { MemoryMaintenance } from './MemoryMaintenance.tsx';
 import { Badge, BusyDots, Button, cx, Empty, OwnerIcon, Section, statusTone, timeAgo } from './ui.tsx';
 
 /** Sessions onionsoup itself ran in this directory (hires, reviews) are not the person's chats. */
 const ENGINE_TITLE = /^([a-z0-9-]+|w-\d{8}-[0-9a-f]+): /;
 
 const NOTE_LABELS: Record<string, string> = {
+  'delete-approved': 'Delete approved', 'request-denied': 'Request denied',
+  'create-failed': 'Create failed', 'delete-failed': 'Delete failed',
+  'attention-decision': 'Attention decision', 'request-recovery': 'Request recovery',
+  'request-recovered': 'Request recovered', 'request-completed': 'Request completed',
+  'create-approved': 'Create approved', 'request-opened': 'Request opened',
   'chat-decision': 'Noted', 'chat-action': 'Did', 'work-opened': 'Opened work', 'plan-approved': 'Plan approved', 'plan-rejected': 'Plan rejected',
   published: 'Published', 'publish-failed': 'Publish failed', asked: 'Asked', answered: 'Answered', attention: 'Needs you', 'ci-triage': 'CI triage',
   'work-status': 'Work update', 'owner-created': 'Created owner', 'owner-updated': 'Updated owner', 'owner-retired': 'Retired owner', 'ship-started': 'Shipping', shipped: 'Shipped',
@@ -203,6 +209,7 @@ function Notebook({ desk, onClose }: { desk: DeskState; onClose: () => void }) {
           ))}
           <button className="ml-auto text-muted-foreground hover:text-foreground" onClick={onClose}><RiCloseLine className="size-5" /></button>
         </div>
+        <MemoryMaintenance ownerId={desk.owner.id} />
         <pre className="overflow-y-auto p-4 typography-meta whitespace-pre-wrap font-sans">{desk.registers[tab] ?? ''}</pre>
       </div>
     </div>

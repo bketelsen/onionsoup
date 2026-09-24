@@ -11,6 +11,10 @@ import type { Runtime } from './runtime.ts';
  */
 export const NOTICE_PREFIX = '[onionsoup notice]';
 
+export function isRuntimeNotice(text: string) {
+  return text.trimStart().startsWith(NOTICE_PREFIX);
+}
+
 export interface WorkNotice {
   id: string;
   owner: string;
@@ -37,6 +41,11 @@ export function describeChange(item: WorkItem, previous: string | undefined): { 
   const [before, beforePr] = (previous ?? '|').split('|');
   const title = `"${item.proposal.title}"`;
   const pr = item.publication;
+  // A desk can publish and merge between ticks; preserve failures in post-merge follow-ups.
+  const hasNewFailure = item.status === 'failed' && item.status !== before;
+  if (!hasNewFailure && pr && pr.state !== beforePr && (pr.state === 'merged' || pr.state === 'closed') && beforePr !== undefined) {
+    return { change: `pr-${pr.state}`, text: `The PR for ${item.id} ${title} was ${pr.state}: ${pr.url}.${pr.state === 'closed' ? ' It was closed without merging; find out why before proposing it again.' : ''}` };
+  }
   if (item.status !== before && NOTABLE.has(item.status)) {
     if (item.status === 'failed') {
       const timedOut = /Aborted/.test(item.reason ?? '') ? ' (a hire ran out its time limit or was stopped)' : '';
@@ -45,11 +54,11 @@ export function describeChange(item: WorkItem, previous: string | undefined): { 
     if (item.status === 'rejected') {
       return { change: 'rejected', text: `The person rejected the plan for ${item.id} ${title}: ${item.reason ?? 'no reason given'}. Take that into account; do not reopen the same work unless the person asks.` };
     }
-    const where = item.rebaseOf ? `updated ${item.rebaseOf.prUrl}` : pr ? `is published as ${pr.url}` : `landed on ${item.branch}; it becomes a PR when the person publishes it`;
+    const where = item.rebaseOf ? `updated ${item.rebaseOf.prUrl}`
+      : pr ? `is published as ${pr.url}`
+      : item.repairOf ? `landed on ${item.branch}; publication will update ${item.repairOf.prUrl}`
+      : `landed on ${item.branch}; it becomes a PR when the person publishes it`;
     return { change: 'landed', text: `Your work item ${item.id} ${title} passed verification and review and ${where}. Tell the person if anything about it needs them.` };
-  }
-  if (pr && pr.state !== beforePr && (pr.state === 'merged' || pr.state === 'closed') && beforePr !== undefined) {
-    return { change: `pr-${pr.state}`, text: `The PR for ${item.id} ${title} was ${pr.state}: ${pr.url}.${pr.state === 'closed' ? ' It was closed without merging; find out why before proposing it again.' : ''}` };
   }
   return undefined;
 }
@@ -57,7 +66,8 @@ export function describeChange(item: WorkItem, previous: string | undefined): { 
 /** Where the work was opened from: its recorded origin, or the owner's work-opened journal entry for older items. */
 async function originOf(runtime: Runtime, item: WorkItem, chatDirectory: (ownerId: string) => Promise<string>) {
   if (item.origin) return item.origin;
-  const source = item.rebaseOf ? await runtime.ledger.get(item.rebaseOf.itemId).catch(() => undefined) : undefined;
+  const sourceId = item.rebaseOf?.itemId ?? item.repairOf?.itemId;
+  const source = sourceId ? await runtime.ledger.get(sourceId).catch(() => undefined) : undefined;
   if (source?.origin) return source.origin;
   const journal = join(runtime.notebook(item.owner).directory, 'journal');
   const files = (await readdir(journal).catch(() => [] as string[])).filter(name => name.endsWith('.jsonl'));

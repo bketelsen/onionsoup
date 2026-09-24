@@ -5,13 +5,15 @@ export interface OwnerSummary {
   chat: boolean; waiting: number; running: number;
 }
 
-export interface PendingPermission { id: string; sessionID: string; permission: string; patterns: string[]; metadata: Record<string, unknown>; always: string[] }
-export interface QuestionInfo { question: string; header: string; options: { label: string; description: string }[]; multiple?: boolean; custom?: boolean }
-export interface PendingQuestion { id: string; sessionID: string; questions: QuestionInfo[] }
+import type { QuestionRequest, PermissionRequest } from '@opencode-ai/sdk/v2';
+export type { QuestionInfo } from '@opencode-ai/sdk/v2';
+export type PendingQuestion = QuestionRequest;
+export type PendingPermission = PermissionRequest;
 
 export interface InboxEntry {
-  kind: 'plan' | 'push' | 'publish' | 'create' | 'delete' | 'permission' | 'question';
+  kind: 'plan' | 'push' | 'publish' | 'create' | 'delete' | 'permission' | 'question' | 'attention' | 'request-recovery';
   id: string; owner: string; title: string; detail: string; at?: string; sessionID?: string;
+  attentionStatus?: string;
   permission?: PendingPermission; question?: PendingQuestion;
 }
 
@@ -28,19 +30,7 @@ export interface DeskState {
   registers: Record<string, string>;
 }
 
-export interface WorkItem {
-  id: string; owner: string; status: string; reason?: string; createdAt: string; updatedAt: string;
-  proposal: { title: string; goal: string; rationale: string; acceptance: string[]; size: string; repository?: string };
-  plan?: { summary: string; steps: { description: string; files: string[] }[]; tests: string[]; risks: string[]; outOfScope?: string[] };
-  planApproval?: { by: string; at: string; note?: string };
-  implementations: { report: { summary: string }; diffStat: string; verification: { command: string; exitCode: number; output: string }[] }[];
-  verdicts: { decision: string; summary: string; findings: { severity?: string; file?: string; description?: string }[] }[];
-  hires: { stage: string; craft: string; model: string; family: string; sessionID: string; outcome: string; cost: number; startedAt: string; finishedAt: string; error?: string }[];
-  humanNotes: { kind: string; by: string; note: string }[];
-  branch?: string; landedCommit?: string;
-  publication?: { url: string; state: string };
-  rebaseOf?: { prUrl: string };
-}
+export type { WorkItem } from '@onionsoup/owners';
 
 // opencode's session and message shapes, trimmed to what the chat reads.
 export interface Session { id: string; title: string; directory: string; parentID?: string; time: { created: number; updated: number } }

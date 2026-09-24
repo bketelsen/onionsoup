@@ -5,7 +5,8 @@ import { userInfo } from 'node:os';
 import { promisify } from 'node:util';
 import { parseArgs } from 'node:util';
 import type { WorkItem } from './ledger.ts';
-import { distill, wake } from './owner.ts';
+import { wake } from './owner.ts';
+import { requestDistill } from './memory.ts';
 import { Runtime } from './runtime.ts';
 import { askOwner, formatAnswer } from './ask.ts';
 import { approveCreate, approveDelete, denyRequest, processRequests, requestPublish } from './brokering.ts';
@@ -19,7 +20,7 @@ import { deskState } from './desk.ts';
 import { initConfig } from './init.ts';
 import { configDirectory, stateDirectory } from './paths.ts';
 import { ensureDesk } from './workspace.ts';
-import { advance, approvePlan, rejectPlan, resumeItem, revisePlan } from './workflow.ts';
+import { advance, approvePlan, rejectPlan, resumeItem, retryItem, cancelItem, revisePlan } from './workflow.ts';
 
 const run = promisify(execFile);
 
@@ -146,8 +147,8 @@ const COMMANDS: Record<string, Command> = {
     console.log(detail(await advance(runtime, required(itemId, 'work item'), progress)));
   },
   async distill(runtime, [ownerId]) {
-    const result = await distill(runtime, required(ownerId, 'owner'));
-    console.log(`distilled: ${result.edits} edits, $${result.cost.toFixed(4)}`);
+    await requestDistill(runtime, required(ownerId, 'owner'), userInfo().username);
+    console.log('Distillation queued; the daemon or `owners tick` will run it.');
   },
   async notebook(runtime, [ownerId]) {
     const notebook = runtime.notebook(required(ownerId, 'owner'));
@@ -158,6 +159,14 @@ const COMMANDS: Record<string, Command> = {
     const item = await resumeItem(runtime, required(itemId, 'work item'), userInfo().username);
     console.log(line(item));
     await continueIfFree(runtime, item);
+  },
+  async retry(runtime, [itemId]) {
+    const item = await retryItem(runtime, required(itemId, 'work item'), userInfo().username);
+    console.log(line(item));
+    await continueIfFree(runtime, item);
+  },
+  async cancel(runtime, [itemId]) {
+    console.log(line(await cancelItem(runtime, required(itemId, 'work item'), userInfo().username, required(options.reason, '--reason'))));
   },
   async 'approve-push'(runtime, [itemId]) {
     const item = await approvePush(runtime, required(itemId, 'work item'), userInfo().username);
@@ -261,7 +270,11 @@ if (commandName === 'init') {
 }
 const runtime = await Runtime.open({ declarations: options.declarations!, state: options.state! });
 /** Commands that only read, or only record a person's decision, never take the runtime lock. */
-const LOCK_FREE = ['items', 'show', 'notebook', 'requests', 'approve', 'publish', 'revise-plan', 'reject', 'resume', 'desk', 'desk-state', 'retract', 'ask', 'request-publish', 'propose', 'ship', 'approve-push', 'approve-create', 'approve-delete', 'deny-request'];
+const LOCK_FREE = [
+  'distill', 'items', 'show', 'notebook', 'requests', 'approve', 'publish', 'revise-plan', 'reject',
+  'resume', 'retry', 'cancel', 'desk', 'desk-state', 'retract', 'ask', 'request-publish', 'propose',
+  'ship', 'approve-push', 'approve-create', 'approve-delete', 'deny-request',
+];
 try {
   const unlock = LOCK_FREE.includes(commandName!) ? async () => {} : await runtime.lock();
   try {

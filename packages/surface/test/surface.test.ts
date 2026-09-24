@@ -27,12 +27,37 @@ function fakeOpencode() {
     ].filter(entry => !answeredPermissions.has(entry.id)) : [],
     replyPermission: async (directory, requestID, reply) => { calls.push(['permission', directory, requestID, reply]); answeredPermissions.add(requestID); },
     questions: async () => [],
-    replyQuestion: async () => {},
-    rejectQuestion: async () => {},
+    replyQuestion: async (directory, requestID, answers) => { calls.push(['question', directory, requestID, answers]); },
+    rejectQuestion: async (directory, requestID) => { calls.push(['reject-question', directory, requestID]); },
     events: async () => {},
   };
   return { api, calls };
 }
+
+test('the surface queues notebook maintenance alongside a running daemon and exposes failures', async () => {
+  const { server, runtime, call } = await start();
+  const { distill, memoryStatus } = await import('@onionsoup/owners');
+  const unlock = await runtime.lock();
+  try {
+    await runtime.notebook('clippy').ensure('# Charter\nTest owner\n');
+    await runtime.notebook('clippy').journal({ kind: 'chat-decision', note: 'remember this' });
+    const queued = await call('POST', '/api/owners/clippy/memory', {});
+    assert.equal(queued.status, 200);
+    assert.equal(queued.body.queued, true);
+    assert.equal((await memoryStatus(runtime, 'clippy')).queued, true);
+    runtime.hire = async () => { throw new Error('provider_unavailable'); };
+    await assert.rejects(distill(runtime, 'clippy'), /provider_unavailable/);
+    const status = await call('GET', '/api/owners/clippy/memory');
+    assert.equal(status.body.status, 'failed');
+    assert.match(String(status.body.error), /provider_unavailable/);
+    assert.equal(status.body.queued, true);
+    assert.equal((await call('GET', '/api/owners/nobody/memory')).status, 404);
+    assert.equal((await call('POST', '/api/owners/nobody/memory', {})).status, 404);
+  } finally {
+    await unlock();
+    server.close();
+  }
+});
 
 async function start() {
   const runtime = await Runtime.open({ declarations: 'packages/owners/test/fixtures/owners', state: await mkdtemp(join(tmpdir(), 'surface-')) });
@@ -135,6 +160,69 @@ test('a work item\'s hires are found by title in opencode\'s store, and read fro
     const messages = (await call('GET', '/api/items/w-1/sessions/ses_impl/messages')).body as unknown as { info: { sessionID: string } }[];
     assert.equal(messages[0]?.info.sessionID, 'ses_impl');
     assert.equal((await call('GET', '/api/items/w-1/sessions/ses_x/messages')).status, 404, 'another item\'s session is not served');
+  } finally {
+    server.close();
+  }
+});
+
+test('person recovery decisions resume the exact stage, retry failures and cancel a pending push', async () => {
+  const { runtime, server, call } = await start();
+  try {
+    await runtime.notebook('clippy').ensure('# Charter\n');
+    const proposal = { title: 'Recover', goal: 'g', rationale: 'r', acceptance: ['a'], size: 'small' as const };
+    const item = await runtime.ledger.create('clippy', 'change', proposal, { status: 'interrupted', resumeStatus: 'reviewing' });
+    assert.equal((await call('POST', '/api/decide', { action: 'resume-item', id: item.id })).status, 200);
+    assert.equal((await runtime.ledger.get(item.id)).status, 'reviewing');
+    await runtime.ledger.update(item.id, current => ({ ...current, status: 'failed', resumeStatus: 'landing' }));
+    assert.equal((await call('POST', '/api/decide', { action: 'retry-item', id: item.id })).status, 200);
+    assert.equal((await runtime.ledger.get(item.id)).status, 'landing');
+    await runtime.ledger.update(item.id, current => ({ ...current, status: 'awaiting-push-approval' }));
+    assert.equal((await call('POST', '/api/decide', { action: 'cancel-item', id: item.id, reason: 'Keep the existing head' })).status, 200);
+    const cancelled = await runtime.ledger.get(item.id);
+    assert.equal(cancelled.status, 'cancelled');
+    assert.equal(cancelled.humanNotes.at(-1)?.by, 'tester');
+    assert.equal(cancelled.reason, 'Keep the existing head');
+  } finally {
+    server.close();
+  }
+});
+
+test('attention and uncertain requests have durable decisions in the inbox', async () => {
+  const { runtime, server, call } = await start();
+  try {
+    await runtime.notebook('bellonda').ensure('# Test');
+    await runtime.notebook('bellonda').journal({ kind: 'attention', note: 'Investigate failed deployment' });
+    const request = await runtime.requests.open('bellonda', 'bellonda', {
+      kind: 'work', purpose: 'fix it', proposal: { title: 'Fix', goal: 'Fix', rationale: 'Broken', acceptance: ['Fixed'], size: 'small' },
+    }, 'none');
+    await runtime.requests.save({ ...request, status: 'interrupted', operation: { id: 'operation-1', stage: 'pending-owner', startedAt: request.createdAt } });
+    const snapshot = (await call('GET', '/api/state')).body;
+    const inbox = snapshot.inbox as { id: string; kind: string }[];
+    const attention = inbox.find(entry => entry.kind === 'attention')!;
+    assert.ok(attention);
+    assert.ok(inbox.some(entry => entry.kind === 'request-recovery' && entry.id === request.id));
+    assert.equal((await call('POST', '/api/decide', { action: 'acknowledge-attention', id: attention.id, reason: 'Investigating' })).body.outcome, 'acknowledged');
+    assert.equal((await call('POST', '/api/decide', { action: 'resolve-attention', id: attention.id, reason: 'Recovered' })).body.outcome, 'resolved');
+    assert.equal((await call('POST', '/api/decide', { action: 'cancel-request', id: request.id, reason: 'No longer needed' })).body.outcome, 'failed');
+    const remaining = (await call('GET', '/api/state')).body.inbox as { id: string }[];
+    assert.ok(!remaining.some(entry => entry.id === attention.id || entry.id === request.id));
+    assert.equal((await runtime.requests.get(request.id)).recovery[0]?.reason, 'No longer needed');
+  } finally {
+    server.close();
+  }
+});
+
+
+test('question replies carry every ordered answer to opencode and dismissal uses the rejection endpoint', async () => {
+  const { server, call, calls } = await start();
+  try {
+    const answers = [['Engine', 'Surface', 'Docs'], ['Later'], ['Keep the existing colors.']];
+    const reply = await call('POST', '/api/owners/bellonda/questions/question-1', { answers });
+    assert.equal(reply.status, 200);
+    assert.deepEqual(calls.at(-1), ['question', '/desks/bellonda', 'question-1', answers]);
+    const rejected = await call('POST', '/api/owners/bellonda/questions/question-2', { reject: true });
+    assert.equal(rejected.status, 200);
+    assert.deepEqual(calls.at(-1), ['reject-question', '/desks/bellonda', 'question-2']);
   } finally {
     server.close();
   }

@@ -19,7 +19,7 @@ const run = promisify(execFile);
  */
 export const AUTHORITY_FIELDS = ['grants', 'deploy', 'incus', 'mcp', 'manages'] as const;
 
-const DONE = new Set(['landed', 'failed', 'rejected']);
+const DONE = new Set(['landed', 'failed', 'rejected', 'cancelled']);
 
 /** What a steward's scope patterns match: the repository or org name, incus:<remotes> or truenas:<host>. */
 export function domainKey(domain: OwnerDeclaration['domain']) {

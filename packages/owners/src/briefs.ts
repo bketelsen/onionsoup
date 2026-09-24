@@ -2,6 +2,7 @@ import type { Finding, Plan, ProposedWork } from './artifacts.ts';
 import type { Duty } from './declarations.ts';
 import type { Verification, WorkItem } from './ledger.ts';
 import type { InstanceAsk, ResourceRequest } from './requests.ts';
+import { REPOSITORY_REVIEW, REPOSITORY_WRITING } from './repository-writing.ts';
 
 function block(label: string, body: string) {
   return `<${label}>\n${body.trim()}\n</${label}>`;
@@ -56,6 +57,7 @@ const WORK_STATE_TEXT: Partial<Record<WorkItem['status'], (item: WorkItem) => st
   landed: item => item.publication
     ? `landed and published as ${item.publication.url}`
     : `landed on local branch ${item.branch}, NOT yet on the base branch, so your checkout does not show it`,
+  cancelled: item => `cancelled by a person: ${item.reason}`,
   rejected: item => `plan rejected by a person: ${item.reason}`,
   failed: item => `failed: ${item.reason}`,
 };
@@ -130,6 +132,7 @@ export function ownerAnswerBrief(item: WorkItem, questions: readonly string[], n
 export function implementBrief(item: WorkItem, plan: Plan, knowledge: string, rubric: string) {
   const sections = [
     'You have been hired to implement one approved plan in this working tree. Make the change, add the tests the plan calls for, and run them. Do not commit.',
+    block('repository-writing', REPOSITORY_WRITING),
     block('work', proposalText(item.proposal, false)),
     block('approved-plan', planText(plan)),
     ...(knowledge ? [block('owner-knowledge', knowledge)] : []),
@@ -151,6 +154,7 @@ export function implementBrief(item: WorkItem, plan: Plan, knowledge: string, ru
 export function reviewBrief(item: WorkItem, plan: Plan, patch: string, verification: readonly Verification[], notebook: string, rubric: string) {
   return [
     'You have been hired to review one change. The working tree has the change applied; read around it as needed. Do not edit anything.',
+    block('repository-writing', REPOSITORY_REVIEW),
     block('work', proposalText(item.proposal)),
     block('approved-plan', planText(plan)),
     block('diff', patch),

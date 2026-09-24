@@ -1,9 +1,12 @@
 import { execFile } from 'node:child_process';
-import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
+import { z } from 'zod';
 import type { NotebookEdit, NotebookRegister } from './artifacts.ts';
+import type { JournalCursor, MemoryPolicy } from './memory-config.ts';
+import { withRecordLock } from './record-lock.ts';
 
 const run = promisify(execFile);
 
@@ -11,6 +14,17 @@ export const NOTEBOOK_LIMITS = { orientationChars: 24_000 };
 
 /** The last commit queued per notebooks repository; see Notebook.commit. */
 const COMMITS = new Map<string, Promise<void>>();
+const JournalHeader = z.object({ at: z.string(), kind: z.string() });
+const HOUSEKEEPING = new Set(['wake', 'app-updates', 'maintain-prs']);
+
+function journalHeader(line: string, file: string, index: number) {
+  try {
+    return JournalHeader.parse(JSON.parse(line));
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`memory_entry_invalid: ${file}:${index + 1}: ${reason}`);
+  }
+}
 
 const REGISTER_TITLES: Record<NotebookRegister, string> = {
   MAP: 'Map: layout of the domain',
@@ -93,11 +107,43 @@ export class Notebook {
     await appendFile(join(this.directory, 'journal', `${day}.jsonl`), line + '\n');
   }
 
-  async journalSince(marker: string | undefined) {
-    const { stdout } = await git(this.root, ['ls-files', '--others', '--cached', `${this.ownerId}/journal`]);
-    const files = stdout.split('\n').filter(Boolean).sort();
-    const lines = (await Promise.all(files.map(file => readFile(join(this.root, file), 'utf8')))).join('').split('\n').filter(Boolean);
-    return marker ? lines.filter(line => (JSON.parse(line) as { at: string }).at > marker) : lines;
+  /** A bounded snapshot with a line cursor: entries appended during a hire remain unread. */
+  async journalSnapshot(policy: MemoryPolicy, cursor?: JournalCursor, legacyMarker?: string) {
+    const directory = join(this.directory, 'journal');
+    const files = (await readdir(directory).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return [];
+      throw error;
+    })).filter(file => file.endsWith('.jsonl')).sort();
+    const snapshot = { lines: [] as string[], cursor, chars: 0, hasMore: false };
+    for (const file of files) {
+      if (cursor && file < cursor.file) continue;
+      const lines = (await readFile(join(directory, file), 'utf8')).split('\n').slice(0, -1);
+      const start = cursor?.file === file ? cursor.line : 0;
+      for (let index = start; index < lines.length; index++) {
+        const line = lines[index]!;
+        let entry: z.infer<typeof JournalHeader>;
+        try {
+          entry = journalHeader(line, file, index);
+        } catch (error) {
+          if (snapshot.lines.length) return { ...snapshot, hasMore: true };
+          throw error;
+        }
+        const wasConsumed = legacyMarker && entry.at <= legacyMarker;
+        if (wasConsumed || HOUSEKEEPING.has(entry.kind)) {
+          snapshot.cursor = { file, line: index + 1 };
+          continue;
+        }
+        if (snapshot.lines.length >= policy.maxEntries) return { ...snapshot, hasMore: true };
+        if (snapshot.chars + line.length > policy.maxChars) {
+          if (snapshot.lines.length) return { ...snapshot, hasMore: true };
+          throw new Error(`memory_entry_too_large: ${file}:${index + 1}; increase memory.maxChars`);
+        }
+        snapshot.lines.push(line);
+        snapshot.chars += line.length;
+        snapshot.cursor = { file, line: index + 1 };
+      }
+    }
+    return snapshot;
   }
 
   /**
@@ -143,8 +189,10 @@ export class Notebook {
 
   private async applyOne(edit: NotebookEdit) {
     const path = join(this.directory, `${edit.register}.md`);
-    const current = await readFile(path, 'utf8');
-    await writeFile(path, editSection(current, edit));
+    await withRecordLock(join(this.root, '.git', `register-${this.ownerId}-${edit.register}.lock`), async () => {
+      const current = await readFile(path, 'utf8');
+      await writeFile(path, editSection(current, edit));
+    });
   }
 }
 

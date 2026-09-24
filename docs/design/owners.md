@@ -15,6 +15,11 @@ The runtime, not the prompt, enforces how work happens: plans wait for a person'
 run by host code in a sandbox, reviews come from a different model family, and anything that creates,
 deletes or destroys waits for a person unless the person granted standing approval in configuration.
 
+Repository documents read as the project's record: decisions, rationale and consequences. Owner prompts and
+implementer briefs keep conversational process history in PR descriptions, commit messages and notebooks;
+reviewer briefs check for narration about who asked or which owners were consulted. Repository-specific
+templates, conventions and review rubrics take precedence over this general writing guidance.
+
 ```
           events · schedules · deterministic checks · a person in chat
                                    │
@@ -36,7 +41,9 @@ with what waits and what runs, one inbox of every gate and chat permission with 
 its chats (drawn like OpenChamber's, whose styles it borrows under MIT), work, activity and notebook. It is a small
 Node server that starts its own opencode (which loads the plugin from the person's real, host config — see the
 threat model below), imports the engine directly, relays opencode's events to the browser, and keeps the
-person's settings (owner order, per-chat auto-accept); the opencode password never reaches the browser.
+person's settings (owner order, per-chat auto-accept); the opencode password never reaches the browser. Inbox questions use the same form as chat: answers are collected
+in question order, support multiple selections and permitted custom responses, and submit together. Work reviews
+show each finding's issue and suggestion using the engine's shared work-item type.
 OpenChamber and its Owner's Desk panel came first and were retired for it.
 
 ## Engine and configuration
@@ -78,7 +85,7 @@ An owner is declared once (`owners/<id>.yaml`) and keeps one identity across ses
 - **Grants**: standing approvals the person gives in configuration (`publish-site`, `update-app`, `merge`, `ship`),
   journaled as "approved by standing grant" whenever they are used.
 - **Desk**: a worktree on a `desk/<id>` branch (or the evidence folder for non-repository owners) where chat
-  work happens. Desk changes become a verified, reviewed PR through `onionsoup_propose_changes`.
+  work happens. Desk changes become a verified, reviewed PR through `onionsoup_propose_changes`. Publication is a ledger workflow: commit, push, PR creation, merge and site follow-up have durable checkpoints. Retrying a clean desk continues its unfinished publication, and its PR participates in maintenance. An active publication reports its progress; permanent failures name the cancellation needed before a new proposal. Journal failures remain visible without changing a completed publication back to failed.
 
 ### Freelancers and workflows
 
@@ -90,6 +97,19 @@ implementer's family (checked from recorded providers) → revise or replan with
 the owner's status, which also reports recent outcomes). The `maintain-prs` duty keeps published PRs mergeable and green:
 a conflict wakes the owner, which decides and briefs the implementer (the force-push waits for approval), and
 failing CI on a new head commit wakes the owner once to decide fix (a work item at the plan gate), flaky, or person.
+A CI repair records the original PR and head, plans and implements from that head, and publication appends to that
+PR after checking its head has not moved. Rebase maintenance preserves the whole PR, including earlier repairs,
+and skips patch-equivalent commits already integrated on the base by a squash merge.
+Desk publications use the same maintenance records. The chat that proposed a desk change is saved before
+publication starts, so later merge and close notices return to that chat. Open PRs stay in the owner's Work
+list and status text even when newer completed work fills its recent history. A desk PR merged immediately
+under a grant produces a merge notice, including when publication and merging happen between daemon ticks.
+
+Migration policy: desk PRs created before ledger-backed publication remain untracked. Their legacy
+`desk-change-opened` journal entries are retained as history, but are not automatically imported: they do not
+reliably record the repository, reviewed head, or originating chat needed for safe maintenance. Existing
+ledger-backed desk publications remain tracked; missing origins are not guessed from unrelated chats.
+An approved replan resets its worktree once; verification and review share a revision budget for each plan.
 Owners hear how their work went: each daemon tick compares work items with what it last saw, journals changes the
 owner should act on (landed, failed, rejected, PR merged or closed), and queues a notice that the plugin posts into
 the chat the work was opened from, marked as coming from the runtime, so the owner decides the next step in front
@@ -106,30 +126,78 @@ Each owner has a notebook in a Git repository: `CHARTER`, `MAP`, `WISDOM`, `FAIL
 `open-questions`, and a journal. Everything the owner does is journaled; `distill` folds the journal into the
 registers, and the owner is the curator. A notebook is knowledge, never authority.
 
+Memory maintenance is automatic: the daemon checks for unread journal entries and runs bounded distillation
+batches beside its tick, at most one owner at a time and after that owner's work and duties finish. Owner
+`memory` configuration controls the interval, retry delay and batch limits. Empty journals never hire a model.
+The notebook's **Update notebook** button and `owners distill <owner>` queue a manual pass without stopping the
+daemon; the surface shows queued/running state and failures. A file-and-line cursor advances only through the
+consumed snapshot, so decisions recorded during a hire remain for the next pass. Failed hires retain the cursor
+and request for retry. Old timestamp markers are read on migration.
+
 Chat memory is deliberate. Tool calls that were not auto-allowed are journaled deterministically. After each
 exchange a watcher from another model family extracts only the person's decisions, kept only if the quote is
 verbatim; they land in the journal as candidates, and distill decides what enters the notebook. The person can
 retract a note from the Desk or in chat. Every owner sees a generated roster of the other owners.
 
+Each chat turn also reads a bounded recent journal tail: questions and answers, work outcomes, CI triage,
+attention, owner changes and person decisions. This supplies activity performed outside the conversation before
+it reaches the notebook. Retractions in that window suppress earlier matching decision candidates; a later decision can reaffirm them. The owner's
+`chatContext` policy bounds age, entries, characters and bytes read; malformed or incomplete lines are skipped.
+Recent raw decisions supplement answering briefs even before distillation, and can overlap distilled memory so
+concurrent decisions are not lost to a timestamp cutoff. They are context, never authority.
+
 ### Requests between owners
 
 Owners ask each other questions (`onionsoup_ask`: answered from the other owner's notebook and fresh evidence,
-split into observed, inferred and unknown) and open requests to each other:
+split into observed, inferred and unknown). Each answer queues a durable runtime notice for the answering
+owner's latest person chat, discovered from existing nonchild sessions and persona user messages. The plugin
+waits for that chat to be idle, then posts with `noReply`; the decision watcher skips runtime notices. No person
+chat means the notice stays pending. A pinned destination and stable message ID reconcile a post accepted before
+a crash; transport failures retain the queue entry. Full exchanges remain in `notices/exchanges` under the state
+directory, and shortened notices cite their record ID. Owners also open requests to each other:
 
 | Request | From → to | After the receiving owner accepts |
 | --- | --- | --- |
+| `work` | any → repository owner with a workflow | receiver accepts or declines; accepted work enters its ordinary plan gate, and the request tracks the linked work through merge or failure |
 | `instance` | any → incus owner | person approves create (optionally the delete too), runtime creates, follow-up runs, delete |
 | `publish-site` | site source → NAS owner | grant or person, then build · stage · swap · restart app · verify byte for byte · roll back on failure |
-| `update-app` | NAS owner → itself | grant or person, then update through the API and follow the TrueNAS job to the end |
+| `update-app` | NAS owner → itself | grant or person, then upgrade the catalog or pull and redeploy images; follow the specific TrueNAS job to success |
+
+App requests preserve image-update intent even when the catalog version is unchanged. Catalog upgrades use
+truenas-mcp; image-only updates use the declared SSH connection to run `sudo -n midclt call app.pull_images`
+with redeploy enabled (the SSH account needs permission for that command). Completion requires the tracked
+job to succeed, the app to run at the target version, and image updates to clear. If a catalog upgrade leaves
+image updates pending, a second tracked job pulls them; temporary polling failures retry within the deadline. Read-only recovery can confirm
+a known successful job without starting another update. See the [TrueNAS API](https://api.truenas.com/v25.10/api_methods_app.pull_images.html).
 
 People only record decisions (approve, reject, revise-plan, resume, approve-create, approve-push, …); the
-runtime acts on them, so decisions never race the daemon.
+runtime acts on them. Ledger updates use per-record kernel locks across daemon, CLI and surface processes.
+Learning hires append their records to the latest item, preserving publication and person decisions made while
+the hire runs.
+Request decisions and runner cleanup update the latest
+record under a cross-process lock. Each active request step records its operation identity and checkpoints before effects.
+After a stopped runtime, recovery adopts an Incus instance only when its request tag matches, confirms deletion by absence,
+checks a published site's saved index digest only after its restart and serving check were recorded, and checks an app's recorded job and final state. Uncertain outcomes remain
+`interrupted` in the inbox: the person can check again, retry after inspection with a reason, or stop the request.
+Instance retry first checks for an existing tagged instance; stopping a provisioned instance retains its delete gate.
+A failed NAS job can be replaced on an explicit retry, while an active or successful recorded job remains attached.
+Effect-free owner decisions and work-status checks retry with exponential backoff (three attempts by default), then
+ask the person. Each tick detects dead request runners while preserving live CLI claims; read-only reconciliation
+runs in the bounded request pool, so unavailable hosts cannot hold up the tick. Neither
+recovery nor a follow-up silently replays an unknown effect.
+
+`onionsoup_request_work` delegates to a declared repository owner. Acceptance creates one durable linked work item, with
+all normal plan, verification, review and publication gates. Both owners hear completion, and declined or failed work raises
+attention for both so the person can redirect it. Attention discovery imports only the previous seven days on its first run (the cutoff is persisted; older journal
+history remains intact). It then indexes appended bytes, caches unchanged files, and skips malformed records without
+breaking the inbox. Attention items can be acknowledged, resolved with an outcome, or reopened through `onionsoup_attention`. The inbox exposes acknowledge
+and resolve controls and keeps acknowledged items visible until resolved.
 
 ### Always on
 
 `npm run owners -- daemon` (installed as `deploy/onionsoup-owners.service`) ticks every minute: it re-reads the
-configuration, moves requests along, runs due duties, advances work items, and raises work notices. Duties and
-work items run in the background beside the tick (one run per item, one item per owner, two of each at a time), so
+configuration, moves requests along, runs due duties, advances work items, and raises work notices. Requests, duties and
+work items run in the background beside the tick (one run per item, one item per owner, two of each at a time; requests reserve both participating owners and serialize shared resources), so
 a long hire never holds up a 15-minute check or a waiting request. Deterministic
 checks wake a model only when one is needed, and that model is the owner. Work a stopped runtime was actually
 doing is marked interrupted and never replayed; a person resumes it.

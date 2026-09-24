@@ -89,8 +89,95 @@ The surface (`npm run surface:build && npm run surface`, or `deploy/onionsoup-su
 their chats and one inbox of everything waiting on you at http://127.0.0.1:4747. It starts its own opencode, or
 attaches to one given `OPENCODE_URL`.
 
+## Notebook maintenance
+
+Notebook maintenance runs automatically for every owner. Override its defaults in an owner's declaration:
+
+```yaml
+memory:
+  enabled: true
+  everyMs: 3600000       # at most hourly when unread journal entries exist
+  retryMs: 300000        # retry failed runs after five minutes
+  batchDelayMs: 60000    # continue automatic backlogs after one minute
+  minEntries: 1
+  maxEntries: 100        # one bounded batch per pass
+  maxChars: 24000
+```
+
+Use **Update notebook** in the surface notebook or `owners distill <owner>` to queue a pass even when automatic
+maintenance is disabled. The running daemon (or `owners tick`) consumes the request. New requests arriving during
+a hire remain queued; errors appear in the notebook controls. Increase `maxChars` if an individual journal entry
+exceeds the batch limit. Automatic maintenance waits while that owner has active work or a duty. Manual requests
+remain queued until their backlog drains; automatic backlogs use `batchDelayMs` between batches. Housekeeping
+entries (`wake`, `app-updates`, `maintain-prs`) advance the cursor without a model hire. Interrupted hires appear
+as retryable failures. Journal entries are retained on size/parse errors so decisions cannot silently disappear.
+
+## Recent chat context and owner exchanges
+
+An owner's declaration can override the recent-context defaults independently of notebook distillation:
+
+```yaml
+chatContext:
+  ageHours: 48
+  maxEntries: 32
+  maxChars: 8000
+  entryChars: 2000
+  scanBytes: 131072       # total recent journal bytes read per context refresh
+  noticeChars: 12000     # displayed exchange excerpt; full text stays on disk
+  noticeSessions: 30     # most recently updated nonchild sessions inspected
+```
+
+Every chat system transform reads recent activity again. Owner answers also read recent person decisions,
+including undistilled choices. Limits retain the newest eligible records; retractions found in the scanned window
+cancel matching decisions. Increase the age or byte limit when a busy journal pushes relevant context out.
+
+The plugin checks the durable exchange queue every 15 seconds. It selects the answering owner's latest person
+message among the inspected sessions, ignoring synthetic messages, runtime notices and other agents. Delivery
+uses `noReply`, so it adds transcript evidence without hiring an owner or watcher. Unreadable candidate sessions (including structured-output hires) are logged and skipped. Busy chats, failed
+session listings and missing person chats leave the notice queued. Exchanges survive plugin restarts; accepted posts use a stable
+message ID to avoid duplicates after acknowledgement loss. Full records are retained under
+`$ONIONSOUP_HOME/notices/exchanges/pending` or `delivered`, with absolute paths and their ID cited in the transcript. Owners without a persona do not queue new chat notices;
+legacy notices for personless or retired owners move to `undeliverable` with a reason. Discovery reloads
+configuration before treating an unknown owner as retired, so an older plugin cannot discard a new owner’s notice. If the owner's
+person chat is older than the configured session search window, raise `noticeSessions` or speak in that chat.
+Restart the surface after installing plugin changes.
+
 ## What needs engine code
 
 New domain kinds (how an owner observes and changes something, like `git-repository`, `incus`, `truenas`, `github-org`), new
 request kinds, and new duty kinds are engine code in `packages/owners`. See [gaps.md](gaps.md) for what is
 missing, and the [design](design/owners.md) for how the pieces fit.
+
+## Work lifecycle changes
+
+Work item readers should use the public `WorkItem` schema. Use `Ledger.update(id, mutate)` for partial changes
+from a person decision, a background task, or a publication checkpoint: it reloads the record under a kernel
+lock shared by all runtime processes. Keep the mutation synchronous and perform external effects outside the
+lock. Learning records, publication state, and human notes must not be replaced from an old snapshot.
+
+Custom workflows should record `resumeStatus` before claiming an active stage and clear `activeRunner` when
+it finishes. Person decisions use `resumeItem`, `retryItem`, and `cancelItem`; cancellation of active work is
+refused. Desk publication uses the `desk-publication` workflow and its persisted stage to reconcile retries
+against the local commit and existing GitHub PR before repeating effects.
+
+## Delegation, attention and recovery
+
+An owner can call `onionsoup_request_work` with a declared receiver, title, goal, rationale, acceptance criteria,
+size, and (for repository groups) repository. Receivers need a declared workflow; unsupported domains are refused
+before a request is opened. Accepting creates ordinary proposed work and never bypasses the person's plan approval.
+The request keeps its linked work id and outcome; declines, failed work and closed unmerged PRs raise attention for both owners.
+
+Use `onionsoup_attention` to list an owner's attention, acknowledge it, resolve it with an outcome, or reopen it.
+The surface inbox also offers acknowledgement and resolution. All decisions keep the original journal entry and record
+who acted and why. Recovery controls for interrupted resource requests distinguish read-only outcome checks from an
+explicit retry after inspection; a retry or stop requires a reason. Incus instances created before request tagging cannot
+be automatically adopted from their names alone.
+
+Attention's first import uses `ATTENTION_LIMITS.initialHistoryDays` (default 7); older history stays in the notebook
+without flooding the inbox. Its persisted cursor and cache read only appended journal bytes, up to
+`ATTENTION_LIMITS.scanBytesPerFile` per file per scan. Malformed lines are skipped with a location-only diagnostic;
+an incomplete current-day tail is retried when more bytes arrive. Past completed daily journals are immutable inputs.
+Request model-only retries use `REQUEST_LIMITS.decisionAttempts`, `retryBaseMs` and `retryMaxMs`. Ambiguous read-only checks wait `REQUEST_LIMITS.reconcileMs` (default five minutes)
+between attempts, so the same old request does not occupy an owner on every tick. Reconciliation of a
+publication requires both recorded completion of the restart/serving check and a matching served `index.html` digest;
+it does not prove a full static asset tree from index content alone.

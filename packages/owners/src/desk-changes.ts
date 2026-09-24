@@ -1,10 +1,13 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { z } from 'zod';
+import type { WorkItem } from './ledger.ts';
 import { Verdict } from './artifacts.ts';
 import { requestPublish } from './brokering.ts';
 import { requireFreelancer, type RepositoryOwner } from './declarations.ts';
 import { pickModel } from './families.ts';
 import type { Runtime } from './runtime.ts';
+import { REPOSITORY_REVIEW } from './repository-writing.ts';
 import { ensureDesk, git, verificationPassed, verify } from './workspace.ts';
 
 const run = promisify(execFile);
@@ -17,7 +20,7 @@ export const DESK_CHANGE_LIMITS = { diffChars: 60_000 };
  * PR. An owner holding a merge grant from the person merges its own approved PR, and a site built from the
  * repository is then published through its host's grant.
  */
-export interface DeskChangeResult { outcome: 'merged' | 'opened' | 'needs-work' | 'nothing-to-do'; summary: string; url?: string; publishRequest?: string }
+export interface DeskChangeResult { outcome: 'merged' | 'opened' | 'needs-work' | 'publication-failed' | 'in-progress' | 'nothing-to-do'; summary: string; url?: string; publishRequest?: string }
 
 function hasMergeGrant(owner: RepositoryOwner) {
   return owner.grants.some(grant => grant.to === owner.id && grant.action === 'merge' && (grant.target === owner.domain.name || grant.target === '*'));
@@ -26,6 +29,7 @@ function hasMergeGrant(owner: RepositoryOwner) {
 function reviewBrief(owner: RepositoryOwner, title: string, summary: string, patch: string) {
   return [
     `You have been hired to review a change ${owner.persona?.name ?? owner.id} made in ${owner.domain.name}. Do not edit anything.`,
+    REPOSITORY_REVIEW,
     `<title>${title}</title>`,
     `<what-the-owner-says-it-does>\n${summary}\n</what-the-owner-says-it-does>`,
     `<diff-against-${owner.domain.baseBranch}>\n${patch}\n</diff-against-${owner.domain.baseBranch}>`,
@@ -34,7 +38,10 @@ conventions. Revise, with specific findings, otherwise. Replan is not available 
   ].join('\n\n');
 }
 
-export async function proposeDeskChanges(runtime: Runtime, ownerId: string, title: string, summary: string, repository?: string): Promise<DeskChangeResult> {
+async function prepareDeskChanges(
+  runtime: Runtime, ownerId: string, title: string, summary: string,
+  repository?: string, origin?: WorkItem['origin'],
+): Promise<DeskChangeResult> {
   const owner = runtime.repositoryOwner(ownerId, repository);
   const desk = await ensureDesk(owner, runtime.desksRoot);
   if (!(await git(desk.path, ['status', '--porcelain'])).trim()) return { outcome: 'nothing-to-do', summary: 'The desk has no changes.' };
@@ -54,25 +61,184 @@ export async function proposeDeskChanges(runtime: Runtime, ownerId: string, titl
     const findings = verdict.findings.map(finding => `- [${finding.severity}] ${finding.file}: ${finding.issue} → ${finding.suggestion}`).join('\n');
     return { outcome: 'needs-work', summary: `${reviewer.model} asked for changes; nothing was committed.\n${verdict.summary}\n${findings}` };
   }
-  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
-  const branch = `owners/${owner.id}-${stamp}`;
   await git(desk.path, ['add', '-A']);
-  await git(desk.path, ['commit', '-q', '-m', `${title}\n\n${summary}\n\nOwner: ${owner.id}\nReviewed-by: ${reviewer.model}`]);
-  await git(desk.path, ['push', '-q', 'origin', `HEAD:refs/heads/${branch}`]);
-  const created = await run('gh', ['pr', 'create', '--repo', owner.domain.name, '--base', owner.domain.baseBranch, '--head', branch, '--title', title,
-    '--body', `${summary}\n\nReviewed by \`${reviewer.model}\`: ${verdict.summary}\n\nOpened by the onionsoup owner \`${owner.id}\` from its desk.`]);
-  const url = created.stdout.trim().split('\n').at(-1) ?? '';
-  if (!hasMergeGrant(owner)) {
-    await notebook.journal({ kind: 'desk-change-opened', outcome: url, note: title });
-    await notebook.commit('journal desk change').catch(() => undefined);
-    return { outcome: 'opened', summary: `Opened ${url}; a person merges it.`, url };
+  const item = await runtime.ledger.create(owner.id, DESK_WORKFLOW, {
+    title, goal: summary, rationale: 'Reviewed changes from the owner desk', acceptance: ['Host verification and cross-family review pass'],
+    size: 'small', repository,
+  }, {
+    status: 'landing', worktree: desk.path, origin,
+    implementations: [{ report: { summary, filesChanged: [], deviationsFromPlan: [] }, diffStat: patch, verification }],
+    verdicts: [verdict],
+    deskPublication: {
+      stage: 'commit', reviewer: reviewer.model,
+      reviewedHead: (await git(desk.path, ['rev-parse', 'HEAD'])).trim(),
+      reviewedTree: (await git(desk.path, ['write-tree'])).trim(),
+    },
+  });
+  return continueDeskPublication(runtime, item.id);
+}
+
+export const DESK_WORKFLOW = 'desk-publication';
+
+export async function proposeDeskChanges(
+  runtime: Runtime, ownerId: string, title: string, summary: string,
+  repository?: string, origin?: WorkItem['origin'],
+) {
+  const pending = (await runtime.ledger.list()).find(item => item.owner === ownerId
+    && item.proposal.repository === repository && item.deskPublication
+    && item.deskPublication.stage !== 'complete' && item.status !== 'cancelled');
+  if (pending) return continueDeskPublication(runtime, pending.id);
+  return prepareDeskChanges(runtime, ownerId, title, summary, repository, origin);
+}
+
+async function continueDeskPublication(runtime: Runtime, itemId: string) {
+  try {
+    return deskResult(await advanceDeskPublication(runtime, itemId));
+  } catch (error) {
+    if (!(error instanceof Error) || error.message !== 'work_item_active') throw error;
+    return deskResult(await runtime.ledger.get(itemId));
   }
-  await run('gh', ['pr', 'merge', url, '--squash', '--delete-branch']);
-  await git(desk.path, ['fetch', '-q', 'origin']);
-  await git(desk.path, ['reset', '-q', '--hard', `origin/${owner.domain.baseBranch}`]);
-  await notebook.journal({ kind: 'desk-change-merged', outcome: url, note: `${title} (reviewed by ${reviewer.model}; merged under the person's merge grant)` });
-  const hostsSite = [...runtime.declarations.owners.values()].flatMap(other => (other.domain.kind === 'truenas' ? other.domain.sites : [])).find(site => site.source === owner.id);
-  const publish = hostsSite ? await requestPublish(runtime, owner.id, hostsSite.id, `Publish merged change: ${title}`) : undefined;
-  await notebook.commit('journal desk change').catch(() => undefined);
-  return { outcome: 'merged', summary: `Merged ${url}${publish ? `; publishing ${hostsSite!.id} (${publish.id})` : ''}.`, url, publishRequest: publish?.id };
+}
+
+const PERMANENT_FAILURES = new Set(['desk_changed_since_review', 'desk_head_changed', 'desk_pr_closed']);
+
+function deskResult(item: WorkItem): DeskChangeResult {
+  if (item.activeRunner) return { outcome: 'in-progress', summary: `Publication ${item.id} is running at ${item.deskPublication!.stage}.` };
+  if (item.status === 'failed') return deskFailure(item);
+  const outcome = item.publication?.state === 'merged' ? 'merged' : 'opened';
+  const warning = item.reason ? `; ${item.reason}` : '';
+  return {
+    outcome, summary: `${outcome} ${item.publication?.url}${warning}`, url: item.publication?.url,
+    publishRequest: item.deskPublication?.publishRequest,
+  };
+}
+
+function deskFailure(item: WorkItem): DeskChangeResult {
+  const permanent = PERMANENT_FAILURES.has(item.reason ?? '');
+  const next = permanent
+    ? `Cancel ${item.id} before proposing the revised desk changes.`
+    : `Retry propose changes to continue ${item.id}, or cancel it.`;
+  const commit = item.landedCommit ? `Commit ${item.landedCommit} is retained.` : 'No publication commit was recorded.';
+  return {
+    outcome: 'publication-failed',
+    summary: `Publication stopped at ${item.deskPublication!.stage}: ${item.reason}. ${commit} ${next}`,
+    url: item.publication?.url,
+  };
+}
+
+type DeskStage = NonNullable<WorkItem['deskPublication']>['stage'];
+type DeskStep = (runtime: Runtime, item: WorkItem) => Promise<Partial<WorkItem>>;
+
+function checkpoint(item: WorkItem, stage: DeskStage) {
+  return { ...item.deskPublication!, stage };
+}
+
+const commitDesk: DeskStep = async (_runtime, item) => {
+  const desk = item.worktree!;
+  const head = (await git(desk, ['rev-parse', 'HEAD'])).trim();
+  if (head === item.deskPublication!.reviewedHead) {
+    await git(desk, ['add', '-A']);
+    const tree = (await git(desk, ['write-tree'])).trim();
+    if (tree !== item.deskPublication!.reviewedTree) throw new Error('desk_changed_since_review');
+    await git(desk, ['commit', '-q', '-m', `${item.proposal.title}\n\n${item.proposal.goal}\n\nWork-item: ${item.id}\nReviewed-by: ${item.deskPublication!.reviewer}`]);
+  } else {
+    const message = await git(desk, ['log', '-1', '--format=%B']);
+    if (!message.split('\n').includes(`Work-item: ${item.id}`)) throw new Error('desk_head_changed');
+  }
+  return { landedCommit: (await git(desk, ['rev-parse', 'HEAD'])).trim(), branch: `owners/${item.id}`, deskPublication: checkpoint(item, 'push') };
+};
+
+const pushDesk: DeskStep = async (runtime, item) => {
+  await git(runtime.repositoryFor(item).workspace, ['push', '-q', 'origin', `${item.landedCommit}:refs/heads/${item.branch}`]);
+  return { deskPublication: checkpoint(item, 'open') };
+};
+
+const PullRequest = z.object({ url: z.string(), state: z.enum(['OPEN', 'MERGED', 'CLOSED']) });
+
+async function openDeskPr(runtime: Runtime, item: WorkItem) {
+  const owner = runtime.repositoryFor(item);
+  const listed = await run('gh', ['pr', 'list', '--repo', owner.domain.name, '--head', item.branch!, '--state', 'all', '--json', 'url,state']);
+  const existing = z.array(PullRequest).parse(JSON.parse(listed.stdout))[0];
+  if (existing) return existing;
+  const created = await run('gh', ['pr', 'create', '--repo', owner.domain.name, '--base', owner.domain.baseBranch,
+    '--head', item.branch!, '--title', item.proposal.title,
+    '--body', `${item.proposal.goal}\n\nReviewed by ${item.deskPublication!.reviewer}: ${item.verdicts.at(-1)!.summary}\n\nWork item: ${item.id}`]);
+  return PullRequest.parse({ url: created.stdout.trim().split('\n').at(-1), state: 'OPEN' });
+}
+
+const openDesk: DeskStep = async (runtime, item) => {
+  const opened = await openDeskPr(runtime, item);
+  const states = { OPEN: 'open', MERGED: 'merged', CLOSED: 'closed' } as const;
+  const shouldMerge = hasMergeGrant(runtime.repositoryFor(item));
+  return {
+    publication: { url: opened.url, branch: item.branch!, by: item.owner, at: new Date().toISOString(), state: states[opened.state] },
+    deskPublication: checkpoint(item, shouldMerge ? 'merge' : 'complete'),
+  };
+};
+
+const mergeDesk: DeskStep = async (runtime, item) => {
+  const owner = runtime.repositoryFor(item);
+  if (!hasMergeGrant(owner)) return { deskPublication: checkpoint(item, 'complete') };
+  const viewed = await run('gh', ['pr', 'view', item.publication!.url, '--json', 'url,state']);
+  const current = PullRequest.parse(JSON.parse(viewed.stdout));
+  if (current.state === 'CLOSED') throw new Error('desk_pr_closed');
+  if (current.state === 'OPEN') {
+    await runtime.notebook(item.owner).journal({ kind: 'grant-used', workItem: item.id, note: 'merge approved by standing grant' });
+    await run('gh', ['pr', 'merge', current.url, '--squash', '--delete-branch']);
+  }
+  return { publication: { ...item.publication!, state: 'merged' }, deskPublication: checkpoint(item, 'finish') };
+};
+
+const finishDesk: DeskStep = async (runtime, item) => {
+  const owner = runtime.repositoryFor(item);
+  await git(item.worktree!, ['fetch', '-q', 'origin']);
+  const head = (await git(item.worktree!, ['rev-parse', 'HEAD'])).trim();
+  const isClean = !(await git(item.worktree!, ['status', '--porcelain'])).trim();
+  if (head === item.landedCommit && isClean) await git(item.worktree!, ['reset', '-q', '--hard', `origin/${owner.domain.baseBranch}`]);
+  const site = [...runtime.declarations.owners.values()]
+    .flatMap(candidate => candidate.domain.kind === 'truenas' ? candidate.domain.sites : [])
+    .find(candidate => candidate.source === item.owner);
+  const purpose = `Publish merged desk work ${item.id}: ${item.proposal.title}`;
+  const existing = (await runtime.requests.list()).find(request => request.from === item.owner && request.ask.purpose === purpose);
+  const publish = site ? existing ?? await requestPublish(runtime, item.owner, site.id, purpose) : undefined;
+  return { deskPublication: { ...checkpoint(item, 'complete'), publishRequest: publish?.id } };
+};
+
+const DESK_STEPS: Partial<Record<DeskStage, DeskStep>> = {
+  commit: commitDesk, push: pushDesk, open: openDesk, merge: mergeDesk, finish: finishDesk,
+};
+
+export async function advanceDeskPublication(runtime: Runtime, itemId: string) {
+  let item = await runtime.ledger.update(itemId, current => {
+    if (current.activeRunner) throw new Error('work_item_active');
+    if (current.status === 'cancelled') throw new Error('work_item_cancelled');
+    return { ...current, status: 'landing', resumeStatus: 'landing', activeRunner: process.pid, reason: undefined };
+  });
+  try {
+    let step = DESK_STEPS[item.deskPublication!.stage];
+    while (step) {
+      const changes = await step(runtime, item);
+      item = await runtime.ledger.update(item.id, current => ({ ...current, ...changes }));
+      step = DESK_STEPS[item.deskPublication!.stage];
+    }
+    item = await runtime.ledger.update(item.id, current => ({ ...current, status: 'landed', activeRunner: undefined }));
+  } catch (error) {
+    item = await runtime.ledger.update(item.id, current => ({
+      ...current, status: 'failed', activeRunner: undefined, reason: error instanceof Error ? error.message : String(error),
+    }));
+  }
+  if (item.status === 'landed') item = await recordDeskPublication(runtime, item);
+  return item;
+}
+
+async function recordDeskPublication(runtime: Runtime, item: WorkItem) {
+  const notebook = runtime.notebook(item.owner);
+  try {
+    await notebook.journal({ kind: 'desk-change-published', workItem: item.id, outcome: item.publication?.url });
+    await notebook.commit('journal desk change');
+    return item;
+  } catch (error) {
+    const reason = `desk_publication_journal_failed: ${error instanceof Error ? error.message : String(error)}`;
+    return runtime.ledger.update(item.id, current => ({ ...current, reason }));
+  }
 }

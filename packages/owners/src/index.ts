@@ -5,8 +5,10 @@ export { Ledger, WorkItem, WorkStatus, HireRecord, Verification } from './ledger
 export { Notebook, editSection } from './notebook.ts';
 export { Runtime } from './runtime.ts';
 export { Background } from './daemon.ts';
-export { wake, distill, recordLearnings } from './owner.ts';
-export { advance, approvePlan, rejectPlan, revisePlan } from './workflow.ts';
+export { wake, recordLearnings } from './owner.ts';
+export { distill, requestDistill, memoryStatus, memoryFingerprint } from './memory.ts';
+export { MemoryPolicy, MemoryState, type MemoryStatus } from './memory-config.ts';
+export { advance, approvePlan, rejectPlan, revisePlan, resumeItem, retryItem, cancelItem } from './workflow.ts';
 export { publish } from './publish.ts';
 export { approvePush } from './rebase.ts';
 export { approveCreate, approveDelete, denyRequest } from './brokering.ts';
@@ -15,3 +17,7 @@ export { chatDirectory } from './chats.ts';
 export { configDirectory, stateDirectory } from './paths.ts';
 export { describeAsk, type ResourceRequest } from './requests.ts';
 export { domainSummary } from './roster.ts';
+
+export { listAttention, changeAttention, type Attention } from './attention.ts';
+export { requestWork } from './delegation.ts';
+export { recoverRequest, reconcileRequest } from './request-recovery.ts';

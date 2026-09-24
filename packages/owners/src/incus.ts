@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { z } from 'zod';
@@ -135,7 +135,8 @@ export class ManagedInstances {
   }
 
   async add(ownerId: string, entry: ManagedInstance) {
-    await this.write(ownerId, [...(await this.list(ownerId)), entry]);
+    const existing = (await this.list(ownerId)).filter(candidate => candidate.remote !== entry.remote || candidate.name !== entry.name);
+    await this.write(ownerId, [...existing, entry]);
   }
 
   async remove(ownerId: string, remote: string, name: string) {
@@ -144,7 +145,9 @@ export class ManagedInstances {
 
   private async write(ownerId: string, entries: ManagedInstance[]) {
     await mkdir(dirname(this.path(ownerId)), { recursive: true });
-    await writeFile(this.path(ownerId), JSON.stringify(entries, null, 2) + '\n');
+    const temporary = `${this.path(ownerId)}.${process.pid}.tmp`;
+    await writeFile(temporary, JSON.stringify(entries, null, 2) + '\n');
+    await rename(temporary, this.path(ownerId));
   }
 
   private path(ownerId: string) {
@@ -176,7 +179,7 @@ export async function checkCreate(owner: IncusOwner, managed: ManagedInstances, 
 /** Host code only, after a person approved it. */
 export async function createInstance(client: IncusClient, owner: IncusOwner, managed: ManagedInstances, spec: CreateSpec, request: { id: string; requestedBy: string }) {
   const name = await checkCreate(owner, managed, spec);
-  await client.run(['launch', spec.image, `${spec.remote}:${name}`], INCUS_LIMITS.launchTimeoutMs);
+  await client.run(['launch', spec.image, `${spec.remote}:${name}`, '-c', `user.onionsoup.request=${request.id}`], INCUS_LIMITS.launchTimeoutMs);
   await managed.add(owner.id, { remote: spec.remote, name, image: spec.image, requestId: request.id, requestedBy: request.requestedBy, createdAt: new Date().toISOString() });
   return { remote: spec.remote, name };
 }
@@ -188,4 +191,23 @@ export async function deleteInstance(client: IncusClient, owner: IncusOwner, man
   if (!isManaged || !name.startsWith(owner.domain.namePrefix)) throw new Error(`not_managed_by_onionsoup: ${remote}:${name}`);
   await client.run(['delete', '--force', `${remote}:${name}`], INCUS_LIMITS.launchTimeoutMs);
   await managed.remove(owner.id, remote, name);
+}
+
+/** Adopt only an instance tagged by this exact operation; name matches alone are not evidence. */
+export async function reconcileInstance(client: IncusClient, owner: IncusOwner, managed: ManagedInstances,
+  request: { id: string; from: string }, expected: { remote: string; name: string; image: string }) {
+  const instances = z.array(RawInstance).parse(JSON.parse(await client.run(['list', `${expected.remote}:`, '--format', 'json'])));
+  const found = instances.find(instance => instance.name === expected.name);
+  if (!found || found.config?.['user.onionsoup.request'] !== request.id) return undefined;
+  await managed.add(owner.id, { ...expected, requestId: request.id, requestedBy: request.from,
+    createdAt: found.created_at ?? new Date().toISOString() });
+  return { remote: expected.remote, name: expected.name };
+}
+
+export async function reconcileDeletion(client: IncusClient, owner: IncusOwner, managed: ManagedInstances,
+  instance: { remote: string; name: string }) {
+  const instances = z.array(RawInstance).parse(JSON.parse(await client.run(['list', `${instance.remote}:`, '--format', 'json'])));
+  if (instances.some(candidate => candidate.name === instance.name)) return false;
+  await managed.remove(owner.id, instance.remote, instance.name);
+  return true;
 }
