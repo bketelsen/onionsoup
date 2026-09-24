@@ -20,7 +20,16 @@ test('configured owner prompts carry repository writing guidance alongside each 
   const input = new Proxy({} as PluginInput, {
     get(_target, key) { throw new Error(`unexpected_plugin_input: ${String(key)}`); },
   });
-  const hooks = await plugin.server(input, { declarations: 'packages/owners/test/fixtures/owners', state });
+  const originalSandbox = process.env.ONIONSOUP_SANDBOX;
+  let hooks: Awaited<ReturnType<typeof plugin.server>>;
+  try {
+    delete process.env.ONIONSOUP_SANDBOX;
+    hooks = await plugin.server(input, { declarations: 'packages/owners/test/fixtures/owners', state });
+  } finally {
+    if (originalSandbox === undefined) delete process.env.ONIONSOUP_SANDBOX;
+    else process.env.ONIONSOUP_SANDBOX = originalSandbox;
+  }
+  assert.equal(process.env.ONIONSOUP_SANDBOX, originalSandbox);
   const config: Config = {};
   await hooks.config!(config);
   const owners = Object.values(config.agent ?? {}).filter(
