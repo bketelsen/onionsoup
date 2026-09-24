@@ -19,6 +19,18 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
 - **No budgets.** Per-owner cost caps and wake-rate limits are designed but not enforced, and cost is only tracked
   for providers that report it (Copilot); ChatGPT OAuth reports $0.
 
+- **Initiative chains stall on the person's publish and merge.** An assignment completes only when its PR merges,
+  so each step waits wherever a landed item waits to be published or a PR waits to be merged (the initiative view
+  says so). A report with a `merge` grant merges only desk changes, not work items.
+- **No initiatives between peers.** Only a manager plans across owners, through its direct reports; peers still
+  delegate one request at a time, and the receiver may decline.
+- **Waking a manager needs the surface running.** Manager notices are posted by the plugin in the surface's
+  opencode; with the surface down they stay queued. If the initiative's chat was deleted, the notice stays pending:
+  there is no fallback to the manager's latest chat yet. Tool lists are built when the plugin starts, so a
+  `reportsTo` change shows new tools only after a surface restart (engine checks apply at once).
+- **A failed plan-review hire escalates for good.** A transient provider failure leaves that plan for the person
+  rather than retrying the manager's review.
+
 ## Surfaces
 
 - **The Desk polls** every 20 seconds and has no push. It cannot open itself, and a job cited in chat cannot link

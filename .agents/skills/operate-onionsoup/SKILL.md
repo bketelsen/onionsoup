@@ -11,11 +11,17 @@ cause, and the fix is either applied through the normal gates or reported to the
 ## Where things are
 
 - **Engine:** `~/projects/onionsoup`, run as the user unit `onionsoup-owners.service`, which ticks every 60s:
-  re-read the configuration, process requests, run due duties, advance work items, raise work notices. Duties and
-  work items run in the background, so the tick itself stays short; `owners tick` waits for what it started.
+  re-read the configuration, process requests, supervise initiatives, run due duties, advance work items, raise
+  work notices. Duties, work items and managers' plan reviews run in the background, so the tick itself stays
+  short; `owners tick` waits for what it started.
 - **Config:** `~/.config/onionsoup` (`ONIONSOUP_CONFIG`).
-- **State:** `~/.local/share/onionsoup` (`ONIONSOUP_HOME`). It holds `state/` (ledger, requests, locks,
-  ci-triage, ship), `desks/<owner>`, `checkouts/`, `evidence/<owner>` and `tools/`.
+- **State:** `~/.local/share/onionsoup` (`ONIONSOUP_HOME`). It holds `state/` (ledger, requests, initiatives,
+  locks, ci-triage, ship), `desks/<owner>`, `checkouts/`, `evidence/<owner>` and `tools/`.
+- **Initiatives:** `state/initiatives/<id>.json`, a manager's assignments to its reports. Read them with
+  `npm run owners -- initiatives` and `npm run owners -- initiative <id>`; assignment state there is derived from
+  the linked request and item. Only an `approved` initiative whose approval names its current `revision` dispatches.
+  A step that seems stuck is usually waiting on the person to publish or merge the previous PR, or on an open
+  escalation from the report.
 - **Notebooks:** under state, one Git repo per owner. Read one with `npm run owners -- notebook <id>`.
 - **Plugin:** `packages/owners/src/plugin.ts`, loaded by the surface's opencode (`onionsoup-surface.service`,
   http://127.0.0.1:4747). A change takes effect only when the surface restarts.

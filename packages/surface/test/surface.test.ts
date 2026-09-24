@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { Runtime, reportFriction } from '@onionsoup/owners';
+import { Runtime, approveInitiative, draftInitiative, reportFriction, submitInitiative } from '@onionsoup/owners';
 import { SurfaceState, surfaceServer, type OpencodeApi } from '@onionsoup/surface';
 
 function fakeOpencode() {
@@ -255,6 +255,66 @@ test('question replies carry every ordered answer to opencode and dismissal uses
     const rejected = await call('POST', '/api/owners/bellonda/questions/question-2', { reject: true });
     assert.equal(rejected.status, 200);
     assert.deepEqual(calls.at(-1), ['reject-question', '/desks/bellonda', 'question-2']);
+  } finally {
+    server.close();
+  }
+});
+
+test('the surface shows the org chart and initiatives, and the person approves an initiative from the inbox', async () => {
+  const { server, runtime, call } = await start();
+  try {
+    for (const owner of runtime.declarations.owners.keys()) await runtime.notebook(owner).ensure('# Charter\n');
+    const org = (await call('GET', '/api/org')).body as unknown as { id: string; manager?: string }[];
+    assert.equal(org.find(entry => entry.id === 'clippy')?.manager, 'odrade');
+    assert.equal(org.find(entry => entry.id === 'odrade')?.manager, undefined);
+
+    const proposal = (title: string) => ({ title, goal: 'g', rationale: 'r', acceptance: ['a'], size: 'small' as const });
+    const drafted = await draftInitiative(runtime, 'odrade', { title: 'Org change', goal: 'Change core then the wiki', rationale: 'r', assignments: [
+      { id: 'wiki', to: 'bellonda', proposal: proposal('Wiki'), after: ['core'] },
+      { id: 'core', to: 'clippy', proposal: proposal('Core'), after: [] },
+    ] }, { sessionID: 'ses_odrade', directory: '/evidence/odrade' });
+    await submitInitiative(runtime, 'odrade', drafted.id);
+    const inbox = (await call('GET', '/api/state')).body.inbox as { kind: string; id: string; owner: string; detail: string }[];
+    const entry = inbox.find(candidate => candidate.kind === 'initiative');
+    assert.equal(entry?.id, drafted.id);
+    assert.equal(entry?.owner, 'odrade');
+    assert.match(entry!.detail, /2 assignments to bellonda, clippy/);
+
+    const detail = (await call('GET', `/api/initiatives/${drafted.id}`)).body as { assignments: { id: string; depth: number; state: string }[]; origin?: unknown };
+    assert.deepEqual(detail.assignments.map(assignment => [assignment.id, assignment.depth, assignment.state]), [['core', 0, 'not-dispatched'], ['wiki', 1, 'not-dispatched']]);
+    assert.equal(detail.origin, undefined, 'the manager chat stays on the host');
+    assert.equal((await call('GET', '/api/initiatives/i-20260924-000000')).status, 404);
+    assert.equal((await call('POST', '/api/decide', { action: 'approve-initiative' })).status, 400, 'a decision without an id is refused at the edge');
+
+    assert.equal((await call('POST', '/api/decide', { action: 'approve-initiative', id: drafted.id, note: 'Go' })).body.outcome, 'approved');
+    const approved = await runtime.initiatives.get(drafted.id);
+    assert.deepEqual([approved.status, approved.approval?.by, approved.approval?.note], ['approved', 'tester', 'Go']);
+    const listed = (await call('GET', '/api/initiatives')).body as unknown as { id: string; status: string; total: number }[];
+    assert.deepEqual(listed.map(summary => [summary.id, summary.status, summary.total]), [[drafted.id, 'approved', 2]]);
+  } finally {
+    server.close();
+  }
+});
+
+test('a report plan under its manager grant says so in the inbox; without a grant it reads as usual', async () => {
+  const { server, runtime, call } = await start();
+  try {
+    for (const owner of runtime.declarations.owners.keys()) await runtime.notebook(owner).ensure('# Charter\n');
+    const proposal = { title: 'Core', goal: 'Change core', rationale: 'r', acceptance: ['a'], size: 'small' as const };
+    const drafted = await draftInitiative(runtime, 'odrade', { title: 'Org change', goal: 'g', rationale: 'r', assignments: [
+      { id: 'core', to: 'clippy', proposal, after: [] }, { id: 'wiki', to: 'bellonda', proposal: { ...proposal, title: 'Wiki' }, after: [] },
+    ] });
+    await submitInitiative(runtime, 'odrade', drafted.id);
+    await approveInitiative(runtime, drafted.id, 'person');
+    const plan = { summary: 'The plan', steps: [{ description: 's', files: [] }], tests: ['t'], risks: [], outOfScope: [], questionsForOwner: [] };
+    const assigned = (owner: string, assignment: string) => runtime.ledger.create(owner, 'change', proposal, {
+      status: 'awaiting-plan-approval', plan, assignment: { initiative: drafted.id, assignment },
+    });
+    const clippyItem = await assigned('clippy', 'core');
+    const bellondaItem = await assigned('bellonda', 'wiki');
+    const inbox = (await call('GET', '/api/state')).body.inbox as { kind: string; id: string; detail: string }[];
+    assert.equal(inbox.find(entry => entry.id === clippyItem.id)?.detail, 'Odrade reviews under standing grant. The plan');
+    assert.equal(inbox.find(entry => entry.id === bellondaItem.id)?.detail, 'The plan');
   } finally {
     server.close();
   }

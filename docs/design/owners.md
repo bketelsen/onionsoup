@@ -85,8 +85,10 @@ An owner is declared once (`owners/<id>.yaml`) and keeps one identity across ses
 - **Stewards**: an owner with `manages:` creates, changes and retires owners within its scope through a tool that
   validates the whole configuration, refuses authority fields, asks the person, and commits to the config repo.
   The daemon re-reads the configuration every tick, so new owners start without a restart.
-- **Grants**: standing approvals the person gives in configuration (`publish-site`, `update-app`, `merge`, `ship`),
-  journaled as "approved by standing grant" whenever they are used.
+- **Grants**: standing approvals the person gives in configuration (`publish-site`, `update-app`, `merge`, `ship`,
+  `approve-plans`), journaled as "approved by standing grant" whenever they are used.
+- **Reporting line**: `reportsTo` names an owner's manager. The roster every owner reads is drawn as that tree, and
+  a manager plans cross-repository work through its reports (see [Org chart and initiatives](#org-chart-and-initiatives)).
 - **Desk**: a worktree on a `desk/<id>` branch (or the evidence folder for non-repository owners) where chat
   work happens. Desk changes become a verified, reviewed PR through `onionsoup_propose_changes`. Publication is a ledger workflow: commit, push, PR creation, merge and site follow-up have durable checkpoints. Retrying a clean desk continues its unfinished publication, and its PR participates in maintenance. An active publication reports its progress; permanent failures name the cancellation needed before a new proposal. Journal failures remain visible without changing a completed publication back to failed.
 
@@ -170,7 +172,7 @@ directory, and shortened notices cite their record ID. Owners also open requests
 
 | Request | From → to | After the receiving owner accepts |
 | --- | --- | --- |
-| `work` | any → repository owner with a workflow | receiver accepts or declines; accepted work enters its ordinary plan gate, and the request tracks the linked work through merge or failure |
+| `work` | any → repository owner with a workflow | receiver accepts or declines (work from its manager is accepted automatically); accepted work enters its ordinary plan gate, and the request tracks the linked work through merge or failure |
 | `instance` | any → incus owner | person approves create (optionally the delete too), runtime creates, follow-up runs, delete |
 | `publish-site` | site source → NAS owner | grant or person, then build · stage · swap · restart app · verify byte for byte · roll back on failure |
 | `update-app` | NAS owner → itself | grant or person, then upgrade the catalog or pull and redeploy images; follow the specific TrueNAS job to success |
@@ -205,10 +207,61 @@ history remains intact). It then indexes appended bytes, caches unchanged files,
 breaking the inbox. Attention items can be acknowledged, resolved with an outcome, or reopened through `onionsoup_attention`. The inbox exposes acknowledge
 and resolve controls and keeps acknowledged items visible until resolved.
 
+### Org chart and initiatives
+
+The org chart is configuration: `reportsTo: <owner>` on a declaration. Loading refuses unknown managers
+(`org_chart_unknown_manager`), self-reports (`org_chart_self`) and cycles (`org_chart_cycle`). A steward may put owners
+in its scope under itself or take them back out, but never sets, changes or clears a line to anyone else. Each
+owner's prompt says who its manager and direct reports are; `managerOf`, `directReports` and `isDirectReport` in
+`declarations.ts` are the only readers of the field.
+
+Work a manager requests from a direct report is accepted automatically (no hire; only the report is reserved in the
+request pool) and still goes through the report's ordinary plan, verification, review and publication gates. A
+peer's request is still decided by the receiver.
+
+An **initiative** (`state/initiatives/<id>.json`, `org-work.ts`) is a manager's cross-repository change: assignments
+to its direct reports, each a proposal with `after` dependencies. The manager drafts, updates and submits it in chat
+with `onionsoup_initiative` (shown only to owners with reports); the draft records that chat. Submission checks every
+assignment: the assignee is a direct report with a workflow, owns the named repository, and has a `maintain-prs` duty
+(completion means merged, so a report that cannot observe merges is refused); dependencies exist and do not cycle;
+the manager has fewer than `INITIATIVE_LIMITS.maxOpenPerManager` open initiatives. The person approves, sends back
+or cancels it once, in the surface inbox or with `owners approve-initiative | revise-initiative | cancel-initiative`.
+Any edit after submission is a new revision that stops dispatch until the person approves it again.
+
+Each daemon tick runs `superviseInitiatives` after requests. It is deterministic and acts only on an approved
+initiative whose approval names its current revision: an assignment whose dependencies have all merged is dispatched
+as a work request carrying its assignment reference (a request already carrying that reference is linked instead of
+repeated), and the initiative completes when every assignment merged or fails when one failed. An assignment stores
+only its request id; its state (requested, working, plan waiting, waiting on the person to publish or merge, merged,
+failed) is derived from the request and work item. A chain therefore waits on the person wherever a PR waits to be
+published or merged.
+
+The manager hears how assigned work goes: the notice pass journals each change to her too and queues a manager
+notice into the initiative's chat (`WorkItem.origin` stays the item owner's chat), which wakes her there. Approval,
+send-back, cancellation, completion and failure of the initiative reach the same chat.
+
+**Plan approval under grant.** A report may give its manager `approve-plans` (a grant on the report's declaration,
+`to` its manager, target a repository or `*`; loading refuses one to anyone else with `grant_not_to_manager`). For
+each new plan (by digest) waiting in a supervised initiative, the daemon hires the manager in its review pool
+(`DAEMON_LIMITS.parallelReviews`): a sandboxed owner hire with a structured verdict. Approve records the plan
+approval as `owner:<manager> (standing grant approve-plans in <report>)` and journals `grant-used` to both notebooks;
+revise goes to the planner as plan feedback; escalate leaves the plan for the person and raises attention. After
+`SUPERVISION_LIMITS.revisionsPerItem` revisions, or when the hire fails, the verdict is escalate. Without the grant
+the plan waits for the person as always, and the inbox says when the manager reviews under a grant.
+
+**Steering and pushback.** A manager reads her reports' assigned work with `onionsoup_status`, which also lists her
+initiatives, and acts on it with `onionsoup_steer` (approve a plan under the grant, send it back, cancel the work,
+or leave the report a note). A report pushes back with `onionsoup_raise` (objection, question or blocked): the
+escalation is stored on the initiative, journaled to both, raised as the manager's attention, and wakes her. While it
+is open she cannot approve that assignment's plans; she resolves it with `onionsoup_initiative resolve-escalation`.
+
+The surface shows the tree under **Org**, each initiative's assignments by dependency step with their state, work,
+PRs, escalations and plan reviews, and initiatives awaiting approval in the inbox.
+
 ### Always on
 
 `npm run owners -- daemon` (installed as `deploy/onionsoup-owners.service`) ticks every minute: it re-reads the
-configuration, moves requests along, runs due duties, advances work items, and raises work notices. Requests, duties and
+configuration, moves requests along, supervises initiatives, runs due duties, advances work items, and raises work notices. Requests, duties and
 work items run in the background beside the tick (one run per item, one item per owner, two of each at a time; requests reserve both participating owners and serialize shared resources), so
 a long hire never holds up a 15-minute check or a waiting request. Deterministic
 checks wake a model only when one is needed, and that model is the owner. Work a stopped runtime was actually

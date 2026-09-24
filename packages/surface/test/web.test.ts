@@ -3,7 +3,9 @@ import { test } from 'node:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createElement } from 'react';
 import { FrictionDetail } from '../web/src/components/FrictionView.tsx';
-import type { FrictionRecord } from '../web/src/types.ts';
+import { InitiativeView } from '../web/src/components/InitiativeView.tsx';
+import { OrgTree } from '../web/src/components/OrgView.tsx';
+import type { FrictionRecord, PublicInitiative } from '../web/src/types.ts';
 import { applyChatEvent, orderedMessages, type Messages } from '../web/src/chat/chatState.ts';
 import { addedFile, languageOf, parseUnifiedDiff } from '../web/src/chat/diff.ts';
 import type { Message, Part } from '../web/src/types.ts';
@@ -100,4 +102,37 @@ test('unified diffs parse into files with line numbers, and new files are all ad
   const created = addedFile('/repo/new.py', 'print(1)\nprint(2)\n');
   assert.deepEqual([created.additions, created.deletions, created.rows.map(row => row.new)], [2, 0, [1, 2]]);
   assert.deepEqual(['a.ts', 'Dockerfile', 'x/vscode.chroot', 'notes.txt'].map(languageOf), ['typescript', 'docker', 'bash', '']);
+});
+
+test('an initiative lists its assignments by dependency step with state chips, work and PR links, escalations and plan reviews', () => {
+  const initiative: PublicInitiative = {
+    id: 'i-20260924-abcdef', owner: 'odrade', title: 'Org change', goal: 'Change core, then the wiki', rationale: 'Asked for',
+    status: 'approved', revision: 0, approval: { by: 'person', at: '2026-09-24T10:00:00.000Z', revision: 0 },
+    feedback: [], createdAt: '2026-09-24T09:00:00.000Z', updatedAt: '2026-09-24T11:00:00.000Z',
+    assignments: [
+      { id: 'core', to: 'clippy', title: 'Core change', after: [], depth: 0, state: 'awaiting-merge', request: 'r-1',
+        item: { id: 'w-request-r-1', status: 'landed', url: 'https://example.test/pr/7', prState: 'open' } },
+      { id: 'wiki', to: 'bellonda', title: 'Wiki follow-up', after: ['core'], depth: 1, state: 'not-dispatched' },
+    ],
+    escalations: [{ id: 'e-12345678', kind: 'question', from: 'clippy', assignment: 'core', note: 'Which branch?', at: '2026-09-24T10:30:00.000Z' }],
+    planReviews: [{ item: 'w-request-r-1', digest: 'abc', verdict: 'approve', note: 'Fits', by: 'owner:odrade', at: '2026-09-24T10:40:00.000Z' }],
+  };
+  const html = renderToStaticMarkup(createElement(InitiativeView, { initiative }));
+  for (const text of ['Org change', 'Step 1', 'Step 2', 'Core change', 'waiting on you to merge', 'not dispatched', 'after core',
+    'w-request-r-1', 'https://example.test/pr/7', 'Which branch?', 'Plan reviews', 'owner:odrade: Fits', 'Approved by person for revision 0']) {
+    assert.ok(html.includes(text), text);
+  }
+  assert.ok(html.indexOf('Core change') < html.indexOf('Wiki follow-up'), 'dependency order');
+  assert.ok(!html.includes('Approve initiative'), 'an approved initiative has no approval controls');
+  const waiting = renderToStaticMarkup(createElement(InitiativeView, { initiative: { ...initiative, status: 'awaiting-approval' } }));
+  assert.ok(waiting.includes('Approve initiative'));
+});
+
+test('the org tree nests reports under their manager', () => {
+  const html = renderToStaticMarkup(createElement(OrgTree, { entries: [
+    { id: 'clippy', name: 'clippy', title: '', icon: 'code', domain: 'd', manager: 'odrade' },
+    { id: 'odrade', name: 'Odrade', title: 'Mother Superior', icon: 'shield', domain: 'd' },
+    { id: 'homelab', name: 'Miles Teg', title: 'Bashar', icon: 'shield', domain: 'd' },
+  ] }));
+  assert.match(html, /Odrade.*<ul[^>]*>.*clippy.*<\/ul>.*Miles Teg/s);
 });

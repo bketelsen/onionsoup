@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { RiDraggable, RiInbox2Line, RiNotification3Line, RiErrorWarningLine } from '@remixicon/react';
+import { RiDraggable, RiInbox2Line, RiNotification3Line, RiErrorWarningLine, RiOrganizationChart } from '@remixicon/react';
 import { navigate, useConnected } from '../api.ts';
 import type { SurfaceState } from '../types.ts';
 import { BusyDots, cx, OwnerIcon } from './ui.tsx';
@@ -73,6 +73,10 @@ export function Rail({ state, route, onReorder }: { state?: SurfaceState; route:
           className={cx('flex items-center gap-2 rounded-md px-2 py-1.5 typography-ui-label', route[0] === 'friction' ? 'bg-interactive-active text-foreground' : 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground')}>
           <RiErrorWarningLine className="size-4" />Friction
           {!!state?.frictionCount && <span className="ml-auto rounded-full bg-primary text-primary-foreground px-1.5 typography-micro font-semibold">{state.frictionCount}</span>}
+        </button>
+        <button onClick={() => navigate('org')}
+          className={cx('flex items-center gap-2 rounded-md px-2 py-1.5 typography-ui-label', route[0] === 'org' || route[0] === 'initiative' ? 'bg-interactive-active text-foreground' : 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground')}>
+          <RiOrganizationChart className="size-4" />Org
         </button>
         <div className="mt-3 mb-1 px-2 typography-micro uppercase tracking-wide text-muted-foreground text-[0.68rem]">Owners</div>
         {state?.owners.map(owner => (

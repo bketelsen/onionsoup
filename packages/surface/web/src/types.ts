@@ -11,7 +11,7 @@ export type PendingQuestion = QuestionRequest;
 export type PendingPermission = PermissionRequest;
 
 export interface InboxEntry {
-  kind: 'plan' | 'push' | 'publish' | 'create' | 'delete' | 'permission' | 'question' | 'attention' | 'request-recovery';
+  kind: 'plan' | 'push' | 'publish' | 'create' | 'delete' | 'permission' | 'question' | 'attention' | 'request-recovery' | 'initiative';
   id: string; owner: string; title: string; detail: string; at?: string; sessionID?: string;
   attentionStatus?: string;
   permission?: PendingPermission; question?: PendingQuestion;
@@ -20,6 +20,7 @@ export interface InboxEntry {
 export interface SurfaceState { owners: OwnerSummary[]; inbox: InboxEntry[]; frictionCount: number; opencode?: { ok: boolean; error?: string } }
 
 export type { PublicFrictionRecord as FrictionRecord } from '../../src/friction-public.ts';
+export type { InitiativeSummary, OrgEntry, PublicAssignment, PublicInitiative } from '../../src/initiative-public.ts';
 
 export interface JournalNote { at: string; kind: string; note?: string; quote?: string; outcome?: string; stage?: string; session?: string; workItem?: string; retracted?: boolean }
 

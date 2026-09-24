@@ -3,4 +3,6 @@ persona: { name: Bellonda, title: Keeper of the test wiki, source: "Chapterhouse
 domain: { kind: git-repository, name: example/wiki, remote: https://example.invalid/wiki.git, baseBranch: main, verify: [[mkdocs, build, --strict]] }
 model: github-copilot/claude-sonnet-5
 workflow: change
-duties: []
+duties:
+  - { id: prs, kind: maintain-prs, instructions: "Keep published PRs mergeable." }
+reportsTo: odrade

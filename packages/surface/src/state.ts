@@ -1,14 +1,18 @@
 import { join } from 'node:path';
+import { z } from 'zod';
 import {
   approveCreate, approveDelete, approvePlan, approvePush, awaitingPublish, chatDirectory, denyRequest, deskState, describeAsk,
   domainSummary, itemText, publish, rejectPlan, revisePlan, resumeItem, retryItem, cancelItem, memoryFingerprint, type ResourceRequest, type Runtime,
   listAttention, changeAttention, recoverRequest, reconcileRequest,
   listFriction, frictionDetail, type FrictionRecord,
+  approveInitiative, reviseInitiative, cancelInitiative, initiativeViews, managerOf, planGrantFor,
+  type AssignmentView, type Initiative, type InitiativeView, type WorkItem,
 } from '@onionsoup/owners';
 import type { OpencodeApi, PendingPermission, PendingQuestion } from './opencode.ts';
 import { readSessionMessages, readSessionsTitled } from './hire-store.ts';
 import { ordered, SettingsStore } from './settings.ts';
 import type { PublicFrictionRecord } from './friction-public.ts';
+import type { InitiativeSummary, OrgEntry, PublicAssignment, PublicInitiative } from './initiative-public.ts';
 
 /**
  * The surface's view of onionsoup: owners with what waits on the person, one inbox across all of them, and the
@@ -32,8 +36,18 @@ function requestRecoveryDetail(request: ResourceRequest) {
   ].join('; ');
 }
 
+/** A person's decision on an engine gate, parsed once at the HTTP edge. */
+export const Decision = z.object({
+  action: z.string().trim().min(1),
+  id: z.string().trim().min(1),
+  note: z.string().optional(),
+  reason: z.string().optional(),
+  withDelete: z.boolean().optional(),
+});
+export type Decision = z.infer<typeof Decision>;
+
 export interface InboxEntry {
-  kind: 'plan' | 'push' | 'publish' | 'create' | 'delete' | 'permission' | 'question' | 'request-recovery' | 'attention';
+  kind: 'plan' | 'push' | 'publish' | 'create' | 'delete' | 'permission' | 'question' | 'request-recovery' | 'attention' | 'initiative';
   id: string;
   owner: string;
   title: string;
@@ -59,6 +73,46 @@ export interface OwnerSummary {
   chat: boolean;
   waiting: number;
   running: number;
+}
+
+/** How deep an assignment sits in its initiative's dependency order: 0 needs nothing first. */
+function dependencyDepths(assignments: readonly AssignmentView[]) {
+  const byId = new Map(assignments.map(assignment => [assignment.id, assignment]));
+  const depths = new Map<string, number>();
+  const depth = (id: string, path: readonly string[]): number => {
+    const known = depths.get(id);
+    if (known !== undefined) return known;
+    // A draft may still hold a cycle; submission refuses it, so draw it flat rather than recurse forever.
+    const after = (byId.get(id)?.after ?? []).filter(dependency => !path.includes(dependency));
+    const value = after.length ? 1 + Math.max(...after.map(dependency => depth(dependency, [...path, id]))) : 0;
+    depths.set(id, value);
+    return value;
+  };
+  return new Map(assignments.map(assignment => [assignment.id, depth(assignment.id, [])]));
+}
+
+function publicAssignment(assignment: AssignmentView, depth: number): PublicAssignment {
+  const { item } = assignment;
+  return {
+    id: assignment.id, to: assignment.to, title: assignment.proposal.title, after: assignment.after, depth, state: assignment.state,
+    request: assignment.request,
+    item: item && { id: item.id, status: item.status, url: item.publication?.url, prState: item.publication?.state },
+  };
+}
+
+function publicInitiative(view: InitiativeView): PublicInitiative {
+  const { origin: _origin, assignments, ...fields } = view;
+  const depths = dependencyDepths(assignments);
+  const shown = assignments.map(assignment => publicAssignment(assignment, depths.get(assignment.id) ?? 0));
+  return { ...fields, assignments: shown.sort((left, right) => left.depth - right.depth) };
+}
+
+function initiativeSummary(view: InitiativeView): InitiativeSummary {
+  return {
+    id: view.id, owner: view.owner, title: view.title, status: view.status, revision: view.revision,
+    merged: view.assignments.filter(assignment => assignment.state === 'completed').length, total: view.assignments.length,
+    openEscalations: view.escalations.filter(escalation => !escalation.resolution).length, updatedAt: view.updatedAt,
+  };
 }
 
 export class SurfaceState {
@@ -102,6 +156,7 @@ export class SurfaceState {
     const items = await this.runtime.ledger.list();
     const requests = await this.runtime.requests.list();
     const attention = await listAttention(this.runtime);
+    const initiatives = await this.runtime.initiatives.list();
     const entries: InboxEntry[] = [
       ...attention.filter(entry => entry.status !== 'resolved').map(entry => ({
         kind: 'attention' as const, id: entry.id, owner: entry.owner, title: entry.note,
@@ -112,7 +167,8 @@ export class SurfaceState {
         kind: 'request-recovery' as const, id: request.id, owner: request.to, title: describeAsk(request.ask),
         detail: requestRecoveryDetail(request), at: request.updatedAt,
       })),
-      ...items.filter(item => item.status === 'awaiting-plan-approval').map(item => ({ kind: 'plan' as const, id: item.id, owner: item.owner, title: item.proposal.title, detail: item.plan?.summary ?? item.proposal.goal, at: item.updatedAt })),
+      ...initiatives.filter(initiative => initiative.status === 'awaiting-approval').map(initiative => this.initiativeEntry(initiative)),
+      ...items.filter(item => item.status === 'awaiting-plan-approval').map(item => this.planEntry(item, initiatives)),
       ...items.filter(item => item.status === 'awaiting-push-approval').map(item => ({ kind: 'push' as const, id: item.id, owner: item.owner, title: item.proposal.title, detail: item.rebaseOf?.prUrl ?? '', at: item.updatedAt })),
       ...items.filter(awaitingPublish).map(item => ({ kind: 'publish' as const, id: item.id, owner: item.owner, title: item.proposal.title, detail: `Landed on ${item.branch}; publishing opens a draft PR.`, at: item.updatedAt })),
       ...requests.filter(request => request.status === 'awaiting-create-approval').map(request => ({ kind: 'create' as const, id: request.id, owner: request.to, title: `${request.from} asks: ${describeAsk(request.ask)}`, detail: request.ask.purpose, at: request.updatedAt })),
@@ -129,6 +185,54 @@ export class SurfaceState {
       for (const question of questions) entries.push({ kind: 'question', id: question.id, owner: owner.id, sessionID: question.sessionID, title: question.questions[0]?.question ?? 'A question', detail: '', question });
     }
     return entries;
+  }
+
+  private nameOf(ownerId: string) {
+    return this.runtime.declarations.owners.get(ownerId)?.persona?.name ?? ownerId;
+  }
+
+  private initiativeEntry(initiative: Initiative): InboxEntry {
+    const reports = [...new Set(initiative.assignments.map(assignment => assignment.to))].join(', ');
+    return {
+      kind: 'initiative', id: initiative.id, owner: initiative.owner, title: `Initiative: ${initiative.title}`,
+      detail: `${initiative.assignments.length} assignments to ${reports}. ${initiative.goal}`, at: initiative.updatedAt,
+    };
+  }
+
+  /** The manager holding this plan's approve-plans grant, when her review comes before the person's. */
+  private planReviewer(item: WorkItem, initiatives: readonly Initiative[]) {
+    const initiative = initiatives.find(candidate => candidate.id === item.assignment?.initiative && candidate.status === 'approved');
+    if (!initiative) return undefined;
+    const owner = this.runtime.declarations.owners.get(item.owner);
+    const repository = this.runtime.repositoryFor(item).domain.name;
+    return owner && planGrantFor(owner, initiative.owner, repository) ? this.nameOf(initiative.owner) : undefined;
+  }
+
+  private planEntry(item: WorkItem, initiatives: readonly Initiative[]): InboxEntry {
+    const reviewer = this.planReviewer(item, initiatives);
+    const summary = item.plan?.summary ?? item.proposal.goal;
+    return {
+      kind: 'plan', id: item.id, owner: item.owner, title: item.proposal.title, at: item.updatedAt,
+      detail: reviewer ? `${reviewer} reviews under standing grant. ${summary}` : summary,
+    };
+  }
+
+  /** Every owner with its manager, for the org chart. */
+  org(): OrgEntry[] {
+    return [...this.runtime.declarations.owners.values()].map(owner => ({
+      id: owner.id, name: owner.persona?.name ?? owner.id, title: owner.persona?.title ?? '', icon: owner.persona?.icon ?? 'briefcase',
+      domain: domainSummary(owner), manager: managerOf(this.runtime.declarations, owner.id)?.id,
+    }));
+  }
+
+  async initiatives() {
+    return (await initiativeViews(this.runtime)).map(initiativeSummary);
+  }
+
+  async initiative(initiativeId: string) {
+    const view = (await initiativeViews(this.runtime)).find(candidate => candidate.id === initiativeId);
+    if (!view) throw new Error(`initiative_not_found: ${initiativeId}`);
+    return publicInitiative(view);
   }
 
   async owners(inbox?: InboxEntry[]): Promise<OwnerSummary[]> {
@@ -183,7 +287,7 @@ export class SurfaceState {
   }
 
   /** A person's decision on an engine gate. Returns a one-line outcome. */
-  async decide(decision: { action: string; id: string; note?: string; reason?: string; withDelete?: boolean }, by: string) {
+  async decide(decision: Decision, by: string) {
     const reason = decision.reason?.trim();
     const actions: Record<string, () => Promise<string>> = {
       'approve-plan': async () => (await approvePlan(this.runtime, decision.id, by, decision.note)).status,
@@ -202,6 +306,9 @@ export class SurfaceState {
       'cancel-request': async () => (await recoverRequest(this.runtime, decision.id, 'cancel', by, required(reason, 'reason'))).status,
       'acknowledge-attention': async () => (await changeAttention(this.runtime, decision.id, 'acknowledged', by, required(reason, 'reason'))).status,
       'resolve-attention': async () => (await changeAttention(this.runtime, decision.id, 'resolved', by, required(reason, 'reason'))).status,
+      'approve-initiative': async () => (await approveInitiative(this.runtime, decision.id, by, decision.note)).status,
+      'revise-initiative': async () => (await reviseInitiative(this.runtime, decision.id, by, required(decision.note, 'note'))).status,
+      'cancel-initiative': async () => (await cancelInitiative(this.runtime, decision.id, by, required(reason, 'reason'))).status,
     };
     const action = actions[decision.action];
     if (!action) throw new Error(`unknown_decision: ${decision.action}`);
@@ -255,6 +362,7 @@ export class SurfaceState {
     return JSON.stringify([
       items.map(item => [item.id, item.status, item.updatedAt]),
       requests.map(request => [request.id, request.status, request.updatedAt]),
+      (await this.runtime.initiatives.list()).map(initiative => [initiative.id, initiative.status, initiative.updatedAt]),
       await memoryFingerprint(this.runtime),
       await listAttention(this.runtime),
       (await listFriction(this.runtime)).map(entry => [entry.id, entry.count, entry.lastSeen]),

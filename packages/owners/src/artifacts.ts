@@ -69,6 +69,13 @@ export const Verdict = z.object({
 });
 export type Verdict = z.infer<typeof Verdict>;
 
+/** A manager's review of a report's plan, under the person's standing approve-plans grant. */
+export const ManagerPlanVerdict = z.object({
+  decision: z.enum(['approve', 'revise', 'escalate']),
+  note: z.string().describe('approve: anything worth keeping in mind (may be empty); revise: exactly what the planner must change; escalate: why the person should decide'),
+});
+export type ManagerPlanVerdict = z.infer<typeof ManagerPlanVerdict>;
+
 export const Learnings = z.object({
   notebook: z.array(NotebookEdit),
 });
