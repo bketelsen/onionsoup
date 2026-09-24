@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { Runtime, advance, approvePlan, cancelItem, publish, resumeItem, retryItem } from '@onionsoup/owners';
 import { git, refreshCheckout, ensureDesk, createWorktree } from '../src/workspace.ts';
 import { maintainPullRequests } from '../src/rebase.ts';
-import { proposeDeskChanges } from '../src/desk-changes.ts';
+import { DESK_CHANGE_LIMITS, proposeDeskChanges, resetDeskReviews } from '../src/desk-changes.ts';
+import { deskReviewRounds } from '../src/desk-reviews.ts';
 import type { HireRequest } from '../src/opencode.ts';
 
 const proposal = { title: 'Repair flow', goal: 'Complete the change', rationale: 'Regression', acceptance: ['It completes'], size: 'small' as const };
@@ -601,4 +602,69 @@ test('a post-merge desk failure still reports the failed follow-up', async () =>
   const notice = describeChange(source, 'landing|open');
   assert.equal(notice?.change, 'failed');
   assert.match(notice!.text, /site_publish_unavailable/);
+});
+
+async function journalKinds(runtime: Runtime, ownerId: string) {
+  const directory = join(runtime.notebook(ownerId).directory, 'journal');
+  const files = (await readdir(directory).catch(() => [] as string[])).filter(name => name.endsWith('.jsonl'));
+  const lines = (await Promise.all(files.map(file => readFile(join(directory, file), 'utf8')))).join('').split('\n').filter(Boolean);
+  return lines.map(line => (JSON.parse(line) as { kind: string }).kind);
+}
+
+const revise = (issue: string) => ({
+  decision: 'revise', summary: `Fix ${issue}`, findings: [{ severity: 'major', file: 'change', issue, suggestion: `Resolve ${issue}` }],
+});
+
+test('a desk re-review checks the previous findings against what changed since, instead of starting over', async () => {
+  const { runtime } = await fixture();
+  const desk = await ensureDesk(runtime.repositoryOwner('clippy'), runtime.desksRoot);
+  const briefs: string[] = [];
+  scriptHires(runtime, async request => {
+    briefs.push(request.brief);
+    return revise(`issue ${briefs.length}`);
+  });
+  await writeFile(join(desk.path, 'change'), 'first draft\n');
+  assert.equal((await proposeDeskChanges(runtime, 'clippy', 'Desk change', 'Update')).outcome, 'needs-work');
+  assert.doesNotMatch(briefs[0]!, /previous-review/, 'a first review has nothing to check against');
+  await writeFile(join(desk.path, 'change'), 'second draft\n');
+  assert.equal((await proposeDeskChanges(runtime, 'clippy', 'Desk change', 'Update')).outcome, 'needs-work');
+  assert.match(briefs[1]!, /<previous-review round="1" reviewer="[^"]+" decision="revise">/);
+  assert.match(briefs[1]!, /\[major\] change: issue 1 → Resolve issue 1/);
+  assert.match(briefs[1]!, /<changes-since-previous-review>[\s\S]*-first draft\n\+second draft/);
+  assert.match(briefs[1]!, /checking every previous finding/);
+  const rounds = await deskReviewRounds(runtime, 'clippy', 'example/clippy');
+  assert.deepEqual(rounds.map(round => round.findings[0]?.issue), ['issue 1', 'issue 2']);
+  assert.equal((await git(desk.path, ['diff', '--name-only'])).trim(), 'change', "the review's snapshot leaves the owner's own git diff intact");
+});
+
+test('after too many rounds the person decides; a reset starts afresh and an approval clears the history', async (context) => {
+  const { runtime, root, remote } = await fixture();
+  const desk = await ensureDesk(runtime.repositoryOwner('clippy'), runtime.desksRoot);
+  const limit = DESK_CHANGE_LIMITS.reviewRoundsBeforePerson;
+  context.after(() => { DESK_CHANGE_LIMITS.reviewRoundsBeforePerson = limit; });
+  DESK_CHANGE_LIMITS.reviewRoundsBeforePerson = 2;
+  let hires = 0;
+  let answer: unknown = revise('wording');
+  scriptHires(runtime, async () => {
+    hires++;
+    return answer;
+  });
+  await writeFile(join(desk.path, 'change'), 'draft\n');
+  await proposeDeskChanges(runtime, 'clippy', 'Desk change', 'Update');
+  await proposeDeskChanges(runtime, 'clippy', 'Desk change', 'Update');
+  const waiting = await proposeDeskChanges(runtime, 'clippy', 'Desk change', 'Update');
+  assert.equal(waiting.outcome, 'needs-person');
+  assert.match(waiting.summary, /desk-review-reset clippy example\/clippy/);
+  assert.equal(hires, 2, 'no reviewer is hired while the person decides');
+  await proposeDeskChanges(runtime, 'clippy', 'Desk change', 'Update');
+  assert.equal((await journalKinds(runtime, 'clippy')).filter(kind => kind === 'attention').length, 1, 'the person is asked once');
+
+  assert.equal(await resetDeskReviews(runtime, 'clippy', undefined, 'person'), 2);
+  assert.ok((await journalKinds(runtime, 'clippy')).includes('desk-review-reset'));
+  answer = verdict;
+  await fakeGithub(root, remote, async () => {
+    assert.equal((await proposeDeskChanges(runtime, 'clippy', 'Desk change', 'Update')).outcome, 'opened');
+  });
+  assert.equal(hires, 3);
+  assert.deepEqual(await deskReviewRounds(runtime, 'clippy', 'example/clippy'), [], 'an approved change leaves no history');
 });

@@ -14,7 +14,7 @@ import { DAEMON_LIMITS, daemon, drain, recordDutyRun, tick, type TickLog } from 
 import { publish } from './publish.ts';
 import { approvePush } from './rebase.ts';
 import { describeAsk, type ResourceRequest } from './requests.ts';
-import { proposeDeskChanges } from './desk-changes.ts';
+import { proposeDeskChanges, resetDeskReviews } from './desk-changes.ts';
 import { shipEngine } from './ship.ts';
 import { deskState, initiativesText, initiativeText } from './desk.ts';
 import { approveInitiative, cancelInitiative, initiativeView, initiativeViews, reviseInitiative } from './org-work.ts';
@@ -227,6 +227,10 @@ const COMMANDS: Record<string, Command> = {
   async 'deny-request'(runtime, [requestId]) {
     console.log(requestLine(await denyRequest(runtime, required(requestId, 'request'), userInfo().username, required(options.reason, '--reason'))));
   },
+  async 'desk-review-reset'(runtime, [ownerId, repository]) {
+    const cleared = await resetDeskReviews(runtime, required(ownerId, 'owner'), repository, userInfo().username);
+    console.log(`${ownerId}: ${cleared} review rounds cleared; the next proposal is reviewed afresh`);
+  },
   async initiatives(runtime) {
     console.log(initiativesText(await initiativeViews(runtime)));
   },
@@ -293,7 +297,7 @@ const LOCK_FREE = [
   'distill', 'items', 'show', 'notebook', 'requests', 'approve', 'publish', 'revise-plan', 'reject',
   'resume', 'retry', 'cancel', 'desk', 'desk-state', 'retract', 'ask', 'request-publish', 'propose',
   'ship', 'approve-push', 'approve-create', 'approve-delete', 'deny-request',
-  'initiatives', 'initiative', 'approve-initiative', 'revise-initiative', 'cancel-initiative',
+  'desk-review-reset', 'initiatives', 'initiative', 'approve-initiative', 'revise-initiative', 'cancel-initiative',
 ];
 try {
   const unlock = LOCK_FREE.includes(commandName!) ? async () => {} : await runtime.lock();

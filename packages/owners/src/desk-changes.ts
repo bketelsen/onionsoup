@@ -4,6 +4,9 @@ import { z } from 'zod';
 import type { WorkItem } from './ledger.ts';
 import { Verdict } from './artifacts.ts';
 import { requestPublish } from './brokering.ts';
+import {
+  changesSince, clearDeskReviews, deskReviewRounds, deskTree, recordDeskReview, type DeskReviewRound,
+} from './desk-reviews.ts';
 import { requireFreelancer, type RepositoryOwner } from './declarations.ts';
 import { pickModel } from './families.ts';
 import type { Runtime } from './runtime.ts';
@@ -12,7 +15,7 @@ import { ensureDesk, git, verificationPassed, verify } from './workspace.ts';
 
 const run = promisify(execFile);
 
-export const DESK_CHANGE_LIMITS = { diffChars: 60_000 };
+export const DESK_CHANGE_LIMITS = { diffChars: 60_000, reviewRoundsBeforePerson: 4 };
 
 /**
  * An owner's desk work becomes a reviewed change: host code verifies the desk in the sandbox, hires a reviewer
@@ -20,22 +23,62 @@ export const DESK_CHANGE_LIMITS = { diffChars: 60_000 };
  * PR. An owner holding a merge grant from the person merges its own approved PR, and a site built from the
  * repository is then published through its host's grant.
  */
-export interface DeskChangeResult { outcome: 'merged' | 'opened' | 'needs-work' | 'publication-failed' | 'in-progress' | 'nothing-to-do'; summary: string; url?: string; publishRequest?: string }
+export interface DeskChangeResult { outcome: 'merged' | 'opened' | 'needs-work' | 'needs-person' | 'publication-failed' | 'in-progress' | 'nothing-to-do'; summary: string; url?: string; publishRequest?: string }
 
 function hasMergeGrant(owner: RepositoryOwner) {
   return owner.grants.some(grant => grant.to === owner.id && grant.action === 'merge' && (grant.target === owner.domain.name || grant.target === '*'));
 }
 
-function reviewBrief(owner: RepositoryOwner, title: string, summary: string, patch: string) {
+function reviewBrief(owner: RepositoryOwner, title: string, summary: string, patch: string, previousReview?: string) {
   return [
     `You have been hired to review a change ${owner.persona?.name ?? owner.id} made in ${owner.domain.name}. Do not edit anything.`,
     REPOSITORY_REVIEW,
     `<title>${title}</title>`,
     `<what-the-owner-says-it-does>\n${summary}\n</what-the-owner-says-it-does>`,
     `<diff-against-${owner.domain.baseBranch}>\n${patch}\n</diff-against-${owner.domain.baseBranch}>`,
+    previousReview,
     `Approve only if the diff does what the owner says and nothing else, is correct, and keeps to the repository's
 conventions. Revise, with specific findings, otherwise. Replan is not available here; use revise.`,
-  ].join('\n\n');
+  ].filter(Boolean).join('\n\n');
+}
+
+function findingLines(findings: Verdict['findings']) {
+  return findings.map(finding => `- [${finding.severity}] ${finding.file}: ${finding.issue} → ${finding.suggestion}`).join('\n');
+}
+
+const CONVERGENCE = `This change has been reviewed before. Start by checking every previous finding against the diff,
+and say in your summary which are resolved. Ask for changes only for previous findings that are not resolved and for
+problems in the changes since the previous review. Text that earlier rounds already reviewed without objection is
+settled: raise something new there only if it is a blocker (a factual, correctness or safety error), and say why no
+earlier round caught it.`;
+
+/** The latest round's findings and what changed since, so this round checks them instead of starting over. */
+async function previousReviewSection(deskPath: string, rounds: readonly DeskReviewRound[], currentTree: string) {
+  const previous = rounds.at(-1);
+  if (!previous) return undefined;
+  const changes = (await changesSince(deskPath, previous.tree, currentTree))?.slice(0, DESK_CHANGE_LIMITS.diffChars);
+  const findings = findingLines(previous.findings) || '(no findings listed)';
+  const since = changes === undefined ? '' : `<changes-since-previous-review>\n${changes}\n</changes-since-previous-review>`;
+  const header = `round="${rounds.length}" reviewer="${previous.reviewer}" decision="${previous.decision}"`;
+  return [`<previous-review ${header}>\n${previous.summary}\n${findings}\n</previous-review>`, since, CONVERGENCE].filter(Boolean).join('\n\n');
+}
+
+/** After too many rounds the person reads the diff; no reviewer is hired until they clear the history. */
+function waitingForPerson(owner: RepositoryOwner, rounds: readonly DeskReviewRound[]): DeskChangeResult | undefined {
+  if (rounds.length < DESK_CHANGE_LIMITS.reviewRoundsBeforePerson) return undefined;
+  const reset = `npm run owners -- desk-review-reset ${owner.id} ${owner.domain.name}`;
+  return {
+    outcome: 'needs-person',
+    summary: `${rounds.length} review rounds asked for changes; nothing was committed and no reviewer was hired. Bring the person in: they read the diff and tell you what to change, or clear the review history with \`${reset}\`.`,
+  };
+}
+
+async function recordNeedsWork(runtime: Runtime, owner: RepositoryOwner, title: string, round: DeskReviewRound) {
+  const notebook = runtime.notebook(owner.id);
+  await notebook.journal({ kind: 'desk-change-reviewed', outcome: round.decision, note: `${title}: ${round.summary}` });
+  const rounds = await recordDeskReview(runtime, owner.id, owner.domain.name, round);
+  if (rounds.length !== DESK_CHANGE_LIMITS.reviewRoundsBeforePerson) return;
+  await notebook.journal({ kind: 'attention', note: `desk change "${title}" in ${owner.domain.name}: ${rounds.length} review rounds asked for changes; the person reads the diff and decides` });
 }
 
 async function prepareDeskChanges(
@@ -51,16 +94,20 @@ async function prepareDeskChanges(
     const failed = verification.filter(result => result.exitCode !== 0).map(result => `${result.command}: ${result.output.slice(-600)}`).join('\n');
     return { outcome: 'needs-work', summary: `Verification failed; nothing was committed.\n${failed}` };
   }
+  const rounds = await deskReviewRounds(runtime, owner.id, owner.domain.name);
+  const waiting = waitingForPerson(owner, rounds);
+  if (waiting) return waiting;
   await git(desk.path, ['add', '-A', '--intent-to-add']);
   const patch = (await git(desk.path, ['diff', `origin/${owner.domain.baseBranch}`])).slice(0, DESK_CHANGE_LIMITS.diffChars);
+  const tree = await deskTree(desk.path);
+  const brief = reviewBrief(owner, title, summary, patch, await previousReviewSection(desk.path, rounds, tree));
   const reviewer = pickModel(runtime.declarations.families, requireFreelancer(runtime.declarations, 'review').models, [runtime.family(owner.model)]);
-  const verdict = (await runtime.hire(owner.id, { role: 'reviewer', model: reviewer.model, directory: desk.path, title: `${owner.id}: review desk change`, brief: reviewBrief(owner, title, summary, patch), schema: Verdict })).value;
-  const notebook = runtime.notebook(owner.id);
+  const verdict = (await runtime.hire(owner.id, { role: 'reviewer', model: reviewer.model, directory: desk.path, title: `${owner.id}: review desk change`, brief, schema: Verdict })).value;
   if (verdict.decision !== 'approve') {
-    await notebook.journal({ kind: 'desk-change-reviewed', outcome: verdict.decision, note: `${title}: ${verdict.summary}` });
-    const findings = verdict.findings.map(finding => `- [${finding.severity}] ${finding.file}: ${finding.issue} → ${finding.suggestion}`).join('\n');
-    return { outcome: 'needs-work', summary: `${reviewer.model} asked for changes; nothing was committed.\n${verdict.summary}\n${findings}` };
+    await recordNeedsWork(runtime, owner, title, { at: new Date().toISOString(), reviewer: reviewer.model, ...verdict, tree });
+    return { outcome: 'needs-work', summary: `${reviewer.model} asked for changes; nothing was committed.\n${verdict.summary}\n${findingLines(verdict.findings)}` };
   }
+  await clearDeskReviews(runtime, owner.id, owner.domain.name);
   await git(desk.path, ['add', '-A']);
   const item = await runtime.ledger.create(owner.id, DESK_WORKFLOW, {
     title, goal: summary, rationale: 'Reviewed changes from the owner desk', acceptance: ['Host verification and cross-family review pass'],
@@ -76,6 +123,17 @@ async function prepareDeskChanges(
     },
   });
   return continueDeskPublication(runtime, item.id);
+}
+
+/** The person has read the diff: the next proposal is reviewed afresh, with no earlier rounds and a new budget. */
+export async function resetDeskReviews(runtime: Runtime, ownerId: string, repository: string | undefined, by: string) {
+  const owner = runtime.repositoryOwner(ownerId, repository);
+  const rounds = await deskReviewRounds(runtime, owner.id, owner.domain.name);
+  await clearDeskReviews(runtime, owner.id, owner.domain.name);
+  const notebook = runtime.notebook(owner.id);
+  await notebook.journal({ kind: 'desk-review-reset', note: `${owner.domain.name}: ${rounds.length} review rounds cleared by ${by}` });
+  await notebook.commit('journal desk-review-reset').catch(() => undefined);
+  return rounds.length;
 }
 
 export const DESK_WORKFLOW = 'desk-publication';

@@ -1,0 +1,62 @@
+import { execFile } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { promisify } from 'node:util';
+import { z } from 'zod';
+import { Finding, Verdict } from './artifacts.ts';
+import type { Runtime } from './runtime.ts';
+import { git } from './workspace.ts';
+
+const run = promisify(execFile);
+
+/**
+ * The review rounds of one owner's desk change in one repository. Each round keeps the tree it reviewed, so the
+ * next reviewer sees what changed since and checks the earlier findings first instead of starting over.
+ */
+export const DeskReviewRound = z.object({
+  at: z.string(), reviewer: z.string(), decision: Verdict.shape.decision, summary: z.string(), findings: z.array(Finding), tree: z.string(),
+});
+export type DeskReviewRound = z.infer<typeof DeskReviewRound>;
+const DeskReviewHistory = z.object({ rounds: z.array(DeskReviewRound) });
+
+function historyPath(runtime: Runtime, ownerId: string, repository: string) {
+  return join(runtime.stateDirectory, 'desk-reviews', `${ownerId}--${repository.replaceAll('/', '--')}.json`);
+}
+
+export async function deskReviewRounds(runtime: Runtime, ownerId: string, repository: string) {
+  const text = await readFile(historyPath(runtime, ownerId, repository), 'utf8').catch(() => undefined);
+  return text ? DeskReviewHistory.parse(JSON.parse(text)).rounds : [];
+}
+
+export async function recordDeskReview(runtime: Runtime, ownerId: string, repository: string, round: DeskReviewRound) {
+  const path = historyPath(runtime, ownerId, repository);
+  const rounds = [...await deskReviewRounds(runtime, ownerId, repository), round];
+  await mkdir(join(runtime.stateDirectory, 'desk-reviews'), { recursive: true });
+  await writeFile(path, JSON.stringify({ rounds }, null, 2) + '\n');
+  return rounds;
+}
+
+/** An approved change, or the person's reset, starts the next desk change with no history. */
+export async function clearDeskReviews(runtime: Runtime, ownerId: string, repository: string) {
+  await rm(historyPath(runtime, ownerId, repository), { force: true });
+}
+
+/** The desk's working tree as a tree object, built in a throwaway index so the desk's own staging is untouched. */
+export async function deskTree(deskPath: string) {
+  const index = join(tmpdir(), `onionsoup-desk-index-${randomUUID()}`);
+  const options = { cwd: deskPath, env: { ...process.env, GIT_INDEX_FILE: index }, maxBuffer: 32 * 1024 * 1024 };
+  try {
+    await run('git', ['read-tree', 'HEAD'], options);
+    await run('git', ['add', '-A'], options);
+    return (await run('git', ['write-tree'], options)).stdout.trim();
+  } finally {
+    await rm(index, { force: true });
+  }
+}
+
+/** What changed since the tree a round reviewed; undefined when that tree is gone. */
+export async function changesSince(deskPath: string, reviewedTree: string, currentTree: string) {
+  return git(deskPath, ['diff', reviewedTree, currentTree]).catch(() => undefined);
+}
