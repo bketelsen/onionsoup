@@ -22,7 +22,8 @@ export { listAttention, changeAttention, type Attention } from './attention.ts';
 export { requestWork } from './delegation.ts';
 export { AssignmentRef, AssignmentState, Assignment, Initiative, InitiativeDraft, InitiativeStatus, INITIATIVE_LIMITS } from './initiatives.ts';
 export {
-  approveInitiative, reviseInitiative, cancelInitiative, initiativeView, initiativeViews, assignmentState, planDigest,
+  draftInitiative, submitInitiative, approveInitiative, reviseInitiative, cancelInitiative, initiativeView, initiativeViews,
+  assignmentState, planDigest,
   type AssignmentView, type InitiativeView,
 } from './org-work.ts';
 export { initiativeText, initiativesText } from './desk.ts';

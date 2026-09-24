@@ -3,7 +3,7 @@ import { stat } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { userInfo } from 'node:os';
 import { extname, join, normalize, resolve } from 'node:path';
-import type { SurfaceState } from './state.ts';
+import { Decision, type SurfaceState } from './state.ts';
 import { memoryStatus, requestDistill } from '@onionsoup/owners';
 
 export const SURFACE_LIMITS = { pollMs: 3_000, reloadMs: 15_000, bodyBytes: 1024 * 1024, heartbeatMs: 25_000 };
@@ -23,12 +23,17 @@ const FRICTION_HTTP_STATUS: Record<string, number> = {
   friction_invalid_id: 400, friction_not_found: 404, friction_invalid_record: 422,
 };
 
-async function frictionRoute<T>(operation: () => Promise<T>) {
+const INITIATIVE_HTTP_STATUS: Record<string, number> = {
+  initiative_invalid_id: 400, initiative_not_found: 404,
+};
+
+/** Engine errors whose code (the text before the first colon) has an HTTP status keep their message. */
+async function codedRoute<T>(statuses: Record<string, number>, operation: () => Promise<T>) {
   try {
     return await operation();
   } catch (error) {
     const reason = error instanceof Error ? error.message : '';
-    const status = FRICTION_HTTP_STATUS[reason];
+    const status = statuses[reason.split(':')[0]!];
     if (status) throw new HttpError(status, reason);
     throw error;
   }
@@ -99,8 +104,11 @@ export function surfaceServer(state: SurfaceState, options: { webRoot: string; b
       const [inbox, opencode] = await Promise.all([state.inbox(), state.opencode.health()]);
       return { owners: await state.owners(inbox), inbox, opencode, frictionCount: (await state.friction()).length };
     }),
-    route('GET', '/api/friction', async () => frictionRoute(() => state.friction())),
-    route('GET', '/api/friction/:id', async params => frictionRoute(() => state.frictionRecord(params.id!))),
+    route('GET', '/api/friction', async () => codedRoute(FRICTION_HTTP_STATUS, () => state.friction())),
+    route('GET', '/api/friction/:id', async params => codedRoute(FRICTION_HTTP_STATUS, () => state.frictionRecord(params.id!))),
+    route('GET', '/api/org', async () => state.org()),
+    route('GET', '/api/initiatives', async () => state.initiatives()),
+    route('GET', '/api/initiatives/:id', async params => codedRoute(INITIATIVE_HTTP_STATUS, () => state.initiative(params.id!))),
     route('GET', '/api/settings', async () => state.settings.read()),
     route('PUT', '/api/settings/owner-order', async (_params, body) => {
       const order = (await body()).order;
@@ -124,13 +132,9 @@ export function surfaceServer(state: SurfaceState, options: { webRoot: string; b
       return state.hireMessages(session.id);
     }),
     route('POST', '/api/decide', async (_params, body) => {
-      const input = await body();
-      const outcome = await state.decide({
-        action: text(input.action, 'action'), id: text(input.id, 'id'),
-        note: typeof input.note === 'string' ? input.note : undefined,
-        reason: typeof input.reason === 'string' ? input.reason : undefined,
-        withDelete: typeof input.withDelete === 'boolean' ? input.withDelete : undefined,
-      }, by);
+      const parsed = Decision.safeParse(await body());
+      if (!parsed.success) throw new HttpError(400, `invalid_decision: ${parsed.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`).join('; ')}`);
+      const outcome = await state.decide(parsed.data, by);
       broadcast('onionsoup', { reason: 'decision' });
       return { outcome };
     }),

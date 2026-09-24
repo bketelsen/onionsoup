@@ -91,6 +91,18 @@ function RecoveryActions(props: DecisionActionProps) {
   </>;
 }
 
+function InitiativeActions(props: DecisionActionProps) {
+  const { entry, busy, text, decide } = props;
+  return <>
+    <Button variant="primary" disabled={busy} onClick={() => void decide('approve-initiative', { note: text || undefined })}>Approve initiative</Button>
+    <Button disabled={busy || !text.trim()} onClick={() => void decide('revise-initiative', { note: text })}>Send back</Button>
+    <Button variant="destructive" disabled={busy || !text.trim()} onClick={() => void decide('cancel-initiative', { reason: text })}>Cancel</Button>
+    {!globalThis.location?.hash.startsWith('#/initiative/') && (
+      <Button variant="ghost" onClick={() => navigate('initiative', entry.id)}><RiExternalLinkLine className="size-3.5" />Breakdown</Button>
+    )}
+  </>;
+}
+
 function ItemLink({ entry, label }: { entry: InboxEntry; label: string }) {
   if (globalThis.location?.hash.startsWith('#/item/')) return null;
   return <Button variant="ghost" onClick={() => navigate('item', entry.id)}>
@@ -107,6 +119,7 @@ const ACTIONS: Record<InboxEntry['kind'], (props: DecisionActionProps) => ReactN
   permission: PermissionActions,
   attention: AttentionActions,
   'request-recovery': RecoveryActions,
+  initiative: InitiativeActions,
   question: () => null,
 };
 

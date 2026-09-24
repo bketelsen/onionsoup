@@ -94,3 +94,17 @@ test('attention and interrupted requests retain their decision controls after th
   assert.match(recovery, /disabled=""[^>]*>Stop request/);
   for (const html of [attention, recovery]) assert.ok(html.includes('Reason or observed outcome'));
 });
+
+test('an initiative waiting on the person offers approve, send back and cancel, the last two requiring a note', () => {
+  const html = renderToStaticMarkup(createElement(Decision, {
+    entry: { kind: 'initiative', id: 'i-20260924-abcdef', owner: 'odrade', title: 'Initiative: Org change', detail: '2 assignments to bellonda, clippy.' },
+    onDone: () => undefined,
+  }));
+  assert.ok(html.includes('Initiative to approve'));
+  assert.match(html, /<button[^>]*>Approve initiative/);
+  assert.doesNotMatch(html, /disabled=""[^>]*>Approve initiative/);
+  assert.match(html, /disabled=""[^>]*>Send back/);
+  assert.match(html, /disabled=""[^>]*>Cancel/);
+  assert.ok(html.includes('Breakdown'));
+  assert.ok(html.includes('Note (sent with approval, required to send back or cancel)'));
+});
