@@ -45,7 +45,11 @@ export type OwnerAnswers = z.infer<typeof OwnerAnswers>;
 
 export const ImplementationReport = z.object({
   summary: z.string(),
-  filesChanged: z.array(z.string()),
+  // Nothing in the codebase currently reads filesChanged (verified by grep), so a
+  // model that omits it defaults to an empty array rather than failing the whole
+  // deliverable. If a consumer starts depending on this field, revisit this
+  // comment and the default together.
+  filesChanged: z.array(z.string()).default([]),
   deviationsFromPlan: z.array(z.string()),
 });
 export type ImplementationReport = z.infer<typeof ImplementationReport>;

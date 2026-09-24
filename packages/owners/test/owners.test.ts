@@ -208,6 +208,16 @@ test('a deliverable with a list sent as a JSON string is repaired; a missing fie
   assert.throws(() => salvageAnswer(new HireError('deliverable_invalid', 'ses_1', { observed: 'x' })), /deliverable_invalid/);
 });
 
+test('an implementation report omitting filesChanged defaults to an empty array, but summary and deviationsFromPlan stay required', async () => {
+  const { parseDeliverable } = await import('../src/opencode.ts');
+  const { ImplementationReport } = await import('../src/artifacts.ts');
+  const withoutFilesChanged = parseDeliverable(ImplementationReport, { summary: 'did the thing', deviationsFromPlan: [] });
+  assert.ok(withoutFilesChanged.success);
+  assert.deepEqual(withoutFilesChanged.data, { summary: 'did the thing', filesChanged: [], deviationsFromPlan: [] });
+  assert.equal(parseDeliverable(ImplementationReport, { filesChanged: [], deviationsFromPlan: [] }).success, false);
+  assert.equal(parseDeliverable(ImplementationReport, { summary: 'did the thing', filesChanged: [] }).success, false);
+});
+
 test('a steward creates and retires owners in its scope, and never writes authority or itself', async () => {
   const { cp: copy, writeFile: write, access } = await import('node:fs/promises');
   const { execFileSync } = await import('node:child_process');
