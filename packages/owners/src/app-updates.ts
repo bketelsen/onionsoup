@@ -3,9 +3,8 @@ import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { z } from 'zod';
 import type { Duty } from './declarations.ts';
-import type { ResourceRequest } from './requests.ts';
+import type { ResourceRequest, UpdateAppAsk } from './requests.ts';
 import type { Runtime } from './runtime.ts';
-import { withTruenas } from './truenas.ts';
 
 /**
  * App updates on the NAS. Detection is deterministic and needs no model; a model (the owner) is woken only
@@ -13,7 +12,7 @@ import { withTruenas } from './truenas.ts';
  * request that a standing grant or a person approves, and host code performs it through the TrueNAS API.
  * A hold is remembered for that target version, so the owner is not re-asked about the same release daily.
  */
-export const APP_UPDATE_LIMITS = { holdDays: 7, updateWaitMs: 15 * 60_000, pollMs: 10_000 };
+export const APP_UPDATE_LIMITS = { holdDays: 7, updateWaitMs: 15 * 60_000, pollMs: 10_000, jobHistory: 50, maxJobsPerUpdate: 3 };
 
 interface AppUpdate { name: string; state: string; version: string; latestVersion: string; humanVersion: string; imageUpdates: boolean }
 
@@ -81,8 +80,10 @@ If you could not read any notes for an app, hold it and say so. List the URLs yo
 /** The app-updates duty. Returns a summary; opens update-app requests for apps judged safe. */
 export async function reviewAppUpdates(runtime: Runtime, ownerId: string, duty: Duty) {
   const owner = runtime.truenasOwner(ownerId);
-  const report = await withTruenas(owner.domain, false, call => call('truenas_apps_update_report'));
-  const open = new Set((await runtime.requests.list()).filter(request => request.ask.kind === 'update-app' && !['updated', 'failed', 'declined', 'denied'].includes(request.status)).map(request => (request.ask as { app: string }).app));
+  const report = await runtime.truenas(owner.domain, false, call => call('truenas_apps_update_report'));
+  const open = new Set((await runtime.requests.list()).flatMap(request =>
+    request.to === ownerId && request.ask.kind === 'update-app' && !['updated', 'failed', 'declined', 'denied'].includes(request.status)
+      ? [request.ask.app] : []));
   const holds = await readHolds(runtime, ownerId);
   const candidates = appsIn(report).filter(app => !open.has(app.name) && !isHeld(holds[app.name], app));
   const notebook = runtime.notebook(ownerId);
@@ -102,7 +103,7 @@ export async function reviewAppUpdates(runtime: Runtime, ownerId: string, duty: 
       await notebook.journal({ kind: 'app-held', note: `${app.name} ${app.version} → ${app.latestVersion}: ${decision.reason}`, outcome: decision.notesRead.join(' ') });
       continue;
     }
-    const ask = { kind: 'update-app' as const, app: app.name, fromVersion: app.version, toVersion: app.latestVersion, purpose: decision.reason, notesRead: decision.notesRead };
+    const ask = { kind: 'update-app' as const, app: app.name, fromVersion: app.version, toVersion: app.latestVersion, imageUpdates: app.imageUpdates, purpose: decision.reason, notesRead: decision.notesRead };
     opened.push(await runtime.requests.open(ownerId, ownerId, ask, 'none'));
     await notebook.journal({ kind: 'app-update-proposed', note: `${app.name} ${app.version} → ${app.latestVersion}: ${decision.reason}`, outcome: decision.notesRead.join(' ') });
   }
@@ -112,62 +113,159 @@ export async function reviewAppUpdates(runtime: Runtime, ownerId: string, duty: 
   return { summary: `updates proposed: ${opened.map(request => (request.ask as { app: string }).app).join(', ') || 'none'}; held: ${held.join(', ') || 'none'}`, opened };
 }
 
-interface AppStatus { state?: string; version?: string; upgrade_available?: boolean }
+type AppStatus = z.infer<typeof RawApp>;
 
 /** truenas_app_get answers with a list holding the app. */
 async function appStatus(runtime: Runtime, ownerId: string, app: string): Promise<AppStatus> {
   const owner = runtime.truenasOwner(ownerId);
-  const text = await withTruenas(owner.domain, false, call => call('truenas_app_get', { name: app }));
-  const parsed = JSON.parse(text) as AppStatus | AppStatus[];
-  return (Array.isArray(parsed) ? parsed[0] : parsed) ?? {};
+  const text = await runtime.truenas(owner.domain, false, call => call('truenas_app_get', { name: app }));
+  const response = z.union([RawApp, z.array(RawApp)]).parse(JSON.parse(text));
+  const status = Array.isArray(response) ? response.find(candidate => candidate.name === app) : response;
+  if (!status || status.name !== app) throw new Error(`app_status_missing: ${app}`);
+  return status;
 }
 
 function describeStatus(status: AppStatus) {
-  return `state ${status.state ?? '?'}, version ${status.version ?? '?'}`;
+  return `state ${status.state ?? '?'}, version ${status.version ?? '?'}, image updates ${status.image_updates_available ?? '?'}`;
 }
 
-function isSettled(status: AppStatus, toVersion: string) {
-  return status.state === 'RUNNING' && (status.version === toVersion || status.upgrade_available === false);
+function isSettled(status: AppStatus, ask: UpdateAppAsk) {
+  const needsImages = ask.imageUpdates ?? ask.fromVersion === ask.toVersion;
+  return status.state === 'RUNNING' && status.version === ask.toVersion
+    && status.image_updates_available !== true
+    && (!needsImages || status.image_updates_available === false);
 }
 
-interface UpgradeJob { id: number; state: string; error?: string | null; arguments?: unknown[] }
+const UpgradeJob = z.object({
+  id: z.number().int(),
+  state: z.string(),
+  method: z.string(),
+  error: z.string().nullable().optional(),
+  arguments: z.array(z.unknown()).optional(),
+});
+type UpgradeJob = z.infer<typeof UpgradeJob>;
 
-async function upgradeJobs(runtime: Runtime, ownerId: string, app: string): Promise<UpgradeJob[]> {
+async function upgradeJobs(runtime: Runtime, ownerId: string, ask: UpdateAppAsk): Promise<UpgradeJob[]> {
   const owner = runtime.truenasOwner(ownerId);
-  const text = await withTruenas(owner.domain, false, call => call('truenas_jobs_list', { method: 'app.upgrade', limit: 50 }));
-  const jobs = JSON.parse(text) as UpgradeJob[];
-  return jobs.filter(job => Array.isArray(job.arguments) && job.arguments[0] === app);
+  const histories = await Promise.all(Object.keys(UPDATE_STARTERS).map(async method => {
+    const text = await runtime.truenas(owner.domain, false, call => call('truenas_jobs_list', {
+      method, limit: APP_UPDATE_LIMITS.jobHistory,
+    }));
+    return z.array(UpgradeJob).parse(JSON.parse(text)).filter(job =>
+      job.arguments?.[0] === ask.app && job.method === method);
+  }));
+  return histories.flat();
 }
 
 const ACTIVE_JOB = new Set(['WAITING', 'RUNNING']);
+const FAILED_JOB = new Set(['FAILED', 'ABORTED']);
 
-/**
- * Host code only, after approval: update through the TrueNAS API, follow TrueNAS's upgrade job to the end, and
- * confirm the app runs the new version. An app is STOPPED between its old and new containers, so only the job's
- * outcome and the app's state after it count. Idempotent: an app already on the target is recorded, and an
- * upgrade job already running for the app is followed instead of starting a second one.
- */
-export async function updateApp(runtime: Runtime, request: ResourceRequest) {
+export interface AppUpdateOptions {
+  jobId?: number;
+  onJobStarted?: (jobId: number) => Promise<unknown>;
+}
+
+type UpdateMethod = keyof typeof UPDATE_STARTERS;
+
+function updateMethod(ask: UpdateAppAsk, status: AppStatus): UpdateMethod {
+  return status.version === ask.toVersion ? 'app.pull_images' : 'app.upgrade';
+}
+
+function shellArgument(value: string) {
+  return "'" + value.replaceAll("'", "'\\''") + "'";
+}
+
+const UPDATE_STARTERS = {
+  'app.upgrade': async (runtime: Runtime, request: ResourceRequest) => {
+    if (request.ask.kind !== 'update-app') throw new Error('not_an_update_request');
+    const app = request.ask.app;
+    const response = await runtime.truenas(runtime.truenasOwner(request.to).domain, true,
+      call => call('truenas_app_update', { name: app }));
+    return z.object({ job_id: z.number().int() }).parse(JSON.parse(response)).job_id;
+  },
+  'app.pull_images': async (runtime: Runtime, request: ResourceRequest) => {
+    if (request.ask.kind !== 'update-app') throw new Error('not_an_update_request');
+    // midclt without -job returns the job ID immediately; the ordinary read-only job poll follows it.
+    const command = `sudo -n midclt call app.pull_images ${shellArgument(JSON.stringify(request.ask.app))} '{"redeploy":true}'`;
+    const response = await runtime.truenasSsh(runtime.truenasOwner(request.to).domain, command);
+    return z.number().int().parse(JSON.parse(response));
+  },
+};
+
+async function startUpgrade(runtime: Runtime, request: ResourceRequest, method: UpdateMethod, options: AppUpdateOptions) {
+  if (request.ask.kind !== 'update-app') throw new Error('not_an_update_request');
+  const jobs = await upgradeJobs(runtime, request.to, request.ask);
+  if (options.jobId !== undefined) {
+    if (!jobs.some(job => job.id === options.jobId)) throw new Error(`app_upgrade_job_missing: ${options.jobId}`);
+    return options.jobId;
+  }
+  const active = jobs.find(job => ACTIVE_JOB.has(job.state));
+  const jobId = active?.id ?? await UPDATE_STARTERS[method](runtime, request);
+  await options.onJobStarted?.(jobId);
+  return jobId;
+}
+
+/** Read-only recovery: only a recorded successful job and matching app state prove completion. */
+export async function reconcileAppUpdate(runtime: Runtime, request: ResourceRequest, jobId?: number) {
+  if (request.ask.kind !== 'update-app') throw new Error('not_an_update_request');
+  if (jobId === undefined) return undefined;
+  const job = (await upgradeJobs(runtime, request.to, request.ask)).find(candidate => candidate.id === jobId);
+  if (job?.state !== 'SUCCESS') return undefined;
+  const status = await appStatus(runtime, request.to, request.ask.app);
+  return isSettled(status, request.ask) ? `${describeStatus(status)} (job ${jobId})` : undefined;
+}
+
+async function observeUpgrade(runtime: Runtime, request: ResourceRequest, jobId: number) {
+  if (request.ask.kind !== 'update-app') throw new Error('not_an_update_request');
+  const job = (await upgradeJobs(runtime, request.to, request.ask)).find(candidate => candidate.id === jobId);
+  const status = job?.state === 'SUCCESS' ? await appStatus(runtime, request.to, request.ask.app) : undefined;
+  return { job, status };
+}
+
+async function waitForUpgrade(runtime: Runtime, request: ResourceRequest, jobId: number, requestedMethod: UpdateMethod) {
   if (request.ask.kind !== 'update-app') throw new Error('not_an_update_request');
   const { app, toVersion } = request.ask;
-  const before = await appStatus(runtime, request.to, app);
-  if (isSettled(before, toVersion) && before.version === toVersion) return `already on ${toVersion}; ${describeStatus(before)}`;
-  let jobId = (await upgradeJobs(runtime, request.to, app)).find(job => ACTIVE_JOB.has(job.state))?.id;
-  if (jobId === undefined) {
-    const started = JSON.parse(await withTruenas(runtime.truenasOwner(request.to).domain, true, call => call('truenas_app_update', { name: app }))) as { job_id?: number };
-    jobId = started.job_id;
-  }
   const deadline = Date.now() + APP_UPDATE_LIMITS.updateWaitMs;
-  let last = describeStatus(before);
+  let last = 'job not yet observed';
   while (Date.now() < deadline) {
     await sleep(APP_UPDATE_LIMITS.pollMs);
-    const job = jobId === undefined ? undefined : (await upgradeJobs(runtime, request.to, app).catch(() => [])).find(candidate => candidate.id === jobId);
-    if (job?.state === 'FAILED' || job?.state === 'ABORTED') throw new Error(`TrueNAS upgrade job ${jobId} ${job.state}: ${String(job.error ?? '').slice(0, 300)}`);
-    if (job && ACTIVE_JOB.has(job.state)) continue;
-    const status = await appStatus(runtime, request.to, app).catch(() => ({} as AppStatus));
+    const observed = await observeUpgrade(runtime, request, jobId).catch(error => {
+      last = `app_upgrade_poll_unavailable: ${error instanceof Error ? error.message : String(error)}`;
+      return undefined;
+    });
+    if (!observed) continue;
+    const { job, status } = observed;
+    if (job && FAILED_JOB.has(job.state)) {
+      throw new Error(`app_upgrade_failed: job ${jobId} ${job.state}: ${(job.error ?? '').slice(0, 300)}`);
+    }
+    if (!status) continue;
     last = describeStatus(status);
-    if (isSettled(status, toVersion)) return `${last} (job ${jobId ?? '?'})`;
-    if (job?.state === 'SUCCESS' && (status.state === 'CRASHED' || status.state === 'STOPPED')) throw new Error(`upgrade job ${jobId} succeeded but ${app} is ${status.state} (${last})`);
+    const needsPull = job?.method === 'app.upgrade' && status.state === 'RUNNING'
+      && status.version === toVersion && status.image_updates_available === true;
+    const finishedOtherUpdate = job?.method !== requestedMethod && status.state === 'RUNNING';
+    if (isSettled(status, request.ask) || needsPull || finishedOtherUpdate) return status;
+    if (status.state === 'CRASHED' || status.state === 'STOPPED') {
+      throw new Error(`app_upgrade_unhealthy: job ${jobId} succeeded but ${app} is ${status.state}`);
+    }
   }
-  throw new Error(`app ${app} did not settle on ${toVersion} (${last}, job ${jobId ?? '?'})`);
+  throw new Error(`app_upgrade_unsettled: ${app} target ${toVersion} (${last}, job ${jobId})`);
+}
+
+/** Host code follows one upgrade job; version equality alone never proves an image update succeeded. */
+export async function updateApp(runtime: Runtime, request: ResourceRequest, options: AppUpdateOptions = {}) {
+  if (request.ask.kind !== 'update-app') throw new Error('not_an_update_request');
+  const before = await appStatus(runtime, request.to, request.ask.app);
+  if (options.jobId === undefined && isSettled(before, request.ask)) {
+    return `already on ${request.ask.toVersion}; ${describeStatus(before)}`;
+  }
+  let status = before;
+  let nextOptions = options;
+  for (let completedJobs = 0; completedJobs < APP_UPDATE_LIMITS.maxJobsPerUpdate; completedJobs++) {
+    const method = updateMethod(request.ask, status);
+    const jobId = await startUpgrade(runtime, request, method, nextOptions);
+    status = await waitForUpgrade(runtime, request, jobId, method);
+    if (isSettled(status, request.ask)) return `${describeStatus(status)} (job ${jobId})`;
+    nextOptions = { onJobStarted: options.onJobStarted };
+  }
+  throw new Error(`app_upgrade_unsettled: ${request.ask.app} exceeded ${APP_UPDATE_LIMITS.maxJobsPerUpdate} jobs`);
 }

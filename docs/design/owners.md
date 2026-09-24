@@ -98,7 +98,9 @@ owner should act on (landed, failed, rejected, PR merged or closed), and queues 
 the chat the work was opened from, marked as coming from the runtime, so the owner decides the next step in front
 of the person.
 An owner with a `deploy` section and a `ship` grant ships its repository where it runs: fast-forward, verify in
-the sandbox, restart through a delayed systemd unit that health-checks and rolls back.
+the sandbox, restart through a delayed systemd unit that health-checks and rolls back. Both verification and
+health-check failures reset to the previous revision, reinstall dependencies, and rebuild engine and browser
+artifacts. Rollback failures are journaled as attention; the watchdog leaves services stopped if rebuilding fails.
 
 ### Notebooks and memory
 
@@ -128,7 +130,14 @@ split into observed, inferred and unknown) and open requests to each other:
 | --- | --- | --- |
 | `instance` | any → incus owner | person approves create (optionally the delete too), runtime creates, follow-up runs, delete |
 | `publish-site` | site source → NAS owner | grant or person, then build · stage · swap · restart app · verify byte for byte · roll back on failure |
-| `update-app` | NAS owner → itself | grant or person, then update through the API and follow the TrueNAS job to the end |
+| `update-app` | NAS owner → itself | grant or person, then upgrade the catalog or pull and redeploy images; follow the specific TrueNAS job to success |
+
+App requests preserve image-update intent even when the catalog version is unchanged. Catalog upgrades use
+truenas-mcp; image-only updates use the declared SSH connection to run `sudo -n midclt call app.pull_images`
+with redeploy enabled (the SSH account needs permission for that command). Completion requires the tracked
+job to succeed, the app to run at the target version, and image updates to clear. If a catalog upgrade leaves
+image updates pending, a second tracked job pulls them; temporary polling failures retry within the deadline. Read-only recovery can confirm
+a known successful job without starting another update. See the [TrueNAS API](https://api.truenas.com/v25.10/api_methods_app.pull_images.html).
 
 People only record decisions (approve, reject, revise-plan, resume, approve-create, approve-push, …); the
 runtime acts on them. Ledger updates use per-record kernel locks across daemon, CLI and surface processes.
