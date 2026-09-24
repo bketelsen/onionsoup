@@ -270,8 +270,10 @@ test('person recovery decisions resume the exact stage, retry failures and cance
     assert.equal((await call('POST', '/api/decide', { action: 'resume-item', id: item.id })).status, 200);
     assert.equal((await runtime.ledger.get(item.id)).status, 'reviewing');
     await runtime.ledger.update(item.id, current => ({ ...current, status: 'failed', resumeStatus: 'landing' }));
-    assert.equal((await call('POST', '/api/decide', { action: 'retry-item', id: item.id })).status, 200);
-    assert.equal((await runtime.ledger.get(item.id)).status, 'landing');
+    assert.equal((await call('POST', '/api/decide', { action: 'retry-item', id: item.id, reason: 'I approve the wording' })).status, 200);
+    const retried = await runtime.ledger.get(item.id);
+    assert.equal(retried.status, 'landing');
+    assert.equal(retried.humanNotes.at(-1)?.note, 'I approve the wording (continue from landing)', 'the note typed with retry is kept');
     await runtime.ledger.update(item.id, current => ({ ...current, status: 'awaiting-push-approval' }));
     assert.equal((await call('POST', '/api/decide', { action: 'cancel-item', id: item.id, reason: 'Keep the existing head' })).status, 200);
     const cancelled = await runtime.ledger.get(item.id);

@@ -35,7 +35,7 @@ export function WorkRecovery({ item, onDone }: { item: WorkItem; onDone: () => v
       {recover && <Button disabled={busy} onClick={() => void decide(recover.action)}>{recover.label}</Button>}
       <Button variant="destructive" disabled={busy || !reason.trim()} onClick={() => void decide('cancel-item')}>Cancel work</Button>
     </div>
-    <input value={reason} onChange={event => setReason(event.target.value)} placeholder="Reason for cancellation"
+    <input value={reason} onChange={event => setReason(event.target.value)} placeholder={recover ? "Note for the retry, or reason to cancel" : "Reason to cancel"}
       className="rounded-md border border-border bg-background px-2 py-1 typography-meta" />
     {error && <div className="typography-meta text-status-error">{error}</div>}
   </div>;

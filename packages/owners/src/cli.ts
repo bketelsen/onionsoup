@@ -157,12 +157,12 @@ const COMMANDS: Record<string, Command> = {
     console.log(`${notebook.directory}\n${stdout}`);
   },
   async resume(runtime, [itemId]) {
-    const item = await resumeItem(runtime, required(itemId, 'work item'), userInfo().username);
+    const item = await resumeItem(runtime, required(itemId, 'work item'), userInfo().username, options.note);
     console.log(line(item));
     await continueIfFree(runtime, item);
   },
   async retry(runtime, [itemId]) {
-    const item = await retryItem(runtime, required(itemId, 'work item'), userInfo().username);
+    const item = await retryItem(runtime, required(itemId, 'work item'), userInfo().username, options.note);
     console.log(line(item));
     await continueIfFree(runtime, item);
   },

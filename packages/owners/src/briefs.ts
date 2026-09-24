@@ -9,8 +9,10 @@ function block(label: string, body: string) {
   return `<${label}>\n${body.trim()}\n</${label}>`;
 }
 
-function humanNotesText(item: WorkItem, kind: 'approval' | 'plan-feedback') {
-  return item.humanNotes.filter(note => note.kind === kind).map(note => `${note.by} (${note.at.slice(0, 10)}): ${note.note}`).join('\n');
+type HumanNoteKind = WorkItem['humanNotes'][number]['kind'];
+
+function humanNotesText(item: WorkItem, ...kinds: HumanNoteKind[]) {
+  return item.humanNotes.filter(note => kinds.includes(note.kind)).map(note => `${note.by} (${note.at.slice(0, 10)}): ${note.note}`).join('\n');
 }
 
 function list(items: readonly string[]) {
@@ -113,6 +115,10 @@ export function planBrief(item: WorkItem, notebook: string, rubric: string) {
     sections.push(block('previous-plan', planText(item.plan)), block('why-replan', `${previous.summary}\n${findingsText(previous.findings)}`));
   }
   sections.push('Put questions only the owner can answer in questionsForOwner; leave it empty if the notebook and code answer everything.');
+  sections.push(`The person approves this plan before anyone implements it, and that approval is their go-ahead for everything
+the plan describes. Do not add steps that wait for further evidence of their approval (a GitHub comment, a review, a
+message): an implementer cannot obtain it. If a step needs a decision only the person can make, name it in the plan's
+risks so they settle it before approving.`);
   return sections.join('\n\n');
 }
 
@@ -141,6 +147,8 @@ export function implementBrief(item: WorkItem, plan: Plan, knowledge: string, ru
   ];
   const approvalNotes = humanNotesText(item, 'approval');
   if (approvalNotes) sections.push(block('conditions-of-approval', `${approvalNotes}\nThese are part of the approved plan.`));
+  const recoveryNotes = humanNotesText(item, 'retry', 'resume');
+  if (recoveryNotes) sections.push(block('person-notes-on-recovery', `${recoveryNotes}\nThe person wrote these when resuming or retrying this work; they answer questions an earlier attempt raised.`));
   const lastVerdict = item.verdicts.at(-1);
   if (lastVerdict?.decision === 'revise') {
     sections.push(block('review-findings-to-address', `${lastVerdict.summary}\n${findingsText(lastVerdict.findings)}`));
@@ -161,6 +169,7 @@ export function reviewBrief(item: WorkItem, plan: Plan, patch: string, verificat
     block('diff', patch),
     block('host-verification', verificationText(verification)),
     block('conditions-of-approval', humanNotesText(item, 'approval') || '(none)'),
+    block('person-notes-on-recovery', humanNotesText(item, 'retry', 'resume') || '(none)'),
     ...(notebook ? [block('owner-knowledge', notebook)] : []),
     block('rubric', rubric),
     'Decide: approve (ready to land), revise (the implementer should fix specific findings), or replan (the plan itself is wrong).',
