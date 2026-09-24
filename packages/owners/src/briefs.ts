@@ -1,4 +1,5 @@
 import type { Finding, Plan, ProposedWork } from './artifacts.ts';
+import type { Initiative } from './initiatives.ts';
 import type { Duty } from './declarations.ts';
 import type { Verification, WorkItem } from './ledger.ts';
 import type { InstanceAsk, ResourceRequest } from './requests.ts';
@@ -231,5 +232,20 @@ export function publishDecisionBrief(request: ResourceRequest, site: { id: strin
     `Decide as the owner of the NAS. Accept unless something in your snapshot makes publishing unsafe right now (the app is
 missing or failing, the pool is degraded, an alert affects the dataset). The runtime builds the site from ${site.source}'s
 repository, swaps it in atomically, restarts the app and verifies it, rolling back on failure. Decline with a reason otherwise.`,
+  ].join('\n\n');
+}
+
+/** A manager reviews a report's plan for one of its initiatives, under a standing grant from the person. */
+export function managerPlanReviewBrief(initiative: Initiative, item: WorkItem, plan: Plan, notebook: string) {
+  return [
+    `You manage ${item.owner}, which planned work for your initiative "${initiative.title}". The person gave you a standing grant to approve its plans; the runtime journals every use. Review the plan as its manager. Read what you need; do not edit anything.`,
+    block('initiative', `Goal: ${initiative.goal}\nWhy: ${initiative.rationale}`),
+    block('assignment', proposalText(item.proposal)),
+    block('plan', planText(plan)),
+    block('earlier-plan-feedback', humanNotesText(item, 'plan-feedback') || '(none)'),
+    block('your-notebook', notebook),
+    `Approve if the plan does what the assignment asks, fits the initiative and stays in scope. Revise, with specific
+notes the planner can act on, if it needs changes. Escalate if the person should decide: a change of scope or risk,
+a disagreement you cannot settle, or anything you are unsure about.`,
   ].join('\n\n');
 }

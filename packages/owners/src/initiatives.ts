@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { ProposedWork } from './artifacts.ts';
+import { ManagerPlanVerdict, ProposedWork } from './artifacts.ts';
 import { ChatOrigin } from './chat-origin.ts';
 import { withRecordLock } from './record-lock.ts';
 
@@ -12,6 +12,13 @@ import { withRecordLock } from './record-lock.ts';
  * dependencies have merged. An assignment stores only the request it became: its state is derived (org-work.ts).
  */
 export const INITIATIVE_LIMITS = { maxAssignments: 12, maxOpenPerManager: 3 };
+
+/** Journal kinds initiative work writes; activity views and chat context show them. */
+export const INITIATIVE_JOURNAL_KINDS = [
+  'initiative-drafted', 'initiative-updated', 'initiative-submitted', 'initiative-approved', 'initiative-revised',
+  'initiative-cancelled', 'initiative-completed', 'initiative-failed', 'assignment-dispatched', 'assignment-cancelled',
+  'plan-review', 'grant-used', 'escalation', 'escalation-resolved', 'steered', 'manager-note',
+] as const;
 
 /** Which assignment a work request or work item carries out. */
 export const AssignmentRef = z.object({ initiative: z.string(), assignment: z.string() });
@@ -47,7 +54,7 @@ export type InitiativeStatus = z.infer<typeof InitiativeStatus>;
 export const PlanReview = z.object({
   item: z.string(),
   digest: z.string(),
-  verdict: z.enum(['approve', 'revise', 'escalate']),
+  verdict: ManagerPlanVerdict.shape.decision,
   note: z.string(),
   by: z.string(),
   at: z.string(),

@@ -1,14 +1,20 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { mkdir } from 'node:fs/promises';
 import { isDeepStrictEqual } from 'node:util';
+import { ManagerPlanVerdict, type Plan } from './artifacts.ts';
+import { managerPlanReviewBrief } from './briefs.ts';
 import type { ChatOrigin } from './chat-origin.ts';
-import { directReports, isDirectReport } from './declarations.ts';
+import { directReports, isDirectReport, planGrantFor, type Grant } from './declarations.ts';
 import { requestWork } from './delegation.ts';
-import { INITIATIVE_LIMITS, type Assignment, type AssignmentState, type Initiative, type InitiativeDraft, type InitiativeStatus } from './initiatives.ts';
+import {
+  INITIATIVE_LIMITS, type Assignment, type AssignmentState, type Escalation, type Initiative, type InitiativeDraft,
+  type InitiativeStatus, type PlanReview,
+} from './initiatives.ts';
 import type { WorkItem, WorkStatus } from './ledger.ts';
 import { queueNotice } from './notices.ts';
 import type { RequestStatus, ResourceRequest } from './requests.ts';
 import type { Runtime } from './runtime.ts';
-import { cancelItem } from './workflow.ts';
+import { approvePlan, cancelItem, revisePlan } from './workflow.ts';
 
 /**
  * A manager's initiatives: drafted in chat, approved once by the person, then supervised deterministically. Each
@@ -316,12 +322,17 @@ async function rollUp(runtime: Runtime, view: InitiativeView) {
 
 export interface SupervisionOptions {
   onError: (context: string, error: unknown) => void;
+  /** Runs a manager's plan review beside the tick (the daemon's review pool); without it, plans wait for the person. */
+  startReview?: (key: string, review: () => Promise<void>) => void;
 }
 
-async function superviseOne(runtime: Runtime, initiative: Initiative, requests: readonly ResourceRequest[], items: readonly WorkItem[]) {
+async function superviseOne(runtime: Runtime, initiative: Initiative, requests: readonly ResourceRequest[], items: readonly WorkItem[], options: SupervisionOptions) {
   for (const assignment of readyToDispatch(viewOf(initiative, requests, items))) await dispatch(runtime, initiative, assignment, requests);
-  const latest = await runtime.initiatives.get(initiative.id);
-  await rollUp(runtime, viewOf(latest, await runtime.requests.list(), items));
+  const latest = viewOf(await runtime.initiatives.get(initiative.id), await runtime.requests.list(), items);
+  await rollUp(runtime, latest);
+  for (const item of plansToReview(runtime, latest)) {
+    options.startReview?.(`${latest.owner}/${item.id}`, () => runPlanReview(runtime, latest.owner, item.id).catch(error => options.onError(item.id, error)));
+  }
 }
 
 /** One deterministic pass over approved initiatives: dispatch what is ready, finish what is done. */
@@ -331,9 +342,182 @@ export async function superviseInitiatives(runtime: Runtime, options: Supervisio
   const [requests, items] = await Promise.all([runtime.requests.list(), runtime.ledger.list()]);
   for (const initiative of supervised) {
     try {
-      await superviseOne(runtime, initiative, requests, items);
+      await superviseOne(runtime, initiative, requests, items, options);
     } catch (error) {
       options.onError(initiative.id, error);
     }
   }
+}
+
+export const SUPERVISION_LIMITS = { revisionsPerItem: 2 };
+
+export function planDigest(plan: Plan) {
+  return createHash('sha256').update(JSON.stringify(plan)).digest('hex').slice(0, 16);
+}
+
+/** Work a manager's initiative assigned, with the initiative, or undefined when it is not hers. */
+async function assignedItem(runtime: Runtime, managerId: string, itemId: string) {
+  const item = await runtime.ledger.get(itemId).catch(() => undefined);
+  const initiative = item?.assignment ? await runtime.initiatives.get(item.assignment.initiative).catch(() => undefined) : undefined;
+  if (!item?.assignment || !initiative || initiative.owner !== managerId) return undefined;
+  return { item, initiative, assignmentId: item.assignment.assignment };
+}
+
+/** Whether a manager may read this work: it carries out one of her initiatives. */
+export async function isManagersItem(runtime: Runtime, managerId: string, itemId: string) {
+  return Boolean(await assignedItem(runtime, managerId, itemId));
+}
+
+function openEscalation(initiative: Initiative, assignmentId: string) {
+  return initiative.escalations.find(escalation => escalation.assignment === assignmentId && !escalation.resolution);
+}
+
+function grantForItem(runtime: Runtime, managerId: string, item: WorkItem) {
+  return planGrantFor(runtime.owner(item.owner), managerId, runtime.repositoryFor(item).domain.name);
+}
+
+interface VerdictContext { runtime: Runtime; managerId: string; item: WorkItem; grant: Grant; note: string }
+
+const PLAN_VERDICTS: Record<ManagerPlanVerdict['decision'], (context: VerdictContext) => Promise<WorkItem>> = {
+  approve: async ({ runtime, managerId, item, grant, note }) => {
+    const by = `owner:${managerId} (standing grant approve-plans in ${item.owner})`;
+    const approved = await approvePlan(runtime, item.id, by, note.trim() || undefined);
+    await journal(runtime, [managerId, item.owner], 'grant-used', `${item.id}: plan approved by ${managerId} under ${item.owner}'s approve-plans grant (${grant.target})`);
+    return approved;
+  },
+  revise: async ({ runtime, managerId, item, note }) => {
+    if (!note.trim()) throw new Error('plan_review_note_required: say what the planner must change');
+    return revisePlan(runtime, item.id, `owner:${managerId}`, note);
+  },
+  escalate: async ({ runtime, managerId, item, note }) => {
+    await journal(runtime, [managerId], 'attention', `${item.id} (${item.owner}): plan left for the person: ${note}`);
+    return item;
+  },
+};
+
+/** A manager's verdict on a report's plan, under the person's approve-plans grant. Recorded per plan digest. */
+export async function reviewReportPlan(runtime: Runtime, managerId: string, itemId: string, verdict: ManagerPlanVerdict) {
+  const context = await assignedItem(runtime, managerId, itemId);
+  if (!context || context.initiative.status !== 'approved') throw new Error(`plan_review_not_in_initiative: ${itemId} is not work in an approved initiative of ${managerId}`);
+  const grant = grantForItem(runtime, managerId, context.item);
+  if (!grant) throw new Error(`plan_review_no_grant: ${context.item.owner} has not granted ${managerId} approve-plans; the person approves this plan`);
+  const escalation = openEscalation(context.initiative, context.assignmentId);
+  if (escalation) throw new Error(`plan_review_escalation_open: ${escalation.id} (${escalation.kind}) on ${context.assignmentId} is unresolved`);
+  if (!context.item.plan || context.item.status !== 'awaiting-plan-approval') throw new Error(`not_awaiting_plan_approval: ${context.item.status}`);
+  const review: PlanReview = {
+    item: itemId, digest: planDigest(context.item.plan), verdict: verdict.decision, note: verdict.note, by: `owner:${managerId}`, at: new Date().toISOString(),
+  };
+  const reviewed = await PLAN_VERDICTS[verdict.decision]({ runtime, managerId, item: context.item, grant, note: verdict.note });
+  await runtime.initiatives.update(context.initiative.id, current => ({ ...current, planReviews: [...current.planReviews, review] }));
+  await journal(runtime, [managerId, context.item.owner], 'plan-review', `${itemId}: ${verdict.decision} by ${managerId}${verdict.note ? `: ${verdict.note}` : ''}`);
+  return reviewed;
+}
+
+/** Plans waiting in a supervised initiative that the manager may review and has not reviewed in this form. */
+function plansToReview(runtime: Runtime, view: InitiativeView) {
+  if (!isSupervised(view)) return [];
+  return view.assignments.flatMap(assignment => {
+    const item = assignment.item;
+    if (assignment.state !== 'plan-waiting' || !item?.plan || item.activeRunner) return [];
+    if (openEscalation(view, assignment.id) || !grantForItem(runtime, view.owner, item)) return [];
+    const digest = planDigest(item.plan);
+    return view.planReviews.some(review => review.item === item.id && review.digest === digest) ? [] : [item];
+  });
+}
+
+async function hirePlanVerdict(runtime: Runtime, managerId: string, itemId: string): Promise<ManagerPlanVerdict> {
+  const context = await assignedItem(runtime, managerId, itemId);
+  if (!context?.item.plan) throw new Error(`plan_review_not_in_initiative: ${itemId}`);
+  const manager = runtime.owner(managerId);
+  await mkdir(manager.workspace, { recursive: true });
+  const brief = managerPlanReviewBrief(context.initiative, context.item, context.item.plan, await runtime.notebook(managerId).orientation());
+  const hired = await runtime.hire(managerId, {
+    role: 'owner', model: manager.model, directory: manager.workspace, title: `${itemId}: manager plan review`, brief, schema: ManagerPlanVerdict,
+  }, itemId);
+  return hired.value;
+}
+
+async function revisionsAsked(runtime: Runtime, managerId: string, itemId: string) {
+  const context = await assignedItem(runtime, managerId, itemId);
+  return context?.initiative.planReviews.filter(review => review.item === itemId && review.verdict === 'revise').length ?? 0;
+}
+
+/** The daemon's plan review: the manager is hired for a verdict, within a revision budget; a failed hire escalates. */
+export async function runPlanReview(runtime: Runtime, managerId: string, itemId: string) {
+  const revisions = await revisionsAsked(runtime, managerId, itemId);
+  const verdict: ManagerPlanVerdict = revisions >= SUPERVISION_LIMITS.revisionsPerItem
+    ? { decision: 'escalate', note: `revision_limit_reached: ${revisions} revisions asked for already; the person decides` }
+    : await hirePlanVerdict(runtime, managerId, itemId).catch(error => ({
+      decision: 'escalate' as const, note: `plan_review_hire_failed: ${error instanceof Error ? error.message : String(error)}`,
+    }));
+  await reviewReportPlan(runtime, managerId, itemId, verdict);
+}
+
+type Steer = (runtime: Runtime, managerId: string, item: WorkItem, note: string) => Promise<string>;
+
+/** What a manager may do to her reports' assigned work from chat. Approving needs the grant; sending back does not. */
+const STEERS: Record<'approve-plan' | 'revise-plan' | 'cancel' | 'note', Steer> = {
+  'approve-plan': async (runtime, managerId, item, note) => (await reviewReportPlan(runtime, managerId, item.id, { decision: 'approve', note })).status,
+  'revise-plan': async (runtime, managerId, item, note) => (await revisePlan(runtime, item.id, `owner:${managerId}`, note)).status,
+  cancel: async (runtime, managerId, item, note) => (await cancelItem(runtime, item.id, `owner:${managerId}`, note)).status,
+  note: async (runtime, managerId, item, note) => {
+    await journal(runtime, [item.owner], 'manager-note', `${item.id}: from ${managerId}: ${note}`);
+    return 'noted in its journal';
+  },
+};
+export type SteerAction = keyof typeof STEERS;
+export const STEER_ACTIONS = Object.keys(STEERS) as SteerAction[];
+
+export async function steerReportItem(runtime: Runtime, managerId: string, itemId: string, action: SteerAction, note: string) {
+  const context = await assignedItem(runtime, managerId, itemId);
+  if (!context) throw new Error(`not_your_report_item: ${itemId} is not work in one of ${managerId}'s initiatives`);
+  if (action !== 'approve-plan' && !note.trim()) throw new Error(`steer_note_required: ${action} needs a note`);
+  const outcome = await STEERS[action](runtime, managerId, context.item, note);
+  await journal(runtime, [managerId, context.item.owner], 'steered', `${itemId}: ${action} by ${managerId}${note ? `: ${note}` : ''}`);
+  return outcome;
+}
+
+export interface Raise { kind: Escalation['kind']; note: string; item?: string; initiative?: string; assignment?: string }
+
+/** The assignment a report raises about: named through its work item, or by initiative and assignment id. */
+async function raisedAssignment(runtime: Runtime, reportId: string, raise: Raise) {
+  const item = raise.item ? await runtime.ledger.get(raise.item).catch(() => undefined) : undefined;
+  const ref = item?.assignment ?? (raise.initiative && raise.assignment ? { initiative: raise.initiative, assignment: raise.assignment } : undefined);
+  const initiative = ref ? await runtime.initiatives.get(ref.initiative).catch(() => undefined) : undefined;
+  const assignment = initiative?.assignments.find(candidate => candidate.id === ref?.assignment);
+  if (!initiative || !assignment || assignment.to !== reportId) {
+    throw new Error(`not_your_assignment: ${reportId} has no such assignment; name your work item, or an initiative and assignment id`);
+  }
+  return { initiative, assignment, item: item?.id };
+}
+
+/** A report pushes back: the manager is woken in her chat, and her plan approvals for it wait until she resolves it. */
+export async function raiseToManager(runtime: Runtime, reportId: string, raise: Raise) {
+  if (!raise.note.trim()) throw new Error('raise_note_required');
+  const { initiative, assignment, item } = await raisedAssignment(runtime, reportId, raise);
+  const escalation: Escalation = {
+    id: `e-${randomUUID().slice(0, 8)}`, kind: raise.kind, from: reportId, assignment: assignment.id, item, note: raise.note, at: new Date().toISOString(),
+  };
+  const updated = await runtime.initiatives.update(initiative.id, current => ({ ...current, escalations: [...current.escalations, escalation] }));
+  const where = `${initiative.id}/${assignment.id}${item ? ` (work ${item})` : ''}`;
+  await journal(runtime, [reportId], 'escalation', `${escalation.id}: ${raise.kind} to ${initiative.owner} on ${where}: ${raise.note}`);
+  await journal(runtime, [initiative.owner], 'attention', `${reportId} escalated (${raise.kind}) on ${where}: ${raise.note}`);
+  const answer = 'Answer it (onionsoup_steer note), bring in the person, and resolve it with onionsoup_initiative resolve-escalation.';
+  await tellManager(runtime, updated, 'escalation', `${reportId} escalates (${raise.kind}, ${escalation.id}) on ${where}: ${raise.note}. ${answer}`);
+  return escalation;
+}
+
+export async function resolveEscalation(runtime: Runtime, managerId: string, initiativeId: string, escalationId: string, note: string) {
+  if (!note.trim()) throw new Error('escalation_resolution_note_required');
+  await requireOwnInitiative(runtime, managerId, initiativeId);
+  const resolution = { by: `owner:${managerId}`, at: new Date().toISOString(), note };
+  const updated = await runtime.initiatives.update(initiativeId, current => {
+    const escalation = current.escalations.find(candidate => candidate.id === escalationId);
+    if (!escalation) throw new Error(`unknown_escalation: ${escalationId}`);
+    if (escalation.resolution) throw new Error(`escalation_already_resolved: ${escalationId}`);
+    return { ...current, escalations: current.escalations.map(candidate => (candidate.id === escalationId ? { ...candidate, resolution } : candidate)) };
+  });
+  const escalation = updated.escalations.find(candidate => candidate.id === escalationId)!;
+  await journal(runtime, [managerId, escalation.from], 'escalation-resolved', `${escalationId} on ${initiativeId}/${escalation.assignment}: ${note}`);
+  return escalation;
 }

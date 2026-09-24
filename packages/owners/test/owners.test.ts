@@ -109,6 +109,7 @@ test('the org chart comes from reportsTo, refuses unknown managers, self-reports
     ['reportsTo: nobody', /org_chart_unknown_manager: homelab reports to nobody/],
     ['reportsTo: homelab', /org_chart_self: homelab/],
     ['reportsTo: clippy', /org_chart_cycle/],
+    ['grants: [{ to: odrade, action: approve-plans, target: "*" }]', /grant_not_to_manager: homelab grants approve-plans to odrade, who is not its manager/],
   ];
   const odrade = await read(join(config, 'owners', 'odrade.yaml'), 'utf8');
   await write(join(config, 'owners', 'odrade.yaml'), `${odrade}reportsTo: homelab\n`);

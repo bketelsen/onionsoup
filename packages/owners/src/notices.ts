@@ -85,10 +85,9 @@ export function describeForManager(item: WorkItem, previous: string | undefined)
   if (!described || !item.assignment) return undefined;
   const { initiative, assignment } = item.assignment;
   const what = MANAGER_TEXT[described.change]?.(item) ?? described.change;
-  return {
-    change: described.change,
-    text: `${item.owner}'s work ${item.id} "${item.proposal.title}" (assignment ${assignment} of initiative ${initiative}) ${what}. See the initiative with onionsoup_initiative show ${initiative}; decide whether anything needs you or the person, and say so.`,
-  };
+  const work = `${item.owner}'s work ${item.id} "${item.proposal.title}" (assignment ${assignment} of initiative ${initiative})`;
+  const next = `See the initiative with onionsoup_initiative show ${initiative}; decide whether anything needs you or the person, and say so.`;
+  return { change: described.change, text: `${work} ${what}. ${next}` };
 }
 
 /** Who hears about a change: the item's owner, and for assigned work also the manager, in the initiative's chat. */

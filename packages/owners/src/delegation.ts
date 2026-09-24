@@ -28,7 +28,7 @@ type Acceptance = (runtime: Runtime, request: ResourceRequest, ask: WorkAsk) => 
 /** Who decides: work from the receiver's declared manager is accepted as assigned; a peer's is weighed by the receiver. */
 const ACCEPTANCE: Record<'manager' | 'peer', Acceptance> = {
   manager: async (_runtime, request) => ({
-    decision: 'accept', reply: `assigned by ${request.from}, ${request.to}'s manager; accepted automatically`,
+    decision: 'accept', reply: `assigned by ${request.from}, ${request.to}'s manager; accepted automatically (push back with onionsoup_raise)`,
   }),
   peer: async (runtime, request, ask) => {
     const owner = runtime.owner(request.to);

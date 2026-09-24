@@ -130,10 +130,11 @@ export const Grant = z.object({
   to: z.string(),
   /**
    * publish-site and update-app are requests to another owner; merge lets an owner merge its own reviewed PRs;
-   * ship lets an owner deploy its repository where it runs.
+   * ship lets an owner deploy its repository where it runs; approve-plans lets this owner's manager (`to`) approve
+   * the plans of work it carries out for the manager's initiatives.
    */
-  action: z.enum(['publish-site', 'update-app', 'merge', 'ship']),
-  /** The site or app, or "*" for all of them. */
+  action: z.enum(['publish-site', 'update-app', 'merge', 'ship', 'approve-plans']),
+  /** The site, app or repository, or "*" for all of them. */
   target: z.string(),
 });
 export type Grant = z.infer<typeof Grant>;
@@ -277,6 +278,18 @@ export function checkOrgChart(owners: ReadonlyMap<string, OwnerDeclaration>) {
     if (!owners.has(owner.reportsTo)) throw new Error(`org_chart_unknown_manager: ${owner.id} reports to ${owner.reportsTo}, which is not declared`);
   }
   for (const owner of owners.values()) checkNoCycle(owners, owner.id);
+  for (const owner of owners.values()) checkPlanGrants(owner);
+}
+
+/** Only an owner's manager may hold its approve-plans grant. */
+function checkPlanGrants(owner: OwnerDeclaration) {
+  const misplaced = owner.grants.find(grant => grant.action === 'approve-plans' && grant.to !== owner.reportsTo);
+  if (misplaced) throw new Error(`grant_not_to_manager: ${owner.id} grants approve-plans to ${misplaced.to}, who is not its manager`);
+}
+
+/** The person's standing approval for a manager to approve this owner's plans in one repository, if given. */
+export function planGrantFor(owner: OwnerDeclaration, managerId: string, repository: string) {
+  return owner.grants.find(grant => grant.action === 'approve-plans' && grant.to === managerId && (grant.target === repository || grant.target === '*'));
 }
 
 function checkNoCycle(owners: ReadonlyMap<string, OwnerDeclaration>, start: string) {

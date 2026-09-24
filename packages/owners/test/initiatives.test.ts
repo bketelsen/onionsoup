@@ -8,10 +8,13 @@ import { drain, tick, type TickLog } from '../src/daemon.ts';
 import { INITIATIVE_LIMITS, type InitiativeDraft } from '../src/initiatives.ts';
 import { pendingNotices } from '../src/notices.ts';
 import {
-  approveInitiative, cancelAssignment, cancelInitiative, draftInitiative, initiativeView, reviseInitiative, submitInitiative,
-  superviseInitiatives, updateInitiative,
+  approveInitiative, cancelAssignment, cancelInitiative, draftInitiative, initiativeView, planDigest, raiseToManager, resolveEscalation,
+  reviewReportPlan, reviseInitiative, steerReportItem, submitInitiative, superviseInitiatives, updateInitiative,
 } from '../src/org-work.ts';
 import { Runtime } from '../src/runtime.ts';
+import { listAttention } from '../src/attention.ts';
+import type { ManagerPlanVerdict } from '../src/artifacts.ts';
+import { withActiveHooks } from './active-hooks.ts';
 
 const origin = { sessionID: 'ses_odrade', directory: '/evidence/odrade' };
 
@@ -222,4 +225,167 @@ test('a manager cancels an assignment nothing waits for, and the initiative comp
   assert.equal(done.status, 'completed');
   assert.deepEqual(done.assignments.map(assignment => assignment.state), ['completed', 'cancelled']);
   assert.equal((await runtime.requests.list()).length, 1);
+});
+
+function plan(summary: string) {
+  return { summary, steps: [{ description: 'Change it', files: ['main.go'] }], tests: ['go test'], risks: [], outOfScope: [], questionsForOwner: [] };
+}
+
+/** Stand in for the planner: the item now waits for approval of this plan. */
+function setPlan(runtime: Runtime, itemId: string, summary: string) {
+  return runtime.ledger.update(itemId, item => ({ ...item, status: 'awaiting-plan-approval', plan: plan(summary) }));
+}
+
+/** Approve the initiative, dispatch a1 and let clippy accept it; returns clippy's item. */
+async function dispatchedCoreItem(runtime: Runtime) {
+  const initiative = await submitted(runtime);
+  await approveInitiative(runtime, initiative.id, 'person');
+  await supervise(runtime);
+  const [request] = await runtime.requests.list();
+  await processRequest(runtime, request!.id);
+  return { initiative, request: request!, itemId: (await runtime.requests.get(request!.id)).workItem! };
+}
+
+/** Only the manager's plan review may hire, and it answers with these verdicts in order. */
+function scriptManager(runtime: Runtime, verdicts: ManagerPlanVerdict[]) {
+  const hires: string[] = [];
+  runtime.hire = async (_owner, request) => {
+    if (!request.title.endsWith(': manager plan review')) throw new Error('no_hire_permitted');
+    hires.push(request.title);
+    const verdict = verdicts.shift();
+    if (!verdict) throw new Error('no_verdict_scripted');
+    return { value: request.schema.parse(verdict), sessionID: 'scripted', cost: 0, startedAt: '', finishedAt: '' };
+  };
+  return hires;
+}
+
+/** Supervise with a review pool, wait for the reviews it started, and say how many. */
+async function superviseWithReviews(runtime: Runtime) {
+  const started: Promise<void>[] = [];
+  await superviseInitiatives(runtime, {
+    onError: (_context, error) => { throw error; },
+    startReview: (_key, review) => { started.push(review()); },
+  });
+  await Promise.all(started);
+  return started.length;
+}
+
+test('a manager approves a report plan under its grant, journaled to both; without a grant the plan waits for the person', async () => {
+  const runtime = await setup();
+  const hires = scriptManager(runtime, [{ decision: 'approve', note: 'Fits the initiative' }]);
+  const { initiative, request, itemId } = await dispatchedCoreItem(runtime);
+  const clippy = runtime.declarations.owners.get('clippy')!;
+  runtime.declarations.owners.set('clippy', { ...clippy, grants: [] });
+  const waiting = await setPlan(runtime, itemId, 'Core plan');
+  assert.equal(await superviseWithReviews(runtime), 0, 'removing the grant restores the person\'s gate');
+  await assert.rejects(reviewReportPlan(runtime, 'odrade', itemId, { decision: 'approve', note: '' }), /plan_review_no_grant: clippy/);
+  runtime.declarations.owners.set('clippy', clippy);
+
+  assert.equal(await superviseWithReviews(runtime), 1);
+  const approved = await runtime.ledger.get(itemId);
+  assert.equal(approved.status, 'implementing');
+  assert.equal(approved.planApproval?.by, 'owner:odrade (standing grant approve-plans in clippy)');
+  for (const owner of ['odrade', 'clippy']) {
+    assert.ok((await journalOf(runtime, owner)).some(entry => entry.kind === 'grant-used' && entry.note?.includes(itemId)), owner);
+  }
+  const reviews = (await runtime.initiatives.get(initiative.id)).planReviews;
+  assert.deepEqual(reviews.map(review => [review.item, review.verdict, review.digest]), [[itemId, 'approve', planDigest(waiting.plan!)]]);
+  assert.equal(await superviseWithReviews(runtime), 0);
+  assert.deepEqual(hires, [`${itemId}: manager plan review`]);
+
+  await mergeAssignment(runtime, request.id);
+  await supervise(runtime);
+  const second = (await runtime.requests.list()).find(candidate => candidate.to === 'bellonda')!;
+  await processRequest(runtime, second.id);
+  const bellondaItem = (await runtime.requests.get(second.id)).workItem!;
+  await setPlan(runtime, bellondaItem, 'Wiki plan');
+  assert.equal(await superviseWithReviews(runtime), 0, 'bellonda granted nothing');
+  await assert.rejects(reviewReportPlan(runtime, 'odrade', bellondaItem, { decision: 'approve', note: '' }), /plan_review_no_grant: bellonda/);
+  assert.equal((await runtime.ledger.get(bellondaItem)).status, 'awaiting-plan-approval');
+});
+
+test('a manager sends a plan back within a revision budget, after which it escalates to the person without a hire', async () => {
+  const runtime = await setup();
+  const hires = scriptManager(runtime, [{ decision: 'revise', note: 'Smaller' }, { decision: 'revise', note: 'Smaller still' }]);
+  const { initiative, itemId } = await dispatchedCoreItem(runtime);
+  for (const summary of ['Plan 1', 'Plan 2']) {
+    await setPlan(runtime, itemId, summary);
+    assert.equal(await superviseWithReviews(runtime), 1);
+    assert.equal((await runtime.ledger.get(itemId)).status, 'planning');
+  }
+  assert.deepEqual((await runtime.ledger.get(itemId)).humanNotes.map(note => [note.kind, note.by, note.note]), [
+    ['plan-feedback', 'owner:odrade', 'Smaller'], ['plan-feedback', 'owner:odrade', 'Smaller still'],
+  ]);
+  await setPlan(runtime, itemId, 'Plan 3');
+  assert.equal(await superviseWithReviews(runtime), 1);
+  assert.equal(hires.length, 2, 'the budget is spent: no third hire');
+  assert.equal((await runtime.ledger.get(itemId)).status, 'awaiting-plan-approval', 'the person decides');
+  const last = (await runtime.initiatives.get(initiative.id)).planReviews.at(-1);
+  assert.equal(last?.verdict, 'escalate');
+  assert.match(last!.note, /revision_limit_reached/);
+  assert.ok((await listAttention(runtime)).some(entry => entry.owner === 'odrade' && entry.note.includes(itemId)));
+  assert.equal(await superviseWithReviews(runtime), 0, 'a reviewed plan is not reviewed again');
+});
+
+test('a failed plan-review hire escalates with its error instead of approving', async () => {
+  const runtime = await setup();
+  const { initiative, itemId } = await dispatchedCoreItem(runtime);
+  await setPlan(runtime, itemId, 'Core plan');
+  assert.equal(await superviseWithReviews(runtime), 1);
+  const [review] = (await runtime.initiatives.get(initiative.id)).planReviews;
+  assert.equal(review?.verdict, 'escalate');
+  assert.match(review!.note, /plan_review_hire_failed: no_hire_permitted/);
+  assert.equal((await runtime.ledger.get(itemId)).status, 'awaiting-plan-approval');
+});
+
+test('a report escalation wakes the manager and blocks her approvals until resolved; steering is limited to her reports\' assigned work', async () => {
+  const runtime = await setup();
+  const { initiative, itemId } = await dispatchedCoreItem(runtime);
+  await setPlan(runtime, itemId, 'Core plan');
+  const escalation = await raiseToManager(runtime, 'clippy', { kind: 'objection', note: 'This belongs in the wiki', item: itemId });
+  await assert.rejects(raiseToManager(runtime, 'bellonda', { kind: 'question', note: 'Why?', item: itemId }), /not_your_assignment/);
+  assert.equal((await runtime.initiatives.get(initiative.id)).escalations[0]?.id, escalation.id);
+  assert.ok((await journalOf(runtime, 'clippy')).some(entry => entry.kind === 'escalation' && entry.note?.includes('This belongs in the wiki')));
+  assert.ok((await listAttention(runtime)).some(entry => entry.owner === 'odrade' && entry.note.includes('clippy escalated (objection)')));
+  const woken = (await pendingNotices(runtime)).find(notice => notice.change === 'escalation');
+  assert.equal(woken?.owner, 'odrade');
+  assert.deepEqual(woken?.origin, origin);
+
+  assert.equal(await superviseWithReviews(runtime), 0);
+  await assert.rejects(steerReportItem(runtime, 'odrade', itemId, 'approve-plan', ''), /plan_review_escalation_open/);
+  await resolveEscalation(runtime, 'odrade', initiative.id, escalation.id, 'Core first, then the wiki');
+  assert.ok((await journalOf(runtime, 'clippy')).some(entry => entry.kind === 'escalation-resolved'));
+
+  await steerReportItem(runtime, 'odrade', itemId, 'note', 'Keep it small');
+  assert.ok((await journalOf(runtime, 'clippy')).some(entry => entry.kind === 'manager-note' && entry.note?.includes('Keep it small')));
+  assert.equal(await steerReportItem(runtime, 'odrade', itemId, 'revise-plan', 'Drop step 2'), 'planning');
+  await setPlan(runtime, itemId, 'Core plan, smaller');
+  assert.equal(await steerReportItem(runtime, 'odrade', itemId, 'approve-plan', ''), 'implementing');
+  assert.equal((await runtime.ledger.get(itemId)).planApproval?.by, 'owner:odrade (standing grant approve-plans in clippy)');
+
+  const peerWork = await runtime.ledger.create('homelab', 'change', proposal('Fleet change'));
+  const ownWork = await runtime.ledger.create('clippy', 'change', proposal('Unassigned'));
+  await assert.rejects(steerReportItem(runtime, 'odrade', peerWork.id, 'note', 'x'), /not_your_report_item/);
+  await assert.rejects(steerReportItem(runtime, 'odrade', ownWork.id, 'cancel', 'x'), /not_your_report_item/);
+  await assert.rejects(steerReportItem(runtime, 'homelab', itemId, 'note', 'x'), /not_your_report_item/);
+});
+
+test('in chat, a manager drafts from her chat, reads her reports\' assigned work, and sees her initiatives in status', async () => {
+  const runtime = await setup();
+  const { initiative, itemId } = await dispatchedCoreItem(runtime);
+  await raiseToManager(runtime, 'clippy', { kind: 'question', note: 'Which branch?', item: itemId });
+  const input = new Proxy({} as Parameters<typeof withActiveHooks>[0], {
+    get(_target, key) { throw new Error(`unexpected_plugin_input: ${String(key)}`); },
+  });
+  const hooks = await withActiveHooks(input, { declarations: 'packages/owners/test/fixtures/owners', state: runtime.stateDirectory });
+  const context = (agent: string) => ({ agent, sessionID: `ses_${agent}`, messageID: 'msg_1', directory: '/chat', worktree: '/chat', abort: new AbortController().signal, metadata: () => {}, ask: async () => {} });
+  const tools = hooks.tool!;
+  assert.match(String(await tools.onionsoup_status!.execute({ item: itemId }, context('Odrade'))), new RegExp(`^${itemId}: Core change`));
+  assert.match(String(await tools.onionsoup_status!.execute({ item: itemId }, context('Bellonda'))), /^No work item/);
+  const summary = String(await tools.onionsoup_status!.execute({}, context('Odrade')));
+  assert.ok(summary.includes(`- ${initiative.id} [approved]: Cross-repository change (0/2 merged; 1 open escalation)`), summary);
+  const drafted = String(await tools.onionsoup_initiative!.execute({ action: 'draft', initiative: twoRepoDraft() }, context('Odrade')));
+  const draftedId = /Drafted (i-\S+)\./.exec(drafted)![1]!;
+  assert.deepEqual((await runtime.initiatives.get(draftedId)).origin, { sessionID: 'ses_Odrade', directory: '/chat' });
+  await assert.rejects(tools.onionsoup_initiative!.execute({ action: 'draft', initiative: { title: 'x' } }, context('Odrade')), /initiative_invalid: goal/);
 });

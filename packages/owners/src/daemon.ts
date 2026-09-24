@@ -16,6 +16,7 @@ import { advance } from './workflow.ts';
 
 export const DAEMON_LIMITS = {
   tickMs: 60_000, shutdownGraceMs: 5_000, parallelItems: 2, parallelDuties: 2, parallelMemory: 1, parallelRequests: 2,
+  parallelReviews: 1,
 };
 
 /**
@@ -60,10 +61,12 @@ const requestOwners = new Set<string>();
 const items = new Background(DAEMON_LIMITS.parallelItems);
 const duties = new Background(DAEMON_LIMITS.parallelDuties);
 const memories = new Background(DAEMON_LIMITS.parallelMemory);
+/** Managers' plan reviews under approve-plans grants. */
+const reviews = new Background(DAEMON_LIMITS.parallelReviews);
 
 /** Wait for background work the ticks started. */
 export async function drain() {
-  await Promise.all([items.drain(), duties.drain(), memories.drain(), requests.drain()]);
+  await Promise.all([items.drain(), duties.drain(), memories.drain(), requests.drain(), reviews.drain()]);
 }
 
 const UNIT_MS: Record<string, number> = { m: 60_000, h: 3_600_000, d: 86_400_000 };
@@ -231,7 +234,7 @@ export async function tick(runtime: Runtime, log: TickLog) {
     log.error('requests', error);
   }
   try {
-    await superviseInitiatives(runtime, { onError: log.error });
+    await superviseInitiatives(runtime, { onError: log.error, startReview: (key, review) => reviews.start(key, review) });
   } catch (error) {
     log.error('initiatives', error);
   }

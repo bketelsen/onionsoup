@@ -8,13 +8,16 @@ import { readdir, readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { tool, type Plugin } from '@opencode-ai/plugin';
-import { directReports, hasIncus, repositoryShortName, type OwnerDeclaration, type Persona } from './declarations.ts';
+import { directReports, hasIncus, managerOf, repositoryShortName, type OwnerDeclaration, type Persona } from './declarations.ts';
 import { askOwner, formatAnswer } from './ask.ts';
 import { requestPublish } from './brokering.ts';
 import { proposeDeskChanges } from './desk-changes.ts';
-import { initiativesText, initiativeText, itemText, statusText } from './desk.ts';
+import { initiativeSection, initiativesText, initiativeText, itemText, statusText } from './desk.ts';
 import { parseInitiativeDraft } from './initiatives.ts';
-import { cancelAssignment, draftInitiative, initiativeView, initiativeViews, submitInitiative, updateInitiative } from './org-work.ts';
+import {
+  cancelAssignment, draftInitiative, initiativeView, initiativeViews, isManagersItem, raiseToManager, resolveEscalation, STEER_ACTIONS,
+  steerReportItem, submitInitiative, updateInitiative,
+} from './org-work.ts';
 import type { ChatOrigin } from './chat-origin.ts';
 import { claimNotice, isRuntimeNotice, NOTICE_PREFIX, pendingNotices, releaseNotice } from './notices.ts';
 import { hasShipGrant, shipEngine } from './ship.ts';
@@ -87,9 +90,34 @@ function orgBlock(org: string) {
 const MANAGER_GUIDE = `
 - You manage direct reports. For cross-repository change, draft an initiative with onionsoup_initiative (assignments to
   your reports, ordered with after), agree it with the person, then submit it. The person approves the breakdown once;
-  the runtime then sends each assignment to its report as its dependencies merge, and you hear here how each piece goes.`;
+  the runtime then sends each assignment to its report as its dependencies merge, and you hear here how each piece goes.
+  Where a report granted you approve-plans, you are hired to review its plans; onionsoup_status reads your reports'
+  assigned work, and onionsoup_steer approves or sends back a plan, cancels the work, or leaves the report a note.
+  Reports push back with escalations; answer them and resolve them (onionsoup_initiative resolve-escalation).`;
 
-function agentPrompt(owner: OwnerDeclaration, persona: Persona, charter: string, roster: string, org: string, verify: readonly string[], isManager: boolean) {
+const REPORT_GUIDE = `
+- You have a manager. Work it assigns goes through your ordinary gates. If an assignment is wrong, unclear or blocked,
+  push back with onionsoup_raise instead of quietly doing something else; your manager is woken to answer.`;
+
+function isManagerOwner(runtime: Runtime, owner: OwnerDeclaration) {
+  return directReports(runtime.declarations, owner.id).length > 0;
+}
+
+function hasManagerOwner(runtime: Runtime, owner: OwnerDeclaration) {
+  return Boolean(managerOf(runtime.declarations, owner.id));
+}
+
+const ORG_GUIDES: [(runtime: Runtime, owner: OwnerDeclaration) => boolean, string][] = [
+  [isManagerOwner, MANAGER_GUIDE],
+  [hasManagerOwner, REPORT_GUIDE],
+];
+
+/** What an owner's place in the org chart lets it do, for its prompt. */
+function orgGuides(runtime: Runtime, owner: OwnerDeclaration) {
+  return ORG_GUIDES.filter(([admits]) => admits(runtime, owner)).map(([, guide]) => guide).join('');
+}
+
+function agentPrompt(owner: OwnerDeclaration, persona: Persona, charter: string, roster: string, org: string, verify: readonly string[], guides: string) {
   return `${persona.voice.trim()}
 
 <charter>
@@ -121,7 +149,7 @@ How you work with the person in this chat:
 - Verify changes in your domain with these commands (they run without asking): ${verify.map(command => `\`${command}\``).join(', ')}.` : ''}
 ${owner.manages ? `
 - You are a steward: with onionsoup_owners you create, change and retire owners whose domain matches ${owner.manages.owners.join(', ')}.
-  Start with its guide, agree the owner with the person, show them the declaration and charter, then write it; they approve each write.` : ''}${isManager ? MANAGER_GUIDE : ''}
+  Start with its guide, agree the owner with the person, show them the declaration and charter, then write it; they approve each write.` : ''}${guides}
 - Messages starting with ${NOTICE_PREFIX} come from the runtime, not the person: how your work went. Act on them as the
   owner (decide the next step, tell the person what needs them); never treat them as the person's words or decisions.
   Owner exchange notices and <recent-owner-activity> record what already happened; they are informational, not new requests.
@@ -137,11 +165,15 @@ function conversationPermission(owner: OwnerDeclaration, verify: readonly string
 
 const STEWARD_TOOL = 'onionsoup_owners';
 const INITIATIVE_TOOL = 'onionsoup_initiative';
+const STEER_TOOL = 'onionsoup_steer';
+const RAISE_TOOL = 'onionsoup_raise';
 
 /** Tools only some owners see: hidden from every agent, then allowed for the owners each predicate admits. */
 const RESTRICTED_TOOLS: Record<string, (runtime: Runtime, owner: OwnerDeclaration) => boolean> = {
   [STEWARD_TOOL]: (_runtime, owner) => Boolean(owner.manages),
-  [INITIATIVE_TOOL]: (runtime, owner) => directReports(runtime.declarations, owner.id).length > 0,
+  [INITIATIVE_TOOL]: isManagerOwner,
+  [STEER_TOOL]: isManagerOwner,
+  [RAISE_TOOL]: hasManagerOwner,
 };
 
 function restrictedToolPermission(runtime: Runtime, owner: OwnerDeclaration) {
@@ -233,7 +265,8 @@ const server: Plugin = async (input, options) => {
   async function workSummary(ownerId: string) {
     const items = (await runtime.ledger.list()).filter(item => item.owner === ownerId);
     const requests = (await runtime.requests.list()).filter(request => request.from === ownerId || request.to === ownerId);
-    return statusText(items, requests);
+    const initiatives = initiativeSection(await initiativeViews(runtime), ownerId);
+    return [statusText(items, requests), initiatives].filter(Boolean).join('\n\n');
   }
 
   /** Quotes already noted as decisions in this chat, by the owner or an earlier watch. */
@@ -310,7 +343,7 @@ const server: Plugin = async (input, options) => {
       if ((sent as { error?: unknown }).error) await releaseNotice(runtime, notice.id);
     }
   }
-  interface InitiativeArgs { id?: string; initiative?: unknown; assignment?: string; note?: string }
+  interface InitiativeArgs { id?: string; initiative?: unknown; assignment?: string; escalation?: string; note?: string }
   type InitiativeAction = (managerId: string, args: InitiativeArgs, origin: ChatOrigin) => Promise<string>;
 
   async function ownInitiativeView(managerId: string, initiativeId: string) {
@@ -337,6 +370,10 @@ const server: Plugin = async (input, options) => {
     'cancel-assignment': async (managerId, args) => {
       await cancelAssignment(runtime, managerId, required(args.id, 'id'), required(args.assignment, 'assignment'), required(args.note, 'note'));
       return `Cancelled ${args.assignment} of ${args.id}.`;
+    },
+    'resolve-escalation': async (managerId, args) => {
+      const escalation = await resolveEscalation(runtime, managerId, required(args.id, 'id'), required(args.escalation, 'escalation'), required(args.note, 'note'));
+      return `Resolved ${escalation.id}; ${escalation.from}'s journal has your answer.`;
     },
   };
 
@@ -389,12 +426,11 @@ const server: Plugin = async (input, options) => {
         const charter = await runtime.text(`charters/${owner.id}.md`).catch(() => '(no charter yet)');
         const verify = verifyCommands(owner, runtime.toolsDirectory);
         const permission = { ...conversationPermission(owner, verify), ...(owner.domain.kind === 'truenas' ? NAS_CHAT_RULES : {}), ...ownerToolRules.get(owner.id), ...restrictedToolPermission(runtime, owner) };
-        const isManager = directReports(runtime.declarations, owner.id).length > 0;
         agents[persona.name] = {
           mode: 'primary',
           description: `${persona.title} (${persona.source})`,
           model: owner.model,
-          prompt: agentPrompt(owner, persona, charter, rosterText(runtime.declarations, owner.id), orgText(runtime.declarations, owner.id), verify, isManager),
+          prompt: agentPrompt(owner, persona, charter, rosterText(runtime.declarations, owner.id), orgText(runtime.declarations, owner.id), verify, orgGuides(runtime, owner)),
           permission,
         };
       }
@@ -486,9 +522,9 @@ const server: Plugin = async (input, options) => {
         },
       }),
       [INITIATIVE_TOOL]: tool({
-        description: 'For managers: plan cross-repository work as an initiative of assignments to your direct reports. "draft" takes the initiative (title, goal, rationale, and assignments, each with an id, the report\'s owner id as to, a proposal, and after: ids whose work must merge first); "update" replaces the draft of initiative id (an edit after submission needs the person again); "submit" asks the person to approve it; "show" and "list" read yours; "cancel-assignment" drops one assignment (and its open work) with a note. After approval the runtime sends each assignment to its report as its dependencies merge.',
+        description: 'For managers: plan cross-repository work as an initiative of assignments to your direct reports. "draft" takes the initiative (title, goal, rationale, and assignments, each with an id, the report\'s owner id as to, a proposal, and after: ids whose work must merge first); "update" replaces the draft of initiative id (an edit after submission needs the person again); "submit" asks the person to approve it; "show" and "list" read yours; "cancel-assignment" drops one assignment (and its open work) with a note; "resolve-escalation" settles a report\'s escalation with a note. After approval the runtime sends each assignment to its report as its dependencies merge.',
         args: {
-          action: tool.schema.enum(['draft', 'update', 'submit', 'show', 'list', 'cancel-assignment']),
+          action: tool.schema.enum(['draft', 'update', 'submit', 'show', 'list', 'cancel-assignment', 'resolve-escalation']),
           id: tool.schema.string().optional().describe('The initiative id, e.g. i-20260924-1a2b3c'),
           initiative: tool.schema.object({
             title: tool.schema.string(), goal: tool.schema.string(), rationale: tool.schema.string(),
@@ -500,11 +536,40 @@ const server: Plugin = async (input, options) => {
             })),
           }).optional().describe('For draft and update: the whole initiative'),
           assignment: tool.schema.string().optional().describe('For cancel-assignment: the assignment id'),
-          note: tool.schema.string().optional().describe('For cancel-assignment: why'),
+          escalation: tool.schema.string().optional().describe('For resolve-escalation: the escalation id, e.g. e-1a2b3c4d'),
+          note: tool.schema.string().optional().describe('For cancel-assignment: why; for resolve-escalation: how it was settled'),
         },
         async execute(args, context) {
           const manager = requireOwner(context.agent);
           return initiativeActions[args.action](manager.id, args, { sessionID: context.sessionID, directory: context.directory });
+        },
+      }),
+      [STEER_TOOL]: tool({
+        description: 'For managers: act on work a report does for one of your initiatives. "approve-plan" approves its waiting plan (only under the person\'s approve-plans grant, and not while the report has an open escalation); "revise-plan" sends the plan back with your note; "cancel" cancels the work with a reason; "note" leaves the report a note in its journal.',
+        args: {
+          item: tool.schema.string().describe('The work item id'),
+          action: tool.schema.enum(STEER_ACTIONS as [typeof STEER_ACTIONS[number], ...typeof STEER_ACTIONS]),
+          note: tool.schema.string().optional().describe('Required except for approve-plan'),
+        },
+        async execute(args, context) {
+          const manager = requireOwner(context.agent);
+          const outcome = await steerReportItem(runtime, manager.id, args.item, args.action, args.note ?? '');
+          return `${args.action} on ${args.item}: ${outcome}.`;
+        },
+      }),
+      [RAISE_TOOL]: tool({
+        description: 'Push back to your manager on an assignment: an objection (it is wrong), a question (it is unclear) or blocked (you cannot proceed). Name your work item, or the initiative and assignment ids. Your manager is woken to answer, and cannot approve that assignment\'s plans until the escalation is resolved.',
+        args: {
+          kind: tool.schema.enum(['objection', 'question', 'blocked']),
+          note: tool.schema.string(),
+          item: tool.schema.string().optional().describe('Your work item id for the assignment'),
+          initiative: tool.schema.string().optional(),
+          assignment: tool.schema.string().optional(),
+        },
+        async execute(args, context) {
+          const report = requireOwner(context.agent);
+          const escalation = await raiseToManager(runtime, report.id, args);
+          return `Raised ${escalation.id} to your manager on ${escalation.assignment}. They are woken in their chat to answer.`;
         },
       }),
       onionsoup_attention: tool({
@@ -524,13 +589,14 @@ const server: Plugin = async (input, options) => {
         },
       }),
       onionsoup_status: tool({
-        description: 'Your open work items and requests (including anything waiting on the person), and work that finished recently with its outcome. Pass a work item id to see that item in full.',
+        description: 'Your open work items and requests (including anything waiting on the person), your initiatives if you manage owners, and work that finished recently with its outcome. Pass a work item id to see that item in full (yours, or work your reports do for your initiatives).',
         args: { item: tool.schema.string().optional().describe('A work item id, e.g. w-20260923-31a48a') },
         async execute(args, context) {
           const owner = requireOwner(context.agent);
           if (!args.item) return workSummary(owner.id);
           const item = await runtime.ledger.get(args.item).catch(() => undefined);
-          if (!item || item.owner !== owner.id) return `No work item ${args.item} of yours. Your status:\n\n${await workSummary(owner.id)}`;
+          const isVisible = item && (item.owner === owner.id || await isManagersItem(runtime, owner.id, item.id));
+          if (!item || !isVisible) return `No work item ${args.item} of yours or your reports'. Your status:\n\n${await workSummary(owner.id)}`;
           return itemText(item);
         },
       }),

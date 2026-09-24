@@ -5,3 +5,5 @@ workflow: change
 duties:
   - { id: prs, kind: maintain-prs, instructions: "Keep published PRs mergeable." }
 reportsTo: odrade
+grants:
+  - { to: odrade, action: approve-plans, target: example/clippy }

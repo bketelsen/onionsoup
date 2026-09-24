@@ -1,6 +1,7 @@
 import { open, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
+import { INITIATIVE_JOURNAL_KINDS } from './initiatives.ts';
 import { parseJournalRecord, type JournalRecord } from './journal-record.ts';
 import type { Runtime } from './runtime.ts';
 
@@ -21,7 +22,7 @@ export type ChatContextPolicy = z.infer<typeof ChatContextPolicy>;
 
 const ACTIVITY = new Set(['asked', 'answered', 'work-status', 'ci-triage', 'attention',
   'owner-created', 'owner-updated', 'owner-retired', 'chat-decision', 'retracted', 'attention-decision',
-  'plan-approved', 'plan-feedback', 'push-approved', 'work-cancelled', 'published', 'friction']);
+  'plan-approved', 'plan-feedback', 'push-approved', 'work-cancelled', 'published', 'friction', ...INITIATIVE_JOURNAL_KINDS]);
 
 export function clipped(text: string, limit: number) {
   return text.length <= limit ? text : `${text.slice(0, Math.max(0, limit - 1))}…`;

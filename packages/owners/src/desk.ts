@@ -3,7 +3,7 @@ import { listAttention } from './attention.ts';
 import { readFile, readdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { OwnerDeclaration } from './declarations.ts';
-import type { AssignmentState } from './initiatives.ts';
+import { INITIATIVE_JOURNAL_KINDS, type AssignmentState, type Escalation, type PlanReview } from './initiatives.ts';
 import type { AssignmentView, InitiativeView } from './org-work.ts';
 import type { WorkItem } from './ledger.ts';
 import { describeAsk, type ResourceRequest } from './requests.ts';
@@ -19,6 +19,7 @@ const NOTE_KINDS = new Set([
   'rebase-pushed', 'attention', 'app-held', 'app-update-proposed', 'app-updated', 'request-accepted', 'request-declined',
   'request-refused', 'instance-created', 'instance-deleted', 'follow-up', 'asked', 'answered', 'ci-triage', 'owner-created',
   'owner-updated', 'owner-retired', 'ship-started', 'shipped', 'work-status', 'friction',
+  ...INITIATIVE_JOURNAL_KINDS,
 ]);
 const DONE = new Set(['landed', 'failed', 'rejected', 'cancelled']);
 
@@ -161,6 +162,15 @@ function assignmentLine(assignment: AssignmentView) {
   return `- ${assignment.id} → ${assignment.to}${after}: ${assignment.proposal.title} [${ASSIGNMENT_WORDS[assignment.state] ?? assignment.state}]${work}${pr}`;
 }
 
+function escalationLine(escalation: Escalation) {
+  const state = escalation.resolution ? `resolved by ${escalation.resolution.by}: ${escalation.resolution.note}` : 'OPEN';
+  return `Escalation ${escalation.id} (${escalation.kind}) from ${escalation.from} on ${escalation.assignment}: ${escalation.note} [${state}]`;
+}
+
+function planReviewLine(review: PlanReview) {
+  return `Plan review of ${review.item} (plan ${review.digest}): ${review.verdict} by ${review.by}${review.note ? `: ${review.note}` : ''}`;
+}
+
 /** One initiative in full, for its manager and the person. */
 export function initiativeText(view: InitiativeView) {
   const approval = view.approval ? `approved by ${view.approval.by} for revision ${view.approval.revision}` : 'not approved';
@@ -171,6 +181,8 @@ export function initiativeText(view: InitiativeView) {
     'Assignments:',
     ...view.assignments.map(assignmentLine),
     ...view.feedback.map(entry => `Sent back by ${entry.by} (revision ${entry.revision}): ${entry.note}`),
+    ...view.escalations.map(escalationLine),
+    ...view.planReviews.map(planReviewLine),
   ];
   if (view.outcome) lines.push(`Outcome: ${view.outcome}`);
   return lines.join('\n');
@@ -181,6 +193,18 @@ export function initiativesText(views: readonly InitiativeView[]) {
   if (!views.length) return 'No initiatives.';
   return views.map(view => {
     const merged = view.assignments.filter(assignment => assignment.state === 'completed').length;
-    return `- ${view.id} [${view.status}]: ${view.title} (${merged}/${view.assignments.length} merged)`;
+    const open = view.escalations.filter(escalation => !escalation.resolution).length;
+    const escalations = open ? `; ${open} open escalation${open === 1 ? '' : 's'}` : '';
+    return `- ${view.id} [${view.status}]: ${view.title} (${merged}/${view.assignments.length} merged${escalations})`;
   }).join('\n');
+}
+
+const FINISHED_INITIATIVES = new Set(['completed', 'failed', 'cancelled']);
+
+/** A manager's status section: open initiatives, and those that finished recently. Empty when there are none. */
+export function initiativeSection(views: readonly InitiativeView[], ownerId: string, now = new Date()) {
+  const since = now.getTime() - STATUS_LIMITS.recentDays * 24 * 60 * 60 * 1000;
+  const shown = views.filter(view => view.owner === ownerId && (!FINISHED_INITIATIVES.has(view.status) || Date.parse(view.updatedAt) >= since));
+  if (!shown.length) return '';
+  return `Your initiatives (onionsoup_initiative show <id> for detail):\n${initiativesText(shown)}`;
 }
