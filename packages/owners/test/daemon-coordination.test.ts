@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, rename, unlink, writeFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { Runtime } from '../src/runtime.ts';
 import { tick, drain, type TickLog } from '../src/daemon.ts';
@@ -103,4 +103,24 @@ test('a live external request runner reserves memory and runnable work', async (
   assert.equal((await memoryStatus(runtime, 'clippy')).lastAttempt, undefined);
   assert.equal((await runtime.requests.get(request.id)).operation?.runner, process.pid);
   assert.deepEqual(errors, []);
+});
+
+test('unavailable request storage does not stop later daemon ticks', async () => {
+  const { runtime, errors, log } = await setup();
+  const request = await approved(runtime);
+  runtime.incus = { run: async () => '' };
+  const directory = runtime.requests.directory;
+  await rename(directory, `${directory}.unavailable`);
+  await writeFile(directory, 'temporarily unavailable');
+  try {
+    await tick(runtime, log);
+    assert.equal(errors.length, 2);
+  } finally {
+    await unlink(directory);
+    await rename(`${directory}.unavailable`, directory);
+  }
+  await tick(runtime, log);
+  await drain();
+  assert.equal((await runtime.requests.get(request.id)).status, 'provisioned');
+  assert.equal(errors.length, 2);
 });

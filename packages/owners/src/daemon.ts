@@ -230,7 +230,13 @@ export async function tick(runtime: Runtime, log: TickLog) {
   } catch (error) {
     log.error('requests', error);
   }
-  const reserved = await reservedRequestOwners(runtime);
+  let reserved: ReadonlySet<string>;
+  try {
+    reserved = await reservedRequestOwners(runtime);
+  } catch (error) {
+    log.error('request reservations', error);
+    return; // Retry next tick when the owner reservations can be read safely.
+  }
   await runDueDuties(runtime, log, reserved);
   const runnable = (await runtime.ledger.list()).filter(candidate => RUNNABLE.includes(candidate.status) && !candidate.activeRunner);
   advanceRunnable(runnable, runtime, log, reserved);
