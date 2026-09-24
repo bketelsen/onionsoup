@@ -138,10 +138,22 @@ exchange a watcher from another model family extracts only the person's decision
 verbatim; they land in the journal as candidates, and distill decides what enters the notebook. The person can
 retract a note from the Desk or in chat. Every owner sees a generated roster of the other owners.
 
+Each chat turn also reads a bounded recent journal tail: questions and answers, work outcomes, CI triage,
+attention, owner changes and person decisions. This supplies activity performed outside the conversation before
+it reaches the notebook. Retractions in that window suppress earlier matching decision candidates; a later decision can reaffirm them. The owner's
+`chatContext` policy bounds age, entries, characters and bytes read; malformed or incomplete lines are skipped.
+Recent raw decisions supplement answering briefs even before distillation, and can overlap distilled memory so
+concurrent decisions are not lost to a timestamp cutoff. They are context, never authority.
+
 ### Requests between owners
 
 Owners ask each other questions (`onionsoup_ask`: answered from the other owner's notebook and fresh evidence,
-split into observed, inferred and unknown) and open requests to each other:
+split into observed, inferred and unknown). Each answer queues a durable runtime notice for the answering
+owner's latest person chat, discovered from existing nonchild sessions and persona user messages. The plugin
+waits for that chat to be idle, then posts with `noReply`; the decision watcher skips runtime notices. No person
+chat means the notice stays pending. A pinned destination and stable message ID reconcile a post accepted before
+a crash; transport failures retain the queue entry. Full exchanges remain in `notices/exchanges` under the state
+directory, and shortened notices cite their record ID. Owners also open requests to each other:
 
 | Request | From → to | After the receiving owner accepts |
 | --- | --- | --- |

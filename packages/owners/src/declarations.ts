@@ -1,3 +1,4 @@
+import { ChatContextPolicy } from './chat-context.ts';
 import { readdir, readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { parse } from 'yaml';
@@ -167,6 +168,7 @@ export const OwnerDeclaration = z.object({
   workflow: z.string().optional(),
   duties: z.array(Duty),
   maxProposals: z.number().int().min(0).default(3),
+  chatContext: ChatContextPolicy.default(() => ChatContextPolicy.parse({})),
   memory: MemoryPolicy.default(() => MemoryPolicy.parse({})),
   grants: z.array(Grant).default([]),
   /** Where the owner's repository runs, for the ship action: the running checkout and the units to restart. */

@@ -11,6 +11,10 @@ import type { Runtime } from './runtime.ts';
  */
 export const NOTICE_PREFIX = '[onionsoup notice]';
 
+export function isRuntimeNotice(text: string) {
+  return text.trimStart().startsWith(NOTICE_PREFIX);
+}
+
 export interface WorkNotice {
   id: string;
   owner: string;
