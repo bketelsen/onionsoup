@@ -29,6 +29,7 @@ export interface DeskState {
 }
 
 export interface WorkItem {
+  activeRunner?: number;
   id: string; owner: string; status: string; reason?: string; createdAt: string; updatedAt: string;
   proposal: { title: string; goal: string; rationale: string; acceptance: string[]; size: string; repository?: string };
   plan?: { summary: string; steps: { description: string; files: string[] }[]; tests: string[]; risks: string[]; outOfScope?: string[] };

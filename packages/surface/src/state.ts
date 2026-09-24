@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import {
   approveCreate, approveDelete, approvePlan, approvePush, awaitingPublish, chatDirectory, denyRequest, deskState, describeAsk,
-  domainSummary, itemText, publish, rejectPlan, revisePlan, type Runtime,
+  domainSummary, itemText, publish, rejectPlan, revisePlan, resumeItem, retryItem, cancelItem, type Runtime,
 } from '@onionsoup/owners';
 import type { OpencodeApi, PendingPermission, PendingQuestion } from './opencode.ts';
 import { readSessionMessages, readSessionsTitled } from './hire-store.ts';
@@ -12,7 +12,7 @@ import { ordered, SettingsStore } from './settings.ts';
  * decisions the person takes. Reads and decisions go through the same engine functions the CLI uses, lock-free,
  * so the running daemon carries on from whatever is decided here.
  */
-const DONE = new Set(['landed', 'failed', 'rejected']);
+const DONE = new Set(['landed', 'failed', 'rejected', 'cancelled']);
 const RUNNING = new Set(['planning', 'implementing', 'reviewing', 'landing']);
 
 export interface InboxEntry {
@@ -143,17 +143,22 @@ export class SurfaceState {
   /** A person's decision on an engine gate. Returns a one-line outcome. */
   async decide(decision: { action: string; id: string; note?: string; reason?: string; withDelete?: boolean }, by: string) {
     const reason = decision.reason?.trim();
-    switch (decision.action) {
-      case 'approve-plan': return (await approvePlan(this.runtime, decision.id, by, decision.note)).status;
-      case 'revise-plan': return (await revisePlan(this.runtime, decision.id, by, required(decision.note, 'note'))).status;
-      case 'reject-plan': return (await rejectPlan(this.runtime, decision.id, by, required(reason, 'reason'))).status;
-      case 'approve-push': return (await approvePush(this.runtime, decision.id, by)).status;
-      case 'publish': return (await publish(this.runtime, decision.id, by)).publication?.url ?? 'published';
-      case 'approve-create': return (await approveCreate(this.runtime, decision.id, by, decision.withDelete ?? true)).status;
-      case 'approve-delete': return (await approveDelete(this.runtime, decision.id, by)).status;
-      case 'deny-request': return (await denyRequest(this.runtime, decision.id, by, reason || 'denied from the surface')).status;
-      default: throw new Error(`unknown_decision: ${decision.action}`);
-    }
+    const actions: Record<string, () => Promise<string>> = {
+      'approve-plan': async () => (await approvePlan(this.runtime, decision.id, by, decision.note)).status,
+      'revise-plan': async () => (await revisePlan(this.runtime, decision.id, by, required(decision.note, 'note'))).status,
+      'reject-plan': async () => (await rejectPlan(this.runtime, decision.id, by, required(reason, 'reason'))).status,
+      'approve-push': async () => (await approvePush(this.runtime, decision.id, by)).status,
+      'publish': async () => (await publish(this.runtime, decision.id, by)).publication?.url ?? 'published',
+      'approve-create': async () => (await approveCreate(this.runtime, decision.id, by, decision.withDelete ?? true)).status,
+      'approve-delete': async () => (await approveDelete(this.runtime, decision.id, by)).status,
+      'deny-request': async () => (await denyRequest(this.runtime, decision.id, by, reason || 'denied from the surface')).status,
+      'resume-item': async () => (await resumeItem(this.runtime, decision.id, by)).status,
+      'retry-item': async () => (await retryItem(this.runtime, decision.id, by)).status,
+      'cancel-item': async () => (await cancelItem(this.runtime, decision.id, by, required(reason, 'reason'))).status,
+    };
+    const action = actions[decision.action];
+    if (!action) throw new Error(`unknown_decision: ${decision.action}`);
+    return action();
   }
 
   async retract(ownerId: string, note: string) {

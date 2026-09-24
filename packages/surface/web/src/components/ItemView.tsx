@@ -3,6 +3,7 @@ import { RiArrowLeftLine, RiExternalLinkLine } from '@remixicon/react';
 import { api, navigate, useEvents } from '../api.ts';
 import type { InboxEntry, WorkItem } from '../types.ts';
 import { Decision } from './Decision.tsx';
+import { WorkRecovery } from './WorkRecovery.tsx';
 import { ItemActivity } from './ItemActivity.tsx';
 import { Badge, Empty, Section, statusTone, timeAgo } from './ui.tsx';
 
@@ -47,6 +48,7 @@ export function ItemView({ itemId }: { itemId: string }) {
             {waiting.kind === 'plan' && <span className="typography-micro text-muted-foreground">The plan is below; your note goes with an approval, and is required to send it back or reject it.</span>}
           </div>
         )}
+        <WorkRecovery item={item} onDone={() => void load()} />
         <Section title="Proposal">
           <div className="typography-markdown flex flex-col gap-1">
             <p><strong>Goal.</strong> {item.proposal.goal}</p>

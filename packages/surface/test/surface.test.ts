@@ -139,3 +139,25 @@ test('a work item\'s hires are found by title in opencode\'s store, and read fro
     server.close();
   }
 });
+
+test('person recovery decisions resume the exact stage, retry failures and cancel a pending push', async () => {
+  const { runtime, server, call } = await start();
+  try {
+    await runtime.notebook('clippy').ensure('# Charter\n');
+    const proposal = { title: 'Recover', goal: 'g', rationale: 'r', acceptance: ['a'], size: 'small' as const };
+    const item = await runtime.ledger.create('clippy', 'change', proposal, { status: 'interrupted', resumeStatus: 'reviewing' });
+    assert.equal((await call('POST', '/api/decide', { action: 'resume-item', id: item.id })).status, 200);
+    assert.equal((await runtime.ledger.get(item.id)).status, 'reviewing');
+    await runtime.ledger.update(item.id, current => ({ ...current, status: 'failed', resumeStatus: 'landing' }));
+    assert.equal((await call('POST', '/api/decide', { action: 'retry-item', id: item.id })).status, 200);
+    assert.equal((await runtime.ledger.get(item.id)).status, 'landing');
+    await runtime.ledger.update(item.id, current => ({ ...current, status: 'awaiting-push-approval' }));
+    assert.equal((await call('POST', '/api/decide', { action: 'cancel-item', id: item.id, reason: 'Keep the existing head' })).status, 200);
+    const cancelled = await runtime.ledger.get(item.id);
+    assert.equal(cancelled.status, 'cancelled');
+    assert.equal(cancelled.humanNotes.at(-1)?.by, 'tester');
+    assert.equal(cancelled.reason, 'Keep the existing head');
+  } finally {
+    server.close();
+  }
+});
