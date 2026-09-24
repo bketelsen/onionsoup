@@ -136,7 +136,9 @@ message among the inspected sessions, ignoring synthetic messages, runtime notic
 uses `noReply`, so it adds transcript evidence without hiring an owner or watcher. Unreadable candidate sessions (including structured-output hires) are logged and skipped. Busy chats, failed
 session listings and missing person chats leave the notice queued. Exchanges survive plugin restarts; accepted posts use a stable
 message ID to avoid duplicates after acknowledgement loss. Full records are retained under
-`$ONIONSOUP_HOME/notices/exchanges/pending` or `delivered`, with their ID cited in the transcript. If the owner's
+`$ONIONSOUP_HOME/notices/exchanges/pending` or `delivered`, with absolute paths and their ID cited in the transcript. Owners without a persona do not queue new chat notices;
+legacy notices for personless or retired owners move to `undeliverable` with a reason. Discovery reloads
+configuration before treating an unknown owner as retired, so an older plugin cannot discard a new owner’s notice. If the owner's
 person chat is older than the configured session search window, raise `noticeSessions` or speak in that chat.
 Restart the surface after installing plugin changes.
 

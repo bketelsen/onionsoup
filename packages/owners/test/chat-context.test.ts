@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
-import { appendFile, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
+import { appendFile, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import type { Plugin } from '@opencode-ai/plugin';
 import { askOwner } from '../src/ask.ts';
 import { recentActivityContext, recentChatDecisions, recentJournal } from '../src/chat-context.ts';
+import { OwnerDeclaration } from '../src/declarations.ts';
 import { exchangeClient } from '../src/exchange-client.ts';
 import { deliverExchangeNotices, ExchangeNotice, queueExchangeNotice, type ExchangeClient, type NoticeChat, type NoticeMessage } from '../src/exchange-notices.ts';
 import { NOTICE_PREFIX } from '../src/notices.ts';
@@ -52,7 +53,7 @@ function transport() {
   return { client, state, sessions, messages, posted, chat };
 }
 
-async function records(runtime: Runtime, status: 'pending' | 'delivered') {
+async function records(runtime: Runtime, status: 'pending' | 'delivered' | 'undeliverable') {
   const directory = join(runtime.stateDirectory, 'notices', 'exchanges', status);
   const files = (await readdir(directory).catch(() => [])).filter(file => file.endsWith('.json'));
   return Promise.all(files.map(async file => ExchangeNotice.parse(JSON.parse(await readFile(join(directory, file), 'utf8')))));
@@ -198,12 +199,18 @@ test('production exchange adapter uses the synchronous noReply endpoint', async 
 test('plugin rereads recent activity on every system transform and its watcher never hires for runtime notices', async () => {
   const { runtime, notebook, state } = await fixture();
   let watcherCreates = 0;
+  const fake = transport();
+  fake.chat('person', 1);
   const client = { session: {
-    messages: async () => ({ data: [message('human', 1, 'Keep it small'), message('notice', 2, `${NOTICE_PREFIX} Owner exchange`)] }),
+    messages: async () => ({ data: fake.messages.get('person') }),
     create: async () => { watcherCreates += 1; throw new Error('watcher_must_not_wake'); },
   } };
   const hooks = await plugin.server({ client } as unknown as Parameters<Plugin>[0], { declarations, state });
   await hooks['chat.message']!({ sessionID: 'person', agent: 'Miles Teg' }, {} as never);
+  await hooks.event!({ event: { type: 'session.idle', properties: { sessionID: 'person' } } });
+  assert.equal(watcherCreates, 1, 'ordinary person messages reach the watcher hire seam');
+  await queueExchangeNotice(runtime, 'homelab', 'Question and answer from another owner');
+  await deliverExchangeNotices(runtime, fake.client);
   await notebook.journal({ kind: 'answered', note: 'An exchange outside this chat' });
   const first = { system: [] as string[] };
   await hooks['experimental.chat.system.transform']!({ sessionID: 'person' } as never, first);
@@ -213,7 +220,7 @@ test('plugin rereads recent activity on every system transform and its watcher n
   await hooks['experimental.chat.system.transform']!({ sessionID: 'person' } as never, next);
   assert.match(next.system.join('\n'), /New work finished between turns/);
   await hooks.event!({ event: { type: 'session.idle', properties: { sessionID: 'person' } } });
-  assert.equal(watcherCreates, 0);
+  assert.equal(watcherCreates, 1, 'a delivered runtime notice must not hire the watcher');
   assert.ok(!(await recentJournal(runtime, 'homelab')).some(entry => entry.kind === 'chat-decision'));
 });
 
@@ -259,4 +266,61 @@ test('a later explicit decision can reaffirm a retracted statement without reviv
   const decisions = await recentChatDecisions(runtime, 'homelab');
   assert.match(decisions, /I reaffirm option A now/);
   assert.doesNotMatch(decisions, /original choice/);
+});
+
+test('retired and personless owners archive pending notices with a reason instead of retrying forever', async () => {
+  const { runtime } = await fixture();
+  const fake = transport();
+  runtime.declarations.owners.set('retired-owner', { ...runtime.declarations.owners.get('homelab')!, id: 'retired-owner' });
+  await queueExchangeNotice(runtime, 'retired-owner', 'No longer deliverable');
+  runtime.declarations.owners.delete('retired-owner');
+  await deliverExchangeNotices(runtime, fake.client);
+  assert.equal((await records(runtime, 'pending')).length, 0);
+  assert.equal((await records(runtime, 'undeliverable'))[0]!.undeliverableReason, 'owner_retired');
+  await queueExchangeNotice(runtime, 'clippy', 'Legacy personless notice');
+  await deliverExchangeNotices(runtime, fake.client);
+  assert.ok((await records(runtime, 'undeliverable')).some(notice => notice.undeliverableReason === 'owner_has_no_persona'));
+  assert.equal(fake.posted.length, 0);
+});
+
+test('unreadable optional journal context is diagnosed without breaking a chat turn', async context => {
+  const { runtime, notebook } = await fixture();
+  const warnings: unknown[][] = [];
+  context.mock.method(console, 'warn', (...args: unknown[]) => warnings.push(args));
+  await rm(join(notebook.directory, 'journal'), { recursive: true });
+  await writeFile(join(notebook.directory, 'journal'), 'not a directory');
+  assert.equal(await recentActivityContext(runtime, 'homelab'), '');
+  assert.equal(await recentChatDecisions(runtime, 'homelab'), '');
+  assert.match(String(warnings[0]![0]), /recent_context_unavailable: homelab/);
+});
+
+test('declared context defaults and age filtering apply within a current journal file', async () => {
+  const { runtime, notebook } = await fixture();
+  const original = runtime.declarations.owners.get('homelab')!;
+  const owner = OwnerDeclaration.parse({ ...original, chatContext: { ageHours: 1, maxEntries: 3 } });
+  assert.equal(owner.chatContext.maxChars, 8000);
+  assert.equal(owner.chatContext.maxEntries, 3);
+  assert.throws(() => OwnerDeclaration.parse({ ...original, chatContext: { ageHours: 0 } }));
+  runtime.declarations.owners.set(owner.id, owner);
+  const now = Date.now();
+  const rows = [
+    { at: new Date(now - 7_200_000).toISOString(), kind: 'answered', note: 'too old in a new file' },
+    { at: new Date(now + 60_000).toISOString(), kind: 'answered', note: 'future timestamp' },
+  ];
+  await writeFile(journalPath(runtime), rows.map(row => JSON.stringify(row)).join('\n') + '\n');
+  await notebook.journal({ kind: 'attention-decision', note: 'resolved attention' });
+  const activity = await recentActivityContext(runtime, 'homelab');
+  assert.match(activity, /resolved attention/);
+  assert.doesNotMatch(activity, /too old|future timestamp/);
+});
+
+test('a stale plugin reloads unknown owner declarations before archiving their notices', async () => {
+  const { runtime } = await fixture();
+  const fake = transport();
+  fake.chat('person', 1);
+  await queueExchangeNotice(runtime, 'homelab', 'Owner declared after plugin startup');
+  runtime.declarations.owners.delete('homelab');
+  await deliverExchangeNotices(runtime, fake.client);
+  assert.equal((await records(runtime, 'undeliverable')).length, 0);
+  assert.equal((await records(runtime, 'delivered')).length, 1);
 });

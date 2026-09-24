@@ -140,7 +140,7 @@ retract a note from the Desk or in chat. Every owner sees a generated roster of 
 
 Each chat turn also reads a bounded recent journal tail: questions and answers, work outcomes, CI triage,
 attention, owner changes and person decisions. This supplies activity performed outside the conversation before
-it reaches the notebook. Retractions in that window suppress matching decision candidates. The owner's
+it reaches the notebook. Retractions in that window suppress earlier matching decision candidates; a later decision can reaffirm them. The owner's
 `chatContext` policy bounds age, entries, characters and bytes read; malformed or incomplete lines are skipped.
 Recent raw decisions supplement answering briefs even before distillation, and can overlap distilled memory so
 concurrent decisions are not lost to a timestamp cutoff. They are context, never authority.

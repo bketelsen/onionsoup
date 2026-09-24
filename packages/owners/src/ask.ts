@@ -60,7 +60,7 @@ export async function askOwner(runtime: Runtime, fromId: string, toName: string,
     await recentChatDecisions(runtime, answerer.id));
   const result = await runtime.hire(answerer.id, { role: 'owner', model: answerer.model, directory: answerer.workspace, title: `${answerer.id}: answering ${asker.id}`, brief, schema: Answer })
     .catch(error => salvageAnswer(error));
-  await queueExchangeNotice(runtime, answerer.id, `${who(asker)} asked:\n${question}\n\nYou answered:\n${formatAnswer(answerer, result.value)}`);
+  if (answerer.persona) await queueExchangeNotice(runtime, answerer.id, `${who(asker)} asked:\n${question}\n\nYou answered:\n${formatAnswer(answerer, result.value)}`);
   for (const [ownerId, kind] of [[asker.id, 'asked'], [answerer.id, 'answered']] as const) {
     const book = runtime.notebook(ownerId);
     await book.journal({ kind, note: `${asker.id} → ${answerer.id}: ${clipped(question, answerer.chatContext.entryChars)}`,

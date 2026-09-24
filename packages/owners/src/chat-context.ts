@@ -20,7 +20,8 @@ export const ChatContextPolicy = z.object({
 export type ChatContextPolicy = z.infer<typeof ChatContextPolicy>;
 
 const ACTIVITY = new Set(['asked', 'answered', 'work-status', 'ci-triage', 'attention',
-  'owner-created', 'owner-updated', 'owner-retired', 'chat-decision', 'retracted']);
+  'owner-created', 'owner-updated', 'owner-retired', 'chat-decision', 'retracted', 'attention-decision',
+  'plan-approved', 'plan-feedback', 'push-approved', 'work-cancelled', 'published']);
 
 export function clipped(text: string, limit: number) {
   return text.length <= limit ? text : `${text.slice(0, Math.max(0, limit - 1))}…`;
@@ -91,9 +92,18 @@ function contextText(records: JournalRecord[], policy: ChatContextPolicy, kinds:
 
 /** Raw recent decisions supplement distilled memory; including already-distilled decisions avoids a lossy time cutoff. */
 export async function recentChatDecisions(runtime: Runtime, ownerId: string) {
-  return contextText(await recentJournal(runtime, ownerId), runtime.owner(ownerId).chatContext, new Set(['chat-decision', 'retracted']));
+  return recentContext(runtime, ownerId, new Set(['chat-decision', 'retracted']));
 }
 
 export async function recentActivityContext(runtime: Runtime, ownerId: string) {
-  return contextText(await recentJournal(runtime, ownerId), runtime.owner(ownerId).chatContext, ACTIVITY);
+  return recentContext(runtime, ownerId, ACTIVITY);
+}
+
+async function recentContext(runtime: Runtime, ownerId: string, kinds: ReadonlySet<string>) {
+  try {
+    return contextText(await recentJournal(runtime, ownerId), runtime.owner(ownerId).chatContext, kinds);
+  } catch (error) {
+    console.warn(`recent_context_unavailable: ${ownerId}`, error);
+    return '';
+  }
 }

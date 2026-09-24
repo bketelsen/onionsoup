@@ -3,7 +3,7 @@ import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { clipped } from './chat-context.ts';
-import { ownsRepositories } from './declarations.ts';
+import { chatPath } from './chats.ts';
 import { isRuntimeNotice, NOTICE_PREFIX } from './notices.ts';
 import { withRecordLock } from './record-lock.ts';
 import type { Runtime } from './runtime.ts';
@@ -21,6 +21,7 @@ export type NoticeMessage = z.infer<typeof NoticeMessage>;
 const Target = z.object({ sessionID: z.string(), directory: z.string() });
 export const ExchangeNotice = z.object({
   id: z.string(), owner: z.string(), text: z.string(), at: z.string(), target: Target.optional(),
+  undeliverableReason: z.enum(['owner_retired', 'owner_has_no_persona']).optional(),
 });
 export type ExchangeNotice = z.infer<typeof ExchangeNotice>;
 
@@ -35,7 +36,7 @@ export interface ExchangeClient {
 
 function paths(runtime: Runtime) {
   const root = join(runtime.stateDirectory, 'notices', 'exchanges');
-  return { pending: join(root, 'pending'), delivered: join(root, 'delivered') };
+  return { pending: join(root, 'pending'), delivered: join(root, 'delivered'), undeliverable: join(root, 'undeliverable') };
 }
 
 async function save(path: string, notice: ExchangeNotice) {
@@ -63,7 +64,7 @@ function personMessage(message: NoticeMessage, agent: string) {
 async function latestPersonChat(runtime: Runtime, ownerId: string, client: ExchangeClient, onError: NoticeError) {
   const owner = runtime.owner(ownerId);
   if (!owner.persona) return undefined;
-  const directories = new Set([owner.workspace, ownsRepositories(owner) ? join(runtime.desksRoot, owner.id) : runtime.evidenceDirectory(owner.id)]);
+  const directories = new Set([owner.workspace, chatPath(runtime, owner.id)]);
   for (const view of runtime.repositoryViews(ownerId)) if (view.desk) directories.add(view.desk);
   const sessions = (await Promise.all([...directories].map(directory => client.sessions(directory)))).flat();
   const unique = [...new Map(sessions.filter(session => !session.parentID).map(session => [session.id, session])).values()]
@@ -81,12 +82,13 @@ async function latestPersonChat(runtime: Runtime, ownerId: string, client: Excha
   return selected?.target;
 }
 
-function noticeText(notice: ExchangeNotice, limit: number) {
-  const reference = `Full exchange record: notices/exchanges/{pending,delivered}/${notice.id}.json`;
+function noticeText(runtime: Runtime, notice: ExchangeNotice, limit: number) {
+  const file = `${notice.id}.json`;
+  const reference = `Full exchange record: ${join(paths(runtime).delivered, file)}\nWhile delivery is pending: ${join(paths(runtime).pending, file)}`;
   return `${NOTICE_PREFIX} Owner exchange (${notice.id})\n${clipped(notice.text, limit)}\n\n${reference}`;
 }
 
-async function deliverOne(runtime: Runtime, file: string, client: ExchangeClient, onError: NoticeError) {
+async function deliverOne(runtime: Runtime, file: string, client: ExchangeClient, locate: (ownerId: string) => Promise<z.infer<typeof Target> | undefined>) {
   const { pending, delivered } = paths(runtime);
   const path = join(pending, file);
   return withRecordLock(`${path}.lock`, async () => {
@@ -96,15 +98,23 @@ async function deliverOne(runtime: Runtime, file: string, client: ExchangeClient
     });
     if (!contents) return;
     const notice = ExchangeNotice.parse(JSON.parse(contents));
+    if (!runtime.declarations.owners.has(notice.owner)) await runtime.reloadDeclarations();
+    const configured = runtime.declarations.owners.get(notice.owner);
+    if (!configured?.persona) {
+      const undeliverableReason = configured ? 'owner_has_no_persona' : 'owner_retired';
+      await save(path, { ...notice, undeliverableReason });
+      await mkdir(paths(runtime).undeliverable, { recursive: true });
+      await rename(path, join(paths(runtime).undeliverable, file));
+      return;
+    }
     const owner = runtime.owner(notice.owner);
-    if (!owner.persona) return;
-    const target = notice.target ?? await latestPersonChat(runtime, owner.id, client, onError);
+    const target = notice.target ?? await locate(owner.id);
     if (!target || !(await client.idle(target))) return;
     await save(path, { ...notice, target });
     const messages = await client.messages(target);
     if (!messages.some(message => message.info.id === notice.id)) {
-      await client.post(target, { agent: owner.persona.name, noReply: true, messageID: notice.id,
-        parts: [{ type: 'text', text: noticeText(notice, owner.chatContext.noticeChars) }] });
+      await client.post(target, { agent: configured.persona.name, noReply: true, messageID: notice.id,
+        parts: [{ type: 'text', text: noticeText(runtime, notice, owner.chatContext.noticeChars) }] });
     }
     await mkdir(delivered, { recursive: true });
     await rename(path, join(delivered, file));
@@ -114,11 +124,16 @@ async function deliverOne(runtime: Runtime, file: string, client: ExchangeClient
 /** Durable retry and a stable message ID reconcile acceptance when a server dies before recording delivery. */
 export async function deliverExchangeNotices(runtime: Runtime, client: ExchangeClient,
   onError: NoticeError = (id, error) => console.warn(`exchange_notice_failed: ${id}`, error)) {
+  const targets = new Map<string, ReturnType<typeof latestPersonChat>>();
+  const locate = (ownerId: string) => {
+    if (!targets.has(ownerId)) targets.set(ownerId, latestPersonChat(runtime, ownerId, client, onError));
+    return targets.get(ownerId)!;
+  };
   const files = (await readdir(paths(runtime).pending).catch(() => []))
     .filter(file => file.endsWith('.json')).sort();
   for (const file of files) {
     try {
-      await deliverOne(runtime, file, client, onError);
+      await deliverOne(runtime, file, client, locate);
     } catch (error) {
       onError(file, error);
     }
