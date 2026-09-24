@@ -38,7 +38,10 @@ conventions. Revise, with specific findings, otherwise. Replan is not available 
   ].join('\n\n');
 }
 
-async function prepareDeskChanges(runtime: Runtime, ownerId: string, title: string, summary: string, repository?: string): Promise<DeskChangeResult> {
+async function prepareDeskChanges(
+  runtime: Runtime, ownerId: string, title: string, summary: string,
+  repository?: string, origin?: WorkItem['origin'],
+): Promise<DeskChangeResult> {
   const owner = runtime.repositoryOwner(ownerId, repository);
   const desk = await ensureDesk(owner, runtime.desksRoot);
   if (!(await git(desk.path, ['status', '--porcelain'])).trim()) return { outcome: 'nothing-to-do', summary: 'The desk has no changes.' };
@@ -63,7 +66,7 @@ async function prepareDeskChanges(runtime: Runtime, ownerId: string, title: stri
     title, goal: summary, rationale: 'Reviewed changes from the owner desk', acceptance: ['Host verification and cross-family review pass'],
     size: 'small', repository,
   }, {
-    status: 'landing', worktree: desk.path,
+    status: 'landing', worktree: desk.path, origin,
     implementations: [{ report: { summary, filesChanged: [], deviationsFromPlan: [] }, diffStat: patch, verification }],
     verdicts: [verdict],
     deskPublication: {
@@ -77,12 +80,15 @@ async function prepareDeskChanges(runtime: Runtime, ownerId: string, title: stri
 
 export const DESK_WORKFLOW = 'desk-publication';
 
-export async function proposeDeskChanges(runtime: Runtime, ownerId: string, title: string, summary: string, repository?: string) {
+export async function proposeDeskChanges(
+  runtime: Runtime, ownerId: string, title: string, summary: string,
+  repository?: string, origin?: WorkItem['origin'],
+) {
   const pending = (await runtime.ledger.list()).find(item => item.owner === ownerId
     && item.proposal.repository === repository && item.deskPublication
     && item.deskPublication.stage !== 'complete' && item.status !== 'cancelled');
   if (pending) return continueDeskPublication(runtime, pending.id);
-  return prepareDeskChanges(runtime, ownerId, title, summary, repository);
+  return prepareDeskChanges(runtime, ownerId, title, summary, repository, origin);
 }
 
 async function continueDeskPublication(runtime: Runtime, itemId: string) {

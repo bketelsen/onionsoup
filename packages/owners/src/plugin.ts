@@ -448,7 +448,9 @@ const server: Plugin = async (input, options) => {
         async execute(args, context) {
           const owner = requireOwner(context.agent);
           context.metadata({ title: `proposing: ${args.title}` });
-          const result = await proposeDeskChanges(runtime, owner.id, args.title, args.summary, args.repository);
+          const result = await proposeDeskChanges(runtime, owner.id, args.title, args.summary, args.repository, {
+            sessionID: context.sessionID, directory: context.directory,
+          });
           return `${result.outcome}: ${result.summary}`;
         },
       }),

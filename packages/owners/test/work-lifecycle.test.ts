@@ -448,3 +448,157 @@ test('desk publication stays landed if its journal fails, and commits the journa
   assert.equal((await git(notebook.root, ['status', '--porcelain'])).trim(), '');
   assert.match(await git(notebook.root, ['log', '-1', '--format=%s']), /journal desk change/);
 });
+
+test('maintenance rebases a desk PR whose earlier desk commit was squash-merged', async () => {
+  const { runtime, root, remote, seed } = await fixture();
+  const desk = await ensureDesk(runtime.repositoryOwner('clippy'), runtime.desksRoot);
+  await writeFile(join(desk.path, 'previous-change'), 'already merged');
+  await git(desk.path, ['add', '.']);
+  await git(desk.path, ['commit', '-qm', 'Previous desk change']);
+  await git(desk.path, ['push', '-q', 'origin', 'HEAD:earlier-desk-pr']);
+  await git(seed, ['fetch', '-q', 'origin']);
+  await git(seed, ['merge', '--squash', 'origin/earlier-desk-pr']);
+  await git(seed, ['commit', '-qm', 'Squash previous desk PR']);
+  await git(seed, ['push', '-q', 'origin', 'main']);
+  await writeFile(join(desk.path, 'next-change'), 'new work');
+  scriptHires(runtime, async request => {
+    assert.equal(request.role, 'reviewer', 'patch-equivalent history needs no conflict-resolution hire');
+    return verdict;
+  });
+  await fakeGithub(root, remote, async () => {
+    await proposeDeskChanges(runtime, 'clippy', 'Next desk change', 'New work');
+    const [source] = await runtime.ledger.list();
+    const github = JSON.parse(await readFile(join(root, 'github.json'), 'utf8'));
+    await writeFile(join(root, 'github.json'), JSON.stringify({ ...github, failing: false, mergeable: 'CONFLICTING' }));
+    const maintained = await maintainPullRequests(runtime, 'clippy');
+    assert.equal(maintained.opened.length, 1);
+    const rebase = maintained.opened[0]!;
+    assert.equal(rebase.rebaseOf?.itemId, source!.id);
+    assert.equal(rebase.rebaseOf?.branch, source!.publication!.branch);
+    const replayed = await advance(runtime, rebase.id);
+    assert.equal(replayed.status, 'awaiting-push-approval', replayed.reason);
+    assert.equal(await readFile(join(replayed.worktree!, 'previous-change'), 'utf8'), 'already merged');
+    assert.equal(await readFile(join(replayed.worktree!, 'next-change'), 'utf8'), 'new work');
+    assert.equal((await git(replayed.worktree!, ['rev-list', '--count', 'origin/main..HEAD'])).trim(), '1');
+  });
+});
+
+test('desk PR CI failures wake the owner once per observed head', async () => {
+  const { runtime, root, remote } = await fixture();
+  const desk = await ensureDesk(runtime.repositoryOwner('clippy'), runtime.desksRoot);
+  await writeFile(join(desk.path, 'change'), 'first');
+  let triages = 0;
+  scriptHires(runtime, async request => {
+    if (request.role === 'reviewer') return verdict;
+    triages++;
+    return { decision: 'flaky', reason: 'External test failure' };
+  });
+  await fakeGithub(root, remote, async () => {
+    await proposeDeskChanges(runtime, 'clippy', 'Desk change', 'First change');
+    const [source] = await runtime.ledger.list();
+    await maintainPullRequests(runtime, 'clippy');
+    await maintainPullRequests(runtime, 'clippy');
+    assert.equal(triages, 1);
+    await writeFile(join(desk.path, 'change'), 'second');
+    await git(desk.path, ['add', '.']);
+    await git(desk.path, ['commit', '-qm', 'Update PR head']);
+    await git(desk.path, ['push', '-q', 'origin', `HEAD:${source!.publication!.branch}`]);
+    await maintainPullRequests(runtime, 'clippy');
+    await maintainPullRequests(runtime, 'clippy');
+    assert.equal(triages, 2);
+    const head = (await git(desk.path, ['rev-parse', 'HEAD'])).trim();
+    const triaged = JSON.parse(await readFile(join(runtime.stateDirectory, 'ci-triage-clippy.json'), 'utf8'));
+    assert.equal(triaged[source!.publication!.url], head);
+  });
+});
+
+test('desk PR merges and closes notify the original chat and remain visible in owner work', async context => {
+  const { noticeWorkChanges, pendingNotices } = await import('../src/notices.ts');
+  const { deskState } = await import('@onionsoup/owners');
+  for (const terminal of ['MERGED', 'CLOSED']) {
+    await context.test(terminal, async () => {
+      const { runtime, root, remote } = await fixture();
+      const desk = await ensureDesk(runtime.repositoryOwner('clippy'), runtime.desksRoot);
+      const origin = { sessionID: 'chat-that-proposed-the-change', directory: desk.path };
+      await writeFile(join(desk.path, 'change'), 'desk change');
+      scriptHires(runtime, async () => verdict);
+      await fakeGithub(root, remote, async () => {
+        await proposeDeskChanges(runtime, 'clippy', 'Desk proposal', 'Update', undefined, origin);
+        const [source] = await runtime.ledger.list();
+        assert.deepEqual(source!.origin, origin);
+        for (let index = 0; index < 6; index++) {
+          await runtime.ledger.create('clippy', 'change', { ...proposal, title: `Newer finished item ${index}` }, { status: 'landed' });
+        }
+        const visible = await deskState(runtime, { owner: 'clippy' });
+        assert.ok(visible.work!.some(item => item.id === source!.id), 'open PR survives the recent-completed limit');
+        assert.ok(!visible.recent!.some(item => item.id === source!.id), 'open PR is not duplicated among completed items');
+        const fallbackDirectory = async () => '/wrong-chat-directory';
+        await noticeWorkChanges(runtime, fallbackDirectory);
+        const github = JSON.parse(await readFile(join(root, 'github.json'), 'utf8'));
+        await writeFile(join(root, 'github.json'), JSON.stringify({ ...github, state: terminal }));
+        await maintainPullRequests(runtime, 'clippy');
+        assert.equal((await runtime.ledger.get(source!.id)).publication!.state, terminal.toLowerCase());
+        const raised = await noticeWorkChanges(runtime, fallbackDirectory);
+        const notice = raised.find(entry => entry.workItem === source!.id)!;
+        assert.equal(notice.change, `pr-${terminal.toLowerCase()}`);
+        assert.deepEqual(notice.origin, origin);
+        assert.ok((await pendingNotices(runtime)).some(entry => entry.id === notice.id));
+        assert.deepEqual(await noticeWorkChanges(runtime, fallbackDirectory), [], 'terminal notice is queued once');
+      });
+    });
+  }
+});
+
+test('an old open desk PR remains in owner status text with its PR URL', async () => {
+  const { statusText } = await import('@onionsoup/owners');
+  const { runtime } = await fixture();
+  const source = await runtime.ledger.create('clippy', 'desk-publication', proposal, {
+    status: 'landed', publication: {
+      url: 'https://example.invalid/pr/1', branch: 'desk', by: 'owner', at: '', state: 'open',
+    },
+  });
+  const text = statusText([source], [], new Date('2100-01-01T00:00:00Z'));
+  assert.match(text, /^Open:\n- work /);
+  assert.match(text, /https:\/\/example.invalid\/pr\/1 \(open\)/);
+  assert.doesNotMatch(text, /Finished in the last/);
+});
+
+test('a desk PR merged under its grant between ticks queues a merge notice for the proposing chat', async () => {
+  const { noticeWorkChanges, pendingNotices } = await import('../src/notices.ts');
+  const { runtime, root, remote } = await fixture();
+  const owner = runtime.declarations.owners.get('clippy')!;
+  owner.grants.push({ to: 'clippy', action: 'merge', target: 'example/clippy' });
+  const desk = await ensureDesk(runtime.repositoryOwner('clippy'), runtime.desksRoot);
+  const origin = { sessionID: 'grant-proposal-chat', directory: desk.path };
+  await writeFile(join(desk.path, 'change'), 'desk change');
+  scriptHires(runtime, async () => verdict);
+  const fallbackDirectory = async () => '/wrong-directory';
+  await noticeWorkChanges(runtime, fallbackDirectory);
+  await fakeGithub(root, remote, async () => {
+    const opened = await proposeDeskChanges(runtime, 'clippy', 'Merge desk change', 'Update', undefined, origin);
+    assert.equal(opened.outcome, 'merged');
+    const [source] = await runtime.ledger.list();
+    assert.equal(source!.publication!.state, 'merged');
+    const notices = await noticeWorkChanges(runtime, fallbackDirectory);
+    assert.equal(notices.length, 1);
+    assert.equal(notices[0]!.change, 'pr-merged');
+    assert.deepEqual(notices[0]!.origin, origin);
+    assert.match(notices[0]!.text, /was merged/);
+    assert.equal((await pendingNotices(runtime))[0]!.change, 'pr-merged');
+    assert.deepEqual(await noticeWorkChanges(runtime, fallbackDirectory), []);
+  });
+});
+
+
+test('a post-merge desk failure still reports the failed follow-up', async () => {
+  const { describeChange } = await import('../src/notices.ts');
+  const { runtime } = await fixture();
+  const source = await runtime.ledger.create('clippy', 'desk-publication', proposal, {
+    status: 'failed', reason: 'site_publish_unavailable', publication: {
+      url: 'https://example.invalid/pr/1', branch: 'desk', by: 'owner', at: '', state: 'merged',
+    },
+  });
+  const notice = describeChange(source, 'landing|open');
+  assert.equal(notice?.change, 'failed');
+  assert.match(notice!.text, /site_publish_unavailable/);
+});

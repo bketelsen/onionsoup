@@ -20,6 +20,10 @@ const NOTE_KINDS = new Set([
 ]);
 const DONE = new Set(['landed', 'failed', 'rejected', 'cancelled']);
 
+function isOpenWork(item: WorkItem) {
+  return !DONE.has(item.status) || item.publication?.state === 'open';
+}
+
 /** Landed on a local branch but not yet a PR: the person publishes it. Rebases update an existing PR instead. */
 export function awaitingPublish(item: WorkItem) {
   return item.status === 'landed' && !item.publication && !item.rebaseOf;
@@ -82,12 +86,12 @@ export async function deskState(runtime: Runtime, query: DeskQuery) {
     })),
     ...requests.filter(request => request.status === 'awaiting-delete-approval').map(request => ({ kind: 'delete', id: request.id, title: `Delete ${request.instance?.remote}:${request.instance?.name}`, detail: request.followUpResult?.summary ?? '' })),
   ];
-  const work = items.filter(item => !DONE.has(item.status)).map(item => ({ id: item.id, status: item.status, title: item.proposal.title }));
+  const work = items.filter(isOpenWork).map(item => ({ id: item.id, status: item.status, title: item.proposal.title }));
   const activity = requests.slice(-DESK_LIMITS.requests).reverse().map(request => ({
     id: request.id, status: request.status, title: describeAsk(request.ask), from: request.from, to: request.to,
     detail: `${request.workItem ? `Work ${request.workItem}: ` : ''}${request.reason ?? request.followUpResult?.summary ?? request.ask.purpose}`, at: request.updatedAt,
   }));
-  const recent = items.filter(item => DONE.has(item.status)).slice(-5).reverse().map(item => ({ id: item.id, status: item.status, title: item.proposal.title, url: item.publication?.url }));
+  const recent = items.filter(item => !isOpenWork(item)).slice(-5).reverse().map(item => ({ id: item.id, status: item.status, title: item.proposal.title, url: item.publication?.url }));
   return {
     owners,
     owner: { id: owner.id, name: owner.persona?.name ?? owner.id, title: owner.persona?.title ?? '', source: owner.persona?.source ?? '', model: owner.model, desk: resolve(runtime.desksRoot, owner.id) },
@@ -116,12 +120,12 @@ function outcome(item: WorkItem) {
 /** An owner's work and requests: everything open, then what finished recently and how. */
 export function statusText(items: readonly WorkItem[], requests: readonly ResourceRequest[], now = new Date()) {
   const since = now.getTime() - STATUS_LIMITS.recentDays * 24 * 60 * 60 * 1000;
-  const open = items.filter(item => !DONE.has(item.status));
-  const recent = items.filter(item => DONE.has(item.status) && Date.parse(item.updatedAt) >= since).slice(-STATUS_LIMITS.recentItems).reverse();
+  const open = items.filter(isOpenWork);
+  const recent = items.filter(item => !isOpenWork(item) && Date.parse(item.updatedAt) >= since).slice(-STATUS_LIMITS.recentItems).reverse();
   const live = requests.filter(request => !['deleted', 'declined', 'denied', 'failed', 'published', 'updated', 'completed'].includes(request.status));
   const finishedRequests = requests.filter(request => !live.includes(request) && Date.parse(request.updatedAt) >= since).slice(-STATUS_LIMITS.recentItems).reverse();
   const sections = [
-    open.length || live.length ? ['Open:', ...open.map(item => `- work ${item.id}: ${item.status}: ${item.proposal.title}`), ...live.map(request => `- request ${request.id}: ${request.status}: ${request.from} → ${request.to} ${describeAsk(request.ask)}${request.workItem ? `; work ${request.workItem}` : ''}`)] : ['Open: nothing.'],
+    open.length || live.length ? ['Open:', ...open.map(item => `- work ${item.id}: ${outcome(item)}: ${item.proposal.title}`), ...live.map(request => `- request ${request.id}: ${request.status}: ${request.from} → ${request.to} ${describeAsk(request.ask)}${request.workItem ? `; work ${request.workItem}` : ''}`)] : ['Open: nothing.'],
     finishedRequests.length ? ['Recent requests:', ...finishedRequests.map(request => `- ${request.id}: ${request.status}: ${describeAsk(request.ask)}${request.workItem ? `; work ${request.workItem}` : ''}${request.reason ? `; ${request.reason}` : ''}`)] : [],
     recent.length ? [`Finished in the last ${STATUS_LIMITS.recentDays} days:`, ...recent.map(item => `- work ${item.id}: ${outcome(item)}: ${item.proposal.title}`)] : [],
   ];
