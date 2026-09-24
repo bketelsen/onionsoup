@@ -14,9 +14,17 @@ export const NOTEBOOK_LIMITS = { orientationChars: 24_000 };
 
 /** The last commit queued per notebooks repository; see Notebook.commit. */
 const COMMITS = new Map<string, Promise<void>>();
-const JournalTimestamp = z.object({ at: z.string() });
-const JournalKind = z.object({ kind: z.string() });
+const JournalHeader = z.object({ at: z.string(), kind: z.string() });
 const HOUSEKEEPING = new Set(['wake', 'app-updates', 'maintain-prs']);
+
+function journalHeader(line: string, file: string, index: number) {
+  try {
+    return JournalHeader.parse(JSON.parse(line));
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`memory_entry_invalid: ${file}:${index + 1}: ${reason}`);
+  }
+}
 
 const REGISTER_TITLES: Record<NotebookRegister, string> = {
   MAP: 'Map: layout of the domain',
@@ -113,9 +121,15 @@ export class Notebook {
       const start = cursor?.file === file ? cursor.line : 0;
       for (let index = start; index < lines.length; index++) {
         const line = lines[index]!;
-        const parsed: unknown = JSON.parse(line);
-        const wasConsumed = legacyMarker && JournalTimestamp.parse(parsed).at <= legacyMarker;
-        if (wasConsumed || HOUSEKEEPING.has(JournalKind.parse(parsed).kind)) {
+        let entry: z.infer<typeof JournalHeader>;
+        try {
+          entry = journalHeader(line, file, index);
+        } catch (error) {
+          if (snapshot.lines.length) return { ...snapshot, hasMore: true };
+          throw error;
+        }
+        const wasConsumed = legacyMarker && entry.at <= legacyMarker;
+        if (wasConsumed || HOUSEKEEPING.has(entry.kind)) {
           snapshot.cursor = { file, line: index + 1 };
           continue;
         }

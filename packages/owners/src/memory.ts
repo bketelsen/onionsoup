@@ -17,8 +17,8 @@ function isAlive(pid: number | undefined) {
   try {
     process.kill(pid, 0);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
   }
 }
 
@@ -62,10 +62,15 @@ export async function requestDistill(runtime: Runtime, ownerId: string, by: stri
 export async function memoryStatus(runtime: Runtime, ownerId: string): Promise<MemoryStatus> {
   const owner = runtime.owner(ownerId);
   const state = await readState(runtime, ownerId);
+  const requests = await queued(runtime, ownerId);
+  const requestedAt = Number(requests.at(-1)?.split('-')[0] ?? 0);
+  const attemptedAt = state.lastAttempt ? Date.parse(state.lastAttempt) : 0;
   const interval = state.status === 'failed' ? owner.memory.retryMs
     : state.hasMore ? owner.memory.batchDelayMs : owner.memory.everyMs;
-  const nextAttemptAt = state.lastAttempt ? new Date(Date.parse(state.lastAttempt) + interval).toISOString() : undefined;
-  return { ...state, queued: (await queued(runtime, ownerId)).length > 0, automatic: owner.memory.enabled, nextAttemptAt };
+  const isImmediate = requests.length > 0 && (state.status === 'idle' || requestedAt > attemptedAt);
+  const nextAttemptAt = owner.memory.enabled || requests.length
+    ? new Date(isImmediate ? Date.now() : attemptedAt + interval).toISOString() : undefined;
+  return { ...state, queued: requests.length > 0, automatic: owner.memory.enabled, nextAttemptAt };
 }
 
 async function snapshotFor(runtime: Runtime, ownerId: string, state: MemoryState) {
@@ -94,8 +99,8 @@ export async function distillIsDue(runtime: Runtime, ownerId: string, now = Date
     const advancesWithoutHire = !snapshot.lines.length && JSON.stringify(snapshot.cursor) !== JSON.stringify(state.cursor);
     return advancesWithoutHire || snapshot.lines.length >= policy.minEntries || (state.hasMore && snapshot.lines.length > 0);
   } catch (error) {
-    // Execute once to persist the actionable size error for the surface, then use the retry delay.
-    if (error instanceof Error && error.message.startsWith('memory_entry_too_large:')) return true;
+    // Execute once to persist the bad entry for the surface, then use the retry delay without losing it.
+    if (error instanceof Error && /^memory_entry_(too_large|invalid):/.test(error.message)) return true;
     throw error;
   }
 }

@@ -192,3 +192,27 @@ test('housekeeping advances deterministically without a memory hire', async () =
   assert.equal(briefs.length, 0);
   assert.equal(await distillIsDue(runtime, 'clippy'), false);
 });
+
+test('invalid journal entries preserve earlier batches and surface a backed-off failure with location', async () => {
+  const { runtime, notebook, briefs } = await fixture();
+  const path = join(notebook.directory, 'journal', '2026-09-23.jsonl');
+  const valid = JSON.stringify({ at: '2026-09-23T12:00:00Z', kind: 'chat-decision', note: 'valid first' });
+  await writeFile(path, `${valid}\ninvalid-json\n`);
+  await distill(runtime, 'clippy');
+  assert.equal((await memoryStatus(runtime, 'clippy')).cursor?.line, 1);
+  const future = Date.now() + runtime.owner('clippy').memory.batchDelayMs + 1;
+  assert.equal(await distillIsDue(runtime, 'clippy', future), true);
+  await assert.rejects(distill(runtime, 'clippy'), /memory_entry_invalid: 2026-09-23.jsonl:2/);
+  assert.match((await memoryStatus(runtime, 'clippy')).error!, /memory_entry_invalid/);
+  assert.equal(await distillIsDue(runtime, 'clippy'), false);
+  assert.equal(briefs.length, 1);
+});
+
+test('disabled automation without a queued request never promises a retry', async () => {
+  const { runtime, notebook, script } = await fixture();
+  runtime.declarations.owners.get('clippy')!.memory.enabled = false;
+  await notebook.journal({ kind: 'chat-decision', note: 'pending' });
+  script.run = async () => { throw new Error('unavailable'); };
+  await assert.rejects(distill(runtime, 'clippy'), /unavailable/);
+  assert.equal((await memoryStatus(runtime, 'clippy')).nextAttemptAt, undefined);
+});

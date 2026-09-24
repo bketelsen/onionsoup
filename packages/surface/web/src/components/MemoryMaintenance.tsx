@@ -42,7 +42,9 @@ export function MemoryMaintenance({ ownerId }: { ownerId: string }) {
       </div>
       {(error || status?.error) && <div className="text-status-error">{error || status?.error}</div>}
       {status?.queued && <div>Queued for the daemon or the next <code>owners tick</code>.</div>}
-      {status?.hasMore && <div>More journal entries remain; the next batch is queued.</div>}
+      {status?.hasMore && <div>More journal entries remain.
+        {status.automatic || status.queued ? ' The next batch will run with the daemon.' : ' Update the notebook to process them.'}
+      </div>}
       {status?.status === 'failed' && status.nextAttemptAt && (
         <div>Next retry after {new Date(status.nextAttemptAt).toLocaleTimeString()}, or retry now.</div>
       )}
