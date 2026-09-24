@@ -235,6 +235,15 @@ test('a deliverable with a list sent as a JSON string is repaired; a missing fie
   assert.throws(() => salvageAnswer(new HireError('deliverable_invalid', 'ses_1', { observed: 'x' })), /deliverable_invalid/);
 });
 
+test('a failed hire reply names its cause instead of serialising an Error to {}', async () => {
+  const { describeReplyError } = await import('../src/opencode.ts');
+  const timeout = new DOMException('The operation timed out.', 'TimeoutError');
+  assert.equal(describeReplyError(timeout), 'TimeoutError: The operation timed out.');
+  assert.equal(describeReplyError(new TypeError('fetch failed')), 'TypeError: fetch failed');
+  assert.equal(describeReplyError({ name: 'BadRequest', data: { message: 'x' } }), '{"name":"BadRequest","data":{"message":"x"}}');
+  assert.equal(describeReplyError(undefined), 'null');
+});
+
 test('an implementation report omitting filesChanged defaults to an empty array, but summary and deviationsFromPlan stay required', async () => {
   const { parseDeliverable } = await import('../src/opencode.ts');
   const { ImplementationReport } = await import('../src/artifacts.ts');

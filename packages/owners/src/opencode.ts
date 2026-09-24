@@ -19,10 +19,20 @@ export const HIRE_LIMITS = { heartbeatMs: 30_000, timeoutMs: 20 * 60_000, server
  */
 export const PLUGIN_URL = new URL(`plugin.${import.meta.url.endsWith('.ts') ? 'ts' : 'js'}`, import.meta.url).href;
 
-/** A hire can run far past undici's default 300 s header timeout; our own deadline aborts the session instead. */
+/**
+ * A hire can run far past the runtime's default 300 s fetch timeout; our own deadline aborts the session instead.
+ * Node honours undici's `dispatcher`; Bun, which runs this module inside opencode's plugin host, ignores it and
+ * needs its own `timeout: false`. Each runtime ignores the other's option.
+ */
 const untimedAgent = new Agent({ headersTimeout: 0, bodyTimeout: 0 });
 const untimedFetch = ((input: RequestInfo | URL, init?: RequestInit) =>
-  fetch(input, { ...init, dispatcher: untimedAgent } as RequestInit)) as typeof fetch;
+  fetch(input, { ...init, dispatcher: untimedAgent, timeout: false } as RequestInit)) as typeof fetch;
+
+/** An Error serialises to `{}`; say what went wrong instead. */
+export function describeReplyError(error: unknown) {
+  if (error instanceof Error) return `${error.name}: ${error.message}`;
+  return JSON.stringify(error ?? null).slice(0, 300);
+}
 
 function elapsedSeconds(startedAt: string) {
   return Math.round((Date.now() - Date.parse(startedAt)) / 1000);
@@ -243,7 +253,7 @@ export class Freelancers {
           parts: [{ type: 'text', text }],
         });
         const info = reply.data?.info as AssistantInfo | undefined;
-        if (!info) throw new HireError(`no_assistant_reply: ${JSON.stringify(reply.error).slice(0, 300)}`, sessionID);
+        if (!info) throw new HireError(`no_assistant_reply: ${describeReplyError(reply.error)}`, sessionID);
         if (info.error) throw new HireError(`${info.error.name ?? 'error'}: ${info.error.data?.message ?? ''}`.trim(), sessionID);
         return info;
       };
