@@ -82,12 +82,12 @@ export async function deskState(runtime: Runtime, query: DeskQuery) {
     })),
     ...requests.filter(request => request.status === 'awaiting-delete-approval').map(request => ({ kind: 'delete', id: request.id, title: `Delete ${request.instance?.remote}:${request.instance?.name}`, detail: request.followUpResult?.summary ?? '' })),
   ];
-  const work = items.filter(item => !DONE.has(item.status)).map(item => ({ id: item.id, status: item.status, title: item.proposal.title }));
+  const work = items.filter(item => !DONE.has(item.status) || item.publication?.state === 'open').map(item => ({ id: item.id, status: item.status, title: item.proposal.title }));
   const activity = requests.slice(-DESK_LIMITS.requests).reverse().map(request => ({
     id: request.id, status: request.status, title: describeAsk(request.ask), from: request.from, to: request.to,
     detail: `${request.workItem ? `Work ${request.workItem}: ` : ''}${request.reason ?? request.followUpResult?.summary ?? request.ask.purpose}`, at: request.updatedAt,
   }));
-  const recent = items.filter(item => DONE.has(item.status)).slice(-5).reverse().map(item => ({ id: item.id, status: item.status, title: item.proposal.title, url: item.publication?.url }));
+  const recent = items.filter(item => DONE.has(item.status) && item.publication?.state !== 'open').slice(-5).reverse().map(item => ({ id: item.id, status: item.status, title: item.proposal.title, url: item.publication?.url }));
   return {
     owners,
     owner: { id: owner.id, name: owner.persona?.name ?? owner.id, title: owner.persona?.title ?? '', source: owner.persona?.source ?? '', model: owner.model, desk: resolve(runtime.desksRoot, owner.id) },

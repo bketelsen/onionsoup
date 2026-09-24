@@ -91,7 +91,16 @@ the owner's status, which also reports recent outcomes). The `maintain-prs` duty
 a conflict wakes the owner, which decides and briefs the implementer (the force-push waits for approval), and
 failing CI on a new head commit wakes the owner once to decide fix (a work item at the plan gate), flaky, or person.
 A CI repair records the original PR and head, plans and implements from that head, and publication appends to that
-PR after checking its head has not moved. Rebase maintenance preserves the whole PR, including earlier repairs.
+PR after checking its head has not moved. Rebase maintenance preserves the whole PR, including earlier repairs,
+and skips patch-equivalent commits already integrated on the base by a squash merge.
+Desk publications use the same maintenance records. The chat that proposed a desk change is saved before
+publication starts, so later merge and close notices return to that chat. Open PRs stay in the owner's Work
+list even when newer completed work fills its recent history.
+
+Migration policy: desk PRs created before ledger-backed publication remain untracked. Their legacy
+`desk-change-opened` journal entries are retained as history, but are not automatically imported: they do not
+reliably record the repository, reviewed head, or originating chat needed for safe maintenance. Existing
+ledger-backed desk publications remain tracked; missing origins are not guessed from unrelated chats.
 An approved replan resets its worktree once; verification and review share a revision budget for each plan.
 Owners hear how their work went: each daemon tick compares work items with what it last saw, journals changes the
 owner should act on (landed, failed, rejected, PR merged or closed), and queues a notice that the plugin posts into

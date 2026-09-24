@@ -29,6 +29,10 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
 
 ## Runtime
 
+- **Legacy desk PRs remain untracked.** PRs recorded only as `desk-change-opened` journal entries before
+  ledger-backed desk publication are not backfilled. They need manual GitHub maintenance; newly proposed
+  desk changes have ledger records, maintenance and originating-chat notices.
+
 - **Sandbox: provider credentials are still readable.** Masking the host opencode config/state closed the plugin
   path (`~/.config/opencode`), but `~/.local/share/opencode/auth.json` stays writable in every sandbox because
   hires must keep authenticating; a credential proxy that hides the real tokens from the sandboxed process is the

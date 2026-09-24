@@ -281,7 +281,10 @@ async function replay(runtime: Runtime, item: WorkItem): Promise<WorkItem> {
 
 async function replayCommits(runtime: Runtime, item: WorkItem, source: WorkItem, path: string) {
   const base = runtime.repositoryFor(item).domain.baseBranch;
-  const commits = (await git(path, ['rev-list', '--reverse', '--no-merges', `origin/${base}..${item.rebaseOf!.previousHead}`]))
+  const commits = (await git(path, [
+    'rev-list', '--reverse', '--no-merges', '--cherry-pick', '--right-only',
+    `origin/${base}...${item.rebaseOf!.previousHead}`,
+  ]))
     .trim().split('\n').filter(Boolean);
   if (!commits.length) throw new Error('rebase_has_no_commits');
   let resolved = false;
