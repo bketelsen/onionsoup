@@ -2,7 +2,7 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import {
   approveCreate, approveDelete, approvePlan, approvePush, awaitingPublish, chatDirectory, denyRequest, deskState, describeAsk,
-  domainSummary, itemText, publish, rejectPlan, revisePlan, resumeItem, retryItem, cancelItem, memoryFingerprint, type ResourceRequest, type Runtime,
+  domainSummary, itemText, publish, rejectPlan, revisePlan, resumeItem, retryItem, landOverFindings, cancelItem, memoryFingerprint, type ResourceRequest, type Runtime,
   listAttention, changeAttention, recoverRequest, reconcileRequest,
   listFriction, frictionDetail, type FrictionRecord,
   approveInitiative, reviseInitiative, cancelInitiative, initiativeViews, managerOf, planGrantFor,
@@ -319,6 +319,7 @@ export class SurfaceState {
       'deny-request': async () => (await denyRequest(this.runtime, decision.id, by, reason || 'denied from the surface')).status,
       'resume-item': async () => (await resumeItem(this.runtime, decision.id, by, reason)).status,
       'retry-item': async () => (await retryItem(this.runtime, decision.id, by, reason)).status,
+      'land-over-findings': async () => (await landOverFindings(this.runtime, decision.id, by, reason ?? '')).item.status,
       'cancel-item': async () => (await cancelItem(this.runtime, decision.id, by, required(reason, 'reason'))).status,
       'reconcile-request': async () => (await reconcileRequest(this.runtime, decision.id)).status,
       'retry-request': async () => (await recoverRequest(this.runtime, decision.id, 'retry', by, required(reason, 'reason'))).status,

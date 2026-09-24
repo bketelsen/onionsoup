@@ -285,6 +285,27 @@ test('person recovery decisions resume the exact stage, retry failures and cance
   }
 });
 
+test('the person lands a verified item over its reviewer findings, with a note', async () => {
+  const { runtime, server, call } = await start();
+  try {
+    await runtime.notebook('clippy').ensure('# Charter\n');
+    const proposal = { title: 'Converge', goal: 'g', rationale: 'r', acceptance: ['a'], size: 'small' as const };
+    const item = await runtime.ledger.create('clippy', 'change', proposal, {
+      status: 'failed', reason: 'revision_limit_reached',
+      implementations: [{ report: { summary: 's', filesChanged: [], deviationsFromPlan: [] }, diffStat: 'x', verification: [] }],
+      verdicts: [{ decision: 'revise', summary: 'More', findings: [{ severity: 'minor', file: 'x', issue: 'wording', suggestion: 'reword' }] }],
+    });
+    assert.notEqual((await call('POST', '/api/decide', { action: 'land-over-findings', id: item.id })).status, 200, 'a note is required');
+    assert.equal((await call('POST', '/api/decide', { action: 'land-over-findings', id: item.id, reason: 'Wording is fine' })).status, 200);
+    const overridden = await runtime.ledger.get(item.id);
+    assert.equal(overridden.status, 'landing');
+    assert.equal(overridden.humanNotes.at(-1)?.kind, 'override');
+    assert.ok((await runtime.ledger.list()).some(entry => entry.status === 'proposed' && entry.proposal.goal.includes('wording')));
+  } finally {
+    server.close();
+  }
+});
+
 test('attention and uncertain requests have durable decisions in the inbox', async () => {
   const { runtime, server, call } = await start();
   try {

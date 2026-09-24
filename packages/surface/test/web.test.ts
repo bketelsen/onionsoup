@@ -6,6 +6,8 @@ import { FrictionDetail } from '../web/src/components/FrictionView.tsx';
 import { InitiativeView } from '../web/src/components/InitiativeView.tsx';
 import { OrgTree } from '../web/src/components/OrgView.tsx';
 import { InboxErrors } from '../web/src/components/InboxErrors.tsx';
+import { WorkRecovery } from '../web/src/components/WorkRecovery.tsx';
+import { WorkItem } from '@onionsoup/owners';
 import type { FrictionRecord, PublicInitiative } from '../web/src/types.ts';
 import { applyChatEvent, orderedMessages, type Messages } from '../web/src/chat/chatState.ts';
 import { addedFile, languageOf, parseUnifiedDiff } from '../web/src/chat/diff.ts';
@@ -154,4 +156,15 @@ test('the org tree nests reports under their manager', () => {
     { id: 'homelab', name: 'Miles Teg', title: 'Bashar', icon: 'shield', domain: 'd' },
   ] }));
   assert.match(html, /Odrade.*<ul[^>]*>.*clippy.*<\/ul>.*Miles Teg/s);
+});
+
+test('a failure at the revision limit offers landing over the findings; other failures do not', () => {
+  const failed = (reason: string) => WorkItem.parse({
+    id: 'w-1', owner: 'clippy', workflow: 'change', status: 'failed', reason, createdAt: '', updatedAt: '',
+    proposal: { title: 't', goal: 'g', rationale: 'r', acceptance: ['a'], size: 'small' },
+  });
+  const render = (reason: string) => renderToStaticMarkup(createElement(WorkRecovery, { item: failed(reason), onDone: () => {} }));
+  assert.match(render('revision_limit_reached'), /Land over findings/);
+  assert.match(render('revision_limit_reached'), /why to land over the findings/);
+  assert.doesNotMatch(render('verification_failed_after_revisions'), /Land over findings/);
 });

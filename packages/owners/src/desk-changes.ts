@@ -4,14 +4,13 @@ import { z } from 'zod';
 import type { WorkItem } from './ledger.ts';
 import { Verdict } from './artifacts.ts';
 import { requestPublish } from './brokering.ts';
-import {
-  changesSince, clearDeskReviews, deskReviewRounds, deskTree, recordDeskReview, type DeskReviewRound,
-} from './desk-reviews.ts';
+import { findingsText, previousReviewText } from './briefs.ts';
+import { clearDeskReviews, deskReviewRounds, recordDeskReview, type DeskReviewRound } from './desk-reviews.ts';
 import { requireFreelancer, type RepositoryOwner } from './declarations.ts';
 import { pickModel } from './families.ts';
 import type { Runtime } from './runtime.ts';
 import { REPOSITORY_REVIEW } from './repository-writing.ts';
-import { ensureDesk, git, verificationPassed, verify } from './workspace.ts';
+import { changesSince, ensureDesk, git, snapshotTree, verificationPassed, verify } from './workspace.ts';
 
 const run = promisify(execFile);
 
@@ -42,25 +41,12 @@ conventions. Revise, with specific findings, otherwise. Replan is not available 
   ].filter(Boolean).join('\n\n');
 }
 
-function findingLines(findings: Verdict['findings']) {
-  return findings.map(finding => `- [${finding.severity}] ${finding.file}: ${finding.issue} → ${finding.suggestion}`).join('\n');
-}
-
-const CONVERGENCE = `This change has been reviewed before. Start by checking every previous finding against the diff,
-and say in your summary which are resolved. Ask for changes only for previous findings that are not resolved and for
-problems in the changes since the previous review. Text that earlier rounds already reviewed without objection is
-settled: raise something new there only if it is a blocker (a factual, correctness or safety error), and say why no
-earlier round caught it.`;
-
 /** The latest round's findings and what changed since, so this round checks them instead of starting over. */
 async function previousReviewSection(deskPath: string, rounds: readonly DeskReviewRound[], currentTree: string) {
   const previous = rounds.at(-1);
   if (!previous) return undefined;
   const changes = (await changesSince(deskPath, previous.tree, currentTree))?.slice(0, DESK_CHANGE_LIMITS.diffChars);
-  const findings = findingLines(previous.findings) || '(no findings listed)';
-  const since = changes === undefined ? '' : `<changes-since-previous-review>\n${changes}\n</changes-since-previous-review>`;
-  const header = `round="${rounds.length}" reviewer="${previous.reviewer}" decision="${previous.decision}"`;
-  return [`<previous-review ${header}>\n${previous.summary}\n${findings}\n</previous-review>`, since, CONVERGENCE].filter(Boolean).join('\n\n');
+  return previousReviewText({ round: rounds.length, reviewer: previous.reviewer, verdict: previous, changesSince: changes });
 }
 
 /** After too many rounds the person reads the diff; no reviewer is hired until they clear the history. */
@@ -99,13 +85,13 @@ async function prepareDeskChanges(
   if (waiting) return waiting;
   await git(desk.path, ['add', '-A', '--intent-to-add']);
   const patch = (await git(desk.path, ['diff', `origin/${owner.domain.baseBranch}`])).slice(0, DESK_CHANGE_LIMITS.diffChars);
-  const tree = await deskTree(desk.path);
+  const tree = await snapshotTree(desk.path);
   const brief = reviewBrief(owner, title, summary, patch, await previousReviewSection(desk.path, rounds, tree));
   const reviewer = pickModel(runtime.declarations.families, requireFreelancer(runtime.declarations, 'review').models, [runtime.family(owner.model)]);
   const verdict = (await runtime.hire(owner.id, { role: 'reviewer', model: reviewer.model, directory: desk.path, title: `${owner.id}: review desk change`, brief, schema: Verdict })).value;
   if (verdict.decision !== 'approve') {
     await recordNeedsWork(runtime, owner, title, { at: new Date().toISOString(), reviewer: reviewer.model, ...verdict, tree });
-    return { outcome: 'needs-work', summary: `${reviewer.model} asked for changes; nothing was committed.\n${verdict.summary}\n${findingLines(verdict.findings)}` };
+    return { outcome: 'needs-work', summary: `${reviewer.model} asked for changes; nothing was committed.\n${verdict.summary}\n${findingsText(verdict.findings)}` };
   }
   await clearDeskReviews(runtime, owner.id, owner.domain.name);
   await git(desk.path, ['add', '-A']);

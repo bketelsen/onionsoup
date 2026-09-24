@@ -120,6 +120,16 @@ Migration policy: desk PRs created before ledger-backed publication remain untra
 reliably record the repository, reviewed head, or originating chat needed for safe maintenance. Existing
 ledger-backed desk publications remain tracked; missing origins are not guessed from unrelated chats.
 An approved replan resets its worktree once; verification and review share a revision budget for each plan.
+Work-item review converges the same way desk review does: each implementation keeps a snapshot of its worktree
+(`tree`, a Git tree written through a throwaway index), and after a `revise` the next reviewer gets that round's
+summary and findings and the diff since the implementation it reviewed, checks those first, and raises new points in
+already-reviewed text only for factual, correctness or safety errors. Desk and work-item reviews share that text
+(`previousReviewText` in `briefs.ts`). When an item still fails with `revision_limit_reached`, the person can retry,
+cancel, or land over the findings (`owners land-over-findings <item> --note ...`, or the surface): only when the
+last implementation's verification passed, and only with a note. It records an `override` note, journals
+`landed-over-findings`, sends the item to the ordinary landing step (the commit carries `Landed-over-findings-by`),
+and opens a `proposed` follow-up for the same owner listing the last review's findings, which goes through planning
+and the plan gate like any work. A last review with no findings opens no follow-up.
 Owners hear how their work went: each daemon tick compares work items with what it last saw, journals changes the
 owner should act on (landed, failed, rejected, PR merged or closed), and queues a notice that the plugin posts into
 the chat the work was opened from, marked as coming from the runtime, so the owner decides the next step in front
