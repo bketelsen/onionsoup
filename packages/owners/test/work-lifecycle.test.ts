@@ -199,7 +199,12 @@ test('a clean desk retries publication after commit and enrolls its PR in the le
   const { runtime, root, remote } = await fixture();
   const desk = await ensureDesk(runtime.repositoryOwner('clippy'), runtime.desksRoot);
   await writeFile(join(desk.path, 'change'), 'desk change');
-  scriptHires(runtime, async () => verdict);
+  scriptHires(runtime, async request => {
+    assert.match(request.brief, /read as the project's own record/);
+    assert.match(request.brief, /flag violations as review findings/);
+    assert.match(request.brief, /Repository-specific templates, conventions and review rubrics take precedence/);
+    return verdict;
+  });
   await fakeGithub(root, remote, async () => {
     await writeFile(join(root, 'github.json'), JSON.stringify({ created: 0, failCreate: true, state: 'OPEN' }));
     assert.equal((await proposeDeskChanges(runtime, 'clippy', 'Desk change', 'Update the desk')).outcome, 'publication-failed');

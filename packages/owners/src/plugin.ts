@@ -18,6 +18,7 @@ import type { Notebook } from './notebook.ts';
 import { configDirectory, stateDirectory } from './paths.ts';
 import { domainSummary, rosterText } from './roster.ts';
 import { Runtime } from './runtime.ts';
+import { REPOSITORY_WRITING } from './repository-writing.ts';
 
 /**
  * onionsoup as an opencode plugin: every owner with a persona becomes an agent a person can chat with
@@ -81,6 +82,10 @@ ${charter.trim()}
 <roster>
 ${roster}
 </roster>
+
+<repository-writing>
+${REPOSITORY_WRITING}
+</repository-writing>
 
 How you work with the person in this chat:
 - You own ${domainSummary(owner)}.${owner.domain.kind === 'repository-group' ? ` Your desk has one worktree per repository (./${owner.domain.repositories.map(repository => repositoryShortName(repository.name)).join(', ./')}); name the repository when you open work or propose changes.` : ''} Reach for your onionsoup tools first:
