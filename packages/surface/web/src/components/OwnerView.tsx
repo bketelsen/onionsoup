@@ -11,6 +11,8 @@ import { Badge, BusyDots, Button, cx, Empty, OwnerIcon, Section, statusTone, tim
 const ENGINE_TITLE = /^([a-z0-9-]+|w-\d{8}-[0-9a-f]+): /;
 
 const NOTE_LABELS: Record<string, string> = {
+  'delete-approved': 'Delete approved', 'request-denied': 'Request denied',
+  'create-failed': 'Create failed', 'delete-failed': 'Delete failed',
   'attention-decision': 'Attention decision', 'request-recovery': 'Request recovery',
   'request-recovered': 'Request recovered', 'request-completed': 'Request completed',
   'create-approved': 'Create approved', 'request-opened': 'Request opened',

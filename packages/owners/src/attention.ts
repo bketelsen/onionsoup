@@ -113,7 +113,7 @@ async function scanFile(runtime: Runtime, index: AttentionIndex, owner: string, 
       cursor.line++;
     }
     cursor.size = start + bytesRead < size || (isPast && cursor.offset < size) ? -1 : size;
-    cursor.complete = cursor.offset >= size;
+    cursor.complete = isPast && cursor.offset >= size;
     index.cursors[key] = cursor;
     return true;
   } finally {

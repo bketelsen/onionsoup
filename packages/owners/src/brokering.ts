@@ -280,6 +280,7 @@ const EFFECT_FREE = new Set<ResourceRequest['status']>(['pending-owner', 'work-r
 
 function requestFailure(request: ResourceRequest, error: unknown): ResourceRequest {
   const operation = { ...request.operation!, runner: undefined };
+  if (request.status !== operation.stage) return { ...request, operation, retry: undefined };
   const attempts = (request.retry?.attempts ?? 0) + 1;
   const shouldRetry = EFFECT_FREE.has(operation.stage) && attempts < REQUEST_LIMITS.decisionAttempts;
   const delay = Math.min(REQUEST_LIMITS.retryMaxMs, REQUEST_LIMITS.retryBaseMs * 2 ** (attempts - 1));

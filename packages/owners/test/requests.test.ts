@@ -445,3 +445,46 @@ test('dead runner cleanup preserves a gate or result that the completed step alr
   assert.equal(finished.instance?.name, 'onionsoup-persisted');
   assert.equal(finished.operation?.runner, undefined);
 });
+
+test('attention discovers late same-day appends on the first scan after UTC rollover', async context => {
+  const runtime = await setup();
+  const morning = Date.parse('2026-09-24T10:00:00.000Z');
+  context.mock.timers.enable({ apis: ['Date'], now: morning });
+  const notebook = runtime.notebook('clippy');
+  await notebook.journal({ kind: 'attention', note: 'Morning attention' });
+  assert.equal((await listAttention(runtime)).length, 1);
+  context.mock.timers.setTime(morning + 5 * 60 * 60_000);
+  await notebook.journal({ kind: 'attention', note: 'Late attention without another scan today' });
+  context.mock.timers.setTime(morning + 24 * 60 * 60_000);
+  assert.deepEqual((await listAttention(runtime)).map(entry => entry.note), ['Morning attention', 'Late attention without another scan today']);
+  assert.equal((await listAttention(runtime)).length, 2);
+});
+
+test('a journal failure after a persisted owner decision does not reopen that decision', async () => {
+  const runtime = await setup();
+  let hires = 0;
+  runtime.hire = async (_owner, request) => {
+    hires++;
+    return { value: request.schema.parse({ decision: 'decline', reply: 'Outside current priorities' }),
+      sessionID: 'scripted', cost: 0, startedAt: new Date().toISOString(), finishedAt: new Date().toISOString() };
+  };
+  const request = await requestWork(runtime, 'homelab', 'clippy', proposal);
+  const notebookFor = runtime.notebook.bind(runtime);
+  runtime.notebook = owner => {
+    const notebook = notebookFor(owner);
+    const journal = notebook.journal.bind(notebook);
+    notebook.journal = async entry => {
+      if (entry.kind === 'attention') throw new Error('journal_disk_unavailable');
+      return journal(entry);
+    };
+    return notebook;
+  };
+  await processRequest(runtime, request.id);
+  const declined = await runtime.requests.get(request.id);
+  assert.equal(declined.status, 'declined');
+  assert.equal(declined.reason, 'Outside current priorities');
+  assert.equal(declined.retry, undefined);
+  assert.equal(declined.operation?.runner, undefined);
+  await processRequest(runtime, request.id);
+  assert.equal(hires, 1);
+});

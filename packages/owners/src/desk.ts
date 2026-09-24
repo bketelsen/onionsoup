@@ -11,6 +11,7 @@ export const DESK_LIMITS = { notes: 40, registerChars: 20_000, requests: 15 };
 
 const REGISTERS = ['MAP', 'WISDOM', 'decisions', 'open-questions', 'FAILURES'] as const;
 const NOTE_KINDS = new Set([
+  'delete-approved', 'request-denied', 'create-failed', 'delete-failed',
   'attention-decision', 'request-recovery', 'request-recovered', 'request-completed', 'create-approved', 'request-opened',
   'chat-decision', 'chat-action', 'retracted', 'work-opened', 'plan-approved', 'plan-rejected', 'published', 'publish-failed',
   'rebase-pushed', 'attention', 'app-held', 'app-update-proposed', 'app-updated', 'request-accepted', 'request-declined',
