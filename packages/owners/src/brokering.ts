@@ -9,7 +9,7 @@ import { publishSite } from './publish-site.ts';
 import { rosterText } from './roster.ts';
 import { checkCreate, createInstance, deleteInstance, INCUS_LIMITS } from './incus.ts';
 import { refreshWorkspace } from './owner.ts';
-import { describeAsk, OwnerDecision, PublishDecision, requireStatus, type ResourceAsk, type ResourceRequest } from './requests.ts';
+import { describeAsk, REQUEST_LIMITS, requestRunnerIsAlive, OwnerDecision, PublishDecision, requireStatus, type ResourceAsk, type ResourceRequest } from './requests.ts';
 import type { Runtime } from './runtime.ts';
 import { runSandboxed } from './sandbox.ts';
 
@@ -270,8 +270,22 @@ export const REQUEST_STEPS: Partial<Record<ResourceRequest['status'], Step>> = {
 };
 
 export function requestCanRun(request: ResourceRequest) {
+  if (request.retry && Date.parse(request.retry.nextAt) > Date.now()) return false;
+  if (request.operation?.runner !== undefined && requestRunnerIsAlive(request.operation.runner)) return false;
   if (request.status === 'provisioned') return !request.followUpResult && request.followUp !== 'none';
   return Boolean(REQUEST_STEPS[request.status]);
+}
+
+const EFFECT_FREE = new Set<ResourceRequest['status']>(['pending-owner', 'work-running']);
+
+function requestFailure(request: ResourceRequest, error: unknown): ResourceRequest {
+  const operation = { ...request.operation!, runner: undefined };
+  const attempts = (request.retry?.attempts ?? 0) + 1;
+  const shouldRetry = EFFECT_FREE.has(operation.stage) && attempts < REQUEST_LIMITS.decisionAttempts;
+  const delay = Math.min(REQUEST_LIMITS.retryMaxMs, REQUEST_LIMITS.retryBaseMs * 2 ** (attempts - 1));
+  return { ...request, operation, status: shouldRetry ? operation.stage : 'interrupted',
+    retry: EFFECT_FREE.has(operation.stage) ? { attempts, nextAt: new Date(Date.now() + delay).toISOString() } : undefined,
+    reason: `request_step_failed: ${error instanceof Error ? error.message : String(error)}` };
 }
 
 /** Run one request to its next gate, isolating failures from every other request. */
@@ -283,23 +297,22 @@ export async function processRequest(runtime: Runtime, id: string, onProgress: (
     const operation = { id: randomUUID(), stage: request.status, startedAt: new Date().toISOString(), runner: process.pid,
       checkpoint: request.operation?.stage === request.status ? request.operation.checkpoint : undefined };
     const active = await runtime.requests.update(id, current => {
-      requireStatus(current, request.status);
-      if (current.operation?.runner !== undefined) throw new Error('request_already_running');
+      if (current.status !== request.status || current.operation?.runner !== undefined) return current;
       return { ...current, operation };
     });
+    if (active.operation?.id !== operation.id) return;
     try {
       await step(runtime, active);
       const finished = await runtime.requests.update(id, current => {
         if (current.operation?.id !== operation.id) throw new Error('request_operation_changed');
-        return { ...current, operation: { ...current.operation, runner: undefined } };
+        return { ...current, retry: undefined, operation: { ...current.operation, runner: undefined } };
       });
       if (finished.status === request.status && Boolean(finished.followUpResult) === Boolean(request.followUpResult)) return;
       onProgress(finished);
     } catch (error) {
       const failed = await runtime.requests.update(id, latest => {
         if (latest.operation?.id !== operation.id) return latest;
-        return { ...latest, status: 'interrupted', operation: { ...latest.operation, runner: undefined },
-          reason: `request_step_failed: ${error instanceof Error ? error.message : String(error)}` };
+        return requestFailure(latest, error);
       });
       onProgress(failed);
       return;
@@ -308,6 +321,13 @@ export async function processRequest(runtime: Runtime, id: string, onProgress: (
 }
 
 /** CLI convenience: every request progresses even when an earlier request fails. */
-export async function processRequests(runtime: Runtime, onProgress: (request: ResourceRequest) => void = () => {}) {
-  for (const request of await runtime.requests.list()) await processRequest(runtime, request.id, onProgress);
+export async function processRequests(runtime: Runtime, onProgress: (request: ResourceRequest) => void = () => {},
+  onError: (id: string, error: unknown) => void = (id, error) => console.warn(`request_unavailable: ${id}`, error)) {
+  for (const request of await runtime.requests.list()) {
+    try {
+      await processRequest(runtime, request.id, onProgress);
+    } catch (error) {
+      onError(request.id, error);
+    }
+  }
 }

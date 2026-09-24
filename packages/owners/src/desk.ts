@@ -1,3 +1,4 @@
+import { parseJournalRecord, type JournalRecord } from './journal-record.ts';
 import { listAttention } from './attention.ts';
 import { readFile, readdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -10,6 +11,7 @@ export const DESK_LIMITS = { notes: 40, registerChars: 20_000, requests: 15 };
 
 const REGISTERS = ['MAP', 'WISDOM', 'decisions', 'open-questions', 'FAILURES'] as const;
 const NOTE_KINDS = new Set([
+  'attention-decision', 'request-recovery', 'request-recovered', 'request-completed', 'create-approved', 'request-opened',
   'chat-decision', 'chat-action', 'retracted', 'work-opened', 'plan-approved', 'plan-rejected', 'published', 'publish-failed',
   'rebase-pushed', 'attention', 'app-held', 'app-update-proposed', 'app-updated', 'request-accepted', 'request-declined',
   'request-refused', 'instance-created', 'instance-deleted', 'follow-up', 'asked', 'answered', 'ci-triage', 'owner-created',
@@ -22,12 +24,15 @@ export function awaitingPublish(item: WorkItem) {
   return item.status === 'landed' && !item.publication && !item.rebaseOf;
 }
 
-interface JournalLine { at: string; kind: string; note?: string; quote?: string; outcome?: string; session?: string; workItem?: string; stage?: string }
+
 
 async function journal(directory: string) {
   const files = (await readdir(join(directory, 'journal')).catch(() => [])).filter(name => name.endsWith('.jsonl')).sort();
   const lines = (await Promise.all(files.map(file => readFile(join(directory, 'journal', file), 'utf8')))).join('').split('\n').filter(Boolean);
-  return lines.map(line => JSON.parse(line) as JournalLine);
+  return lines.flatMap(line => {
+    const entry = parseJournalRecord(line);
+    return entry ? [entry] : [];
+  });
 }
 
 function pickOwner(runtime: Runtime, query: DeskQuery) {
@@ -54,7 +59,7 @@ export async function deskState(runtime: Runtime, query: DeskQuery) {
   const entries = await journal(notebook.directory);
   const retracted = new Set(entries.filter(entry => entry.kind === 'retracted').map(entry => entry.note ?? ''));
   const seenQuotes: string[] = [];
-  const isDuplicate = (entry: JournalLine) => {
+  const isDuplicate = (entry: JournalRecord) => {
     const quote = entry.quote?.trim();
     if (entry.kind !== 'chat-decision' || !quote) return false;
     const duplicate = seenQuotes.some(seen => seen.includes(quote) || quote.includes(seen));

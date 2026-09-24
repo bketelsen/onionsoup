@@ -84,6 +84,11 @@ export async function publishSite(runtime: Runtime, request: ResourceRequest) {
   try {
     await restartApp(domain, site.app);
     await waitForSite(site.url, built.index);
+    if (request.operation) {
+      const verified = { ...publication, verifiedAt: new Date().toISOString() };
+      request.operation.checkpoint = { ...request.operation.checkpoint, publication: verified };
+      await runtime.requests.checkpoint(request.id, { publication: verified });
+    }
   } catch (error) {
     await ssh(domain, `sudo mv ${quoted(live)} ${quoted(`${site.path}/site.failed-${time}`)} && sudo mv ${quoted(previous)} ${quoted(live)}`).catch(() => undefined);
     await restartApp(domain, site.app).catch(() => undefined);
@@ -96,7 +101,7 @@ export async function publishSite(runtime: Runtime, request: ResourceRequest) {
 export async function reconcilePublication(runtime: Runtime, request: ResourceRequest) {
   if (request.ask.kind !== 'publish-site') throw new Error('not_a_publish_request');
   const checkpoint = request.operation?.checkpoint?.publication;
-  if (!checkpoint) return undefined;
+  if (!checkpoint?.verifiedAt) return undefined;
   const site = requireSite(runtime.truenasOwner(request.to).domain, request.ask.site);
   const response = await fetch(site.url, { signal: AbortSignal.timeout(5_000), headers: { 'cache-control': 'no-cache' } });
   if (!response.ok) return undefined;

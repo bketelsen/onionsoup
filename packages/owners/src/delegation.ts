@@ -25,6 +25,9 @@ export async function requestWork(runtime: Runtime, from: string, to: string, pr
 export async function decideWork(runtime: Runtime, request: ResourceRequest) {
   requireStatus(request, 'pending-owner');
   if (request.ask.kind !== 'work') throw new Error('not_a_work_request');
+  const workItem = `w-request-${request.id}`;
+  const existing = (await runtime.ledger.list()).find(item => item.id === workItem);
+  if (existing) return runtime.requests.save({ ...request, status: 'work-running', workItem });
   const owner = runtime.owner(request.to);
   const notebook = runtime.notebook(owner.id);
   await notebook.ensure(await runtime.text(`charters/${owner.id}.md`));
@@ -41,9 +44,7 @@ export async function decideWork(runtime: Runtime, request: ResourceRequest) {
   if (!owner.workflow) throw new Error(`owner_has_no_workflow: ${owner.id}`);
   runtime.repositoryOwner(owner.id, request.ask.proposal.repository);
   // Deterministic identity closes the crash window between ledger creation and saving the request link.
-  const workItem = `w-request-${request.id}`;
-  const existing = (await runtime.ledger.list()).find(item => item.id === workItem);
-  if (!existing) await runtime.ledger.create(owner.id, owner.workflow, request.ask.proposal, { id: workItem });
+  await runtime.ledger.create(owner.id, owner.workflow, request.ask.proposal, { id: workItem });
   const accepted = await runtime.requests.save({ ...request, status: 'work-running', workItem, publishDecision: decision });
   await journalRequest(runtime, accepted, 'request-accepted', `${decision.reply}; linked work ${workItem}`);
   return accepted;
@@ -52,7 +53,7 @@ export async function decideWork(runtime: Runtime, request: ResourceRequest) {
 export async function trackDelegatedWork(runtime: Runtime, request: ResourceRequest) {
   if (!request.workItem) throw new Error('delegation_work_item_missing');
   const item = await runtime.ledger.get(request.workItem);
-  const failed = item.status === 'failed' || item.status === 'rejected' || item.publication?.state === 'closed';
+  const failed = new Set(['failed', 'rejected', 'cancelled']).has(item.status) || item.publication?.state === 'closed';
   const completed = item.publication?.state === 'merged' || (item.status === 'landed' && Boolean(item.rebaseOf));
   if (!failed && !completed) return request;
   const status = failed ? 'failed' : 'completed';

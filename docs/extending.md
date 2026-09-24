@@ -142,3 +142,12 @@ The surface inbox also offers acknowledgement and resolution. All decisions keep
 who acted and why. Recovery controls for interrupted resource requests distinguish read-only outcome checks from an
 explicit retry after inspection; a retry or stop requires a reason. Incus instances created before request tagging cannot
 be automatically adopted from their names alone.
+
+Attention's first import uses `ATTENTION_LIMITS.initialHistoryDays` (default 7); older history stays in the notebook
+without flooding the inbox. Its persisted cursor and cache read only appended journal bytes, up to
+`ATTENTION_LIMITS.scanBytesPerFile` per file per scan. Malformed lines are skipped with a location-only diagnostic;
+an incomplete current-day tail is retried when more bytes arrive. Past completed daily journals are immutable inputs.
+Request model-only retries use `REQUEST_LIMITS.decisionAttempts`, `retryBaseMs` and `retryMaxMs`. Ambiguous read-only checks wait `REQUEST_LIMITS.reconcileMs` (default five minutes)
+between attempts, so the same old request does not occupy an owner on every tick. Reconciliation of a
+publication requires both recorded completion of the restart/serving check and a matching served `index.html` digest;
+it does not prove a full static asset tree from index content alone.

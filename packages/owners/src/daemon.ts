@@ -1,5 +1,4 @@
-import { trackDelegatedWork } from './delegation.ts';
-import { recoverRequests } from './request-recovery.ts';
+import { canReconcileRequest, reconcileRequest } from './request-recovery.ts';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -9,7 +8,7 @@ import { noticeWorkChanges } from './notices.ts';
 import { distill, distillIsDue } from './memory.ts';
 import type { WorkItem, WorkStatus } from './ledger.ts';
 import { wake } from './owner.ts';
-import type { ResourceRequest } from './requests.ts';
+import { requestRunnerIsAlive, type ResourceRequest } from './requests.ts';
 import type { Runtime } from './runtime.ts';
 import { advance } from './workflow.ts';
 
@@ -168,22 +167,34 @@ export async function scheduleMemory(runtime: Runtime, log: TickLog, unavailable
 async function runRequests(runtime: Runtime, log: TickLog) {
   const busyOwners = new Set([...items.keys(), ...duties.keys()].map(key => key.split('/')[0]));
   for (const ownerId of memories.keys()) busyOwners.add(ownerId);
-  for (const request of await runtime.requests.list()) {
+  for (const item of await runtime.ledger.list()) {
+    if (item.activeRunner !== undefined && requestRunnerIsAlive(item.activeRunner)) busyOwners.add(item.owner);
+  }
+  const pendingRequests = await runtime.requests.list();
+  for (const request of pendingRequests) {
+    if (request.operation?.runner === undefined || !requestRunnerIsAlive(request.operation.runner)) continue;
+    busyOwners.add(request.from);
+    busyOwners.add(request.to);
+  }
+  for (const request of pendingRequests) {
     if (request.status === 'work-running') {
       try {
-        const next = await trackDelegatedWork(runtime, request);
-        if (next.status !== request.status) log.request(next);
+        await processRequest(runtime, request.id, log.request);
       } catch (error) {
         log.error(request.id, error);
       }
       continue;
     }
-    if (!requestCanRun(request)) continue;
+    if (!requestCanRun(request) && !canReconcileRequest(request)) continue;
     const owners = new Set([request.from, request.to]);
     if ([...owners].some(owner => requestOwners.has(owner) || busyOwners.has(owner))) continue;
     requests.start(request.id, async () => {
       for (const owner of owners) requestOwners.add(owner);
       try {
+        if (canReconcileRequest(request)) {
+          const reconciled = await reconcileRequest(runtime, request.id);
+          if (reconciled.status !== request.status) log.request(reconciled);
+        }
         await processRequest(runtime, request.id, log.request);
       } catch (error) {
         log.error(request.id, error);
@@ -204,6 +215,7 @@ export async function tick(runtime: Runtime, log: TickLog) {
     log.error('configuration (keeping the last good one)', error);
   }
   try {
+    await runtime.requests.markInterrupted();
     await runRequests(runtime, log);
   } catch (error) {
     log.error('requests', error);
@@ -220,7 +232,6 @@ export async function tick(runtime: Runtime, log: TickLog) {
 
 /** Always on: tick forever. Work cut off by a stop is marked interrupted at the next start, never replayed. */
 export async function daemon(runtime: Runtime, log: TickLog, signal: AbortSignal) {
-  await recoverRequests(runtime, log.error);
   const stranded = await runtime.ledger.markInterrupted();
   if (stranded) log.error('startup', new Error(`${stranded} work items were interrupted by the last stop`));
   while (!signal.aborted) {

@@ -93,7 +93,8 @@ test('one failed owner decision does not starve subsequent requests', async () =
   const broken = await runtime.requests.open('clippy', 'homelab', ask, 'none');
   const next = await approved(runtime);
   await processRequests(runtime);
-  assert.equal((await runtime.requests.get(broken.id)).status, 'interrupted');
+  assert.equal((await runtime.requests.get(broken.id)).status, 'pending-owner');
+  assert.equal((await runtime.requests.get(broken.id)).retry?.attempts, 1);
   assert.match((await runtime.requests.get(broken.id)).reason!, /provider_unavailable/);
   assert.equal((await runtime.requests.get(next.id)).status, 'provisioned');
 });
@@ -182,7 +183,7 @@ test('a completed recorded NAS job reconciles without an update; missing job evi
   runtime.truenas = async (_domain, mutate, action) => {
     assert.equal(mutate, false);
     return action(async tool => tool === 'truenas_jobs_list'
-      ? JSON.stringify([{ id: 42, state: 'SUCCESS', arguments: ['wiki'] }])
+      ? JSON.stringify([{ id: 42, state: 'SUCCESS', method: 'app.upgrade', arguments: ['wiki'] }])
       : JSON.stringify([{ name: 'wiki', state: 'RUNNING', version: '2', image_updates_available: false }]));
   };
   await recoverRequests(runtime, (_context, error) => { throw error; });
@@ -206,7 +207,7 @@ test('publication recovery verifies the recorded build digest and never republis
     assert.ok(address && typeof address !== 'string');
     runtime.truenasOwner('moneo').domain.sites[0]!.url = `http://127.0.0.1:${address.port}/`;
     const request = await runtime.requests.open('bellonda', 'moneo', { kind: 'publish-site', site: 'homelab-wiki', purpose: 'publish' }, 'none');
-    const checkpoint = { publication: { commit: 'built-commit', previous: '/site.previous', digest: createHash('sha256').update(expected).digest('hex') } };
+    const checkpoint = { publication: { commit: 'built-commit', previous: '/site.previous', digest: createHash('sha256').update(expected).digest('hex'), verifiedAt: new Date().toISOString() } };
     await runtime.requests.save({ ...request, status: 'create-approved', operation: { ...operation('create-approved'), checkpoint } });
     await recoverRequests(runtime, (_context, error) => { throw error; });
     assert.equal((await runtime.requests.get(request.id)).published?.commit, 'built-commit');
@@ -252,4 +253,174 @@ test('finishing an owner decision preserves an approval recorded as its gate bec
   assert.equal(settled.status, 'provisioned');
   assert.equal(settled.approvals[0]?.by, 'person');
   assert.equal(settled.operation?.runner, undefined);
+});
+
+test('failed NAS job retry starts a new job; successful retry persists the new checkpoint', async () => {
+  const { APP_UPDATE_LIMITS } = await import('../src/app-updates.ts');
+  const runtime = await setup();
+  const request = await runtime.requests.open('moneo', 'moneo', {
+    kind: 'update-app', app: 'wiki', fromVersion: '1', toVersion: '1', imageUpdates: true, purpose: 'pull', notesRead: [],
+  }, 'none');
+  await runtime.requests.save({ ...request, status: 'create-approved' });
+  let starts = 0;
+  runtime.truenasSsh = async () => JSON.stringify(40 + ++starts);
+  runtime.truenas = async (_domain, _mutate, action) => action(async tool => JSON.stringify(tool === 'truenas_jobs_list'
+    ? Array.from({ length: starts }, (_entry, index) => ({
+      id: 41 + index, method: 'app.pull_images', arguments: ['wiki'], state: index === 0 ? 'FAILED' : 'SUCCESS',
+    }))
+    : [{ name: 'wiki', state: 'RUNNING', version: '1', image_updates_available: starts < 2 }]));
+  const previous = APP_UPDATE_LIMITS.pollMs;
+  APP_UPDATE_LIMITS.pollMs = 1;
+  try {
+    await processRequest(runtime, request.id);
+    assert.equal((await runtime.requests.get(request.id)).status, 'interrupted');
+    assert.equal((await runtime.requests.get(request.id)).operation?.checkpoint?.jobId, 41);
+    await recoverRequest(runtime, request.id, 'retry', 'person', 'Fixed NAS image access');
+    await processRequest(runtime, request.id);
+    const completed = await runtime.requests.get(request.id);
+    assert.equal(completed.status, 'updated');
+    assert.equal(completed.operation?.checkpoint?.jobId, 42);
+    assert.equal(starts, 2);
+  } finally {
+    APP_UPDATE_LIMITS.pollMs = previous;
+  }
+});
+
+test('effect-free failures back off, stop at a configured attempt limit, and do not require inspecting effects', async () => {
+  const { REQUEST_LIMITS } = await import('../src/requests.ts');
+  const runtime = await setup();
+  runtime.incus = { run: async () => '[]' };
+  let attempts = 0;
+  runtime.hire = async () => {
+    attempts++;
+    throw new Error('provider_unavailable');
+  };
+  const request = await runtime.requests.open('clippy', 'homelab', ask, 'none');
+  await processRequest(runtime, request.id);
+  const delayed = await runtime.requests.get(request.id);
+  assert.equal(delayed.status, 'pending-owner');
+  assert.ok(Date.parse(delayed.retry!.nextAt) > Date.now());
+  await processRequest(runtime, request.id);
+  assert.equal(attempts, 1, 'backoff suppresses immediate retries');
+  const previous = REQUEST_LIMITS.retryBaseMs;
+  REQUEST_LIMITS.retryBaseMs = 0;
+  try {
+    await runtime.requests.update(request.id, current => ({ ...current, retry: { attempts: 1, nextAt: new Date(0).toISOString() } }));
+    for (let attempt = 1; attempt < REQUEST_LIMITS.decisionAttempts; attempt++) await processRequest(runtime, request.id);
+    assert.equal((await runtime.requests.get(request.id)).status, 'interrupted');
+    await recoverRequests(runtime, (_context, error) => { throw error; });
+    assert.equal((await runtime.requests.get(request.id)).status, 'interrupted', 'exhausted attempts stay for a person');
+    assert.equal(attempts, REQUEST_LIMITS.decisionAttempts);
+  } finally {
+    REQUEST_LIMITS.retryBaseMs = previous;
+  }
+});
+
+test('periodic recovery notices dead runners but preserves a live CLI claim', async () => {
+  const runtime = await setup();
+  const dead = await approved(runtime, 'dead');
+  const live = await approved(runtime, 'live');
+  await runtime.requests.save({ ...dead, operation: operation('create-approved') });
+  await runtime.requests.save({ ...live, operation: { ...operation('create-approved'), id: 'live-operation', runner: process.pid } });
+  const log: TickLog = { duty: () => {}, item: () => {}, request: () => {}, error: (_context, error) => { throw error; } };
+  await tick(runtime, log);
+  await drain();
+  assert.equal((await runtime.requests.get(dead.id)).status, 'interrupted');
+  assert.equal((await runtime.requests.get(live.id)).operation?.runner, process.pid);
+  await processRequest(runtime, live.id);
+  assert.equal((await runtime.requests.get(live.id)).operation?.id, 'live-operation');
+});
+
+test('a failed request claim does not prevent the next CLI request from progressing', async () => {
+  const runtime = await setup();
+  const first = await approved(runtime, 'bad');
+  const next = await approved(runtime, 'good');
+  runtime.incus = { run: async () => '[]' };
+  const update = runtime.requests.update.bind(runtime.requests);
+  runtime.requests.update = async (id, change) => {
+    if (id === first.id) throw new Error('record_unavailable');
+    return update(id, change);
+  };
+  const errors: string[] = [];
+  await processRequests(runtime, () => {}, id => errors.push(id));
+  assert.deepEqual(errors, [first.id]);
+  assert.equal((await runtime.requests.get(next.id)).status, 'provisioned');
+});
+
+test('instance retry reconciles its tag before launching; cancelling retains a reachable cleanup gate', async () => {
+  const runtime = await setup();
+  const request = await approved(runtime);
+  await runtime.requests.save({ ...request, status: 'interrupted', operation: {
+    ...operation('create-approved'), runner: undefined,
+    checkpoint: { instance: { remote: 'minideb', name: 'onionsoup-test', image: ask.image } },
+  } });
+  runtime.incus = { run: async args => {
+    assert.equal(args[0], 'list');
+    return JSON.stringify([{ name: 'onionsoup-test', type: 'container', status: 'Running', config: { 'user.onionsoup.request': request.id } }]);
+  } };
+  const recovered = await recoverRequest(runtime, request.id, 'retry', 'person', 'Connection recovered');
+  assert.equal(recovered.status, 'provisioned');
+  assert.equal(recovered.instance?.name, 'onionsoup-test');
+  for (const stage of ['provisioned', 'delete-approved'] as const) {
+    await runtime.requests.save({ ...recovered, status: 'interrupted', operation: { ...operation(stage), runner: undefined } });
+    const stopped = await recoverRequest(runtime, request.id, 'cancel', 'person', 'Stop the workload');
+    assert.equal(stopped.status, 'awaiting-delete-approval');
+    assert.equal(stopped.instance?.name, 'onionsoup-test');
+  }
+});
+
+test('matching index content alone cannot prove an interrupted publication completed', async () => {
+  const runtime = await setup();
+  const request = await runtime.requests.open('bellonda', 'moneo', { kind: 'publish-site', site: 'homelab-wiki', purpose: 'publish' }, 'none');
+  await runtime.requests.save({ ...request, status: 'interrupted', operation: {
+    ...operation('create-approved'), runner: undefined,
+    checkpoint: { publication: { commit: 'built', previous: '/not-created-yet', digest: 'same-index-as-live' } },
+  } });
+  assert.equal((await reconcileRequest(runtime, request.id)).status, 'interrupted');
+  assert.equal((await runtime.requests.get(request.id)).published, undefined);
+});
+
+test('attention ingests appended records incrementally, skips malformed lines, and limits historical import', async context => {
+  const { appendFile, readFile, stat } = await import('node:fs/promises');
+  const { deskState } = await import('../src/desk.ts');
+  const runtime = await setup();
+  const journal = join(runtime.notebook('clippy').directory, 'journal', `${new Date().toISOString().slice(0, 10)}.jsonl`);
+  const old = { at: new Date(Date.now() - 30 * 86_400_000).toISOString(), kind: 'attention', note: 'Historical item' };
+  const recent = { at: new Date().toISOString(), kind: 'attention', note: 'Current item' };
+  const completed = JSON.stringify({ ...recent, note: 'Completed trailing record' });
+  const warnings = context.mock.method(console, 'warn', () => {});
+  await appendFile(journal, `${JSON.stringify(old)}\nmalformed\n${JSON.stringify(recent)}\n${completed.slice(0, -2)}`);
+  assert.equal((await listAttention(runtime)).length, 1);
+  assert.equal(warnings.mock.callCount(), 1);
+  const indexPath = join(runtime.stateDirectory, 'attention', 'index.json');
+  const first = await stat(indexPath);
+  assert.equal((await listAttention(runtime)).length, 1);
+  assert.equal((await stat(indexPath)).mtimeMs, first.mtimeMs, 'unchanged journal does not rewrite its index');
+  assert.equal(warnings.mock.callCount(), 1, 'malformed complete line is not reparsed');
+  assert.equal((await deskState(runtime, { owner: 'clippy' })).notes?.some(note => note.note === recent.note), true);
+  await appendFile(journal, completed.slice(-2) + '\n');
+  const entries = await listAttention(runtime);
+  assert.equal(entries.length, 2);
+  const cursorIndex = JSON.parse(await readFile(indexPath, 'utf8')) as { cursors: Record<string, { offset: number }> };
+  assert.equal(cursorIndex.cursors[`clippy/${new Date().toISOString().slice(0, 10)}.jsonl`]?.offset, (await stat(journal)).size);
+  await changeAttention(runtime, entries[0]!.id, 'resolved', 'person', 'Handled');
+  const reopenedRuntime = await Runtime.open({ declarations: 'packages/owners/test/fixtures/owners', state: runtime.stateDirectory });
+  assert.equal((await listAttention(reopenedRuntime)).find(entry => entry.id === entries[0]!.id)?.status, 'resolved');
+});
+
+test('ambiguous reconciliation backs off so an older request cannot starve a newer same-owner request', async () => {
+  const runtime = await setup();
+  const older = await approved(runtime, 'old');
+  await runtime.requests.save({ ...older, createdAt: '2020-01-01T00:00:00.000Z', status: 'interrupted',
+    operation: { ...operation('create-approved'), runner: undefined },
+  });
+  const newer = await approved(runtime, 'new');
+  runtime.incus = { run: async () => '[]' };
+  const log: TickLog = { duty: () => {}, item: () => {}, request: () => {}, error: (_context, error) => { throw error; } };
+  await tick(runtime, log);
+  await drain();
+  assert.ok((await runtime.requests.get(older.id)).reconcileAfter);
+  await tick(runtime, log);
+  await drain();
+  assert.equal((await runtime.requests.get(newer.id)).status, 'provisioned');
 });

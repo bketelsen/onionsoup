@@ -11,6 +11,9 @@ import { Badge, BusyDots, Button, cx, Empty, OwnerIcon, Section, statusTone, tim
 const ENGINE_TITLE = /^([a-z0-9-]+|w-\d{8}-[0-9a-f]+): /;
 
 const NOTE_LABELS: Record<string, string> = {
+  'attention-decision': 'Attention decision', 'request-recovery': 'Request recovery',
+  'request-recovered': 'Request recovered', 'request-completed': 'Request completed',
+  'create-approved': 'Create approved', 'request-opened': 'Request opened',
   'chat-decision': 'Noted', 'chat-action': 'Did', 'work-opened': 'Opened work', 'plan-approved': 'Plan approved', 'plan-rejected': 'Plan rejected',
   published: 'Published', 'publish-failed': 'Publish failed', asked: 'Asked', answered: 'Answered', attention: 'Needs you', 'ci-triage': 'CI triage',
   'work-status': 'Work update', 'owner-created': 'Created owner', 'owner-updated': 'Updated owner', 'owner-retired': 'Retired owner', 'ship-started': 'Shipping', shipped: 'Shipped',

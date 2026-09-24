@@ -5,6 +5,17 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import { ProposedWork } from './artifacts.ts';
 
+export const REQUEST_LIMITS = { decisionAttempts: 3, retryBaseMs: 60_000, retryMaxMs: 15 * 60_000, reconcileMs: 5 * 60_000 };
+
+export function requestRunnerIsAlive(pid: number) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== 'ESRCH';
+  }
+}
+
 /**
  * Owners talk through requests. A resource request moves through a fixed lifecycle, and the two
  * steps that create or destroy something in the world wait for a person:
@@ -99,7 +110,7 @@ export type OwnerDecision = z.infer<typeof OwnerDecision>;
 export const RequestCheckpoint = z.object({
   jobId: z.number().optional(),
   instance: z.object({ remote: z.string(), name: z.string(), image: z.string() }).optional(),
-  publication: z.object({ commit: z.string(), previous: z.string(), digest: z.string() }).optional(),
+  publication: z.object({ commit: z.string(), previous: z.string(), digest: z.string(), verifiedAt: z.string().optional() }).optional(),
 });
 export type RequestCheckpoint = z.infer<typeof RequestCheckpoint>;
 
@@ -111,6 +122,8 @@ export const ResourceRequest = z.object({
   status: RequestStatus,
   reason: z.string().optional(),
   workItem: z.string().optional(),
+  reconcileAfter: z.string().optional(),
+  retry: z.object({ attempts: z.number().int().nonnegative(), nextAt: z.string() }).optional(),
   operation: z.object({
     id: z.string(), stage: RequestStatus, startedAt: z.string(), runner: z.number().optional(),
     checkpoint: RequestCheckpoint.optional(),
@@ -146,7 +159,12 @@ export class Requests {
   async list() {
     await mkdir(this.directory, { recursive: true });
     const names = (await readdir(this.directory)).filter(name => name.endsWith('.json'));
-    const requests = await Promise.all(names.map(name => this.get(name.slice(0, -'.json'.length))));
+    const records = await Promise.allSettled(names.map(name => this.get(name.slice(0, -'.json'.length))));
+    const requests: ResourceRequest[] = [];
+    for (const [index, record] of records.entries()) {
+      if (record.status === 'fulfilled') requests.push(record.value);
+      else console.warn(`request_record_unreadable: ${names[index]}`);
+    }
     return requests.sort((left, right) => left.createdAt.localeCompare(right.createdAt));
   }
 
@@ -181,9 +199,9 @@ export class Requests {
   }
 
   async markInterrupted() {
-    const active = (await this.list()).filter(request => request.operation?.runner !== undefined);
+    const active = (await this.list()).filter(request => request.operation?.runner !== undefined && !requestRunnerIsAlive(request.operation.runner));
     for (const request of active) {
-      await this.update(request.id, current => current.operation?.runner === undefined ? current : {
+      await this.update(request.id, current => current.operation?.runner === undefined || requestRunnerIsAlive(current.operation.runner) ? current : {
         ...current, status: 'interrupted', reason: `request_interrupted: ${current.operation.stage}`,
         operation: { ...current.operation, runner: undefined },
       });

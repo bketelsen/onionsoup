@@ -147,14 +147,20 @@ the hire runs.
 Request decisions and runner cleanup update the latest
 record under a cross-process lock. Each active request step records its operation identity and checkpoints before effects.
 After a stopped runtime, recovery adopts an Incus instance only when its request tag matches, confirms deletion by absence,
-checks a published site's saved build digest, and checks an app's recorded job and final state. Uncertain outcomes remain
-`interrupted` in the inbox: the person can check again, retry after inspection with a reason, or stop the request. Neither
+checks a published site's saved index digest only after its restart and serving check were recorded, and checks an app's recorded job and final state. Uncertain outcomes remain
+`interrupted` in the inbox: the person can check again, retry after inspection with a reason, or stop the request.
+Instance retry first checks for an existing tagged instance; stopping a provisioned instance retains its delete gate.
+A failed NAS job can be replaced on an explicit retry, while an active or successful recorded job remains attached.
+Effect-free owner decisions and work-status checks retry with exponential backoff (three attempts by default), then
+ask the person. Each tick detects dead request runners while preserving live CLI claims; read-only reconciliation
+runs in the bounded request pool, so unavailable hosts cannot hold up the tick. Neither
 recovery nor a follow-up silently replays an unknown effect.
 
 `onionsoup_request_work` delegates to a declared repository owner. Acceptance creates one durable linked work item, with
 all normal plan, verification, review and publication gates. Both owners hear completion, and declined or failed work raises
-attention for both so the person can redirect it. Existing journal attention is discoverable without migration; attention items
-can be acknowledged, resolved with an outcome, or reopened through `onionsoup_attention`. The inbox exposes acknowledge
+attention for both so the person can redirect it. Attention discovery imports only the previous seven days on its first run (the cutoff is persisted; older journal
+history remains intact). It then indexes appended bytes, caches unchanged files, and skips malformed records without
+breaking the inbox. Attention items can be acknowledged, resolved with an outcome, or reopened through `onionsoup_attention`. The inbox exposes acknowledge
 and resolve controls and keeps acknowledged items visible until resolved.
 
 ### Always on

@@ -196,8 +196,11 @@ async function startUpgrade(runtime: Runtime, request: ResourceRequest, method: 
   if (request.ask.kind !== 'update-app') throw new Error('not_an_update_request');
   const jobs = await upgradeJobs(runtime, request.to, request.ask);
   if (options.jobId !== undefined) {
-    if (!jobs.some(job => job.id === options.jobId)) throw new Error(`app_upgrade_job_missing: ${options.jobId}`);
-    return options.jobId;
+    const previous = jobs.find(job => job.id === options.jobId);
+    if (!previous) throw new Error(`app_upgrade_job_missing: ${options.jobId}`);
+    if (!FAILED_JOB.has(previous.state)) return options.jobId;
+    // An explicit request retry may replace a conclusively failed job; unknown outcomes stay attached.
+
   }
   const active = jobs.find(job => ACTIVE_JOB.has(job.state));
   const jobId = active?.id ?? await UPDATE_STARTERS[method](runtime, request);

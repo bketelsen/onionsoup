@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import {
   approveCreate, approveDelete, approvePlan, approvePush, awaitingPublish, chatDirectory, denyRequest, deskState, describeAsk,
-  domainSummary, itemText, publish, rejectPlan, revisePlan, resumeItem, retryItem, cancelItem, memoryFingerprint, type Runtime,
+  domainSummary, itemText, publish, rejectPlan, revisePlan, resumeItem, retryItem, cancelItem, memoryFingerprint, type ResourceRequest, type Runtime,
   listAttention, changeAttention, recoverRequest, reconcileRequest,
 } from '@onionsoup/owners';
 import type { OpencodeApi, PendingPermission, PendingQuestion } from './opencode.ts';
@@ -15,6 +15,20 @@ import { ordered, SettingsStore } from './settings.ts';
  */
 const DONE = new Set(['landed', 'failed', 'rejected', 'cancelled']);
 const RUNNING = new Set(['planning', 'implementing', 'reviewing', 'landing']);
+
+const RECOVERY_GUIDANCE: Partial<Record<ResourceRequest['status'], string>> = {
+  'pending-owner': 'Owner decision retries exhausted; check the provider before retrying.',
+  'work-running': 'Work status checks failed; inspect the linked work item before retrying.',
+};
+
+function requestRecoveryDetail(request: ResourceRequest) {
+  const stage = request.operation?.stage;
+  const guidance = stage ? RECOVERY_GUIDANCE[stage] : undefined;
+  return [request.reason ?? 'Interrupted',
+    `operation ${request.operation?.id ?? 'unknown'} (${stage ?? 'unknown'})`,
+    guidance ?? 'Inspect effects before retrying. Stopping an instance request retains its cleanup gate.',
+  ].join('; ');
+}
 
 export interface InboxEntry {
   kind: 'plan' | 'push' | 'publish' | 'create' | 'delete' | 'permission' | 'question' | 'request-recovery' | 'attention';
@@ -94,7 +108,7 @@ export class SurfaceState {
       })),
       ...requests.filter(request => request.status === 'interrupted').map(request => ({
         kind: 'request-recovery' as const, id: request.id, owner: request.to, title: describeAsk(request.ask),
-        detail: `${request.reason ?? 'Interrupted'}; operation ${request.operation?.id ?? 'unknown'} (${request.operation?.stage ?? 'unknown'}). Inspect effects before retrying.`, at: request.updatedAt,
+        detail: requestRecoveryDetail(request), at: request.updatedAt,
       })),
       ...items.filter(item => item.status === 'awaiting-plan-approval').map(item => ({ kind: 'plan' as const, id: item.id, owner: item.owner, title: item.proposal.title, detail: item.plan?.summary ?? item.proposal.goal, at: item.updatedAt })),
       ...items.filter(item => item.status === 'awaiting-push-approval').map(item => ({ kind: 'push' as const, id: item.id, owner: item.owner, title: item.proposal.title, detail: item.rebaseOf?.prUrl ?? '', at: item.updatedAt })),
