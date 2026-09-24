@@ -543,3 +543,57 @@ test('desk PR merges and closes notify the original chat and remain visible in o
     });
   }
 });
+
+test('an old open desk PR remains in owner status text with its PR URL', async () => {
+  const { statusText } = await import('@onionsoup/owners');
+  const { runtime } = await fixture();
+  const source = await runtime.ledger.create('clippy', 'desk-publication', proposal, {
+    status: 'landed', publication: {
+      url: 'https://example.invalid/pr/1', branch: 'desk', by: 'owner', at: '', state: 'open',
+    },
+  });
+  const text = statusText([source], [], new Date('2100-01-01T00:00:00Z'));
+  assert.match(text, /^Open:\n- work /);
+  assert.match(text, /https:\/\/example.invalid\/pr\/1 \(open\)/);
+  assert.doesNotMatch(text, /Finished in the last/);
+});
+
+test('a desk PR merged under its grant between ticks queues a merge notice for the proposing chat', async () => {
+  const { noticeWorkChanges, pendingNotices } = await import('../src/notices.ts');
+  const { runtime, root, remote } = await fixture();
+  const owner = runtime.declarations.owners.get('clippy')!;
+  owner.grants.push({ to: 'clippy', action: 'merge', target: 'example/clippy' });
+  const desk = await ensureDesk(runtime.repositoryOwner('clippy'), runtime.desksRoot);
+  const origin = { sessionID: 'grant-proposal-chat', directory: desk.path };
+  await writeFile(join(desk.path, 'change'), 'desk change');
+  scriptHires(runtime, async () => verdict);
+  const fallbackDirectory = async () => '/wrong-directory';
+  await noticeWorkChanges(runtime, fallbackDirectory);
+  await fakeGithub(root, remote, async () => {
+    const opened = await proposeDeskChanges(runtime, 'clippy', 'Merge desk change', 'Update', undefined, origin);
+    assert.equal(opened.outcome, 'merged');
+    const [source] = await runtime.ledger.list();
+    assert.equal(source!.publication!.state, 'merged');
+    const notices = await noticeWorkChanges(runtime, fallbackDirectory);
+    assert.equal(notices.length, 1);
+    assert.equal(notices[0]!.change, 'pr-merged');
+    assert.deepEqual(notices[0]!.origin, origin);
+    assert.match(notices[0]!.text, /was merged/);
+    assert.equal((await pendingNotices(runtime))[0]!.change, 'pr-merged');
+    assert.deepEqual(await noticeWorkChanges(runtime, fallbackDirectory), []);
+  });
+});
+
+
+test('a post-merge desk failure still reports the failed follow-up', async () => {
+  const { describeChange } = await import('../src/notices.ts');
+  const { runtime } = await fixture();
+  const source = await runtime.ledger.create('clippy', 'desk-publication', proposal, {
+    status: 'failed', reason: 'site_publish_unavailable', publication: {
+      url: 'https://example.invalid/pr/1', branch: 'desk', by: 'owner', at: '', state: 'merged',
+    },
+  });
+  const notice = describeChange(source, 'landing|open');
+  assert.equal(notice?.change, 'failed');
+  assert.match(notice!.text, /site_publish_unavailable/);
+});

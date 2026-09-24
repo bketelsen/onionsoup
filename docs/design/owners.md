@@ -95,7 +95,8 @@ PR after checking its head has not moved. Rebase maintenance preserves the whole
 and skips patch-equivalent commits already integrated on the base by a squash merge.
 Desk publications use the same maintenance records. The chat that proposed a desk change is saved before
 publication starts, so later merge and close notices return to that chat. Open PRs stay in the owner's Work
-list even when newer completed work fills its recent history.
+list and status text even when newer completed work fills its recent history. A desk PR merged immediately
+under a grant produces a merge notice, including when publication and merging happen between daemon ticks.
 
 Migration policy: desk PRs created before ledger-backed publication remain untracked. Their legacy
 `desk-change-opened` journal entries are retained as history, but are not automatically imported: they do not

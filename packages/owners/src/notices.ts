@@ -37,6 +37,11 @@ export function describeChange(item: WorkItem, previous: string | undefined): { 
   const [before, beforePr] = (previous ?? '|').split('|');
   const title = `"${item.proposal.title}"`;
   const pr = item.publication;
+  // A desk can publish and merge between ticks; preserve failures in post-merge follow-ups.
+  const hasNewFailure = item.status === 'failed' && item.status !== before;
+  if (!hasNewFailure && pr && pr.state !== beforePr && (pr.state === 'merged' || pr.state === 'closed') && beforePr !== undefined) {
+    return { change: `pr-${pr.state}`, text: `The PR for ${item.id} ${title} was ${pr.state}: ${pr.url}.${pr.state === 'closed' ? ' It was closed without merging; find out why before proposing it again.' : ''}` };
+  }
   if (item.status !== before && NOTABLE.has(item.status)) {
     if (item.status === 'failed') {
       const timedOut = /Aborted/.test(item.reason ?? '') ? ' (a hire ran out its time limit or was stopped)' : '';
@@ -50,9 +55,6 @@ export function describeChange(item: WorkItem, previous: string | undefined): { 
       : item.repairOf ? `landed on ${item.branch}; publication will update ${item.repairOf.prUrl}`
       : `landed on ${item.branch}; it becomes a PR when the person publishes it`;
     return { change: 'landed', text: `Your work item ${item.id} ${title} passed verification and review and ${where}. Tell the person if anything about it needs them.` };
-  }
-  if (pr && pr.state !== beforePr && (pr.state === 'merged' || pr.state === 'closed') && beforePr !== undefined) {
-    return { change: `pr-${pr.state}`, text: `The PR for ${item.id} ${title} was ${pr.state}: ${pr.url}.${pr.state === 'closed' ? ' It was closed without merging; find out why before proposing it again.' : ''}` };
   }
   return undefined;
 }
