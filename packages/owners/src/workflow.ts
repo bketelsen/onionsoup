@@ -254,27 +254,32 @@ function retryState(item: WorkItem) {
   };
 }
 
-async function recoverItem(runtime: Runtime, itemId: string, by: string, kind: 'resume' | 'retry') {
+/** The person's words when they give them, else what the runtime resumes; either way the next hire reads it. */
+function recoveryNote(status: WorkStatus, note?: string) {
+  return note?.trim() ? `${note.trim()} (continue from ${status})` : `continue from ${status}`;
+}
+
+async function recoverItem(runtime: Runtime, itemId: string, by: string, kind: 'resume' | 'retry', note?: string) {
   const expected = kind === 'resume' ? 'interrupted' : 'failed';
   const recovered = await runtime.ledger.update(itemId, item => {
     if (item.status !== expected || item.activeRunner) throw new Error(`not_${expected}: ${item.status}`);
     const resumed = kind === 'retry' ? retryState(item) : transition(item, recoveryStage(item));
     return {
       ...resumed,
-      humanNotes: [...item.humanNotes, humanNote(kind, by, `continue from ${resumed.status}`)],
+      humanNotes: [...item.humanNotes, humanNote(kind, by, recoveryNote(resumed.status, note))],
     };
   });
-  await runtime.notebook(recovered.owner).journal({ kind: kind === 'resume' ? 'resumed' : 'retried', workItem: itemId, note: `${by}: continue from ${recovered.status}` });
+  await runtime.notebook(recovered.owner).journal({ kind: kind === 'resume' ? 'resumed' : 'retried', workItem: itemId, note: `${by}: ${recoveryNote(recovered.status, note)}` });
   return recovered;
 }
 
 /** Record a person's recovery decision; the daemon executes the preserved stage on its next tick. */
-export function resumeItem(runtime: Runtime, itemId: string, by: string) {
-  return recoverItem(runtime, itemId, by, 'resume');
+export function resumeItem(runtime: Runtime, itemId: string, by: string, note?: string) {
+  return recoverItem(runtime, itemId, by, 'resume', note);
 }
 
-export function retryItem(runtime: Runtime, itemId: string, by: string) {
-  return recoverItem(runtime, itemId, by, 'retry');
+export function retryItem(runtime: Runtime, itemId: string, by: string, note?: string) {
+  return recoverItem(runtime, itemId, by, 'retry', note);
 }
 
 const CANCELLABLE = new Set<WorkStatus>([

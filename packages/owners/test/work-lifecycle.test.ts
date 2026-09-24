@@ -375,6 +375,29 @@ test('retry after the revision limit goes to implementation with the previous fi
   assert.equal(reviews, 2);
 });
 
+test("a retry note reaches the next implementer and reviewer, so the person's answer is not lost", async () => {
+  const { runtime } = await fixture();
+  const item = await runtime.ledger.create('clippy', 'change', proposal, {
+    status: 'implementing', plan, planApproval: { by: 'person', at: '' },
+  });
+  const briefs: Record<string, string[]> = { implementer: [], reviewer: [] };
+  scriptHires(runtime, async request => {
+    briefs[request.role]?.push(request.brief);
+    if (request.role === 'implementer' && briefs.implementer!.length > 1) await writeFile(join(request.directory, 'change'), 'accepted');
+    if (request.role === 'implementer') return report;
+    if (request.role === 'reviewer') return verdict;
+    return { notebook: [] };
+  });
+  assert.equal((await advance(runtime, item.id)).reason, 'implementer_changed_nothing');
+  assert.doesNotMatch(briefs.implementer![0]!, /person-notes-on-recovery/);
+  await retryItem(runtime, item.id, 'person', 'I approve the exact wording.');
+  const retried = await runtime.ledger.get(item.id);
+  assert.equal(retried.humanNotes.at(-1)?.note, 'I approve the exact wording. (continue from implementing)');
+  assert.equal((await advance(runtime, item.id)).status, 'landed');
+  assert.match(briefs.implementer![1]!, /<person-notes-on-recovery>\nperson \(\d{4}-\d\d-\d\d\): I approve the exact wording\./);
+  assert.match(briefs.reviewer![0]!, /<person-notes-on-recovery>[\s\S]*I approve the exact wording\./);
+});
+
 test('a malformed CI fix is recorded once and raised for a person', async () => {
   const { runtime, root, remote } = await fixture();
   await git(remote, ['branch', 'original', 'main']);

@@ -190,7 +190,10 @@ image updates pending, a second tracked job pulls them; temporary polling failur
 a known successful job without starting another update. See the [TrueNAS API](https://api.truenas.com/v25.10/api_methods_app.pull_images.html).
 
 People only record decisions (approve, reject, revise-plan, resume, approve-create, approve-push, …); the
-runtime acts on them. Ledger updates use per-record kernel locks across daemon, CLI and surface processes.
+runtime acts on them. A note given with resume or retry is kept on the item, and the next implementer and
+reviewer read it, so an answer to a question an earlier attempt raised is not lost. Approving a plan is the
+person's go-ahead for everything it describes; planners are told not to add steps that wait for more evidence of it.
+Ledger updates use per-record kernel locks across daemon, CLI and surface processes.
 Learning hires append their records to the latest item, preserving publication and person decisions made while
 the hire runs.
 Request decisions and runner cleanup update the latest
