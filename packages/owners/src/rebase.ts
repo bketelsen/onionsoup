@@ -86,11 +86,11 @@ async function triageFailingCi(runtime: Runtime, item: WorkItem, headSha: string
     'Decide as the owner: fix (describe the work to plan; the person approves the plan), flaky (not caused by the change; say why), or person (needs the person: secrets, infrastructure, policy).',
   ].join('\n\n');
   const decision = (await runtime.hire(owner.id, { role: 'owner', model: owner.model, directory: owner.workspace, title: `${owner.id}: CI triage`, brief, schema: CiTriage })).value;
-  const kind = decision.decision === 'person' ? 'attention' : 'ci-triage';
-  await notebook.journal({ kind, workItem: item.id, outcome: decision.decision, note: `CI on ${item.publication!.url}: ${decision.reason}` });
+  const invalidFix = decision.decision === 'fix' && (!decision.fix || !owner.workflow);
+  const kind = decision.decision === 'person' || invalidFix ? 'attention' : 'ci-triage';
+  await notebook.journal({ kind, workItem: item.id, outcome: decision.decision, note: invalidFix ? `ci_fix_missing_workflow_or_proposal: ${item.publication!.url}; a person must provide a proposal or configure a workflow.` : `CI on ${item.publication!.url}: ${decision.reason}` });
   let repair: WorkItem | undefined;
-  if (decision.decision === 'fix') {
-    if (!decision.fix || !owner.workflow) throw new Error('ci_fix_missing_workflow_or_proposal');
+  if (decision.decision === 'fix' && decision.fix && owner.workflow) {
     repair = await runtime.ledger.create(owner.id, owner.workflow, {
       ...decision.fix, repository: item.proposal.repository,
     }, {

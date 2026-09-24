@@ -16,7 +16,7 @@ export function WorkRecovery({ item, onDone }: { item: WorkItem; onDone: () => v
   const [reason, setReason] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  if (item.activeRunner || (item.status === 'landed' && item.publication) || !CANCELLABLE.has(item.status)) return null;
+  if (item.activeRunner || (item.status === 'landed' && (item.publication || item.rebaseOf)) || !CANCELLABLE.has(item.status)) return null;
   const recover = RECOVERY[item.status];
   const decide = async (action: string) => {
     setBusy(true);

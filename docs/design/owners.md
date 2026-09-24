@@ -78,7 +78,7 @@ An owner is declared once (`owners/<id>.yaml`) and keeps one identity across ses
 - **Grants**: standing approvals the person gives in configuration (`publish-site`, `update-app`, `merge`, `ship`),
   journaled as "approved by standing grant" whenever they are used.
 - **Desk**: a worktree on a `desk/<id>` branch (or the evidence folder for non-repository owners) where chat
-  work happens. Desk changes become a verified, reviewed PR through `onionsoup_propose_changes`. Publication is a ledger workflow: commit, push, PR creation, merge and site follow-up have durable checkpoints. Retrying a clean desk continues its unfinished publication, and its PR participates in maintenance.
+  work happens. Desk changes become a verified, reviewed PR through `onionsoup_propose_changes`. Publication is a ledger workflow: commit, push, PR creation, merge and site follow-up have durable checkpoints. Retrying a clean desk continues its unfinished publication, and its PR participates in maintenance. An active publication reports its progress; permanent failures name the cancellation needed before a new proposal. Journal failures remain visible without changing a completed publication back to failed.
 
 ### Freelancers and workflows
 
@@ -134,8 +134,9 @@ configuration, moves requests along, runs due duties, advances work items, and r
 work items run in the background beside the tick (one run per item, one item per owner, two of each at a time), so
 a long hire never holds up a 15-minute check or a waiting request. Deterministic
 checks wake a model only when one is needed, and that model is the owner. Work a stopped runtime was actually
-doing is marked interrupted and never replayed; a person resumes its recorded stage. Failed work can be retried
-with a fresh revision budget. The item page and CLI (`resume`, `retry`, `cancel --reason`) expose these decisions;
+doing is marked interrupted and never replayed; every tick also checks external runner claims so a stopped
+plugin or surface does not leave work stuck. A person resumes the recorded stage. Failed work can be retried
+with fresh revision and replan budgets; exhausted review decisions resume implementation or planning directly. The item page and CLI (`resume`, `retry`, `cancel --reason`) expose these decisions;
 queued work, unpublished local work and pending gates can be cancelled, while an active effect must finish first.
 Cancelling a rebase suppresses automatic replacement for the same PR head.
 

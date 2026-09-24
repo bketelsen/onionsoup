@@ -19,7 +19,7 @@ export const DESK_CHANGE_LIMITS = { diffChars: 60_000 };
  * PR. An owner holding a merge grant from the person merges its own approved PR, and a site built from the
  * repository is then published through its host's grant.
  */
-export interface DeskChangeResult { outcome: 'merged' | 'opened' | 'needs-work' | 'nothing-to-do'; summary: string; url?: string; publishRequest?: string }
+export interface DeskChangeResult { outcome: 'merged' | 'opened' | 'needs-work' | 'publication-failed' | 'in-progress' | 'nothing-to-do'; summary: string; url?: string; publishRequest?: string }
 
 function hasMergeGrant(owner: RepositoryOwner) {
   return owner.grants.some(grant => grant.to === owner.id && grant.action === 'merge' && (grant.target === owner.domain.name || grant.target === '*'));
@@ -70,7 +70,7 @@ async function prepareDeskChanges(runtime: Runtime, ownerId: string, title: stri
       reviewedTree: (await git(desk.path, ['write-tree'])).trim(),
     },
   });
-  return deskResult(await advanceDeskPublication(runtime, item.id));
+  return continueDeskPublication(runtime, item.id);
 }
 
 export const DESK_WORKFLOW = 'desk-publication';
@@ -79,14 +79,43 @@ export async function proposeDeskChanges(runtime: Runtime, ownerId: string, titl
   const pending = (await runtime.ledger.list()).find(item => item.owner === ownerId
     && item.proposal.repository === repository && item.deskPublication
     && item.deskPublication.stage !== 'complete' && item.status !== 'cancelled');
-  if (pending) return deskResult(await advanceDeskPublication(runtime, pending.id));
+  if (pending) return continueDeskPublication(runtime, pending.id);
   return prepareDeskChanges(runtime, ownerId, title, summary, repository);
 }
 
+async function continueDeskPublication(runtime: Runtime, itemId: string) {
+  try {
+    return deskResult(await advanceDeskPublication(runtime, itemId));
+  } catch (error) {
+    if (!(error instanceof Error) || error.message !== 'work_item_active') throw error;
+    return deskResult(await runtime.ledger.get(itemId));
+  }
+}
+
+const PERMANENT_FAILURES = new Set(['desk_changed_since_review', 'desk_head_changed', 'desk_pr_closed']);
+
 function deskResult(item: WorkItem): DeskChangeResult {
-  if (item.status === 'failed') return { outcome: 'needs-work', summary: `${item.reason}; retry propose changes to continue ${item.id}.` };
+  if (item.activeRunner) return { outcome: 'in-progress', summary: `Publication ${item.id} is running at ${item.deskPublication!.stage}.` };
+  if (item.status === 'failed') return deskFailure(item);
   const outcome = item.publication?.state === 'merged' ? 'merged' : 'opened';
-  return { outcome, summary: `${outcome} ${item.publication?.url}`, url: item.publication?.url, publishRequest: item.deskPublication?.publishRequest };
+  const warning = item.reason ? `; ${item.reason}` : '';
+  return {
+    outcome, summary: `${outcome} ${item.publication?.url}${warning}`, url: item.publication?.url,
+    publishRequest: item.deskPublication?.publishRequest,
+  };
+}
+
+function deskFailure(item: WorkItem): DeskChangeResult {
+  const permanent = PERMANENT_FAILURES.has(item.reason ?? '');
+  const next = permanent
+    ? `Cancel ${item.id} before proposing the revised desk changes.`
+    : `Retry propose changes to continue ${item.id}, or cancel it.`;
+  const commit = item.landedCommit ? `Commit ${item.landedCommit} is retained.` : 'No publication commit was recorded.';
+  return {
+    outcome: 'publication-failed',
+    summary: `Publication stopped at ${item.deskPublication!.stage}: ${item.reason}. ${commit} ${next}`,
+    url: item.publication?.url,
+  };
 }
 
 type DeskStage = NonNullable<WorkItem['deskPublication']>['stage'];
@@ -185,11 +214,23 @@ export async function advanceDeskPublication(runtime: Runtime, itemId: string) {
       step = DESK_STEPS[item.deskPublication!.stage];
     }
     item = await runtime.ledger.update(item.id, current => ({ ...current, status: 'landed', activeRunner: undefined }));
-    await runtime.notebook(item.owner).journal({ kind: 'desk-change-published', workItem: item.id, outcome: item.publication?.url });
   } catch (error) {
     item = await runtime.ledger.update(item.id, current => ({
       ...current, status: 'failed', activeRunner: undefined, reason: error instanceof Error ? error.message : String(error),
     }));
   }
+  if (item.status === 'landed') item = await recordDeskPublication(runtime, item);
   return item;
+}
+
+async function recordDeskPublication(runtime: Runtime, item: WorkItem) {
+  const notebook = runtime.notebook(item.owner);
+  try {
+    await notebook.journal({ kind: 'desk-change-published', workItem: item.id, outcome: item.publication?.url });
+    await notebook.commit('journal desk change');
+    return item;
+  } catch (error) {
+    const reason = `desk_publication_journal_failed: ${error instanceof Error ? error.message : String(error)}`;
+    return runtime.ledger.update(item.id, current => ({ ...current, reason }));
+  }
 }

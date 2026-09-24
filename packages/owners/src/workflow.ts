@@ -36,6 +36,7 @@ const plan: Step = async (runtime, item, workflow) => {
   const directory = item.repairOf
     ? (await createWorktree(owner, runtime.worktreesRoot, item.id, item.repairOf.previousHead)).path
     : owner.workspace;
+  if (item.repairOf) await resetForPlan(runtime, item, directory);
   const hired = await freelancer(runtime, 'planning');
   const hirePlanner = async (current: WorkItem) => runtime.hireFor(current, 'plan', 'planning', {
     role: 'planner', model: hired.model, directory, title: `${item.id}: plan`,
@@ -50,15 +51,18 @@ const plan: Step = async (runtime, item, workflow) => {
   return { ...transition(item, 'awaiting-plan-approval'), plan: drafted, planApproval: undefined };
 };
 
+async function resetForPlan(runtime: Runtime, item: WorkItem, path: string) {
+  if (!item.resetForPlan) return;
+  await resetWorktree(runtime.repositoryFor(item), path, item.repairOf?.previousHead);
+  item.resetForPlan = false;
+  await runtime.ledger.update(item.id, current => ({ ...current, resetForPlan: false }));
+}
+
 const implement: Step = async (runtime, item, workflow) => {
   const owner = runtime.repositoryFor(item);
   if (!item.plan || !item.planApproval) throw new Error('plan_not_approved');
   const { path, branch } = await createWorktree(owner, runtime.worktreesRoot, item.id, item.repairOf?.previousHead);
-  if (item.resetForPlan) {
-    await resetWorktree(owner, path, item.repairOf?.previousHead);
-    item.resetForPlan = false;
-    await runtime.ledger.update(item.id, current => ({ ...current, resetForPlan: false }));
-  }
+  await resetForPlan(runtime, item, path);
   const hired = await freelancer(runtime, 'implementation');
   const report = await runtime.hireFor(item, 'implement', 'implementation', {
     role: 'implementer', model: hired.model, directory: path, title: `${item.id}: implement ${item.implementations.length + 1}`,
@@ -235,15 +239,29 @@ function recoveryStage(item: WorkItem): WorkStatus {
   return item.workflow === REBASE_WORKFLOW || item.planApproval ? 'implementing' : 'planning';
 }
 
+const RETRY_STAGES: Record<string, WorkStatus> = {
+  revision_limit_reached: 'implementing',
+  replan_limit_reached: 'planning',
+};
+
+function retryState(item: WorkItem) {
+  const status = RETRY_STAGES[item.reason ?? ''] ?? recoveryStage(item);
+  const needsNewPlan = item.reason === 'replan_limit_reached';
+  return {
+    ...transition(item, status), replans: 0, revisionStart: item.implementations.length,
+    resetForPlan: needsNewPlan || item.resetForPlan,
+    planApproval: needsNewPlan ? undefined : item.planApproval,
+  };
+}
+
 async function recoverItem(runtime: Runtime, itemId: string, by: string, kind: 'resume' | 'retry') {
   const expected = kind === 'resume' ? 'interrupted' : 'failed';
   const recovered = await runtime.ledger.update(itemId, item => {
     if (item.status !== expected || item.activeRunner) throw new Error(`not_${expected}: ${item.status}`);
-    const status = recoveryStage(item);
+    const resumed = kind === 'retry' ? retryState(item) : transition(item, recoveryStage(item));
     return {
-      ...transition(item, status),
-      revisionStart: kind === 'retry' ? item.implementations.length : item.revisionStart,
-      humanNotes: [...item.humanNotes, humanNote(kind, by, `continue from ${status}`)],
+      ...resumed,
+      humanNotes: [...item.humanNotes, humanNote(kind, by, `continue from ${resumed.status}`)],
     };
   });
   await runtime.notebook(recovered.owner).journal({ kind: kind === 'resume' ? 'resumed' : 'retried', workItem: itemId, note: `${by}: continue from ${recovered.status}` });
@@ -268,7 +286,7 @@ const CANCELLABLE = new Set<WorkStatus>([
 export async function cancelItem(runtime: Runtime, itemId: string, by: string, reason: string) {
   const cancelled = await runtime.ledger.update(itemId, item => {
     if (item.activeRunner) throw new Error('work_item_active');
-    if (item.status === 'landed' && item.publication) throw new Error('published_work_cannot_cancel');
+    if (item.status === 'landed' && (item.publication || item.rebaseOf)) throw new Error('published_work_cannot_cancel');
     if (!CANCELLABLE.has(item.status)) throw new Error(`not_cancellable: ${item.status}`);
     return {
       ...transition(item, 'cancelled', reason),

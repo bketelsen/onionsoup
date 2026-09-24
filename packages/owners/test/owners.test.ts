@@ -238,6 +238,7 @@ test('a steward creates and retires owners in its scope, and never writes author
   assert.ok(runtime.declarations.owners.has('widget'));
   assert.match(execFileSync('git', ['-C', config, 'log', '-1', '--format=%s']).toString(), /Add Tamalane \(example\/widget\), by odrade/);
 
+  await runtime.ledger.create('widget', 'change', { title: 'Cancelled', goal: 'g', rationale: 'r', acceptance: ['a'], size: 'small' }, { status: 'cancelled' });
   const retiring = await prepareRetire(runtime, 'odrade', 'widget');
   await retireOwner(runtime, 'odrade', retiring, 'merged into clippy');
   assert.equal(runtime.declarations.owners.has('widget'), false);

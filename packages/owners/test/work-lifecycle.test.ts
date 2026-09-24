@@ -202,7 +202,7 @@ test('a clean desk retries publication after commit and enrolls its PR in the le
   scriptHires(runtime, async () => verdict);
   await fakeGithub(root, remote, async () => {
     await writeFile(join(root, 'github.json'), JSON.stringify({ created: 0, failCreate: true, state: 'OPEN' }));
-    assert.equal((await proposeDeskChanges(runtime, 'clippy', 'Desk change', 'Update the desk')).outcome, 'needs-work');
+    assert.equal((await proposeDeskChanges(runtime, 'clippy', 'Desk change', 'Update the desk')).outcome, 'publication-failed');
     const [failed] = await runtime.ledger.list();
     assert.equal(failed?.deskPublication?.stage, 'open');
     assert.equal((await git(desk.path, ['status', '--porcelain'])).trim(), '');
@@ -283,4 +283,162 @@ test('record lock spawn failure rejects without running the mutation', async () 
     process.env.PATH = previous;
   }
   assert.equal(ran, false);
+});
+
+test('each daemon tick recovers dead external runners while preserving live claims', async () => {
+  const { tick, drain } = await import('../src/daemon.ts');
+  const { runtime } = await fixture();
+  const owner = runtime.declarations.owners.get('clippy')!;
+  runtime.declarations.owners.clear();
+  runtime.declarations.owners.set('clippy', owner);
+  runtime.reloadDeclarations = async () => {};
+  const dead = await runtime.ledger.create('clippy', 'change', proposal, { status: 'landed', activeRunner: 424242 });
+  const live = await runtime.ledger.create('clippy', 'change', proposal, { status: 'implementing', activeRunner: process.pid });
+  const errors: string[] = [];
+  const log = { duty() {}, item() {}, request() {}, error(context: string) { errors.push(context); } };
+  await tick(runtime, log);
+  await drain();
+  assert.equal((await runtime.ledger.get(dead.id)).status, 'interrupted');
+  assert.equal((await runtime.ledger.get(live.id)).activeRunner, process.pid);
+  assert.equal((await resumeItem(runtime, dead.id, 'person')).status, 'landed');
+  assert.deepEqual(errors, ['recovery']);
+  await tick(runtime, log);
+  await drain();
+  assert.deepEqual(errors, ['recovery'], 'a live external runner is neither replayed nor logged as a conflict');
+});
+
+test('retry after the replan limit plans from the original repair head with fresh budgets', async () => {
+  const { runtime } = await fixture();
+  runtime.declarations.workflows.get('change')!.review.maxReplans = 1;
+  const head = (await git(runtime.owner('clippy').workspace, ['rev-parse', 'HEAD'])).trim();
+  const source = await runtime.ledger.create('clippy', 'change', proposal, { status: 'landed' });
+  const item = await runtime.ledger.create('clippy', 'change', proposal, {
+    status: 'implementing', plan, planApproval: { by: 'person', at: '' }, replans: 1,
+    repairOf: { itemId: source.id, previousHead: head, branch: 'original', prUrl: 'https://example.invalid/pr/1' },
+  });
+  let reviews = 0;
+  let plans = 0;
+  scriptHires(runtime, async request => {
+    if (request.role === 'planner') {
+      plans++;
+      await assert.rejects(readFile(join(request.directory, 'change')));
+      assert.equal((await git(request.directory, ['rev-parse', 'HEAD'])).trim(), head);
+      return plan;
+    }
+    if (request.role === 'implementer') {
+      await writeFile(join(request.directory, 'change'), 'attempt');
+      return report;
+    }
+    if (request.role === 'reviewer') return ++reviews === 1 ? { ...verdict, decision: 'replan' } : verdict;
+    return { notebook: [] };
+  });
+  assert.equal((await advance(runtime, item.id)).reason, 'replan_limit_reached');
+  const retried = await retryItem(runtime, item.id, 'person');
+  assert.equal(retried.status, 'planning');
+  assert.equal(retried.replans, 0);
+  assert.equal(retried.planApproval, undefined);
+  assert.equal(retried.revisionStart, 1);
+  assert.equal((await advance(runtime, item.id)).status, 'awaiting-plan-approval');
+  await approvePlan(runtime, item.id, 'person');
+  assert.equal((await advance(runtime, item.id)).status, 'landed');
+  assert.equal(plans, 1);
+  assert.equal(reviews, 2);
+});
+
+test('retry after the revision limit goes to implementation with the previous findings', async () => {
+  const { runtime } = await fixture();
+  runtime.declarations.workflows.get('change')!.review.maxRevisions = 0;
+  const item = await runtime.ledger.create('clippy', 'change', proposal, {
+    status: 'implementing', plan, planApproval: { by: 'person', at: '' },
+  });
+  let implementations = 0;
+  let reviews = 0;
+  scriptHires(runtime, async request => {
+    if (request.role === 'implementer') {
+      implementations++;
+      await writeFile(join(request.directory, 'change'), `attempt ${implementations}`);
+      return report;
+    }
+    if (request.role === 'reviewer') return ++reviews === 1 ? { ...verdict, decision: 'revise' } : verdict;
+    return { notebook: [] };
+  });
+  assert.equal((await advance(runtime, item.id)).reason, 'revision_limit_reached');
+  assert.equal((await retryItem(runtime, item.id, 'person')).status, 'implementing');
+  assert.equal((await advance(runtime, item.id)).status, 'landed');
+  assert.equal(implementations, 2);
+  assert.equal(reviews, 2);
+});
+
+test('a malformed CI fix is recorded once and raised for a person', async () => {
+  const { runtime, root, remote } = await fixture();
+  await git(remote, ['branch', 'original', 'main']);
+  const head = (await git(remote, ['rev-parse', 'original'])).trim();
+  await runtime.ledger.create('clippy', 'change', proposal, {
+    status: 'landed', branch: 'original', landedCommit: head,
+    publication: { url: 'https://github.com/example/clippy/pull/1', branch: 'original', by: 'person', at: '', state: 'open' },
+  });
+  let hires = 0;
+  scriptHires(runtime, async () => {
+    hires++;
+    return { decision: 'fix', reason: 'Missing proposal' };
+  });
+  await fakeGithub(root, remote, async () => {
+    assert.equal((await maintainPullRequests(runtime, 'clippy')).opened.length, 0);
+    assert.equal((await maintainPullRequests(runtime, 'clippy')).opened.length, 0);
+  });
+  assert.equal(hires, 1);
+  const entries = (await runtime.notebook('clippy').journalSince(undefined)).map(line => JSON.parse(line));
+  assert.ok(entries.some(entry => entry.kind === 'attention' && entry.note.includes('ci_fix_missing_workflow_or_proposal')));
+  assert.equal(JSON.parse(await readFile(join(runtime.stateDirectory, 'ci-triage-clippy.json'), 'utf8'))['https://github.com/example/clippy/pull/1'], head);
+});
+
+test('a completed rebase cannot be cancelled and a repair notice names the original PR', async () => {
+  const { describeChange } = await import('../src/notices.ts');
+  const { runtime } = await fixture();
+  const target = { itemId: 'source', previousHead: 'head', branch: 'original', prUrl: 'https://example.invalid/pr/1' };
+  const rebased = await runtime.ledger.create('clippy', 'rebase', proposal, { status: 'landed', rebaseOf: target });
+  await assert.rejects(cancelItem(runtime, rebased.id, 'person', 'Too late'), /published_work_cannot_cancel/);
+  assert.equal((await runtime.ledger.get(rebased.id)).status, 'landed');
+  const repair = await runtime.ledger.create('clippy', 'change', proposal, { status: 'landed', repairOf: target, branch: 'repair' });
+  assert.match(describeChange(repair, 'landing|')!.text, /publication will update https:\/\/example.invalid\/pr\/1/);
+});
+
+test('desk publication reports a competing runner and explains permanent failures', async () => {
+  const { runtime } = await fixture();
+  const desk = await ensureDesk(runtime.repositoryOwner('clippy'), runtime.desksRoot);
+  const item = await runtime.ledger.create('clippy', 'desk-publication', proposal, {
+    status: 'landing', worktree: desk.path, activeRunner: process.pid,
+    deskPublication: { stage: 'commit', reviewedHead: 'old', reviewedTree: 'tree', reviewer: 'reviewer' },
+  });
+  assert.equal((await proposeDeskChanges(runtime, 'clippy', 'Retry', 'Retry')).outcome, 'in-progress');
+  await runtime.ledger.update(item.id, current => ({ ...current, activeRunner: undefined }));
+  const failed = await proposeDeskChanges(runtime, 'clippy', 'Retry', 'Retry');
+  assert.equal(failed.outcome, 'publication-failed');
+  assert.match(failed.summary, /desk_head_changed/);
+  assert.match(failed.summary, /Cancel .* before proposing/);
+  assert.equal((await runtime.ledger.get(item.id)).status, 'failed');
+});
+
+test('desk publication stays landed if its journal fails, and commits the journal on success', async () => {
+  const { advanceDeskPublication } = await import('../src/desk-changes.ts');
+  const { runtime } = await fixture();
+  const createFinished = () => runtime.ledger.create('clippy', 'desk-publication', proposal, {
+    status: 'landing',
+    publication: { url: 'https://example.invalid/pr/1', branch: 'desk', by: 'owner', at: '', state: 'open' },
+    deskPublication: { stage: 'complete', reviewedHead: 'head', reviewedTree: 'tree', reviewer: 'reviewer' },
+  });
+  const notebook = runtime.notebook('clippy');
+  const realJournal = notebook.journal.bind(notebook);
+  runtime.notebook = () => notebook;
+  notebook.journal = async () => { throw new Error('journal_disk_full'); };
+  const first = await createFinished();
+  assert.equal((await advanceDeskPublication(runtime, first.id)).status, 'landed');
+  const persisted = await runtime.ledger.get(first.id);
+  assert.match(persisted.reason!, /desk_publication_journal_failed: journal_disk_full/);
+  assert.equal(persisted.deskPublication?.stage, 'complete');
+  notebook.journal = realJournal;
+  const second = await createFinished();
+  await advanceDeskPublication(runtime, second.id);
+  assert.equal((await git(notebook.root, ['status', '--porcelain'])).trim(), '');
+  assert.match(await git(notebook.root, ['log', '-1', '--format=%s']), /journal desk change/);
 });
