@@ -78,7 +78,7 @@ An owner is declared once (`owners/<id>.yaml`) and keeps one identity across ses
 - **Grants**: standing approvals the person gives in configuration (`publish-site`, `update-app`, `merge`, `ship`),
   journaled as "approved by standing grant" whenever they are used.
 - **Desk**: a worktree on a `desk/<id>` branch (or the evidence folder for non-repository owners) where chat
-  work happens. Desk changes become a verified, reviewed PR through `onionsoup_propose_changes`.
+  work happens. Desk changes become a verified, reviewed PR through `onionsoup_propose_changes`. Publication is a ledger workflow: commit, push, PR creation, merge and site follow-up have durable checkpoints. Retrying a clean desk continues its unfinished publication, and its PR participates in maintenance. An active publication reports its progress; permanent failures name the cancellation needed before a new proposal. Journal failures remain visible without changing a completed publication back to failed.
 
 ### Freelancers and workflows
 
@@ -90,6 +90,9 @@ implementer's family (checked from recorded providers) → revise or replan with
 the owner's status, which also reports recent outcomes). The `maintain-prs` duty keeps published PRs mergeable and green:
 a conflict wakes the owner, which decides and briefs the implementer (the force-push waits for approval), and
 failing CI on a new head commit wakes the owner once to decide fix (a work item at the plan gate), flaky, or person.
+A CI repair records the original PR and head, plans and implements from that head, and publication appends to that
+PR after checking its head has not moved. Rebase maintenance preserves the whole PR, including earlier repairs.
+An approved replan resets its worktree once; verification and review share a revision budget for each plan.
 Owners hear how their work went: each daemon tick compares work items with what it last saw, journals changes the
 owner should act on (landed, failed, rejected, PR merged or closed), and queues a notice that the plugin posts into
 the chat the work was opened from, marked as coming from the runtime, so the owner decides the next step in front
@@ -120,7 +123,9 @@ split into observed, inferred and unknown) and open requests to each other:
 | `update-app` | NAS owner → itself | grant or person, then update through the API and follow the TrueNAS job to the end |
 
 People only record decisions (approve, reject, revise-plan, resume, approve-create, approve-push, …); the
-runtime acts on them, so decisions never race the daemon.
+runtime acts on them. Ledger updates use per-record kernel locks across daemon, CLI and surface processes.
+Learning hires append their records to the latest item, preserving publication and person decisions made while
+the hire runs.
 
 ### Always on
 
@@ -129,7 +134,11 @@ configuration, moves requests along, runs due duties, advances work items, and r
 work items run in the background beside the tick (one run per item, one item per owner, two of each at a time), so
 a long hire never holds up a 15-minute check or a waiting request. Deterministic
 checks wake a model only when one is needed, and that model is the owner. Work a stopped runtime was actually
-doing is marked interrupted and never replayed; a person resumes it.
+doing is marked interrupted and never replayed; every tick also checks external runner claims so a stopped
+plugin or surface does not leave work stuck. A person resumes the recorded stage. Failed work can be retried
+with fresh revision and replan budgets; exhausted review decisions resume implementation or planning directly. The item page and CLI (`resume`, `retry`, `cancel --reason`) expose these decisions;
+queued work, unpublished local work and pending gates can be cancelled, while an active effect must finish first.
+Cancelling a rebase suppresses automatic replacement for the same PR head.
 
 ### Safety
 

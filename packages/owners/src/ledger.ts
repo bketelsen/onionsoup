@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
+import { withRecordLock } from './record-lock.ts';
 import { ImplementationReport, OwnerAnswers, Plan, ProposedWork, Verdict } from './artifacts.ts';
 
 export const HireRecord = z.object({
@@ -37,11 +38,12 @@ export const WorkStatus = z.enum([
   'failed',
   'rejected',
   'interrupted',
+  'cancelled',
 ]);
 export type WorkStatus = z.infer<typeof WorkStatus>;
 
 export const HumanNote = z.object({
-  kind: z.enum(['approval', 'plan-feedback', 'rejection']),
+  kind: z.enum(['approval', 'plan-feedback', 'rejection', 'resume', 'retry', 'cancellation']),
   by: z.string(),
   at: z.string(),
   note: z.string(),
@@ -57,6 +59,8 @@ export const Publication = z.object({
 });
 export type Publication = z.infer<typeof Publication>;
 
+const PullRequestTarget = z.object({ itemId: z.string(), branch: z.string(), prUrl: z.string(), previousHead: z.string() });
+
 export const WorkItem = z.object({
   id: z.string(),
   owner: z.string(),
@@ -70,6 +74,12 @@ export const WorkItem = z.object({
   implementations: z.array(z.object({ report: ImplementationReport, diffStat: z.string(), verification: z.array(Verification) })).default([]),
   verdicts: z.array(Verdict).default([]),
   replans: z.number().default(0),
+  /** Implementation count at the start of the current plan/retry budget. */
+  revisionStart: z.number().optional(),
+  /** Reset only once when beginning an approved replacement plan. */
+  resetForPlan: z.boolean().optional(),
+  /** Exact stage to continue after a failure or interruption. */
+  resumeStatus: WorkStatus.optional(),
   worktree: z.string().optional(),
   branch: z.string().optional(),
   landedCommit: z.string().optional(),
@@ -77,7 +87,15 @@ export const WorkItem = z.object({
   humanNotes: z.array(HumanNote).default([]),
   publication: Publication.optional(),
   /** Set on a rebase work item: which landed item's PR it brings up to date. */
-  rebaseOf: z.object({ itemId: z.string(), branch: z.string(), prUrl: z.string(), previousHead: z.string() }).optional(),
+  rebaseOf: PullRequestTarget.optional(),
+  repairOf: PullRequestTarget.optional(),
+  deskPublication: z.object({
+    stage: z.enum(['commit', 'push', 'open', 'merge', 'finish', 'complete']),
+    reviewedHead: z.string(),
+    reviewedTree: z.string(),
+    reviewer: z.string(),
+    publishRequest: z.string().optional(),
+  }).optional(),
   /** The chat the work was opened from, so the owner hears there how it went. */
   origin: z.object({ sessionID: z.string(), directory: z.string() }).optional(),
   /** The pid working on a step right now; unset when the item is merely queued (approved, resumed). */
@@ -86,6 +104,15 @@ export const WorkItem = z.object({
   updatedAt: z.string(),
 });
 export type WorkItem = z.infer<typeof WorkItem>;
+
+function runnerIsAlive(pid: number) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== 'ESRCH';
+  }
+}
 
 export class Ledger {
   constructor(readonly directory: string) {}
@@ -118,6 +145,15 @@ export class Ledger {
   }
 
   async save(item: WorkItem) {
+    return withRecordLock(`${this.path(item.id)}.lock`, () => this.write(item));
+  }
+
+  /** Read and mutate the latest record under a cross-process lock; never hold it across effects. */
+  async update(id: string, change: (current: WorkItem) => WorkItem) {
+    return withRecordLock(`${this.path(id)}.lock`, async () => this.write(WorkItem.parse(change(await this.get(id)))));
+  }
+
+  private async write(item: WorkItem) {
     await mkdir(this.directory, { recursive: true });
     const updated = { ...item, updatedAt: new Date().toISOString() };
     const temporary = `${this.path(item.id)}.${randomUUID()}.tmp`;
@@ -131,9 +167,12 @@ export class Ledger {
    * working on count; approved or resumed items that nothing had started yet stay queued.
    */
   async markInterrupted() {
-    const stranded = (await this.list()).filter(item => item.activeRunner !== undefined);
+    const stranded = (await this.list()).filter(item => item.activeRunner !== undefined && !runnerIsAlive(item.activeRunner));
     for (const item of stranded) {
-      await this.save({ ...item, status: 'interrupted', activeRunner: undefined, reason: `runtime stopped while ${item.status}` });
+      await this.update(item.id, current => current.activeRunner === undefined || runnerIsAlive(current.activeRunner) ? current : {
+        ...current, status: 'interrupted', resumeStatus: current.status, activeRunner: undefined,
+        reason: `runtime stopped while ${current.status}`,
+      });
     }
     return stranded.length;
   }

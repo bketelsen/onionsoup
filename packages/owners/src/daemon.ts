@@ -130,6 +130,8 @@ function advanceRunnable(runnable: readonly WorkItem[], runtime: Runtime, log: T
 
 /** One pass: configuration, requests (people may be waiting on an instance), due duties, work items, notices. */
 export async function tick(runtime: Runtime, log: TickLog) {
+  const stranded = await runtime.ledger.markInterrupted();
+  if (stranded) log.error('recovery', new Error(`${stranded} work items lost their runner and await a person`));
   try {
     await runtime.reloadDeclarations();
   } catch (error) {
@@ -141,7 +143,7 @@ export async function tick(runtime: Runtime, log: TickLog) {
     log.error('requests', error);
   }
   await runDueDuties(runtime, log);
-  advanceRunnable((await runtime.ledger.list()).filter(candidate => RUNNABLE.includes(candidate.status)), runtime, log);
+  advanceRunnable((await runtime.ledger.list()).filter(candidate => RUNNABLE.includes(candidate.status) && !candidate.activeRunner), runtime, log);
   try {
     for (const notice of await noticeWorkChanges(runtime, ownerId => chatDirectory(runtime, ownerId))) log.duty(notice.owner, 'notice', `${notice.workItem} ${notice.change}${notice.origin ? ' (to its chat)' : ''}`);
   } catch (error) {

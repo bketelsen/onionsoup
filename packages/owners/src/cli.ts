@@ -19,7 +19,7 @@ import { deskState } from './desk.ts';
 import { initConfig } from './init.ts';
 import { configDirectory, stateDirectory } from './paths.ts';
 import { ensureDesk } from './workspace.ts';
-import { advance, approvePlan, rejectPlan, resumeItem, revisePlan } from './workflow.ts';
+import { advance, approvePlan, rejectPlan, resumeItem, retryItem, cancelItem, revisePlan } from './workflow.ts';
 
 const run = promisify(execFile);
 
@@ -159,6 +159,14 @@ const COMMANDS: Record<string, Command> = {
     console.log(line(item));
     await continueIfFree(runtime, item);
   },
+  async retry(runtime, [itemId]) {
+    const item = await retryItem(runtime, required(itemId, 'work item'), userInfo().username);
+    console.log(line(item));
+    await continueIfFree(runtime, item);
+  },
+  async cancel(runtime, [itemId]) {
+    console.log(line(await cancelItem(runtime, required(itemId, 'work item'), userInfo().username, required(options.reason, '--reason'))));
+  },
   async 'approve-push'(runtime, [itemId]) {
     const item = await approvePush(runtime, required(itemId, 'work item'), userInfo().username);
     console.log(line(item));
@@ -261,7 +269,7 @@ if (commandName === 'init') {
 }
 const runtime = await Runtime.open({ declarations: options.declarations!, state: options.state! });
 /** Commands that only read, or only record a person's decision, never take the runtime lock. */
-const LOCK_FREE = ['items', 'show', 'notebook', 'requests', 'approve', 'publish', 'revise-plan', 'reject', 'resume', 'desk', 'desk-state', 'retract', 'ask', 'request-publish', 'propose', 'ship', 'approve-push', 'approve-create', 'approve-delete', 'deny-request'];
+const LOCK_FREE = ['items', 'show', 'notebook', 'requests', 'approve', 'publish', 'revise-plan', 'reject', 'resume', 'retry', 'cancel', 'desk', 'desk-state', 'retract', 'ask', 'request-publish', 'propose', 'ship', 'approve-push', 'approve-create', 'approve-delete', 'deny-request'];
 try {
   const unlock = LOCK_FREE.includes(commandName!) ? async () => {} : await runtime.lock();
   try {

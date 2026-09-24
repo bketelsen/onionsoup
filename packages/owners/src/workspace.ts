@@ -34,25 +34,25 @@ export async function refreshCheckout(owner: RepositoryOwner) {
 }
 
 /** A fresh worktree per work item, on its own branch, next to (not inside) the checkout. */
-export async function createWorktree(owner: RepositoryOwner, worktreesRoot: string, itemId: string) {
+export async function createWorktree(owner: RepositoryOwner, worktreesRoot: string, itemId: string, start?: string) {
   const path = join(worktreesRoot, owner.id, itemId);
   const branch = `owners/${itemId}`;
   if (!existsSync(path)) {
-    await git(owner.workspace, ['worktree', 'add', '-q', '-b', branch, path, `origin/${owner.domain.baseBranch}`]);
+    await git(owner.workspace, ['worktree', 'add', '-q', '-b', branch, path, start ?? `origin/${owner.domain.baseBranch}`]);
   }
   return { path, branch };
 }
 
 /** A replanned item starts from the base again, not from the rejected attempt. */
-export async function resetWorktree(owner: RepositoryOwner, worktree: string) {
-  await git(worktree, ['reset', '-q', '--hard', `origin/${owner.domain.baseBranch}`]);
+export async function resetWorktree(owner: RepositoryOwner, worktree: string, start?: string) {
+  await git(worktree, ['reset', '-q', '--hard', start ?? `origin/${owner.domain.baseBranch}`]);
   await git(worktree, ['clean', '-q', '-fd']);
 }
 
-export async function diffAgainstBase(owner: RepositoryOwner, worktree: string) {
+export async function diffAgainstBase(owner: RepositoryOwner, worktree: string, start?: string) {
   await git(worktree, ['add', '-A', '--intent-to-add']);
-  const stat = await git(worktree, ['diff', '--stat', `origin/${owner.domain.baseBranch}`]);
-  const patch = await git(worktree, ['diff', `origin/${owner.domain.baseBranch}`]);
+  const stat = await git(worktree, ['diff', '--stat', start ?? `origin/${owner.domain.baseBranch}`]);
+  const patch = await git(worktree, ['diff', start ?? `origin/${owner.domain.baseBranch}`]);
   return { stat: stat.trim(), patch: patch.slice(0, WORKSPACE_LIMITS.diffChars) };
 }
 

@@ -86,28 +86,43 @@ async function triageFailingCi(runtime: Runtime, item: WorkItem, headSha: string
     'Decide as the owner: fix (describe the work to plan; the person approves the plan), flaky (not caused by the change; say why), or person (needs the person: secrets, infrastructure, policy).',
   ].join('\n\n');
   const decision = (await runtime.hire(owner.id, { role: 'owner', model: owner.model, directory: owner.workspace, title: `${owner.id}: CI triage`, brief, schema: CiTriage })).value;
+  const invalidFix = decision.decision === 'fix' && (!decision.fix || !owner.workflow);
+  const kind = decision.decision === 'person' || invalidFix ? 'attention' : 'ci-triage';
+  await notebook.journal({ kind, workItem: item.id, outcome: decision.decision, note: invalidFix ? `ci_fix_missing_workflow_or_proposal: ${item.publication!.url}; a person must provide a proposal or configure a workflow.` : `CI on ${item.publication!.url}: ${decision.reason}` });
+  let repair: WorkItem | undefined;
+  if (decision.decision === 'fix' && decision.fix && owner.workflow) {
+    repair = await runtime.ledger.create(owner.id, owner.workflow, {
+      ...decision.fix, repository: item.proposal.repository,
+    }, {
+      repairOf: { itemId: item.id, branch: item.publication!.branch, prUrl: item.publication!.url, previousHead: headSha },
+    });
+  }
   triaged[item.publication!.url] = headSha;
   await writeFile(join(runtime.stateDirectory, `ci-triage-${owner.id}.json`), JSON.stringify(triaged, null, 2) + '\n');
-  const kind = decision.decision === 'person' ? 'attention' : 'ci-triage';
-  await notebook.journal({ kind, workItem: item.id, outcome: decision.decision, note: `CI on ${item.publication!.url}: ${decision.reason}` });
-  if (decision.decision === 'fix' && decision.fix && owner.workflow) return runtime.ledger.create(owner.id, owner.workflow, { ...decision.fix, repository: item.proposal.repository });
-  return undefined;
+  return repair;
 }
 
 /** The maintain-prs duty: record merges and closes, and open a rebase work item for each conflicting PR. */
 export async function maintainPullRequests(runtime: Runtime, ownerId: string) {
   const items = (await runtime.ledger.list()).filter(item => item.owner === ownerId);
-  const openRebases = new Set(items.filter(item => item.rebaseOf && !['landed', 'failed', 'rejected'].includes(item.status)).map(item => item.rebaseOf!.itemId));
+  const openRebases = new Set(items.filter(item => item.rebaseOf && !['landed', 'failed', 'rejected', 'cancelled'].includes(item.status)).map(item => item.rebaseOf!.itemId));
+  const cancelledRebases = new Set(items.filter(item => item.rebaseOf && item.status === 'cancelled')
+    .map(item => `${item.rebaseOf!.itemId}:${item.rebaseOf!.previousHead}`));
   const notes: string[] = [];
   const opened: WorkItem[] = [];
-  for (const item of items.filter(candidate => candidate.publication?.state === 'open')) {
+  for (const item of items.filter(candidate => candidate.publication?.state === 'open' && !candidate.repairOf)) {
     const pr = await settledPullRequest(item.publication!.url);
     const state = PR_STATES[pr.state] ?? 'open';
     if (state !== 'open') {
-      await runtime.ledger.save({ ...item, publication: { ...item.publication!, state } });
+      await runtime.ledger.update(item.id, current => ({ ...current, publication: { ...current.publication!, state } }));
       notes.push(`${item.publication!.url} ${state}`);
       continue;
     }
+    const hasRepair = items.some(candidate => candidate.repairOf?.itemId === item.id
+      && !['failed', 'rejected', 'cancelled'].includes(candidate.status)
+      && !candidate.publication);
+    if (hasRepair) continue;
+    if (openRebases.has(item.id)) continue;
     const fix = await triageFailingCi(runtime, item, pr.headRefOid).catch(error => {
       notes.push(`${item.publication!.url} CI triage failed: ${error instanceof Error ? error.message : error}`);
       return undefined;
@@ -115,8 +130,9 @@ export async function maintainPullRequests(runtime: Runtime, ownerId: string) {
     if (fix) {
       opened.push(fix);
       notes.push(`${item.publication!.url} CI failing → ${fix.id}`);
+      continue;
     }
-    if (pr.mergeable !== 'CONFLICTING' || openRebases.has(item.id)) continue;
+    if (pr.mergeable !== 'CONFLICTING' || cancelledRebases.has(`${item.id}:${pr.headRefOid}`)) continue;
     const rebase = await runtime.ledger.create(ownerId, REBASE_WORKFLOW, {
       title: `Rebase "${item.proposal.title}" onto the current base`,
       goal: `Bring ${item.publication!.url} up to date with the base branch without changing what it does.`,
@@ -124,7 +140,7 @@ export async function maintainPullRequests(runtime: Runtime, ownerId: string) {
       acceptance: ['The PR applies cleanly to the current base', 'Host verification passes', 'The change is the same change the plan approved'],
       size: 'small',
       repository: item.proposal.repository,
-    }, { status: 'implementing', rebaseOf: { itemId: item.id, branch: item.branch!, prUrl: item.publication!.url, previousHead: pr.headRefOid } });
+    }, { status: 'implementing', rebaseOf: { itemId: item.id, branch: item.publication!.branch, prUrl: item.publication!.url, previousHead: pr.headRefOid } });
     opened.push(rebase);
     notes.push(`${item.publication!.url} conflicting → ${rebase.id}`);
   }
@@ -219,7 +235,7 @@ both sides. abandon: the base already covers it or it no longer makes sense; say
 /** The owner is the project manager: it decides whether and how a conflict is resolved before anyone is hired. */
 async function ownerDecidesConflict(runtime: Runtime, item: WorkItem, source: WorkItem, worktree: string, files: string[], originalPatch: string) {
   const owner = runtime.repositoryFor(item);
-  const originalBase = (await git(worktree, ['rev-parse', `${source.landedCommit!}~1`])).trim();
+  const originalBase = (await git(worktree, ['merge-base', item.rebaseOf!.previousHead, `origin/${owner.domain.baseBranch}`])).trim();
   const baseChanges = (await git(worktree, ['log', '--stat', '--format=%h %s', `${originalBase}..origin/${owner.domain.baseBranch}`])).slice(0, 20_000);
   const brief = conflictBrief(source, files, originalPatch, baseChanges, await runtime.notebook(owner.id).orientation());
   return runtime.hireFor(item, 'decide', 'owner', { role: 'owner', model: owner.model, directory: owner.workspace, title: `${item.id}: owner decides conflict`, brief, schema: ConflictDecision });
@@ -228,7 +244,7 @@ async function ownerDecidesConflict(runtime: Runtime, item: WorkItem, source: Wo
 class Abandoned extends Error {}
 
 async function resolveConflicts(runtime: Runtime, item: WorkItem, source: WorkItem, worktree: string, files: string[]) {
-  const originalPatch = (await git(worktree, ['show', source.landedCommit!])).slice(0, 40_000);
+  const originalPatch = (await git(worktree, ['diff', `origin/${runtime.repositoryFor(item).domain.baseBranch}...${item.rebaseOf!.previousHead}`])).slice(0, 40_000);
   const decision = await ownerDecidesConflict(runtime, item, source, worktree, files, originalPatch);
   await runtime.notebook(item.owner).journal({ kind: 'conflict-decision', workItem: item.id, outcome: decision.decision, note: decision.reason });
   if (decision.decision === 'abandon') throw new Abandoned(`owner_abandoned: ${decision.reason}`);
@@ -253,18 +269,32 @@ async function replay(runtime: Runtime, item: WorkItem): Promise<WorkItem> {
   await git(path, ['cherry-pick', '--abort']).catch(() => '');
   await git(path, ['reset', '-q', '--hard', `origin/${owner.domain.baseBranch}`]);
   await git(path, ['clean', '-q', '-fd']);
-  const picked = await git(path, ['cherry-pick', source.landedCommit!]).then(() => true, () => false);
-  const files = picked ? [] : await conflictedFiles(path);
-  if (!picked && !files.length) throw new Error('cherry_pick_failed_without_conflicts');
-  const report = picked
-    ? { summary: 'Replayed cleanly; no conflicts.', filesChanged: [], deviationsFromPlan: [] }
-    : await resolveConflicts(runtime, item, source, path, files);
+  const replayedCommits = await replayCommits(runtime, item, source, path);
+  const report = replayedCommits.report;
   const diff = await diffAgainstBase(owner, path);
   const verification = await verify(owner, path, runtime.toolsDirectory);
   const replayed = { ...item, worktree: path, branch, implementations: [...item.implementations, { report, diffStat: diff.stat, verification }] };
-  await runtime.notebook(item.owner).journal({ kind: 'rebase', workItem: item.id, outcome: picked ? 'clean' : `resolved ${files.length} conflicted files`, note: diff.stat.split('\n').at(-1) });
+  await runtime.notebook(item.owner).journal({ kind: 'rebase', workItem: item.id, outcome: replayedCommits.resolved ? 'resolved conflicts' : 'clean', note: diff.stat.split('\n').at(-1) });
   if (!verificationPassed(verification)) return transition(replayed, 'failed', 'verification_failed_after_rebase');
-  return transition(replayed, picked ? 'awaiting-push-approval' : 'reviewing');
+  return transition(replayed, replayedCommits.resolved ? 'reviewing' : 'awaiting-push-approval');
+}
+
+async function replayCommits(runtime: Runtime, item: WorkItem, source: WorkItem, path: string) {
+  const base = runtime.repositoryFor(item).domain.baseBranch;
+  const commits = (await git(path, ['rev-list', '--reverse', '--no-merges', `origin/${base}..${item.rebaseOf!.previousHead}`]))
+    .trim().split('\n').filter(Boolean);
+  if (!commits.length) throw new Error('rebase_has_no_commits');
+  let resolved = false;
+  let report = { summary: 'Replayed cleanly; no conflicts.', filesChanged: [] as string[], deviationsFromPlan: [] as string[] };
+  for (const commit of commits) {
+    const picked = await git(path, ['cherry-pick', commit]).then(() => true, () => false);
+    if (picked) continue;
+    const files = await conflictedFiles(path);
+    if (!files.length) throw new Error('cherry_pick_failed_without_conflicts');
+    report = await resolveConflicts(runtime, item, source, path, files);
+    resolved = true;
+  }
+  return { resolved, report };
 }
 
 function reviewResolutionBrief(source: WorkItem, originalPatch: string, rebasedPatch: string) {
@@ -283,7 +313,7 @@ async function reviewResolution(runtime: Runtime, item: WorkItem): Promise<WorkI
   const implementerFamily = item.hires.filter(hire => hire.stage === 'implement' && hire.outcome === 'delivered').at(-1)?.family;
   const declaration = requireFreelancer(runtime.declarations, 'review');
   const { model } = pickModel(runtime.declarations.families, declaration.models, implementerFamily ? [implementerFamily] : []);
-  const originalPatch = (await git(owner.workspace, ['show', source.landedCommit!])).slice(0, 30_000);
+  const originalPatch = (await git(owner.workspace, ['diff', `origin/${owner.domain.baseBranch}...${item.rebaseOf!.previousHead}`])).slice(0, 30_000);
   const rebasedPatch = (await diffAgainstBase(owner, item.worktree!)).patch.slice(0, 30_000);
   const verdict = await runtime.hireFor(item, 'review', 'review', {
     role: 'reviewer', model, directory: item.worktree!, title: `${item.id}: review resolution`,
@@ -296,10 +326,12 @@ async function reviewResolution(runtime: Runtime, item: WorkItem): Promise<WorkI
 /** Only after a person approved: overwrite the PR branch, refusing if it moved since we looked. */
 async function push(runtime: Runtime, item: WorkItem): Promise<WorkItem> {
   const { branch, previousHead, itemId } = item.rebaseOf!;
-  await git(item.worktree!, ['push', '-q', `--force-with-lease=${branch}:${previousHead}`, 'origin', `HEAD:${branch}`]);
   const head = (await git(item.worktree!, ['rev-parse', 'HEAD'])).trim();
-  const source = await runtime.ledger.get(itemId);
-  await runtime.ledger.save({ ...source, landedCommit: head });
+  const remoteHead = (await git(item.worktree!, ['ls-remote', 'origin', `refs/heads/${branch}`])).split(/\s/)[0];
+  if (remoteHead !== head) {
+    await git(item.worktree!, ['push', '-q', `--force-with-lease=${branch}:${previousHead}`, 'origin', `HEAD:${branch}`]);
+  }
+  await runtime.ledger.update(itemId, source => ({ ...source, landedCommit: head }));
   await runtime.notebook(item.owner).journal({ kind: 'rebase-pushed', workItem: item.id, outcome: head.slice(0, 8), note: item.rebaseOf!.prUrl });
   return { ...transition(item, 'landed'), landedCommit: head };
 }
@@ -314,10 +346,13 @@ const REBASE_STEPS: Partial<Record<WorkStatus, Step>> = {
 
 export async function advanceRebase(runtime: Runtime, itemId: string, onProgress: (item: WorkItem) => void) {
   let item = await runtime.ledger.get(itemId);
-  if (item.status === 'interrupted') item = transition(item, 'implementing');
   let step = REBASE_STEPS[item.status];
   while (step) {
-    const current = await runtime.ledger.save({ ...item, activeRunner: process.pid });
+    const expectedStatus = item.status;
+    const current = await runtime.ledger.update(item.id, latest => {
+      if (latest.status !== expectedStatus || latest.activeRunner) throw new Error('work_item_changed');
+      return { ...latest, resumeStatus: latest.status, activeRunner: process.pid };
+    });
     try {
       item = await step(runtime, current);
     } catch (error) {
@@ -334,8 +369,13 @@ export async function advanceRebase(runtime: Runtime, itemId: string, onProgress
 
 /** The destructive-action gate for rebases. Only records the decision; the runtime pushes. */
 export async function approvePush(runtime: Runtime, itemId: string, by: string) {
-  const item = await runtime.ledger.get(itemId);
-  if (item.status !== 'awaiting-push-approval') throw new Error(`not_awaiting_push_approval: ${item.status}`);
-  await runtime.notebook(item.owner).journal({ kind: 'push-approved', workItem: item.id, note: by });
-  return runtime.ledger.save({ ...transition(item, 'landing'), humanNotes: [...item.humanNotes, { kind: 'approval', by, at: new Date().toISOString(), note: 'force-push approved' }] });
+  const approved = await runtime.ledger.update(itemId, item => {
+    if (item.status !== 'awaiting-push-approval' || item.activeRunner) throw new Error(`not_awaiting_push_approval: ${item.status}`);
+    return {
+      ...transition(item, 'landing'),
+      humanNotes: [...item.humanNotes, { kind: 'approval' as const, by, at: new Date().toISOString(), note: 'force-push approved' }],
+    };
+  });
+  await runtime.notebook(approved.owner).journal({ kind: 'push-approved', workItem: itemId, note: by });
+  return approved;
 }

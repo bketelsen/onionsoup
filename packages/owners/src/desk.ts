@@ -14,7 +14,7 @@ const NOTE_KINDS = new Set([
   'request-refused', 'instance-created', 'instance-deleted', 'follow-up', 'asked', 'answered', 'ci-triage', 'owner-created',
   'owner-updated', 'owner-retired', 'ship-started', 'shipped', 'work-status',
 ]);
-const DONE = new Set(['landed', 'failed', 'rejected']);
+const DONE = new Set(['landed', 'failed', 'rejected', 'cancelled']);
 
 /** Landed on a local branch but not yet a PR: the person publishes it. Rebases update an existing PR instead. */
 export function awaitingPublish(item: WorkItem) {

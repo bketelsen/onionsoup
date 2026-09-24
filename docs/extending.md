@@ -94,3 +94,15 @@ attaches to one given `OPENCODE_URL`.
 New domain kinds (how an owner observes and changes something, like `git-repository`, `incus`, `truenas`, `github-org`), new
 request kinds, and new duty kinds are engine code in `packages/owners`. See [gaps.md](gaps.md) for what is
 missing, and the [design](design/owners.md) for how the pieces fit.
+
+## Work lifecycle changes
+
+Work item readers should use the public `WorkItem` schema. Use `Ledger.update(id, mutate)` for partial changes
+from a person decision, a background task, or a publication checkpoint: it reloads the record under a kernel
+lock shared by all runtime processes. Keep the mutation synchronous and perform external effects outside the
+lock. Learning records, publication state, and human notes must not be replaced from an old snapshot.
+
+Custom workflows should record `resumeStatus` before claiming an active stage and clear `activeRunner` when
+it finishes. Person decisions use `resumeItem`, `retryItem`, and `cancelItem`; cancellation of active work is
+refused. Desk publication uses the `desk-publication` workflow and its persisted stage to reconcile retries
+against the local commit and existing GitHub PR before repeating effects.

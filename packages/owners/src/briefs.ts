@@ -56,6 +56,7 @@ const WORK_STATE_TEXT: Partial<Record<WorkItem['status'], (item: WorkItem) => st
   landed: item => item.publication
     ? `landed and published as ${item.publication.url}`
     : `landed on local branch ${item.branch}, NOT yet on the base branch, so your checkout does not show it`,
+  cancelled: item => `cancelled by a person: ${item.reason}`,
   rejected: item => `plan rejected by a person: ${item.reason}`,
   failed: item => `failed: ${item.reason}`,
 };
