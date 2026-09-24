@@ -1,5 +1,8 @@
 import { execFile } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import type { RepositoryOwner } from './declarations.ts';
@@ -104,4 +107,25 @@ export async function commitWorktree(worktree: string, message: string) {
   await git(worktree, ['add', '-A']);
   await git(worktree, ['commit', '-q', '-m', message]);
   return (await git(worktree, ['rev-parse', 'HEAD'])).trim();
+}
+
+/**
+ * A working tree as a tree object, built in a throwaway index so the tree's own staging is untouched. Kept with a
+ * review round or an implementation, so a later review can see what changed since.
+ */
+export async function snapshotTree(directory: string) {
+  const index = join(tmpdir(), `onionsoup-snapshot-index-${randomUUID()}`);
+  const options = { cwd: directory, env: { ...process.env, GIT_INDEX_FILE: index }, maxBuffer: 32 * 1024 * 1024 };
+  try {
+    await run('git', ['read-tree', 'HEAD'], options);
+    await run('git', ['add', '-A'], options);
+    return (await run('git', ['write-tree'], options)).stdout.trim();
+  } finally {
+    await rm(index, { force: true });
+  }
+}
+
+/** What changed between two snapshots; undefined when the earlier tree is gone. */
+export async function changesSince(directory: string, reviewedTree: string, currentTree: string) {
+  return git(directory, ['diff', reviewedTree, currentTree]).catch(() => undefined);
 }

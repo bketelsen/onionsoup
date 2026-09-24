@@ -1,13 +1,16 @@
 import { ImplementationReport, Plan, Verdict } from './artifacts.ts';
-import { implementBrief, planBrief, reviewBrief } from './briefs.ts';
+import { findingsText, implementBrief, planBrief, reviewBrief, type PreviousReview } from './briefs.ts';
 import { requireFreelancer, requireWorkflow, type Craft, type WorkflowDeclaration } from './declarations.ts';
 import { advanceDeskPublication, DESK_WORKFLOW } from './desk-changes.ts';
 import { pickModel } from './families.ts';
-import type { HumanNote, WorkItem, WorkStatus } from './ledger.ts';
+import type { HumanNote, Implementation, WorkItem, WorkStatus } from './ledger.ts';
 import { answerQuestions, recordLearnings } from './owner.ts';
 import { advanceRebase, REBASE_WORKFLOW } from './rebase.ts';
 import type { Runtime } from './runtime.ts';
-import { commitWorktree, createWorktree, diffAgainstBase, git, refreshCheckout, removeIgnoredFiles, resetWorktree, verificationPassed, verify } from './workspace.ts';
+import {
+  changesSince, commitWorktree, createWorktree, diffAgainstBase, git, refreshCheckout, removeIgnoredFiles, resetWorktree,
+  snapshotTree, verificationPassed, verify, WORKSPACE_LIMITS,
+} from './workspace.ts';
 
 type Step = (runtime: Runtime, item: WorkItem, workflow: WorkflowDeclaration) => Promise<WorkItem>;
 
@@ -70,8 +73,10 @@ const implement: Step = async (runtime, item, workflow) => {
   });
   const diff = await diffAgainstBase(owner, path, item.repairOf?.previousHead);
   await removeIgnoredFiles(path);
+  const tree = await snapshotTree(path);
   const verification = await verify(owner, path, runtime.toolsDirectory);
-  const implemented = { ...item, worktree: path, branch, implementations: [...item.implementations, { report, diffStat: diff.stat, verification }] };
+  const implementation: Implementation = { report, diffStat: diff.stat, verification, tree };
+  const implemented = { ...item, worktree: path, branch, implementations: [...item.implementations, implementation] };
   await runtime.notebook(item.owner).journal({ kind: 'implement', workItem: item.id, model: hired.model, outcome: verificationPassed(verification) ? 'verified' : 'verification-failed', note: diff.stat.split('\n').at(-1) });
   if (!diff.stat) return transition(implemented, 'failed', 'implementer_changed_nothing');
   if (verificationPassed(verification)) return transition(implemented, 'reviewing');
@@ -83,8 +88,29 @@ function revisionsUsed(item: WorkItem) {
   return Math.max(0, item.implementations.length - (item.revisionStart ?? 0) - 1);
 }
 
+/** The freelancer who last delivered for a stage (the owner's own hires do not count). */
+function lastDelivered(item: WorkItem, stage: string) {
+  return item.hires.filter(hire => hire.stage === stage && hire.craft !== 'owner' && hire.outcome === 'delivered').at(-1);
+}
+
 function familiesOf(item: WorkItem, stages: readonly string[]) {
-  return stages.map(stage => item.hires.filter(hire => hire.stage === stage && hire.craft !== 'owner' && hire.outcome === 'delivered').at(-1)?.family).filter((family): family is string => Boolean(family));
+  return stages.map(stage => lastDelivered(item, stage)?.family).filter((family): family is string => Boolean(family));
+}
+
+/**
+ * The round before this one when it asked for changes, with the diff since the implementation it reviewed: the
+ * last one before the current that passed verification (only those reach review). Without both trees, none.
+ */
+async function previousReviewOf(item: WorkItem): Promise<PreviousReview | undefined> {
+  const verdict = item.verdicts.at(-1);
+  const currentTree = item.implementations.at(-1)?.tree;
+  const reviewed = item.implementations.slice(0, -1).filter(implementation => verificationPassed(implementation.verification)).at(-1);
+  if (verdict?.decision !== 'revise' || !currentTree || !reviewed?.tree) return undefined;
+  const changes = await changesSince(item.worktree!, reviewed.tree, currentTree);
+  return {
+    round: item.verdicts.length, reviewer: lastDelivered(item, 'review')?.model ?? 'unknown', verdict,
+    changesSince: changes?.slice(0, WORKSPACE_LIMITS.diffChars),
+  };
 }
 
 const DECISIONS: Record<Verdict['decision'], (item: WorkItem, workflow: WorkflowDeclaration) => WorkItem> = {
@@ -104,16 +130,23 @@ const review: Step = async (runtime, item, workflow) => {
   const hired = await freelancer(runtime, 'review', excluded);
   const diff = await diffAgainstBase(owner, item.worktree, item.repairOf?.previousHead);
   const verification = item.implementations.at(-1)?.verification ?? [];
+  const knowledge = await knowledgeFor(runtime, item, true);
+  const brief = reviewBrief(item, item.plan, diff.patch, verification, knowledge, hired.rubric, await previousReviewOf(item));
   const verdict = await runtime.hireFor(item, 'review', 'review', {
     role: 'reviewer', model: hired.model, directory: item.worktree, title: `${item.id}: review ${item.verdicts.length + 1}`,
-    brief: reviewBrief(item, item.plan, diff.patch, verification, await knowledgeFor(runtime, item, true), hired.rubric), schema: Verdict,
+    brief, schema: Verdict,
   });
   await runtime.notebook(item.owner).journal({ kind: 'review', workItem: item.id, model: hired.model, outcome: verdict.decision, note: verdict.summary });
   return DECISIONS[verdict.decision]({ ...item, verdicts: [...item.verdicts, verdict] }, workflow);
 };
 
+/** A landing over review findings says so in the commit: the reviewer did not approve it, a person did. */
+function overrideTrailers(item: WorkItem) {
+  return item.humanNotes.filter(note => note.kind === 'override').map(note => `Landed-over-findings-by: ${note.by}`);
+}
+
 function commitMessage(item: WorkItem) {
-  const lastDelivered = (stage: string) => item.hires.filter(hire => hire.stage === stage && hire.craft !== 'owner' && hire.outcome === 'delivered').at(-1)?.model ?? 'unknown';
+  const modelOf = (stage: string) => lastDelivered(item, stage)?.model ?? 'unknown';
   return [
     item.proposal.title,
     '',
@@ -121,10 +154,11 @@ function commitMessage(item: WorkItem) {
     '',
     `Work-item: ${item.id}`,
     `Owner: ${item.owner}`,
-    `Planned-by: ${lastDelivered('plan')}`,
-    `Implemented-by: ${lastDelivered('implement')}`,
-    `Reviewed-by: ${lastDelivered('review')}`,
+    `Planned-by: ${modelOf('plan')}`,
+    `Implemented-by: ${modelOf('implement')}`,
+    `Reviewed-by: ${modelOf('review')}`,
     `Plan-approved-by: ${item.planApproval?.by ?? 'unknown'}`,
+    ...overrideTrailers(item),
   ].join('\n');
 }
 
@@ -301,4 +335,49 @@ export async function cancelItem(runtime: Runtime, itemId: string, by: string, r
   });
   await runtime.notebook(cancelled.owner).journal({ kind: 'work-cancelled', workItem: itemId, note: `${by}: ${reason}` });
   return cancelled;
+}
+
+const LANDABLE_OVER_FINDINGS = 'revision_limit_reached';
+
+/** Only work that ran out of review rounds, with verification passing on what it would land. */
+function requireLandableOverFindings(item: WorkItem) {
+  if (item.activeRunner) throw new Error('work_item_active');
+  if (item.status !== 'failed') throw new Error(`not_failed: ${item.status}`);
+  if (item.reason !== LANDABLE_OVER_FINDINGS) throw new Error(`land_over_findings_not_revision_limit: ${item.reason}`);
+  const latest = item.implementations.at(-1);
+  if (!latest || !verificationPassed(latest.verification)) throw new Error('land_over_findings_unverified');
+}
+
+/** The findings the person landed over become work of their own, planned and approved like any other. */
+function followUpProposal(item: WorkItem, by: string, note: string) {
+  const findings = item.verdicts.at(-1)?.findings ?? [];
+  if (!findings.length) return undefined;
+  return {
+    title: `Follow up review findings on ${item.proposal.title}`,
+    goal: `Resolve the review findings that ${item.id} landed over:\n${findingsText(findings)}`,
+    rationale: `${by} landed ${item.id} over its reviewer's findings after the revision limit: ${note}`,
+    acceptance: ['Each listed finding is resolved, or the plan explains why it does not apply'],
+    size: 'small' as const,
+    repository: item.proposal.repository,
+  };
+}
+
+/**
+ * The person lands work whose review never converged, over the reviewer's last findings. The ordinary landing step
+ * commits it; the override is on the item, in the journal and in the commit, and the findings become a follow-up.
+ */
+export async function landOverFindings(runtime: Runtime, itemId: string, by: string, note: string) {
+  const reason = note.trim();
+  if (!reason) throw new Error('land_over_findings_note_required');
+  const item = await runtime.ledger.update(itemId, current => {
+    requireLandableOverFindings(current);
+    return {
+      ...transition(current, 'landing'), resumeStatus: 'landing',
+      humanNotes: [...current.humanNotes, humanNote('override', by, reason)],
+    };
+  });
+  await runtime.notebook(item.owner).journal({ kind: 'landed-over-findings', workItem: itemId, note: `${by}: ${reason}` });
+  const proposal = followUpProposal(item, by, reason);
+  const followUp = proposal ? await runtime.ledger.create(item.owner, item.workflow, proposal) : undefined;
+  return { item, followUp };
 }

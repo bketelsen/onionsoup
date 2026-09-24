@@ -21,7 +21,7 @@ import { approveInitiative, cancelInitiative, initiativeView, initiativeViews, r
 import { initConfig } from './init.ts';
 import { configDirectory, stateDirectory } from './paths.ts';
 import { ensureDesk } from './workspace.ts';
-import { advance, approvePlan, rejectPlan, resumeItem, retryItem, cancelItem, revisePlan } from './workflow.ts';
+import { advance, approvePlan, rejectPlan, resumeItem, retryItem, cancelItem, revisePlan, landOverFindings } from './workflow.ts';
 
 const run = promisify(execFile);
 
@@ -166,6 +166,12 @@ const COMMANDS: Record<string, Command> = {
     console.log(line(item));
     await continueIfFree(runtime, item);
   },
+  async 'land-over-findings'(runtime, [itemId]) {
+    const { item, followUp } = await landOverFindings(runtime, required(itemId, 'work item'), userInfo().username, required(options.note, '--note'));
+    console.log(line(item));
+    if (followUp) console.log(`follow-up: ${line(followUp)}`);
+    await continueIfFree(runtime, item);
+  },
   async cancel(runtime, [itemId]) {
     console.log(line(await cancelItem(runtime, required(itemId, 'work item'), userInfo().username, required(options.reason, '--reason'))));
   },
@@ -295,7 +301,7 @@ const runtime = await Runtime.open({ declarations: options.declarations!, state:
 /** Commands that only read, or only record a person's decision, never take the runtime lock. */
 const LOCK_FREE = [
   'distill', 'items', 'show', 'notebook', 'requests', 'approve', 'publish', 'revise-plan', 'reject',
-  'resume', 'retry', 'cancel', 'desk', 'desk-state', 'retract', 'ask', 'request-publish', 'propose',
+  'resume', 'retry', 'land-over-findings', 'cancel', 'desk', 'desk-state', 'retract', 'ask', 'request-publish', 'propose',
   'ship', 'approve-push', 'approve-create', 'approve-delete', 'deny-request',
   'desk-review-reset', 'initiatives', 'initiative', 'approve-initiative', 'revise-initiative', 'cancel-initiative',
 ];

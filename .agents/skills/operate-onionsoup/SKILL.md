@@ -40,6 +40,10 @@ cause, and the fix is either applied through the normal gates or reported to the
 2. A stuck item: check its status in `show`.
    - Items waiting on the person (plan approval, push, create/delete) are not stuck; tell the person.
    - An `interrupted` item resumes with `npm run owners -- resume <item>`.
+   - A `failed` item retries its stage with `npm run owners -- retry <item> [--note ...]`. One failed with
+     `revision_limit_reached` whose verification passed can also land over the reviewer's findings, if the person
+     decides so: `npm run owners -- land-over-findings <item> --note "<why>"`. That opens a proposed follow-up
+     listing the findings.
    - After a crash, `recover` marks items whose runner died as interrupted so they can be resumed.
 3. A runtime lock (`runtime_locked`): the daemon holds it during ticks. A stale lock is taken over
    automatically when its holder pid is gone. Never delete lock files while a daemon runs.

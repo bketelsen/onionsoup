@@ -45,7 +45,7 @@ export const WorkStatus = z.enum([
 export type WorkStatus = z.infer<typeof WorkStatus>;
 
 export const HumanNote = z.object({
-  kind: z.enum(['approval', 'plan-feedback', 'rejection', 'resume', 'retry', 'cancellation']),
+  kind: z.enum(['approval', 'plan-feedback', 'rejection', 'resume', 'retry', 'cancellation', 'override']),
   by: z.string(),
   at: z.string(),
   note: z.string(),
@@ -61,6 +61,15 @@ export const Publication = z.object({
 });
 export type Publication = z.infer<typeof Publication>;
 
+export const Implementation = z.object({
+  report: ImplementationReport,
+  diffStat: z.string(),
+  verification: z.array(Verification),
+  /** The worktree as a tree object when it was recorded, so the next review sees what changed since the last one. */
+  tree: z.string().optional(),
+});
+export type Implementation = z.infer<typeof Implementation>;
+
 const PullRequestTarget = z.object({ itemId: z.string(), branch: z.string(), prUrl: z.string(), previousHead: z.string() });
 
 export const WorkItem = z.object({
@@ -73,7 +82,7 @@ export const WorkItem = z.object({
   plan: Plan.optional(),
   ownerAnswers: OwnerAnswers.optional(),
   planApproval: z.object({ by: z.string(), at: z.string(), note: z.string().optional() }).optional(),
-  implementations: z.array(z.object({ report: ImplementationReport, diffStat: z.string(), verification: z.array(Verification) })).default([]),
+  implementations: z.array(Implementation).default([]),
   verdicts: z.array(Verdict).default([]),
   replans: z.number().default(0),
   /** Implementation count at the start of the current plan/retry budget. */

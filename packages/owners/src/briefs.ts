@@ -1,4 +1,4 @@
-import type { Finding, Plan, ProposedWork } from './artifacts.ts';
+import type { Finding, Plan, ProposedWork, Verdict } from './artifacts.ts';
 import type { Initiative } from './initiatives.ts';
 import type { Duty } from './declarations.ts';
 import type { Verification, WorkItem } from './ledger.ts';
@@ -43,8 +43,34 @@ function planText(plan: Plan) {
   ].join('\n');
 }
 
-function findingsText(findings: readonly Finding[]) {
+export function findingsText(findings: readonly Finding[]) {
   return list(findings.map(finding => `[${finding.severity}] ${finding.file}: ${finding.issue} → ${finding.suggestion}`));
+}
+
+const CONVERGENCE = `This change has been reviewed before. Start by checking every previous finding against the diff,
+and say in your summary which are resolved. Ask for changes only for previous findings that are not resolved and for
+problems in the changes since the previous review. Text that earlier rounds already reviewed without objection is
+settled: raise something new there only if it is a blocker (a factual, correctness or safety error), and say why no
+earlier round caught it.`;
+
+/** The review round before this one: who decided what, and the diff between the tree it reviewed and this one. */
+export interface PreviousReview {
+  round: number;
+  reviewer: string;
+  verdict: Pick<Verdict, 'decision' | 'summary' | 'findings'>;
+  /** Undefined when the reviewed tree is gone; the reviewer then checks the findings against the full diff. */
+  changesSince?: string;
+}
+
+/**
+ * The previous round's findings and what changed since, so a re-review checks them instead of starting over. Desk
+ * changes and work items share it: without it every round raises a new set of findings and review never converges.
+ */
+export function previousReviewText({ round, reviewer, verdict, changesSince }: PreviousReview) {
+  const header = `round="${round}" reviewer="${reviewer}" decision="${verdict.decision}"`;
+  const since = changesSince === undefined ? undefined : block('changes-since-previous-review', changesSince);
+  const previous = `<previous-review ${header}>\n${verdict.summary}\n${findingsText(verdict.findings)}\n</previous-review>`;
+  return [previous, since, CONVERGENCE].filter(Boolean).join('\n\n');
 }
 
 /** Host verification as a reader needs it: every command and its exit code, and the output of the ones that failed. */
@@ -160,7 +186,10 @@ export function implementBrief(item: WorkItem, plan: Plan, knowledge: string, ru
   return sections.join('\n\n');
 }
 
-export function reviewBrief(item: WorkItem, plan: Plan, patch: string, verification: readonly Verification[], notebook: string, rubric: string) {
+export function reviewBrief(
+  item: WorkItem, plan: Plan, patch: string, verification: readonly Verification[], notebook: string, rubric: string,
+  previousReview?: PreviousReview,
+) {
   return [
     'You have been hired to review one change. The working tree has the change applied; read around it as needed. Do not edit anything.',
     block('repository-writing', REPOSITORY_REVIEW),
@@ -172,6 +201,7 @@ export function reviewBrief(item: WorkItem, plan: Plan, patch: string, verificat
     block('person-notes-on-recovery', humanNotesText(item, 'retry', 'resume') || '(none)'),
     ...(notebook ? [block('owner-knowledge', notebook)] : []),
     block('rubric', rubric),
+    ...(previousReview ? [previousReviewText(previousReview)] : []),
     'Decide: approve (ready to land), revise (the implementer should fix specific findings), or replan (the plan itself is wrong).',
   ].join('\n\n');
 }

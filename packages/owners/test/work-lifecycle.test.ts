@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { Runtime, advance, approvePlan, cancelItem, publish, resumeItem, retryItem } from '@onionsoup/owners';
+import { Runtime, advance, approvePlan, cancelItem, landOverFindings, publish, resumeItem, retryItem } from '@onionsoup/owners';
 import { git, refreshCheckout, ensureDesk, createWorktree } from '../src/workspace.ts';
 import { REBASE_WORKFLOW, maintainPullRequests } from '../src/rebase.ts';
 import { DESK_CHANGE_LIMITS, proposeDeskChanges, resetDeskReviews } from '../src/desk-changes.ts';
@@ -780,4 +780,85 @@ test('an implementation is verified without the ignored files its implementer in
   assert.equal(landed.status, 'landed', landed.reason);
   assert.ok(reviewed);
   assert.match(await git(runtime.owner('clippy').workspace, ['show', '--name-only', '--format=', landed.landedCommit!]), /^change$/m);
+});
+
+/** A change item whose reviewer asks for changes twice with a revision budget of one: it fails at the limit. */
+async function reviewUntilLimit(runtime: Runtime, lastVerdict: unknown = revise('issue 2')) {
+  runtime.declarations.workflows.get('change')!.review.maxRevisions = 1;
+  const item = await runtime.ledger.create('clippy', 'change', proposal, {
+    status: 'implementing', plan, planApproval: { by: 'person', at: '' },
+  });
+  const briefs: string[] = [];
+  const ownerViews: string[] = [];
+  let implementations = 0;
+  scriptHires(runtime, async request => {
+    if (request.role === 'implementer') {
+      await writeFile(join(request.directory, 'change'), `draft ${++implementations}\n`);
+      return report;
+    }
+    if (request.role !== 'reviewer') return { notebook: [] };
+    briefs.push(request.brief);
+    ownerViews.push((await git(request.directory, ['diff', '--name-only'])).trim());
+    return briefs.length === 1 ? revise('issue 1') : lastVerdict;
+  });
+  const failed = await advance(runtime, item.id);
+  assert.equal(failed.reason, 'revision_limit_reached');
+  return { item: failed, briefs, ownerViews };
+}
+
+test('a work-item re-review checks the previous findings against what changed since, instead of starting over', async () => {
+  const { runtime } = await fixture();
+  const { item, briefs, ownerViews } = await reviewUntilLimit(runtime);
+  assert.doesNotMatch(briefs[0]!, /previous-review/, 'a first review has nothing to check against');
+  assert.match(briefs[1]!, /<previous-review round="1" reviewer="[^"]+" decision="revise">/);
+  assert.match(briefs[1]!, /\[major\] change: issue 1 → Resolve issue 1/);
+  assert.match(briefs[1]!, /<changes-since-previous-review>[\s\S]*-draft 1\n\+draft 2/);
+  assert.match(briefs[1]!, /checking every previous finding/);
+  const trees = item.implementations.map(implementation => implementation.tree);
+  assert.equal(trees.length, 2);
+  assert.ok(trees.every(tree => /^[0-9a-f]{40}$/.test(tree ?? '')), 'each implementation keeps its tree');
+  assert.notEqual(trees[0], trees[1]);
+  assert.deepEqual(ownerViews, ['change', 'change'], "the snapshot leaves the worktree's own git diff intact");
+});
+
+test('the person lands over reviewer findings only for verified work that ran out of review rounds', async () => {
+  const { runtime } = await fixture();
+  const running = await runtime.ledger.create('clippy', 'change', proposal, { status: 'implementing' });
+  await assert.rejects(landOverFindings(runtime, running.id, 'person', 'ship it'), /not_failed: implementing/);
+  const otherFailure = await runtime.ledger.create('clippy', 'change', proposal, { status: 'failed', reason: 'replan_limit_reached' });
+  await assert.rejects(landOverFindings(runtime, otherFailure.id, 'person', 'ship it'), /land_over_findings_not_revision_limit/);
+  const unverified = await runtime.ledger.create('clippy', 'change', proposal, {
+    status: 'failed', reason: 'revision_limit_reached',
+    implementations: [{ report, diffStat: 'change', verification: [{ command: 'test', exitCode: 1, output: 'failed' }] }],
+  });
+  await assert.rejects(landOverFindings(runtime, unverified.id, 'person', 'ship it'), /land_over_findings_unverified/);
+  const { item } = await reviewUntilLimit(runtime);
+  await assert.rejects(landOverFindings(runtime, item.id, 'person', '  '), /land_over_findings_note_required/);
+  assert.equal((await runtime.ledger.get(item.id)).status, 'failed', 'a refusal changes nothing');
+});
+
+test('landing over findings commits through the ordinary landing step and opens a follow-up for the findings', async () => {
+  const { runtime } = await fixture();
+  const { item } = await reviewUntilLimit(runtime);
+  const { followUp } = await landOverFindings(runtime, item.id, 'person', 'The remaining point is a style preference');
+  const landed = await advance(runtime, item.id);
+  assert.equal(landed.status, 'landed', landed.reason);
+  const override = landed.humanNotes.at(-1)!;
+  assert.deepEqual([override.kind, override.by, override.note], ['override', 'person', 'The remaining point is a style preference']);
+  assert.ok((await journalKinds(runtime, 'clippy')).includes('landed-over-findings'));
+  assert.match(await git(landed.worktree!, ['log', '-1', '--format=%B']), /^Landed-over-findings-by: person$/m);
+  const persisted = await runtime.ledger.get(followUp!.id);
+  assert.equal(persisted.status, 'proposed', 'the follow-up is planned and approved like any work');
+  assert.match(persisted.proposal.goal, /\[major\] change: issue 2 → Resolve issue 2/);
+  assert.match(persisted.proposal.goal, new RegExp(item.id));
+});
+
+test('landing over a limit whose last review listed no findings opens no follow-up', async () => {
+  const { runtime } = await fixture();
+  const { item } = await reviewUntilLimit(runtime, { decision: 'revise', summary: 'Not sure', findings: [] });
+  const before = (await runtime.ledger.list()).length;
+  const { item: overridden, followUp } = await landOverFindings(runtime, item.id, 'person', 'Good enough');
+  assert.equal(overridden.status, 'landing');
+  assert.equal(followUp, undefined);
+  assert.equal((await runtime.ledger.list()).length, before);
 });

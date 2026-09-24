@@ -8,7 +8,7 @@ export { Background } from './daemon.ts';
 export { wake, recordLearnings } from './owner.ts';
 export { distill, requestDistill, memoryStatus, memoryFingerprint } from './memory.ts';
 export { MemoryPolicy, MemoryState, type MemoryStatus } from './memory-config.ts';
-export { advance, approvePlan, rejectPlan, revisePlan, resumeItem, retryItem, cancelItem } from './workflow.ts';
+export { advance, approvePlan, rejectPlan, revisePlan, resumeItem, retryItem, cancelItem, landOverFindings } from './workflow.ts';
 export { publish } from './publish.ts';
 export { approvePush } from './rebase.ts';
 export { approveCreate, approveDelete, denyRequest } from './brokering.ts';
