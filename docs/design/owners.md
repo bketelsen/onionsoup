@@ -36,7 +36,9 @@ with what waits and what runs, one inbox of every gate and chat permission with 
 its chats (drawn like OpenChamber's, whose styles it borrows under MIT), work, activity and notebook. It is a small
 Node server that starts its own opencode (which loads the plugin from the person's real, host config — see the
 threat model below), imports the engine directly, relays opencode's events to the browser, and keeps the
-person's settings (owner order, per-chat auto-accept); the opencode password never reaches the browser.
+person's settings (owner order, per-chat auto-accept); the opencode password never reaches the browser. Inbox questions use the same form as chat: answers are collected
+in question order, support multiple selections and permitted custom responses, and submit together. Work reviews
+show each finding's issue and suggestion using the engine's shared work-item type.
 OpenChamber and its Owner's Desk panel came first and were retired for it.
 
 ## Engine and configuration

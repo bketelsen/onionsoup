@@ -27,8 +27,8 @@ function fakeOpencode() {
     ].filter(entry => !answeredPermissions.has(entry.id)) : [],
     replyPermission: async (directory, requestID, reply) => { calls.push(['permission', directory, requestID, reply]); answeredPermissions.add(requestID); },
     questions: async () => [],
-    replyQuestion: async () => {},
-    rejectQuestion: async () => {},
+    replyQuestion: async (directory, requestID, answers) => { calls.push(['question', directory, requestID, answers]); },
+    rejectQuestion: async (directory, requestID) => { calls.push(['reject-question', directory, requestID]); },
     events: async () => {},
   };
   return { api, calls };
@@ -207,6 +207,22 @@ test('attention and uncertain requests have durable decisions in the inbox', asy
     const remaining = (await call('GET', '/api/state')).body.inbox as { id: string }[];
     assert.ok(!remaining.some(entry => entry.id === attention.id || entry.id === request.id));
     assert.equal((await runtime.requests.get(request.id)).recovery[0]?.reason, 'No longer needed');
+  } finally {
+    server.close();
+  }
+});
+
+
+test('question replies carry every ordered answer to opencode and dismissal uses the rejection endpoint', async () => {
+  const { server, call, calls } = await start();
+  try {
+    const answers = [['Engine', 'Surface', 'Docs'], ['Later'], ['Keep the existing colors.']];
+    const reply = await call('POST', '/api/owners/bellonda/questions/question-1', { answers });
+    assert.equal(reply.status, 200);
+    assert.deepEqual(calls.at(-1), ['question', '/desks/bellonda', 'question-1', answers]);
+    const rejected = await call('POST', '/api/owners/bellonda/questions/question-2', { reject: true });
+    assert.equal(rejected.status, 200);
+    assert.deepEqual(calls.at(-1), ['reject-question', '/desks/bellonda', 'question-2']);
   } finally {
     server.close();
   }
