@@ -139,6 +139,7 @@ function isSettled(status: AppStatus, ask: UpdateAppAsk) {
 const UpgradeJob = z.object({
   id: z.number().int(),
   state: z.string(),
+  method: z.string(),
   error: z.string().nullable().optional(),
   arguments: z.array(z.unknown()).optional(),
 });
@@ -147,9 +148,10 @@ type UpgradeJob = z.infer<typeof UpgradeJob>;
 async function upgradeJobs(runtime: Runtime, ownerId: string, ask: UpdateAppAsk): Promise<UpgradeJob[]> {
   const owner = runtime.truenasOwner(ownerId);
   const text = await runtime.truenas(owner.domain, false, call => call('truenas_jobs_list', {
-    method: updateMethod(ask), limit: APP_UPDATE_LIMITS.jobHistory,
+    limit: APP_UPDATE_LIMITS.jobHistory,
   }));
-  return z.array(UpgradeJob).parse(JSON.parse(text)).filter(job => job.arguments?.[0] === ask.app);
+  return z.array(UpgradeJob).parse(JSON.parse(text)).filter(job =>
+    job.arguments?.[0] === ask.app && Object.hasOwn(UPDATE_STARTERS, job.method));
 }
 
 const ACTIVE_JOB = new Set(['WAITING', 'RUNNING']);
@@ -160,8 +162,10 @@ export interface AppUpdateOptions {
   onJobStarted?: (jobId: number) => Promise<unknown>;
 }
 
-function updateMethod(ask: UpdateAppAsk) {
-  return ask.fromVersion === ask.toVersion ? 'app.pull_images' : 'app.upgrade';
+type UpdateMethod = keyof typeof UPDATE_STARTERS;
+
+function updateMethod(ask: UpdateAppAsk, status: AppStatus): UpdateMethod {
+  return status.version === ask.toVersion ? 'app.pull_images' : 'app.upgrade';
 }
 
 function shellArgument(value: string) {
@@ -185,13 +189,15 @@ const UPDATE_STARTERS = {
   },
 };
 
-async function startUpgrade(runtime: Runtime, request: ResourceRequest, options: AppUpdateOptions) {
+async function startUpgrade(runtime: Runtime, request: ResourceRequest, method: UpdateMethod, options: AppUpdateOptions) {
   if (request.ask.kind !== 'update-app') throw new Error('not_an_update_request');
-  const active = (await upgradeJobs(runtime, request.to, request.ask)).find(job => ACTIVE_JOB.has(job.state));
-  let jobId = options.jobId ?? active?.id;
-  if (jobId === undefined) {
-    jobId = await UPDATE_STARTERS[updateMethod(request.ask)](runtime, request);
+  const jobs = await upgradeJobs(runtime, request.to, request.ask);
+  if (options.jobId !== undefined) {
+    if (!jobs.some(job => job.id === options.jobId)) throw new Error(`app_upgrade_job_missing: ${options.jobId}`);
+    return options.jobId;
   }
+  const active = jobs.find(job => ACTIVE_JOB.has(job.state));
+  const jobId = active?.id ?? await UPDATE_STARTERS[method](runtime, request);
   await options.onJobStarted?.(jobId);
   return jobId;
 }
@@ -206,6 +212,13 @@ export async function reconcileAppUpdate(runtime: Runtime, request: ResourceRequ
   return isSettled(status, request.ask) ? `${describeStatus(status)} (job ${jobId})` : undefined;
 }
 
+async function observeUpgrade(runtime: Runtime, request: ResourceRequest, jobId: number) {
+  if (request.ask.kind !== 'update-app') throw new Error('not_an_update_request');
+  const job = (await upgradeJobs(runtime, request.to, request.ask)).find(candidate => candidate.id === jobId);
+  const status = job?.state === 'SUCCESS' ? await appStatus(runtime, request.to, request.ask.app) : undefined;
+  return { job, status };
+}
+
 async function waitForUpgrade(runtime: Runtime, request: ResourceRequest, jobId: number) {
   if (request.ask.kind !== 'update-app') throw new Error('not_an_update_request');
   const { app, toVersion } = request.ask;
@@ -213,14 +226,20 @@ async function waitForUpgrade(runtime: Runtime, request: ResourceRequest, jobId:
   let last = 'job not yet observed';
   while (Date.now() < deadline) {
     await sleep(APP_UPDATE_LIMITS.pollMs);
-    const job = (await upgradeJobs(runtime, request.to, request.ask)).find(candidate => candidate.id === jobId);
+    const observed = await observeUpgrade(runtime, request, jobId).catch(error => {
+      last = `app_upgrade_poll_unavailable: ${error instanceof Error ? error.message : String(error)}`;
+      return undefined;
+    });
+    if (!observed) continue;
+    const { job, status } = observed;
     if (job && FAILED_JOB.has(job.state)) {
       throw new Error(`app_upgrade_failed: job ${jobId} ${job.state}: ${(job.error ?? '').slice(0, 300)}`);
     }
-    if (job?.state !== 'SUCCESS') continue;
-    const status = await appStatus(runtime, request.to, app);
+    if (!status) continue;
     last = describeStatus(status);
-    if (isSettled(status, request.ask)) return `${last} (job ${jobId})`;
+    const needsPull = job?.method === 'app.upgrade' && status.state === 'RUNNING'
+      && status.version === toVersion && status.image_updates_available === true;
+    if (isSettled(status, request.ask) || needsPull) return status;
     if (status.state === 'CRASHED' || status.state === 'STOPPED') {
       throw new Error(`app_upgrade_unhealthy: job ${jobId} succeeded but ${app} is ${status.state}`);
     }
@@ -235,6 +254,12 @@ export async function updateApp(runtime: Runtime, request: ResourceRequest, opti
   if (options.jobId === undefined && isSettled(before, request.ask)) {
     return `already on ${request.ask.toVersion}; ${describeStatus(before)}`;
   }
-  const jobId = await startUpgrade(runtime, request, options);
-  return waitForUpgrade(runtime, request, jobId);
+  let jobId = await startUpgrade(runtime, request, updateMethod(request.ask, before), options);
+  let status = await waitForUpgrade(runtime, request, jobId);
+  if (!isSettled(status, request.ask)) {
+    jobId = await startUpgrade(runtime, request, 'app.pull_images', { onJobStarted: options.onJobStarted });
+    status = await waitForUpgrade(runtime, request, jobId);
+  }
+  if (!isSettled(status, request.ask)) throw new Error(`app_upgrade_unsettled: images still pending after job ${jobId}`);
+  return `${describeStatus(status)} (job ${jobId})`;
 }

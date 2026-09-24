@@ -40,6 +40,9 @@ async function repositoryFixture() {
   await writeFile(join(source, 'build.cjs'), `
 const fs = require('node:fs');
 const revision = fs.readFileSync('revision', 'utf8');
+if (revision === 'old' && process.env.SERVICE_STATE) {
+  if (fs.readFileSync(process.env.SERVICE_STATE, 'utf8').trim() !== 'stopped') process.exit(3);
+}
 const paths = ${JSON.stringify(outputs)};
 for (const path of paths) {
   if (process.argv[2] === 'engine' && path.includes('/web/')) continue;
@@ -122,15 +125,27 @@ async function watchdogTools(root: string) {
   await mkdir(directory);
   const scripts: Record<string, string> = {
     'systemd-run': `#!/usr/bin/python3
-import os, sys
+import json, os, sys
 arguments = sys.argv[1:]
+with open(os.environ['SANDBOX_LOG'], 'a') as log:
+    log.write(json.dumps(arguments) + '\\n')
 start = max(index for index, argument in enumerate(arguments) if argument == '--') + 1
 os.execvp(arguments[start], arguments[start:])
 `,
     systemctl: `#!/bin/sh
 printf '%s\\n' "$*" >> "$SERVICE_LOG"
+if [ "$2" = restart ]; then
+  printf 'artifacts:' >> "$SERVICE_LOG"
+  for path in packages/owners/dist packages/surface/dist packages/surface/web/dist; do
+    cat "$DEPLOY_CHECKOUT/$path/version" >> "$SERVICE_LOG"
+    printf ':' >> "$SERVICE_LOG"
+  done
+  printf '\\n' >> "$SERVICE_LOG"
+  printf active > "$SERVICE_STATE"
+fi
+if [ "$2" = stop ]; then printf stopped > "$SERVICE_STATE"; fi
 if [ "$2" = is-active ]; then
-  test "$(cat "$DEPLOY_CHECKOUT/revision")" = old
+  test "$(cat "$SERVICE_STATE")" = active && test "$(cat "$DEPLOY_CHECKOUT/revision")" = old
 fi
 `,
   };
@@ -148,15 +163,25 @@ for (const hasBuildFailure of [false, true]) {
     let script = '';
     const previousWait = SHIP_LIMITS.healthWaitSeconds;
     const previousHome = process.env.ONIONSOUP_HOME;
+    const previousPath = process.env.PATH;
+    process.env.PATH = `${directory}:${previousPath}`;
     SHIP_LIMITS.healthWaitSeconds = 0;
     process.env.ONIONSOUP_HOME = join(root, 'home');
     try {
-      const shipped = await shipEngine(runtime, 'clippy', localExecution({ schedule: async path => { script = path; } }));
+      const shipped = await shipEngine(runtime, 'clippy', localExecution({ schedule: async path => {
+        assert.match(await journal(runtime), /ship-started/, 'journal is durable before arming the restart');
+        script = path;
+      } }));
       assert.equal(shipped.outcome, 'shipped');
       assert.deepEqual(await artifactVersions(checkout), ['new', 'new', 'new']);
       const serviceLog = join(root, 'services');
+      const serviceState = join(root, 'service-state');
+      const sandboxLog = join(root, 'sandbox-calls');
+      const scriptText = await readFile(script, 'utf8');
+      assert.match(scriptText, /'timeout' '--kill-after' '5s' '600s'/);
+      assert.ok(scriptText.includes(`export PATH='${directory}:`));
       const completed = run('/bin/sh', [script], { env: {
-        ...process.env, PATH: `${directory}:${process.env.PATH}`, SERVICE_LOG: serviceLog,
+        ...process.env, PATH: '/usr/bin:/bin', SERVICE_LOG: serviceLog, SERVICE_STATE: serviceState, SANDBOX_LOG: sandboxLog,
         DEPLOY_CHECKOUT: checkout, FAIL_REBUILD: hasBuildFailure ? '1' : '0',
       } });
       if (hasBuildFailure) await assert.rejects(completed);
@@ -164,13 +189,24 @@ for (const hasBuildFailure of [false, true]) {
       assert.equal((await git(checkout, ['rev-parse', 'HEAD'])).trim(), previous);
       const calls = await readFile(serviceLog, 'utf8');
       assert.equal(calls.match(/restart/g)?.length, hasBuildFailure ? 1 : 2);
-      if (hasBuildFailure) assert.match(await journal(runtime), /ship_rollback_failed/);
+      const sandboxCalls = await readFile(sandboxLog, 'utf8');
+      assert.ok(sandboxCalls.includes('bwrap'));
+      assert.ok(sandboxCalls.includes('--tmpfs'));
+      assert.ok(sandboxCalls.includes('MemoryMax=6G'));
+      assert.match(calls, /artifacts:new:new:new:/);
+      if (hasBuildFailure) {
+        assert.match(await journal(runtime), /ship_rollback_failed/);
+        assert.equal(await readFile(serviceState, 'utf8'), 'stopped');
+        assert.ok(!calls.includes('artifacts:old:old:old:'));
+      }
       else {
         assert.deepEqual(await artifactVersions(checkout), ['old', 'old', 'old']);
         assert.match(await journal(runtime), /ship-rolled-back/);
+        assert.match(calls, /stop fixture.service[\s\S]*restart fixture.service\nartifacts:old:old:old:/);
       }
     } finally {
       SHIP_LIMITS.healthWaitSeconds = previousWait;
+      process.env.PATH = previousPath;
       if (previousHome === undefined) delete process.env.ONIONSOUP_HOME;
       else process.env.ONIONSOUP_HOME = previousHome;
     }

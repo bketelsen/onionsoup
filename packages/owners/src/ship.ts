@@ -1,16 +1,17 @@
+import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { chmod, mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import type { RepositoryOwner } from './declarations.ts';
 import type { Runtime } from './runtime.ts';
-import { runSandboxed, sandboxCommand, privateXdgRoots } from './sandbox.ts';
+import { runSandboxed, sandboxCommand, privateXdgRoots, SANDBOX_LIMITS } from './sandbox.ts';
 import { expandHome } from './truenas.ts';
 import { git } from './workspace.ts';
 
 const run = promisify(execFile);
 
-export const SHIP_LIMITS = { restartDelaySeconds: 5, healthWaitSeconds: 45, failureOutputChars: 800 };
+export const SHIP_LIMITS = { restartDelaySeconds: 5, healthWaitSeconds: 45, failureOutputChars: 800, rollbackKillSeconds: 5 };
 const INSTALL = ['npm', 'ci', '--no-audit', '--no-fund'];
 const ROLLBACK_COMMANDS = [INSTALL, ['npm', 'run', 'build'], ['npm', 'run', 'surface:build']];
 
@@ -30,8 +31,8 @@ export interface ShipExecution {
 const EXECUTION: ShipExecution = {
   sandbox: runSandboxed,
   schedule: (script, target) => run('systemd-run', [
-    '--user', '--quiet', `--on-active=${SHIP_LIMITS.restartDelaySeconds}`,
-    `--unit=onionsoup-ship-${target.slice(0, 12)}`, '/bin/sh', script,
+    '--user', '--quiet', '--collect', `--on-active=${SHIP_LIMITS.restartDelaySeconds}`,
+    `--unit=onionsoup-ship-${target.slice(0, 12)}-${randomUUID().slice(0, 8)}`, '/bin/sh', script,
   ]),
 };
 
@@ -48,6 +49,7 @@ function rollbackCommands(checkout: string) {
   const { config, state } = privateXdgRoots();
   return ROLLBACK_COMMANDS.map(([command, ...args]) => [
     'env', `XDG_CONFIG_HOME=${config}`, `XDG_STATE_HOME=${state}`, `OPENCODE_CONFIG_DIR=${join(config, 'opencode')}`,
+    'timeout', '--kill-after', `${SHIP_LIMITS.rollbackKillSeconds}s`, `${SANDBOX_LIMITS.verifyTimeoutMs / 1000}s`,
     'systemd-run', ...sandboxCommand(command!, args, { cwd: checkout, writable: [checkout] }),
   ].map(shellArgument).join(' ')).join(' &&\n');
 }
@@ -57,6 +59,7 @@ function watchdogScript(ownerId: string, checkout: string, previous: string, ser
   const units = services.map(shellArgument).join(' ');
   const rollback = `cd ${shellArgument(checkout)} && git reset -q --hard ${shellArgument(previous)} &&\n${rollbackCommands(checkout)}`;
   return `#!/bin/sh
+export PATH=${shellArgument(process.env.PATH ?? '/usr/bin:/bin')}
 record() { printf '{"at":"%s","owner":"%s","kind":"%s","note":"%s"}\\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" ${shellArgument(ownerId)} "$1" "$2" >> ${shellArgument(journal)}; }
 healthy() {
   for unit in ${units}; do systemctl --user is-active --quiet "$unit" || return 1; done
@@ -127,12 +130,12 @@ async function scheduleRestart(runtime: Runtime, owner: RepositoryOwner, previou
   await mkdir(join(notebook.directory, 'journal'), { recursive: true });
   await writeFile(script, watchdogScript(owner.id, expandHome(owner.deploy!.checkout), previous, owner.deploy!.services, journal));
   await chmod(script, 0o755);
-  await execution.schedule(script, target);
   await notebook.journal({
     kind: 'ship-started',
     note: `${previous.slice(0, 12)} → ${target.slice(0, 12)}; restarting ${owner.deploy!.services.join(', ')} in ${SHIP_LIMITS.restartDelaySeconds}s`,
   });
   await notebook.commit('journal ship').catch(() => undefined);
+  await execution.schedule(script, target);
 }
 
 /** Fast-forward, verify, and arrange a health-checked restart; both failure paths rebuild previous artifacts. */
