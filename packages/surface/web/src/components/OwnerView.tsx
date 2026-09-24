@@ -18,7 +18,7 @@ const NOTE_LABELS: Record<string, string> = {
   'create-approved': 'Create approved', 'request-opened': 'Request opened',
   'chat-decision': 'Noted', 'chat-action': 'Did', 'work-opened': 'Opened work', 'plan-approved': 'Plan approved', 'plan-rejected': 'Plan rejected',
   published: 'Published', 'publish-failed': 'Publish failed', asked: 'Asked', answered: 'Answered', attention: 'Needs you', 'ci-triage': 'CI triage',
-  'work-status': 'Work update', 'owner-created': 'Created owner', 'owner-updated': 'Updated owner', 'owner-retired': 'Retired owner', 'ship-started': 'Shipping', shipped: 'Shipped',
+  'work-status': 'Work update', friction: 'Friction report', 'owner-created': 'Created owner', 'owner-updated': 'Updated owner', 'owner-retired': 'Retired owner', 'ship-started': 'Shipping', shipped: 'Shipped',
 };
 
 /** An owner's page: its chat in the middle, and beside it what waits, its threads, its work and what it has been doing. */

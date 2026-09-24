@@ -3,10 +3,12 @@ import {
   approveCreate, approveDelete, approvePlan, approvePush, awaitingPublish, chatDirectory, denyRequest, deskState, describeAsk,
   domainSummary, itemText, publish, rejectPlan, revisePlan, resumeItem, retryItem, cancelItem, memoryFingerprint, type ResourceRequest, type Runtime,
   listAttention, changeAttention, recoverRequest, reconcileRequest,
+  listFriction, frictionDetail, type FrictionRecord,
 } from '@onionsoup/owners';
 import type { OpencodeApi, PendingPermission, PendingQuestion } from './opencode.ts';
 import { readSessionMessages, readSessionsTitled } from './hire-store.ts';
 import { ordered, SettingsStore } from './settings.ts';
+import type { PublicFrictionRecord } from './friction-public.ts';
 
 /**
  * The surface's view of onionsoup: owners with what waits on the person, one inbox across all of them, and the
@@ -157,6 +159,20 @@ export class SurfaceState {
     return { item, text: itemText(item), done: DONE.has(item.status) };
   }
 
+  /** Public view excludes the saved directory, which is only for host-side notice delivery. */
+  private publicFriction(record: FrictionRecord): PublicFrictionRecord {
+    const { origin, ...fields } = record;
+    return { ...fields, sessionID: origin.sessionID };
+  }
+
+  async friction() {
+    return (await listFriction(this.runtime)).map(record => this.publicFriction(record));
+  }
+
+  async frictionRecord(id: string) {
+    return this.publicFriction(await frictionDetail(this.runtime, id));
+  }
+
   /**
    * The sessions onionsoup ran for a work item (plan, owner answers, implementations, reviews, learnings), found by
    * the title every hire gets ("<item>: <stage>"). Oldest first; each carries the directory it lives in.
@@ -241,6 +257,7 @@ export class SurfaceState {
       requests.map(request => [request.id, request.status, request.updatedAt]),
       await memoryFingerprint(this.runtime),
       await listAttention(this.runtime),
+      (await listFriction(this.runtime)).map(entry => [entry.id, entry.count, entry.lastSeen]),
     ]);
   }
 }

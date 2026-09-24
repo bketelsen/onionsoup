@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, writeFile } from 'node:fs/promises';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { Runtime } from '@onionsoup/owners';
+import { Runtime, reportFriction } from '@onionsoup/owners';
 import { SurfaceState, surfaceServer, type OpencodeApi } from '@onionsoup/surface';
 
 function fakeOpencode() {
@@ -89,6 +89,38 @@ test('the surface lists owners with what waits on the person, and chat permissio
     const owners = body.owners as { id: string; chat: boolean; waiting: number }[];
     assert.equal(owners.find(owner => owner.id === 'clippy')?.chat, false);
     assert.equal(owners.find(owner => owner.id === 'bellonda')?.waiting, 2);
+  } finally {
+    server.close();
+  }
+});
+
+test('HTTP friction views show bounded safe records and the originating chat without internal directory', async () => {
+  const { runtime, server, call } = await start();
+  try {
+    await runtime.notebook('bellonda').ensure('# Test');
+    const base = { owner: 'bellonda', origin: { sessionID: 'ses_original', directory: '/secret/desk' },
+      model: 'provider/model', commit: 'a'.repeat(40), failures: [{ tool: 'bash', input: 'arguments withheld', error: 'permission denied' }],
+      input: { summary: '<script>alert(1)</script>', expected: 'Success', actual: 'Permission failure' } };
+    const first = await reportFriction(runtime, { ...base, submissionID: 'first' });
+    await reportFriction(runtime, { ...base, submissionID: 'second' });
+    const second = await reportFriction(runtime, { ...base, submissionID: 'third', failures: [],
+      input: { summary: 'A different problem', expected: 'Success', actual: 'Unexpected response' } });
+    assert.notEqual(first.id, second.id);
+    const snapshot = (await call('GET', '/api/state')).body;
+    assert.equal(snapshot.frictionCount, 2);
+    const listing = (await call('GET', '/api/friction')).body as unknown as { id: string; count: number; sessionID: string }[];
+    assert.equal(listing.length, 2);
+    assert.equal(listing.find(entry => entry.id === first.id)?.count, 2);
+    assert.equal(listing.find(entry => entry.id === first.id)?.sessionID, 'ses_original');
+    const detail = await call('GET', `/api/friction/${first.id}`);
+    assert.equal(detail.status, 200);
+    assert.equal(detail.body.summary, '<script>alert(1)</script>');
+    assert.doesNotMatch(JSON.stringify([listing, detail.body]), /secret\/desk|command|\.env/);
+    assert.deepEqual(await call('GET', '/api/friction/not-an-id'), { status: 400, body: { error: 'friction_invalid_id' } });
+    assert.deepEqual(await call('GET', '/api/friction/fr_aaaaaaaaaaaaaaaaaaaaaaaa'), { status: 404, body: { error: 'friction_not_found' } });
+    await writeFile(join(runtime.stateDirectory, 'friction', 'records', 'fr_aaaaaaaaaaaaaaaaaaaaaaaa.json'), '{bad');
+    assert.deepEqual(await call('GET', '/api/friction/fr_aaaaaaaaaaaaaaaaaaaaaaaa'), { status: 422, body: { error: 'friction_invalid_record' } });
+    assert.equal(((await call('GET', '/api/friction')).body as unknown as unknown[]).length, 2);
   } finally {
     server.close();
   }

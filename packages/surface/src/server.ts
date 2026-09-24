@@ -19,6 +19,21 @@ class HttpError extends Error {
   }
 }
 
+const FRICTION_HTTP_STATUS: Record<string, number> = {
+  friction_invalid_id: 400, friction_not_found: 404, friction_invalid_record: 422,
+};
+
+async function frictionRoute<T>(operation: () => Promise<T>) {
+  try {
+    return await operation();
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : '';
+    const status = FRICTION_HTTP_STATUS[reason];
+    if (status) throw new HttpError(status, reason);
+    throw error;
+  }
+}
+
 function send(response: ServerResponse, status: number, body: unknown) {
   response.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
   response.end(JSON.stringify(body));
@@ -82,8 +97,10 @@ export function surfaceServer(state: SurfaceState, options: { webRoot: string; b
   const routes: Route[] = [
     route('GET', '/api/state', async () => {
       const [inbox, opencode] = await Promise.all([state.inbox(), state.opencode.health()]);
-      return { owners: await state.owners(inbox), inbox, opencode };
+      return { owners: await state.owners(inbox), inbox, opencode, frictionCount: (await state.friction()).length };
     }),
+    route('GET', '/api/friction', async () => frictionRoute(() => state.friction())),
+    route('GET', '/api/friction/:id', async params => frictionRoute(() => state.frictionRecord(params.id!))),
     route('GET', '/api/settings', async () => state.settings.read()),
     route('PUT', '/api/settings/owner-order', async (_params, body) => {
       const order = (await body()).order;
