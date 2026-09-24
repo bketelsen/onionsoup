@@ -61,7 +61,7 @@ export function orgText(declarations: Declarations, selfId: string) {
   const manager = managerOf(declarations, selfId);
   const reports = directReports(declarations, selfId);
   const lines = [
-    ...(manager ? [`Your manager: ${reference(manager)}.`] : []),
+    ...(manager ? [`Your manager: ${reference(manager)}. Work your manager requests is accepted automatically and still goes through your ordinary plan, verification and review gates.`] : []),
     ...(reports.length ? [`Your direct reports: ${reports.map(reference).join('; ')}. Delegate work in their domains to them (onionsoup_request_work) instead of doing it yourself.`] : []),
   ];
   return lines.join('\n');

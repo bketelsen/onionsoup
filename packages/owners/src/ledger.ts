@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import { withRecordLock } from './record-lock.ts';
 import { ImplementationReport, OwnerAnswers, Plan, ProposedWork, Verdict } from './artifacts.ts';
+import { ChatOrigin } from './chat-origin.ts';
+import { AssignmentRef } from './initiatives.ts';
 
 export const HireRecord = z.object({
   stage: z.string(),
@@ -97,7 +99,9 @@ export const WorkItem = z.object({
     publishRequest: z.string().optional(),
   }).optional(),
   /** The chat the work was opened from, so the owner hears there how it went. */
-  origin: z.object({ sessionID: z.string(), directory: z.string() }).optional(),
+  origin: ChatOrigin.optional(),
+  /** Set on work a manager assigned through an initiative. */
+  assignment: AssignmentRef.optional(),
   /** The pid working on a step right now; unset when the item is merely queued (approved, resumed). */
   activeRunner: z.number().optional(),
   createdAt: z.string(),

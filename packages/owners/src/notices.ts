@@ -1,5 +1,8 @@
+import { randomUUID } from 'node:crypto';
 import { mkdir, readdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { z } from 'zod';
+import { ChatOrigin } from './chat-origin.ts';
 import type { WorkItem } from './ledger.ts';
 import type { Runtime } from './runtime.ts';
 
@@ -15,15 +18,18 @@ export function isRuntimeNotice(text: string) {
   return text.trimStart().startsWith(NOTICE_PREFIX);
 }
 
-export interface WorkNotice {
-  id: string;
-  owner: string;
-  workItem: string;
-  change: string;
-  text: string;
-  origin?: { sessionID: string; directory: string };
-  at: string;
-}
+/** A message the plugin posts into an owner's chat as a turn, waking the owner there. */
+export const WorkNotice = z.object({
+  id: z.string(),
+  owner: z.string(),
+  workItem: z.string().optional(),
+  initiative: z.string().optional(),
+  change: z.string(),
+  text: z.string(),
+  origin: ChatOrigin.optional(),
+  at: z.string(),
+});
+export type WorkNotice = z.infer<typeof WorkNotice>;
 
 const NOTABLE = new Set(['landed', 'failed', 'rejected']);
 
@@ -37,7 +43,9 @@ function directories(runtime: Runtime) {
 }
 
 /** What changed, in the owner's terms, or undefined when nothing it should act on did. */
-export function describeChange(item: WorkItem, previous: string | undefined): { change: string; text: string } | undefined {
+interface Described { change: string; text: string }
+
+export function describeChange(item: WorkItem, previous: string | undefined): Described | undefined {
   const [before, beforePr] = (previous ?? '|').split('|');
   const title = `"${item.proposal.title}"`;
   const pr = item.publication;
@@ -61,6 +69,66 @@ export function describeChange(item: WorkItem, previous: string | undefined): { 
     return { change: 'landed', text: `Your work item ${item.id} ${title} passed verification and review and ${where}. Tell the person if anything about it needs them.` };
   }
   return undefined;
+}
+
+const MANAGER_TEXT: Record<string, (item: WorkItem) => string> = {
+  landed: item => (item.publication ? `landed and is published as ${item.publication.url}` : `landed on ${item.branch}; it waits on the person to publish it`),
+  failed: item => `failed: ${item.reason ?? 'no reason recorded'}`,
+  rejected: item => `had its plan rejected by the person: ${item.reason ?? 'no reason given'}`,
+  'pr-merged': item => `was merged (${item.publication?.url})`,
+  'pr-closed': item => `had its PR closed without merging (${item.publication?.url})`,
+};
+
+/** The same change, told to the manager whose initiative the work carries out. */
+export function describeForManager(item: WorkItem, previous: string | undefined): Described | undefined {
+  const described = describeChange(item, previous);
+  if (!described || !item.assignment) return undefined;
+  const { initiative, assignment } = item.assignment;
+  const what = MANAGER_TEXT[described.change]?.(item) ?? described.change;
+  return {
+    change: described.change,
+    text: `${item.owner}'s work ${item.id} "${item.proposal.title}" (assignment ${assignment} of initiative ${initiative}) ${what}. Decide whether anything needs you or the person, and say so.`,
+  };
+}
+
+/** Who hears about a change: the item's owner, and for assigned work also the manager, in the initiative's chat. */
+const AUDIENCES = {
+  owner: { describe: describeChange, suffix: '' },
+  manager: { describe: describeForManager, suffix: '-manager' },
+} satisfies Record<string, { describe: (item: WorkItem, previous: string | undefined) => Described | undefined; suffix: string }>;
+
+interface Audience { role: keyof typeof AUDIENCES; owner: string; origin: () => Promise<ChatOrigin | undefined> }
+
+async function audiencesOf(runtime: Runtime, item: WorkItem, chatDirectory: (ownerId: string) => Promise<string>): Promise<Audience[]> {
+  const owner: Audience = { role: 'owner', owner: item.owner, origin: () => originOf(runtime, item, chatDirectory) };
+  const initiative = item.assignment ? await runtime.initiatives.get(item.assignment.initiative).catch(() => undefined) : undefined;
+  if (!initiative) return [owner];
+  return [owner, { role: 'manager', owner: initiative.owner, origin: async () => initiative.origin }];
+}
+
+/** Queue a notice for the plugin to post; written whole, so a reader never sees half a file. */
+export async function queueNotice(runtime: Runtime, notice: WorkNotice) {
+  const { pending } = directories(runtime);
+  await mkdir(pending, { recursive: true });
+  const path = join(pending, `${notice.id}.json`);
+  const temporary = `${path}.${randomUUID()}.tmp`;
+  await writeFile(temporary, JSON.stringify(WorkNotice.parse(notice), null, 2) + '\n');
+  await rename(temporary, path);
+}
+
+async function raiseNotice(runtime: Runtime, item: WorkItem, previous: string | undefined, audience: Audience) {
+  const { describe, suffix } = AUDIENCES[audience.role];
+  const described = describe(item, previous);
+  if (!described) return undefined;
+  const notice: WorkNotice = {
+    id: `${item.id}-${described.change}${suffix}`, owner: audience.owner, workItem: item.id, change: described.change,
+    text: described.text, origin: await audience.origin(), at: new Date().toISOString(),
+  };
+  const notebook = runtime.notebook(audience.owner);
+  await notebook.journal({ kind: 'work-status', workItem: item.id, outcome: described.change, note: described.text.slice(0, 500) });
+  await notebook.commit(`journal ${item.id} ${described.change}`).catch(() => undefined);
+  if (notice.origin) await queueNotice(runtime, notice);
+  return notice;
 }
 
 /** Where the work was opened from: its recorded origin, or the owner's work-opened journal entry for older items. */
@@ -97,17 +165,10 @@ export async function noticeWorkChanges(runtime: Runtime, chatDirectory: (ownerI
   if (seen) {
     for (const item of items) {
       if (seen[item.id] === next[item.id]) continue;
-      const described = describeChange(item, seen[item.id]);
-      if (!described) continue;
-      const notice: WorkNotice = {
-        id: `${item.id}-${described.change}`, owner: item.owner, workItem: item.id, change: described.change, text: described.text,
-        origin: await originOf(runtime, item, chatDirectory), at: new Date().toISOString(),
-      };
-      const notebook = runtime.notebook(item.owner);
-      await notebook.journal({ kind: 'work-status', workItem: item.id, outcome: described.change, note: described.text.slice(0, 500) });
-      await notebook.commit(`journal ${item.id} ${described.change}`).catch(() => undefined);
-      if (notice.origin) await writeFile(join(paths.pending, `${notice.id}.json`), JSON.stringify(notice, null, 2) + '\n');
-      raised.push(notice);
+      for (const audience of await audiencesOf(runtime, item, chatDirectory)) {
+        const notice = await raiseNotice(runtime, item, seen[item.id], audience);
+        if (notice) raised.push(notice);
+      }
     }
   }
   await writeFile(`${paths.seen}.tmp`, JSON.stringify(next, null, 2) + '\n');
@@ -115,10 +176,19 @@ export async function noticeWorkChanges(runtime: Runtime, chatDirectory: (ownerI
   return raised;
 }
 
+function parseNotice(text: string) {
+  try {
+    const parsed = WorkNotice.safeParse(JSON.parse(text));
+    return parsed.success ? parsed.data : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function pendingNotices(runtime: Runtime): Promise<WorkNotice[]> {
   const { pending } = directories(runtime);
   const files = (await readdir(pending).catch(() => [] as string[])).filter(name => name.endsWith('.json')).sort();
-  const notices = await Promise.all(files.map(file => readFile(join(pending, file), 'utf8').then(text => JSON.parse(text) as WorkNotice, () => undefined)));
+  const notices = await Promise.all(files.map(file => readFile(join(pending, file), 'utf8').then(parseNotice, () => undefined)));
   return notices.filter((notice): notice is WorkNotice => Boolean(notice));
 }
 

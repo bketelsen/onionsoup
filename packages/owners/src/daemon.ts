@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { processRequest, requestCanRun } from './brokering.ts';
 import { chatDirectory } from './chats.ts';
+import { requestParticipants } from './delegation.ts';
 import { noticeWorkChanges } from './notices.ts';
 import { distill, distillIsDue } from './memory.ts';
 import type { WorkItem, WorkStatus } from './ledger.ts';
@@ -173,8 +174,7 @@ async function runRequests(runtime: Runtime, log: TickLog) {
   const pendingRequests = await runtime.requests.list();
   for (const request of pendingRequests) {
     if (request.operation?.runner === undefined || !requestRunnerIsAlive(request.operation.runner)) continue;
-    busyOwners.add(request.from);
-    busyOwners.add(request.to);
+    for (const owner of requestParticipants(runtime, request)) busyOwners.add(owner);
   }
   for (const request of pendingRequests) {
     if (request.status === 'work-running') {
@@ -186,7 +186,7 @@ async function runRequests(runtime: Runtime, log: TickLog) {
       continue;
     }
     if (!requestCanRun(request) && !canReconcileRequest(request)) continue;
-    const owners = new Set([request.from, request.to]);
+    const owners = requestParticipants(runtime, request);
     if ([...owners].some(owner => requestOwners.has(owner) || busyOwners.has(owner))) continue;
     requests.start(request.id, async () => {
       for (const owner of owners) requestOwners.add(owner);
@@ -209,8 +209,7 @@ async function reservedRequestOwners(runtime: Runtime) {
   const reserved = new Set(requestOwners);
   for (const request of await runtime.requests.list()) {
     if (!request.operation?.runner || !requestRunnerIsAlive(request.operation.runner)) continue;
-    reserved.add(request.from);
-    reserved.add(request.to);
+    for (const owner of requestParticipants(runtime, request)) reserved.add(owner);
   }
   return reserved;
 }

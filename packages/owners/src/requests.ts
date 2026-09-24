@@ -4,6 +4,7 @@ import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { ProposedWork } from './artifacts.ts';
+import { AssignmentRef } from './initiatives.ts';
 
 export const REQUEST_LIMITS = { decisionAttempts: 3, retryBaseMs: 60_000, retryMaxMs: 15 * 60_000, reconcileMs: 5 * 60_000 };
 
@@ -76,7 +77,11 @@ export const UpdateAppAsk = z.object({
 });
 export type UpdateAppAsk = z.infer<typeof UpdateAppAsk>;
 
-export const WorkAsk = z.object({ kind: z.literal('work'), purpose: z.string(), proposal: ProposedWork });
+export const WorkAsk = z.object({
+  kind: z.literal('work'), purpose: z.string(), proposal: ProposedWork,
+  /** Set when the work carries out an initiative's assignment. */
+  assignment: AssignmentRef.optional(),
+});
 export type WorkAsk = z.infer<typeof WorkAsk>;
 
 export const ResourceAsk = z.discriminatedUnion('kind', [InstanceAsk, PublishAsk, UpdateAppAsk, WorkAsk]);

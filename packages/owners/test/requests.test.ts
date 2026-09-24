@@ -6,7 +6,8 @@ import { test } from 'node:test';
 import { Runtime } from '../src/runtime.ts';
 import { processRequest, processRequests } from '../src/brokering.ts';
 import { recoverRequests, reconcileRequest, recoverRequest } from '../src/request-recovery.ts';
-import { requestWork } from '../src/delegation.ts';
+import { requestParticipants, requestWork } from '../src/delegation.ts';
+import { noticeWorkChanges, pendingNotices } from '../src/notices.ts';
 import { changeAttention, listAttention } from '../src/attention.ts';
 import { tick, drain, type TickLog } from '../src/daemon.ts';
 import type { ResourceRequest } from '../src/requests.ts';
@@ -24,6 +25,18 @@ async function setup() {
 async function approved(runtime: Runtime, suffix = 'test') {
   const opened = await runtime.requests.open('clippy', 'homelab', ask, 'none');
   return runtime.requests.save({ ...opened, status: 'create-approved', decision: { ...decision, nameSuffix: suffix } });
+}
+
+async function journalOf(runtime: Runtime, ownerId: string) {
+  const { readdir, readFile } = await import('node:fs/promises');
+  const directory = join(runtime.notebook(ownerId).directory, 'journal');
+  const files = (await readdir(directory).catch(() => [] as string[])).filter(name => name.endsWith('.jsonl'));
+  const lines = (await Promise.all(files.map(file => readFile(join(directory, file), 'utf8')))).join('').split('\n').filter(Boolean);
+  return lines.map(line => JSON.parse(line) as { kind: string; note?: string; outcome?: string; workItem?: string });
+}
+
+function forbidHires(runtime: Runtime) {
+  runtime.hire = async () => { throw new Error('no_hire_permitted'); };
 }
 
 function operation(stage: ResourceRequest['status']): NonNullable<ResourceRequest['operation']> {
@@ -487,4 +500,45 @@ test('a journal failure after a persisted owner decision does not reopen that de
   assert.equal(declined.operation?.runner, undefined);
   await processRequest(runtime, request.id);
   assert.equal(hires, 1);
+});
+
+test('work from a declared manager is accepted without a hire, carries its assignment, and reserves only the report', async () => {
+  const runtime = await setup();
+  forbidHires(runtime);
+  const assignment = { initiative: 'i-20260924-abcdef', assignment: 'a1' };
+  const request = await requestWork(runtime, 'odrade', 'clippy', proposal, assignment);
+  assert.deepEqual([...requestParticipants(runtime, request)], ['clippy']);
+  const peer = await requestWork(runtime, 'homelab', 'clippy', proposal);
+  assert.deepEqual([...requestParticipants(runtime, peer)].sort(), ['clippy', 'homelab']);
+  await processRequest(runtime, request.id);
+  const accepted = await runtime.requests.get(request.id);
+  assert.equal(accepted.status, 'work-running');
+  assert.match(accepted.publishDecision!.reply, /odrade, clippy's manager; accepted automatically/);
+  const item = await runtime.ledger.get(accepted.workItem!);
+  assert.deepEqual(item.assignment, assignment);
+  assert.equal(item.status, 'proposed');
+  for (const owner of ['odrade', 'clippy']) {
+    assert.ok((await journalOf(runtime, owner)).some(entry => entry.kind === 'request-accepted' && entry.note?.includes('accepted automatically')));
+  }
+  await processRequest(runtime, peer.id);
+  assert.equal((await runtime.requests.get(peer.id)).status, 'pending-owner', 'a peer request still needs the receiver to decide');
+});
+
+test('a manager hears how assigned work went in the chat its initiative was drafted in', async () => {
+  const runtime = await setup();
+  forbidHires(runtime);
+  const origin = { sessionID: 'ses_odrade', directory: '/evidence/odrade' };
+  const initiative = await runtime.initiatives.open('odrade', { title: 'Org change', goal: 'g', rationale: 'r', assignments: [] }, origin);
+  const item = await runtime.ledger.create('clippy', 'change', proposal, { assignment: { initiative: initiative.id, assignment: 'a1' } });
+  const chatDirectory = async (ownerId: string) => `/desks/${ownerId}`;
+  assert.deepEqual(await noticeWorkChanges(runtime, chatDirectory), []);
+  await runtime.ledger.save({ ...item, status: 'failed', reason: 'verification_failed' });
+  const raised = await noticeWorkChanges(runtime, chatDirectory);
+  assert.deepEqual(raised.map(notice => notice.owner).sort(), ['clippy', 'odrade']);
+  const pending = await pendingNotices(runtime);
+  assert.equal(pending.length, 1, 'the report has no chat for this work; only the manager is woken');
+  assert.equal(pending[0]?.id, `${item.id}-failed-manager`);
+  assert.deepEqual(pending[0]?.origin, origin);
+  assert.ok(pending[0]!.text.includes(`clippy's work ${item.id} "Repair domain" (assignment a1 of initiative ${initiative.id}) failed: verification_failed`));
+  assert.ok((await journalOf(runtime, 'odrade')).some(entry => entry.kind === 'work-status' && entry.workItem === item.id && entry.outcome === 'failed'));
 });
