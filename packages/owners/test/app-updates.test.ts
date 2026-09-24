@@ -54,7 +54,8 @@ function scriptNas(runtime: Runtime, options: {
     const handlers: Record<string, () => unknown> = {
       truenas_app_get: () => [options.states[Math.min(statusReads++, options.states.length - 1)]],
       truenas_jobs_list: () => {
-        assert.equal(args?.method, undefined);
+        assert.ok(['app.upgrade', 'app.pull_images'].includes(String(args?.method)));
+        if (args?.method !== method) return [];
         if (hasStarted && options.transientPoll && !hasPollFailed) {
           hasPollFailed = true;
           throw new Error('temporary_connection_failure');
@@ -227,4 +228,43 @@ test('absent image evidence cannot silently confirm an image update', async () =
       : [{ name: 'radarr', state: 'RUNNING', version: '1' }],
   ));
   assert.equal(await reconcileAppUpdate(runtime, request, 42), undefined);
+});
+
+
+test('a catalog request waits for an existing image pull before starting the required upgrade', async () => {
+  const runtime = await nasRuntime();
+  const request = await approvedUpdate(runtime, { toVersion: '2', imageUpdates: false });
+  let version = '1';
+  let activeReads = 0;
+  let hasUpgrade = false;
+  const writes: string[] = [];
+  runtime.truenas = async (_domain, _writes, use) => use(async (tool, args) => {
+    const handlers: Record<string, () => unknown> = {
+      truenas_app_get: () => [app(false, version)],
+      truenas_jobs_list: () => {
+        if (args?.method === 'app.pull_images') {
+          const state = activeReads++ === 0 ? 'RUNNING' : 'SUCCESS';
+          return [{ id: 41, method: 'app.pull_images', state, arguments: ['radarr'] }];
+        }
+        return hasUpgrade ? [{ id: 42, method: 'app.upgrade', state: 'SUCCESS', arguments: ['radarr'] }] : [];
+      },
+      truenas_app_update: () => {
+        assert.ok(activeReads > 1, 'existing pull must finish before upgrading');
+        writes.push('upgrade');
+        version = '2';
+        hasUpgrade = true;
+        return { job_id: 42 };
+      },
+    };
+    return JSON.stringify(handlers[tool]!());
+  });
+  const previous = APP_UPDATE_LIMITS.pollMs;
+  APP_UPDATE_LIMITS.pollMs = 1;
+  try {
+    await processRequests(runtime);
+    assert.equal((await runtime.requests.get(request.id)).status, 'updated');
+    assert.deepEqual(writes, ['upgrade']);
+  } finally {
+    APP_UPDATE_LIMITS.pollMs = previous;
+  }
 });
