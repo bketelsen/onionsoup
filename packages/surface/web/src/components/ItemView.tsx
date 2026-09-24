@@ -4,6 +4,7 @@ import { api, navigate, useEvents } from '../api.ts';
 import type { InboxEntry, WorkItem } from '../types.ts';
 import { Decision } from './Decision.tsx';
 import { WorkRecovery } from './WorkRecovery.tsx';
+import { ReviewFindings } from './ReviewFindings.tsx';
 import { ItemActivity } from './ItemActivity.tsx';
 import { Badge, Empty, Section, statusTone, timeAgo } from './ui.tsx';
 
@@ -93,7 +94,7 @@ export function ItemView({ itemId }: { itemId: string }) {
         {item.verdicts.map((verdict, index) => (
           <Section key={index} title={`Review ${index + 1}`}>
             <div className="typography-markdown"><Badge tone={verdict.decision === 'approve' ? 'success' : 'warning'}>{verdict.decision}</Badge> {verdict.summary}</div>
-            {verdict.findings.length > 0 && <ul className="list-disc pl-5 typography-meta">{verdict.findings.map((finding, position) => <li key={position}>{finding.severity ? `[${finding.severity}] ` : ''}{finding.file ? `${finding.file}: ` : ''}{finding.description}</li>)}</ul>}
+            <ReviewFindings verdict={verdict} />
           </Section>
         ))}
         <Section title="Hires">
