@@ -9,7 +9,7 @@ import { pickModel } from './families.ts';
 import type { WorkItem, WorkStatus } from './ledger.ts';
 import type { Runtime } from './runtime.ts';
 import { REPOSITORY_REVIEW, REPOSITORY_WRITING } from './repository-writing.ts';
-import { createWorktree, diffAgainstBase, git, gitWithLiteralPathspecs, verificationPassed, verify } from './workspace.ts';
+import { createWorktree, diffAgainstBase, git, gitWithLiteralPathspecs, matchHead, verificationPassed, verify } from './workspace.ts';
 
 const run = promisify(execFile);
 
@@ -210,8 +210,9 @@ function resolveBrief(item: WorkItem, source: WorkItem, files: readonly string[]
     `<conflicted-files>\n${files.join('\n')}\n</conflicted-files>`,
     `<original-change>\n${originalPatch}\n</original-change>`,
     `Resolve every conflict so the result is the original change applied on top of the new base: keep everything the base
-added, and re-apply the original change's intent. Remove all conflict markers. Run the tests. Do not commit and do not
-run git commands that change history; the runtime continues the cherry-pick after you.`,
+added, and re-apply the original change's intent. Remove all conflict markers. Run the tests. Do not commit, do not stage (the index is read-only here) and do not
+run git commands that change history; the runtime stages your resolution and continues the cherry-pick after you.
+Anything you install or generate is discarded before host verification.`,
   ].join('\n\n');
 }
 
@@ -274,6 +275,7 @@ async function replay(runtime: Runtime, item: WorkItem): Promise<WorkItem> {
   const replayedCommits = await replayCommits(runtime, item, source, path);
   const report = replayedCommits.report;
   const diff = await diffAgainstBase(owner, path);
+  await matchHead(path);
   const verification = await verify(owner, path, runtime.toolsDirectory);
   const replayed = { ...item, worktree: path, branch, implementations: [...item.implementations, { report, diffStat: diff.stat, verification }] };
   await runtime.notebook(item.owner).journal({ kind: 'rebase', workItem: item.id, outcome: replayedCommits.resolved ? 'resolved conflicts' : 'clean', note: diff.stat.split('\n').at(-1) });

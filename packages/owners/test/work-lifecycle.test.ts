@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
 import { mkdtemp, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { Runtime, advance, approvePlan, cancelItem, publish, resumeItem, retryItem } from '@onionsoup/owners';
 import { git, refreshCheckout, ensureDesk, createWorktree } from '../src/workspace.ts';
-import { maintainPullRequests } from '../src/rebase.ts';
+import { REBASE_WORKFLOW, maintainPullRequests } from '../src/rebase.ts';
 import { DESK_CHANGE_LIMITS, proposeDeskChanges, resetDeskReviews } from '../src/desk-changes.ts';
 import { deskReviewRounds } from '../src/desk-reviews.ts';
 import type { HireRequest } from '../src/opencode.ts';
@@ -690,4 +691,93 @@ test('after too many rounds the person decides; a reset starts afresh and an app
   });
   assert.equal(hires, 3);
   assert.deepEqual(await deskReviewRounds(runtime, 'clippy', 'example/clippy'), [], 'an approved change leaves no history');
+});
+
+/** A base with ignored dependencies, as a Node repository has. */
+async function ignoreDependencies(runtime: Runtime, seed: string) {
+  await writeFile(join(seed, '.gitignore'), 'node_modules/\n');
+  await writeFile(join(seed, 'doc'), 'base doc\n');
+  await git(seed, ['add', '.']);
+  await git(seed, ['commit', '-qm', 'Ignore dependencies']);
+  await git(seed, ['push', '-q', 'origin', 'main']);
+  await refreshCheckout(runtime.repositoryOwner('clippy'));
+}
+
+/** What a hire leaves behind that no commit contains: installed dependencies with their own broken-link docs. */
+async function installDependencies(directory: string) {
+  await mkdir(join(directory, 'node_modules', 'zod'), { recursive: true });
+  await writeFile(join(directory, 'node_modules', 'zod', 'README.md'), '[refine](#refine)\n');
+}
+
+test('a conflict resolution is verified as its commit, without what the resolver installed or left behind', async () => {
+  const { runtime, seed } = await fixture();
+  await ignoreDependencies(runtime, seed);
+  await git(seed, ['checkout', '-qb', 'original']);
+  await writeFile(join(seed, 'doc'), 'original change\n');
+  await git(seed, ['commit', '-qam', 'Original change']);
+  await git(seed, ['push', '-q', 'origin', 'original']);
+  const head = (await git(seed, ['rev-parse', 'HEAD'])).trim();
+  await git(seed, ['checkout', '-q', 'main']);
+  await writeFile(join(seed, 'doc'), 'base moved on\n');
+  await git(seed, ['commit', '-qam', 'Base moves on']);
+  await git(seed, ['push', '-q', 'origin', 'main']);
+  const prUrl = 'https://github.com/example/clippy/pull/1';
+  const source = await runtime.ledger.create('clippy', 'change', proposal, {
+    status: 'landed', branch: 'original', landedCommit: head,
+    publication: { url: prUrl, branch: 'original', by: 'person', at: '', state: 'open' },
+  });
+  const rebase = await runtime.ledger.create('clippy', REBASE_WORKFLOW, proposal, {
+    status: 'implementing', rebaseOf: { itemId: source.id, branch: 'original', prUrl, previousHead: head },
+  });
+  let reviewed = false;
+  scriptHires(runtime, async request => {
+    if (request.role === 'owner') return { decision: 'resolve', guidance: 'Keep both lines', reason: 'Both sides matter' };
+    if (request.role === 'implementer') {
+      assert.match(request.brief, /the runtime stages your resolution/);
+      await writeFile(join(request.directory, 'doc'), 'base moved on\noriginal change\n');
+      await installDependencies(request.directory);
+      await writeFile(join(request.directory, 'scratch.txt'), 'notes');
+      return { ...report, filesChanged: ['doc'] };
+    }
+    if (request.role === 'reviewer') {
+      reviewed = true;
+      assert.equal(existsSync(join(request.directory, 'node_modules')), false, 'ignored dependencies are gone before verification');
+      assert.equal(existsSync(join(request.directory, 'scratch.txt')), false, 'a leftover is reported, not verified');
+      assert.equal((await git(request.directory, ['status', '--porcelain'])).trim(), '');
+      assert.equal(await readFile(join(request.directory, 'doc'), 'utf8'), 'base moved on\noriginal change\n');
+      return verdict;
+    }
+    return { notebook: [] };
+  });
+  const replayed = await advance(runtime, rebase.id);
+  assert.equal(replayed.status, 'awaiting-push-approval', replayed.reason);
+  assert.ok(reviewed);
+  assert.match(replayed.implementations.at(-1)!.report.summary, /Left out of the commit .*scratch\.txt/);
+});
+
+test('an implementation is verified without the ignored files its implementer installed, keeping its new files', async () => {
+  const { runtime, seed } = await fixture();
+  await ignoreDependencies(runtime, seed);
+  const item = await runtime.ledger.create('clippy', 'change', proposal, {
+    status: 'implementing', plan, planApproval: { by: 'person', at: '' },
+  });
+  let reviewed = false;
+  scriptHires(runtime, async request => {
+    if (request.role === 'implementer') {
+      await writeFile(join(request.directory, 'change'), 'new file');
+      await installDependencies(request.directory);
+      return report;
+    }
+    if (request.role === 'reviewer') {
+      reviewed = true;
+      assert.equal(existsSync(join(request.directory, 'node_modules')), false, 'ignored dependencies are gone before verification');
+      assert.equal(await readFile(join(request.directory, 'change'), 'utf8'), 'new file', 'untracked files of the change stay');
+      return verdict;
+    }
+    return { notebook: [] };
+  });
+  const landed = await advance(runtime, item.id);
+  assert.equal(landed.status, 'landed', landed.reason);
+  assert.ok(reviewed);
+  assert.match(await git(runtime.owner('clippy').workspace, ['show', '--name-only', '--format=', landed.landedCommit!]), /^change$/m);
 });
