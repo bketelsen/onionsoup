@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { clipped, recentChatDecisions } from './chat-context.ts';
+import { queueExchangeNotice } from './exchange-notices.ts';
 import type { OwnerDeclaration } from './declarations.ts';
 import { HireError } from './opencode.ts';
 import { incusEvidenceText, refreshWorkspace } from './owner.ts';
@@ -17,11 +19,12 @@ function who(owner: OwnerDeclaration) {
   return owner.persona ? `${owner.persona.name} (${owner.persona.title})` : owner.id;
 }
 
-function askBrief(asker: OwnerDeclaration, question: string, notebook: string, snapshot: string, evidence: string, roster: string) {
+function askBrief(asker: OwnerDeclaration, question: string, notebook: string, snapshot: string, evidence: string, roster: string, decisions: string) {
   return [
     `${who(asker)}, another owner, asks you a question about your domain. Your workspace reflects your domain at ${snapshot}.`,
     `<question>\n${question}\n</question>`,
     `<your-notebook>\n${notebook}\n</your-notebook>`,
+    decisions ? `<recent-person-decisions>\nRaw journal context, including decisions not yet distilled. Retractions cancel earlier matching statements; later decisions can reaffirm them.\n${decisions}\n</recent-person-decisions>` : '',
     evidence ? `<your-incus-snapshot>\n${evidence}\n</your-incus-snapshot>` : '',
     `<roster>\n${roster}\n</roster>`,
     `Answer from your notebook, your workspace and your evidence; read files as needed. You may not change anything.
@@ -52,12 +55,16 @@ export async function askOwner(runtime: Runtime, fromId: string, toName: string,
   const notebook = runtime.notebook(answerer.id);
   await notebook.ensure(await runtime.text(`charters/${answerer.id}.md`).catch(() => `# Charter: ${answerer.id}\n`));
   const snapshot = await refreshWorkspace(runtime, answerer);
-  const brief = askBrief(asker, question, await notebook.orientation(), snapshot, await incusEvidenceText(runtime, answerer), rosterText(runtime.declarations, answerer.id));
+  const brief = askBrief(asker, question, await notebook.orientation(), snapshot,
+    await incusEvidenceText(runtime, answerer), rosterText(runtime.declarations, answerer.id),
+    await recentChatDecisions(runtime, answerer.id));
   const result = await runtime.hire(answerer.id, { role: 'owner', model: answerer.model, directory: answerer.workspace, title: `${answerer.id}: answering ${asker.id}`, brief, schema: Answer })
     .catch(error => salvageAnswer(error));
+  await queueExchangeNotice(runtime, answerer.id, `${who(asker)} asked:\n${question}\n\nYou answered:\n${formatAnswer(answerer, result.value)}`);
   for (const [ownerId, kind] of [[asker.id, 'asked'], [answerer.id, 'answered']] as const) {
     const book = runtime.notebook(ownerId);
-    await book.journal({ kind, note: `${asker.id} → ${answerer.id}: ${question.slice(0, 300)}`, outcome: result.value.answer.slice(0, 500) });
+    await book.journal({ kind, note: `${asker.id} → ${answerer.id}: ${clipped(question, answerer.chatContext.entryChars)}`,
+      outcome: clipped(result.value.answer, answerer.chatContext.entryChars) });
     await book.commit(`journal ${kind}`).catch(() => undefined);
   }
   return { answerer, answer: result.value, cost: result.cost };

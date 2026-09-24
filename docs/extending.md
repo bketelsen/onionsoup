@@ -112,6 +112,34 @@ remain queued until their backlog drains; automatic backlogs use `batchDelayMs` 
 entries (`wake`, `app-updates`, `maintain-prs`) advance the cursor without a model hire. Interrupted hires appear
 as retryable failures. Journal entries are retained on size/parse errors so decisions cannot silently disappear.
 
+## Recent chat context and owner exchanges
+
+An owner's declaration can override the recent-context defaults independently of notebook distillation:
+
+```yaml
+chatContext:
+  ageHours: 48
+  maxEntries: 32
+  maxChars: 8000
+  entryChars: 2000
+  scanBytes: 131072       # total recent journal bytes read per context refresh
+  noticeChars: 12000     # displayed exchange excerpt; full text stays on disk
+  noticeSessions: 30     # most recently updated nonchild sessions inspected
+```
+
+Every chat system transform reads recent activity again. Owner answers also read recent person decisions,
+including undistilled choices. Limits retain the newest eligible records; retractions found in the scanned window
+cancel matching decisions. Increase the age or byte limit when a busy journal pushes relevant context out.
+
+The plugin checks the durable exchange queue every 15 seconds. It selects the answering owner's latest person
+message among the inspected sessions, ignoring synthetic messages, runtime notices and other agents. Delivery
+uses `noReply`, so it adds transcript evidence without hiring an owner or watcher. Unreadable candidate sessions (including structured-output hires) are logged and skipped. Busy chats, failed
+session listings and missing person chats leave the notice queued. Exchanges survive plugin restarts; accepted posts use a stable
+message ID to avoid duplicates after acknowledgement loss. Full records are retained under
+`$ONIONSOUP_HOME/notices/exchanges/pending` or `delivered`, with their ID cited in the transcript. If the owner's
+person chat is older than the configured session search window, raise `noticeSessions` or speak in that chat.
+Restart the surface after installing plugin changes.
+
 ## What needs engine code
 
 New domain kinds (how an owner observes and changes something, like `git-repository`, `incus`, `truenas`, `github-org`), new
