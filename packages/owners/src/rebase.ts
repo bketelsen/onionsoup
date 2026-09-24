@@ -8,6 +8,7 @@ import { requireFreelancer } from './declarations.ts';
 import { pickModel } from './families.ts';
 import type { WorkItem, WorkStatus } from './ledger.ts';
 import type { Runtime } from './runtime.ts';
+import { REPOSITORY_REVIEW, REPOSITORY_WRITING } from './repository-writing.ts';
 import { createWorktree, diffAgainstBase, git, gitWithLiteralPathspecs, verificationPassed, verify } from './workspace.ts';
 
 const run = promisify(execFile);
@@ -204,6 +205,7 @@ export async function stageConflictResolution(worktree: string, files: readonly 
 function resolveBrief(item: WorkItem, source: WorkItem, files: readonly string[], originalPatch: string) {
   return [
     'You have been hired to finish a cherry-pick that stopped on conflicts. The working tree is mid cherry-pick.',
+    REPOSITORY_WRITING,
     `The change being replayed: "${source.proposal.title}". Its approved plan: ${source.plan?.summary ?? source.proposal.goal}`,
     `<conflicted-files>\n${files.join('\n')}\n</conflicted-files>`,
     `<original-change>\n${originalPatch}\n</original-change>`,
@@ -300,6 +302,7 @@ async function replayCommits(runtime: Runtime, item: WorkItem, source: WorkItem,
 function reviewResolutionBrief(source: WorkItem, originalPatch: string, rebasedPatch: string) {
   return [
     'You have been hired to review a conflict resolution. Do not edit anything.',
+    `${REPOSITORY_REVIEW}\nApply this check to text changed by the resolution; do not request unrelated rewrites of the approved change.`,
     `An approved change ("${source.proposal.title}") conflicted with the new base branch and a freelancer resolved it.`,
     `<original-change>\n${originalPatch}\n</original-change>`,
     `<rebased-change-against-new-base>\n${rebasedPatch}\n</rebased-change-against-new-base>`,

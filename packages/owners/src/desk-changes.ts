@@ -7,6 +7,7 @@ import { requestPublish } from './brokering.ts';
 import { requireFreelancer, type RepositoryOwner } from './declarations.ts';
 import { pickModel } from './families.ts';
 import type { Runtime } from './runtime.ts';
+import { REPOSITORY_REVIEW } from './repository-writing.ts';
 import { ensureDesk, git, verificationPassed, verify } from './workspace.ts';
 
 const run = promisify(execFile);
@@ -28,6 +29,7 @@ function hasMergeGrant(owner: RepositoryOwner) {
 function reviewBrief(owner: RepositoryOwner, title: string, summary: string, patch: string) {
   return [
     `You have been hired to review a change ${owner.persona?.name ?? owner.id} made in ${owner.domain.name}. Do not edit anything.`,
+    REPOSITORY_REVIEW,
     `<title>${title}</title>`,
     `<what-the-owner-says-it-does>\n${summary}\n</what-the-owner-says-it-does>`,
     `<diff-against-${owner.domain.baseBranch}>\n${patch}\n</diff-against-${owner.domain.baseBranch}>`,

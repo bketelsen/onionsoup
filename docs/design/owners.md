@@ -15,6 +15,11 @@ The runtime, not the prompt, enforces how work happens: plans wait for a person'
 run by host code in a sandbox, reviews come from a different model family, and anything that creates,
 deletes or destroys waits for a person unless the person granted standing approval in configuration.
 
+Repository documents read as the project's record: decisions, rationale and consequences. Owner prompts and
+implementer briefs keep conversational process history in PR descriptions, commit messages and notebooks;
+reviewer briefs check for narration about who asked or which owners were consulted. Repository-specific
+templates, conventions and review rubrics take precedence over this general writing guidance.
+
 ```
           events · schedules · deterministic checks · a person in chat
                                    │
