@@ -387,7 +387,7 @@ test('a report escalation wakes the manager and blocks her approvals until resol
   await assert.rejects(steerReportItem(runtime, 'homelab', itemId, 'note', 'x'), /not_your_report_item/);
 });
 
-test('in chat, a manager drafts from her chat, reads her reports\' assigned work, and sees her initiatives in status', async () => {
+test('in chat, a manager drafts from her chat, reads all her reports\' work, and sees her initiatives in status', async () => {
   const runtime = await setup();
   const { initiative, itemId } = await dispatchedCoreItem(runtime);
   await raiseToManager(runtime, 'clippy', { kind: 'question', note: 'Which branch?', item: itemId });
@@ -399,8 +399,14 @@ test('in chat, a manager drafts from her chat, reads her reports\' assigned work
   const tools = hooks.tool!;
   assert.match(String(await tools.onionsoup_status!.execute({ item: itemId }, context('Odrade'))), new RegExp(`^${itemId}: Core change`));
   assert.match(String(await tools.onionsoup_status!.execute({ item: itemId }, context('Bellonda'))), /^No work item/);
+  const oneOff = await runtime.ledger.create('clippy', 'change', proposal('One-off fix'));
+  assert.match(String(await tools.onionsoup_status!.execute({ item: oneOff.id }, context('Odrade'))), new RegExp(`^${oneOff.id}: One-off fix`), 'a manager reads work her report took on outside her initiatives');
+  assert.match(String(await tools.onionsoup_status!.execute({ item: oneOff.id }, context('Bellonda'))), /^No work item/, 'a peer does not');
   const summary = String(await tools.onionsoup_status!.execute({}, context('Odrade')));
   assert.ok(summary.includes(`- ${initiative.id} [approved]: Cross-repository change (0/2 merged; 1 open escalation)`), summary);
+  assert.ok(summary.includes("Your reports' work"), summary);
+  assert.ok(summary.includes(`- clippy: work ${oneOff.id}: `) && summary.includes(`- clippy: work ${itemId}: `), summary);
+  assert.doesNotMatch(String(await tools.onionsoup_status!.execute({}, context('Bellonda'))), /Your reports' work/);
   const drafted = String(await tools.onionsoup_initiative!.execute({ action: 'draft', initiative: twoRepoDraft() }, context('Odrade')));
   const draftedId = /Drafted (i-\S+)\./.exec(drafted)![1]!;
   assert.deepEqual((await runtime.initiatives.get(draftedId)).origin, { sessionID: 'ses_Odrade', directory: '/chat' });

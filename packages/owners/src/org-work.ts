@@ -365,11 +365,6 @@ async function assignedItem(runtime: Runtime, managerId: string, itemId: string)
   return { item, initiative, assignmentId: item.assignment.assignment };
 }
 
-/** Whether a manager may read this work: it carries out one of her initiatives. */
-export async function isManagersItem(runtime: Runtime, managerId: string, itemId: string) {
-  return Boolean(await assignedItem(runtime, managerId, itemId));
-}
-
 function openEscalation(initiative: Initiative, assignmentId: string) {
   return initiative.escalations.find(escalation => escalation.assignment === assignmentId && !escalation.resolution);
 }

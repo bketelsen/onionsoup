@@ -257,9 +257,10 @@ revise goes to the planner as plan feedback; escalate leaves the plan for the pe
 `SUPERVISION_LIMITS.revisionsPerItem` revisions, or when the hire fails, the verdict is escalate. Without the grant
 the plan waits for the person as always, and the inbox says when the manager reviews under a grant.
 
-**Steering and pushback.** A manager reads her reports' assigned work with `onionsoup_status`, which also lists her
-initiatives, and acts on it with `onionsoup_steer` (approve a plan under the grant, send it back, cancel the work,
-or leave the report a note). A report pushes back with `onionsoup_raise` (objection, question or blocked): the
+**Steering and pushback.** A manager reads all her direct reports' work with `onionsoup_status`, assigned or taken on
+directly (one-off requests, their own work), and it lists her initiatives. She acts only on work her initiatives
+assigned, with `onionsoup_steer` (approve a plan under the grant, send it back, cancel the work, or leave the report
+a note); reading is oversight, steering is authority. A report pushes back with `onionsoup_raise` (objection, question or blocked): the
 escalation is stored on the initiative, journaled to both, raised as the manager's attention, and wakes her. While it
 is open she cannot approve that assignment's plans; she resolves it with `onionsoup_initiative resolve-escalation`.
 

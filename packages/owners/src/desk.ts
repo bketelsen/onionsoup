@@ -199,6 +199,21 @@ export function initiativesText(views: readonly InitiativeView[]) {
   }).join('\n');
 }
 
+/** One report's open work and what it finished recently, newest first. */
+function reportLines(items: readonly WorkItem[], reportId: string, since: number) {
+  const own = items.filter(item => item.owner === reportId);
+  const recent = own.filter(item => !isOpenWork(item) && Date.parse(item.updatedAt) >= since).slice(-STATUS_LIMITS.recentItems).reverse();
+  return [...own.filter(isOpenWork), ...recent].map(item => `- ${reportId}: work ${item.id}: ${outcome(item)}: ${item.proposal.title}`);
+}
+
+/** A manager's view of all her direct reports' work, assigned or not. Empty when she has no reports. */
+export function reportsWorkText(items: readonly WorkItem[], reportIds: readonly string[], now = new Date()) {
+  if (!reportIds.length) return '';
+  const since = now.getTime() - STATUS_LIMITS.recentDays * 24 * 60 * 60 * 1000;
+  const lines = reportIds.flatMap(reportId => reportLines(items, reportId, since));
+  return `Your reports' work (onionsoup_status <item> for detail):\n${lines.join('\n') || '- nothing open or finished recently'}`;
+}
+
 const FINISHED_INITIATIVES = new Set(['completed', 'failed', 'cancelled']);
 
 /** A manager's status section: open initiatives, and those that finished recently. Empty when there are none. */
