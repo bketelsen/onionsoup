@@ -227,6 +227,23 @@ test('a manager cancels an assignment nothing waits for, and the initiative comp
   assert.equal((await runtime.requests.list()).length, 1);
 });
 
+test('an initiative whose every assignment is cancelled ends cancelled, not completed', async () => {
+  const runtime = await setup();
+  const draft = twoRepoDraft();
+  const initiative = await submitted(runtime, { ...draft, assignments: draft.assignments.slice(0, 1) });
+  await approveInitiative(runtime, initiative.id, 'person');
+  await supervise(runtime);
+  const [request] = await runtime.requests.list();
+  await processRequest(runtime, request!.id);
+  await cancelAssignment(runtime, 'odrade', initiative.id, 'a1', 'Superseded');
+  await processRequest(runtime, request!.id);
+  await supervise(runtime);
+  const ended = await runtime.initiatives.get(initiative.id);
+  assert.equal(ended.status, 'cancelled');
+  assert.equal(ended.outcome, 'every assignment was cancelled');
+  assert.ok((await pendingNotices(runtime)).some(notice => notice.change === 'initiative-cancelled'));
+});
+
 function plan(summary: string) {
   return { summary, steps: [{ description: 'Change it', files: ['main.go'] }], tests: ['go test'], risks: [], outOfScope: [], questionsForOwner: [] };
 }

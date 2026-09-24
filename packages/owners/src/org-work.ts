@@ -272,11 +272,12 @@ export async function cancelAssignment(runtime: Runtime, managerId: string, init
   if (!assignment) throw new Error(`unknown_assignment: ${assignmentId}`);
   const dependents = view.assignments.filter(other => !other.cancelled && other.after.includes(assignmentId));
   if (dependents.length) throw new Error(`assignment_has_dependents: ${dependents.map(other => other.id).join(', ')} wait for ${assignmentId}`);
-  if (assignment.item && LIVE_ITEM.has(assignment.item.status)) await cancelItem(runtime, assignment.item.id, `owner:${managerId}`, reason);
   const cancelled = { by: `owner:${managerId}`, at: new Date().toISOString(), note: reason };
+  // Mark the assignment first: a tick between the two writes must not read the cancelled work as a failed initiative.
   const updated = await runtime.initiatives.update(initiativeId, current => ({
     ...current, assignments: current.assignments.map(candidate => (candidate.id === assignmentId ? { ...candidate, cancelled } : candidate)),
   }));
+  if (assignment.item && LIVE_ITEM.has(assignment.item.status)) await cancelItem(runtime, assignment.item.id, `owner:${managerId}`, reason);
   await journal(runtime, [managerId, assignment.to], 'assignment-cancelled', `${initiativeId}/${assignmentId}: ${reason}`);
   return updated;
 }
@@ -302,10 +303,11 @@ async function dispatch(runtime: Runtime, initiative: Initiative, assignment: As
   if (!existing) await journal(runtime, [initiative.owner, assignment.to], 'assignment-dispatched', `${initiative.id}/${assignment.id} → ${assignment.to}: ${request.id}`);
 }
 
-type Rollup = { status: 'completed' | 'failed'; outcome: string } | undefined;
+type Rollup = { status: 'completed' | 'failed' | 'cancelled'; outcome: string } | undefined;
 
 function rollupOf(view: InitiativeView): Rollup {
   const live = view.assignments.filter(assignment => assignment.state !== 'cancelled');
+  if (!live.length) return { status: 'cancelled', outcome: 'every assignment was cancelled' };
   const failed = live.find(assignment => assignment.state === 'failed');
   if (failed) return { status: 'failed', outcome: `${failed.id} (${failed.to}) failed: ${failed.requestRecord?.reason ?? 'no reason recorded'}` };
   if (live.every(assignment => assignment.state === 'completed')) return { status: 'completed', outcome: `all ${live.length} assignments merged` };
