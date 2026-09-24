@@ -76,14 +76,41 @@ session history, records and listings.
 Authority comes only from your configuration:
 
 - `domain.incus.remotes[].allow` decides where instances may be created and deleted.
-- `grants:` are standing approvals: `{ to: <owner>, action: publish-site | update-app | merge | ship, target: <name or "*"> }`.
+- `grants:` are standing approvals: `{ to: <owner>, action: publish-site | update-app | merge | ship | approve-plans, target: <name or "*"> }`.
   Without a grant, the runtime asks you.
+- `reportsTo: <owner>` puts an owner under a manager (see [Managers and initiatives](#managers-and-initiatives)).
 - `manages: { owners: [<glob>, ...] }` makes an owner a steward: with its `onionsoup_owners` tool it creates,
   changes and retires owners whose domain (repository or org name) matches, with your approval for each write. It
   can never write `grants`, `deploy`, `incus`, `mcp` or `manages`, nor change itself.
 - `deploy: { checkout, services }` says where a repository owner's code runs; with it the owner can ship
   (fast-forward, verify, restart with a health check and rollback).
 - Destructive actions, plan approval and creates/deletes always stop for you unless a grant says otherwise.
+
+## Managers and initiatives
+
+A manager is any owner others report to. Declare the line on each report, and give the report a `maintain-prs`
+duty so its merges are recorded (an initiative is complete only when its work has merged):
+
+```yaml
+# owners/murbella.yaml
+id: murbella
+reportsTo: odrade
+duties:
+  - { id: prs, kind: maintain-prs, every: 15m, instructions: "Keep published PRs mergeable." }
+grants:
+  # Optional: Odrade approves Murbella's plans for Odrade's initiatives; every use is journaled.
+  - { to: odrade, action: approve-plans, target: frostyard/snosi }
+```
+
+The manager then plans cross-repository change in chat with `onionsoup_initiative`: a title, goal, rationale and
+assignments such as `{ id: core-doc, to: taraza, proposal: {...} }` and `{ id: snosi, to: murbella, after: [core-doc],
+proposal: {...} }`. You approve the breakdown once (the surface inbox, or `npm run owners -- approve-initiative <id>`;
+`revise-initiative <id> --note` and `cancel-initiative <id> --reason` send it back or stop it), and `owners
+initiatives` / `owners initiative <id>` read them. The daemon dispatches each assignment when its dependencies have
+merged; the report accepts it automatically and can push back with `onionsoup_raise`. Without an `approve-plans`
+grant, every plan still waits for you. `INITIATIVE_LIMITS` (`maxAssignments`, `maxOpenPerManager`),
+`SUPERVISION_LIMITS.revisionsPerItem` and `DAEMON_LIMITS.parallelReviews` bound the work. A steward may put owners
+in its scope under itself, but only you set any other reporting line or grant.
 
 ## Run it always on
 
