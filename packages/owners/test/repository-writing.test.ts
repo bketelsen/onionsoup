@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp } from 'node:fs/promises';
 import { test } from 'node:test';
 import type { Config, PluginInput } from '@opencode-ai/plugin';
-import plugin from '../src/plugin.ts';
+import { withActiveHooks } from './active-hooks.ts';
 import { Runtime } from '../src/runtime.ts';
 import { Plan } from '../src/artifacts.ts';
 import { implementBrief, reviewBrief } from '../src/briefs.ts';
@@ -21,14 +21,7 @@ test('configured owner prompts carry repository writing guidance alongside each 
     get(_target, key) { throw new Error(`unexpected_plugin_input: ${String(key)}`); },
   });
   const originalSandbox = process.env.ONIONSOUP_SANDBOX;
-  let hooks: Awaited<ReturnType<typeof plugin.server>>;
-  try {
-    delete process.env.ONIONSOUP_SANDBOX;
-    hooks = await plugin.server(input, { declarations: 'packages/owners/test/fixtures/owners', state });
-  } finally {
-    if (originalSandbox === undefined) delete process.env.ONIONSOUP_SANDBOX;
-    else process.env.ONIONSOUP_SANDBOX = originalSandbox;
-  }
+  const hooks = await withActiveHooks(input, { declarations: 'packages/owners/test/fixtures/owners', state });
   assert.equal(process.env.ONIONSOUP_SANDBOX, originalSandbox);
   const config: Config = {};
   await hooks.config!(config);
@@ -36,7 +29,10 @@ test('configured owner prompts carry repository writing guidance alongside each 
     (agent): agent is NonNullable<typeof agent> => agent !== undefined && !agent.hidden,
   );
   assert.ok(owners.length > 1);
-  for (const owner of owners) assertWritingRule(owner.prompt!);
+  for (const owner of owners) {
+    assertWritingRule(owner.prompt!);
+    assert.match(owner.prompt!, /onionsoup_friction \(report reproducible engine behavior/);
+  }
   assert.match(config.agent!.Bellonda!.prompt!, /Exact\./, 'the persona remains available for conversation');
 });
 

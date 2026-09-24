@@ -4,6 +4,7 @@ import { InboxView } from './components/InboxView.tsx';
 import { ItemView } from './components/ItemView.tsx';
 import { OwnerView } from './components/OwnerView.tsx';
 import { Rail } from './components/Rail.tsx';
+import { FrictionView } from './components/FrictionView.tsx';
 import type { SurfaceState } from './types.ts';
 
 const REFRESH_TYPES = new Set(['permission.asked', 'permission.replied', 'question.asked', 'question.replied', 'question.rejected', 'session.status']);
@@ -76,6 +77,7 @@ export function App() {
         void api('/api/settings/owner-order', { method: 'PUT', body: { order } }).catch(() => refresh());
       }} />
       {route[0] === 'item' && route[1] ? <ItemView itemId={route[1]} />
+        : route[0] === 'friction' ? <FrictionView recordId={route[1]} />
         : owner ? <OwnerView key={owner.id} owner={owner} inbox={state?.inbox ?? []} sessionId={route[2] === 'chat' ? route[3] : undefined} refresh={refresh} />
           : <InboxView state={state} refresh={refresh} />}
       </div>

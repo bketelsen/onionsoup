@@ -29,6 +29,18 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
 
 ## Runtime
 
+- **Friction triage and issue gate are not implemented.** Owners can capture bounded, deduplicated friction reports
+  in the surface, with one durable pending wake intent for each new signature. No daemon worker consumes these
+  intents yet; workaround delivery must pin the saved origin, and publishing a draft GitHub issue must have its own
+  person approval gate. A missing failure event stays explicit and makes deduplication provisional. The opencode
+  plugin exposes a message ID but no invocation ID; identical submissions in one assistant message can share an
+  idempotency key. An interrupted pre-write submission blocks other reports of its signature until that submission
+  retries; there is no operator recovery control yet. Existing journal failures between append and acknowledgement
+   can replay a short entry on retry.
+  The friction index bounds record reads on routine surface polls, but old records, wake intents and submission
+  markers have no retention or pruning policy. A missing or corrupt index needs explicit repair rather than
+  silently discarding reports.
+
 - **Legacy desk PRs remain untracked.** PRs recorded only as `desk-change-opened` journal entries before
   ledger-backed desk publication are not backfilled. They need manual GitHub maintenance; newly proposed
   desk changes have ledger records, maintenance and originating-chat notices.
@@ -67,4 +79,3 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
   loaded, and hires are created by the daemon's own servers, so the surface's opencode never listed a hire that
   started after the surface did. The activity rail finds an item's hire sessions by title in opencode's store
   (`readSessionsTitled` in `packages/surface/src/hire-store.ts`) instead.
-
