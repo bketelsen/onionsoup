@@ -93,7 +93,7 @@ export async function recordDutyRun(runtime: Runtime, ownerId: string, dutyId: s
   await writeFile(statePath, JSON.stringify(lastRun, null, 2) + '\n');
 }
 
-async function runDueDuties(runtime: Runtime, log: TickLog) {
+async function runDueDuties(runtime: Runtime, log: TickLog, reserved: ReadonlySet<string>) {
   const statePath = join(runtime.stateDirectory, 'duties.json');
   const lastRun = await readDutyState(statePath);
   for (const owner of runtime.declarations.owners.values()) {
@@ -101,7 +101,7 @@ async function runDueDuties(runtime: Runtime, log: TickLog) {
     for (const duty of owner.duties.filter(candidate => candidate.every)) {
       const key = `${owner.id}/${duty.id}`;
       const previous = lastRun[key] ? Date.parse(lastRun[key]) : 0;
-      if (requestOwners.has(owner.id)) continue;
+      if (reserved.has(owner.id)) continue;
       if (Date.now() - previous < everyMs(duty.every!) || duties.has(key)) continue;
       const started = duties.start(key, async () => {
         try {
@@ -123,11 +123,11 @@ async function runDueDuties(runtime: Runtime, log: TickLog) {
  * Advance runnable work items in the background, at most one per owner at a time: an owner's items share its
  * checkout, where creating worktrees at once would collide.
  */
-function advanceRunnable(runnable: readonly WorkItem[], runtime: Runtime, log: TickLog) {
+function advanceRunnable(runnable: readonly WorkItem[], runtime: Runtime, log: TickLog, reserved: ReadonlySet<string>) {
   const busyOwners = new Set(items.keys().map(key => key.split('/')[0]));
   for (const item of runnable) {
     if (memories.has(item.owner)) continue;
-    if (requestOwners.has(item.owner) || busyOwners.has(item.owner) || items.has(`${item.owner}/${item.id}`)) continue;
+    if (reserved.has(item.owner) || busyOwners.has(item.owner) || items.has(`${item.owner}/${item.id}`)) continue;
     const started = items.start(`${item.owner}/${item.id}`, async () => {
       try {
         await advance(runtime, item.id, log.item);
@@ -205,6 +205,16 @@ async function runRequests(runtime: Runtime, log: TickLog) {
   }
 }
 
+async function reservedRequestOwners(runtime: Runtime) {
+  const reserved = new Set(requestOwners);
+  for (const request of await runtime.requests.list()) {
+    if (!request.operation?.runner || !requestRunnerIsAlive(request.operation.runner)) continue;
+    reserved.add(request.from);
+    reserved.add(request.to);
+  }
+  return reserved;
+}
+
 /** One pass: configuration, requests (people may be waiting on an instance), due duties, work items, notices. */
 export async function tick(runtime: Runtime, log: TickLog) {
   const stranded = await runtime.ledger.markInterrupted();
@@ -220,9 +230,11 @@ export async function tick(runtime: Runtime, log: TickLog) {
   } catch (error) {
     log.error('requests', error);
   }
-  await runDueDuties(runtime, log);
-  advanceRunnable((await runtime.ledger.list()).filter(candidate => RUNNABLE.includes(candidate.status) && !candidate.activeRunner), runtime, log);
-  await scheduleMemory(runtime, log, requestOwners);
+  const reserved = await reservedRequestOwners(runtime);
+  await runDueDuties(runtime, log, reserved);
+  const runnable = (await runtime.ledger.list()).filter(candidate => RUNNABLE.includes(candidate.status) && !candidate.activeRunner);
+  advanceRunnable(runnable, runtime, log, reserved);
+  await scheduleMemory(runtime, log, reserved);
   try {
     for (const notice of await noticeWorkChanges(runtime, ownerId => chatDirectory(runtime, ownerId))) log.duty(notice.owner, 'notice', `${notice.workItem} ${notice.change}${notice.origin ? ' (to its chat)' : ''}`);
   } catch (error) {
