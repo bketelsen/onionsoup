@@ -46,6 +46,33 @@ test('work stranded mid-stage is marked interrupted, not replayed', async () => 
   assert.equal((await ledger.get(queued.id)).status, 'implementing', 'approved but never started stays queued');
 });
 
+test('ship refuses before touching the checkout when any owner has an active work runner', async () => {
+  const { Runtime } = await import('@onionsoup/owners');
+  const { shipEngine } = await import('../src/ship.ts');
+  const runtime = await Runtime.open({ declarations: 'packages/owners/test/fixtures/owners', state: await mkdtemp(join(tmpdir(), 'owners-ship-')) });
+  const clippy = runtime.declarations.owners.get('clippy');
+  assert.ok(clippy);
+  runtime.declarations.owners.set('clippy', {
+    ...clippy,
+    deploy: { checkout: join(runtime.stateDirectory, 'nonexistent-checkout'), services: ['onionsoup-owners.service'] },
+  });
+  const proposal = { title: 'Shipping work', goal: 'g', rationale: 'r', acceptance: ['a'], size: 'small' as const };
+  const planning = await runtime.ledger.create('clippy', 'change', proposal);
+  await runtime.ledger.save({ ...planning, status: 'planning', activeRunner: 424242 });
+  const reviewing = await runtime.ledger.create('homelab', 'change', { ...proposal, title: 'Another owner reviewing' });
+  await runtime.ledger.save({ ...reviewing, status: 'reviewing', activeRunner: 424243 });
+  const queued = await runtime.ledger.create('clippy', 'change', { ...proposal, title: 'Queued work' });
+  await runtime.ledger.save({ ...queued, status: 'implementing' });
+
+  const shipped = await shipEngine(runtime, 'clippy');
+  assert.equal(shipped.outcome, 'failed');
+  assert.match(shipped.summary, /running_work_items/);
+  assert.match(shipped.summary, new RegExp(`${planning.id}.*Shipping work.*planning`));
+  assert.match(shipped.summary, new RegExp(`${reviewing.id}.*Another owner reviewing.*reviewing`));
+  assert.doesNotMatch(shipped.summary, new RegExp(queued.id));
+  assert.doesNotMatch(shipped.summary, /Queued work/);
+});
+
 test('example declarations load and reference known models', async () => {
   const declarations = await loadDeclarations('packages/owners/test/fixtures/owners');
   const clippy = declarations.owners.get('clippy');

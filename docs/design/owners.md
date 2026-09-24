@@ -94,8 +94,11 @@ Owners hear how their work went: each daemon tick compares work items with what 
 owner should act on (landed, failed, rejected, PR merged or closed), and queues a notice that the plugin posts into
 the chat the work was opened from, marked as coming from the runtime, so the owner decides the next step in front
 of the person.
-An owner with a `deploy` section and a `ship` grant ships its repository where it runs: fast-forward, verify in
-the sandbox, restart through a delayed systemd unit that health-checks and rolls back.
+An owner with a `deploy` section and a `ship` grant ships its repository where it runs. Before touching the
+deploy checkout, ship checks the full ledger and refuses with the IDs, titles and statuses of any items with
+active runners, including other owners' work. Once clear, it fast-forwards, verifies in the sandbox, and
+restarts only the owner's configured deploy services through a delayed systemd unit that health-checks and
+rolls back. This up-front check does not prevent new work from starting during verification.
 
 ### Notebooks and memory
 
@@ -130,6 +133,8 @@ work items run in the background beside the tick (one run per item, one item per
 a long hire never holds up a 15-minute check or a waiting request. Deterministic
 checks wake a model only when one is needed, and that model is the owner. Work a stopped runtime was actually
 doing is marked interrupted and never replayed; a person resumes it.
+Shipping refuses while any item has an active runner, so a ship must be retried after the named work finishes
+or is resolved. A manual daemon restart still interrupts active work.
 
 ### Safety
 
