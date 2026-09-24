@@ -12,7 +12,7 @@ import type { Runtime } from './runtime.ts';
  * request that a standing grant or a person approves, and host code performs it through the TrueNAS API.
  * A hold is remembered for that target version, so the owner is not re-asked about the same release daily.
  */
-export const APP_UPDATE_LIMITS = { holdDays: 7, updateWaitMs: 15 * 60_000, pollMs: 10_000, jobHistory: 50 };
+export const APP_UPDATE_LIMITS = { holdDays: 7, updateWaitMs: 15 * 60_000, pollMs: 10_000, jobHistory: 50, maxJobsPerUpdate: 3 };
 
 interface AppUpdate { name: string; state: string; version: string; latestVersion: string; humanVersion: string; imageUpdates: boolean }
 
@@ -147,11 +147,14 @@ type UpgradeJob = z.infer<typeof UpgradeJob>;
 
 async function upgradeJobs(runtime: Runtime, ownerId: string, ask: UpdateAppAsk): Promise<UpgradeJob[]> {
   const owner = runtime.truenasOwner(ownerId);
-  const text = await runtime.truenas(owner.domain, false, call => call('truenas_jobs_list', {
-    limit: APP_UPDATE_LIMITS.jobHistory,
+  const histories = await Promise.all(Object.keys(UPDATE_STARTERS).map(async method => {
+    const text = await runtime.truenas(owner.domain, false, call => call('truenas_jobs_list', {
+      method, limit: APP_UPDATE_LIMITS.jobHistory,
+    }));
+    return z.array(UpgradeJob).parse(JSON.parse(text)).filter(job =>
+      job.arguments?.[0] === ask.app && job.method === method);
   }));
-  return z.array(UpgradeJob).parse(JSON.parse(text)).filter(job =>
-    job.arguments?.[0] === ask.app && Object.hasOwn(UPDATE_STARTERS, job.method));
+  return histories.flat();
 }
 
 const ACTIVE_JOB = new Set(['WAITING', 'RUNNING']);
@@ -219,7 +222,7 @@ async function observeUpgrade(runtime: Runtime, request: ResourceRequest, jobId:
   return { job, status };
 }
 
-async function waitForUpgrade(runtime: Runtime, request: ResourceRequest, jobId: number) {
+async function waitForUpgrade(runtime: Runtime, request: ResourceRequest, jobId: number, requestedMethod: UpdateMethod) {
   if (request.ask.kind !== 'update-app') throw new Error('not_an_update_request');
   const { app, toVersion } = request.ask;
   const deadline = Date.now() + APP_UPDATE_LIMITS.updateWaitMs;
@@ -239,7 +242,8 @@ async function waitForUpgrade(runtime: Runtime, request: ResourceRequest, jobId:
     last = describeStatus(status);
     const needsPull = job?.method === 'app.upgrade' && status.state === 'RUNNING'
       && status.version === toVersion && status.image_updates_available === true;
-    if (isSettled(status, request.ask) || needsPull) return status;
+    const finishedOtherUpdate = job?.method !== requestedMethod && status.state === 'RUNNING';
+    if (isSettled(status, request.ask) || needsPull || finishedOtherUpdate) return status;
     if (status.state === 'CRASHED' || status.state === 'STOPPED') {
       throw new Error(`app_upgrade_unhealthy: job ${jobId} succeeded but ${app} is ${status.state}`);
     }
@@ -254,12 +258,14 @@ export async function updateApp(runtime: Runtime, request: ResourceRequest, opti
   if (options.jobId === undefined && isSettled(before, request.ask)) {
     return `already on ${request.ask.toVersion}; ${describeStatus(before)}`;
   }
-  let jobId = await startUpgrade(runtime, request, updateMethod(request.ask, before), options);
-  let status = await waitForUpgrade(runtime, request, jobId);
-  if (!isSettled(status, request.ask)) {
-    jobId = await startUpgrade(runtime, request, 'app.pull_images', { onJobStarted: options.onJobStarted });
-    status = await waitForUpgrade(runtime, request, jobId);
+  let status = before;
+  let nextOptions = options;
+  for (let completedJobs = 0; completedJobs < APP_UPDATE_LIMITS.maxJobsPerUpdate; completedJobs++) {
+    const method = updateMethod(request.ask, status);
+    const jobId = await startUpgrade(runtime, request, method, nextOptions);
+    status = await waitForUpgrade(runtime, request, jobId, method);
+    if (isSettled(status, request.ask)) return `${describeStatus(status)} (job ${jobId})`;
+    nextOptions = { onJobStarted: options.onJobStarted };
   }
-  if (!isSettled(status, request.ask)) throw new Error(`app_upgrade_unsettled: images still pending after job ${jobId}`);
-  return `${describeStatus(status)} (job ${jobId})`;
+  throw new Error(`app_upgrade_unsettled: ${request.ask.app} exceeded ${APP_UPDATE_LIMITS.maxJobsPerUpdate} jobs`);
 }
