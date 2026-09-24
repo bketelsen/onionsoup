@@ -17,7 +17,14 @@ export interface InboxEntry {
   permission?: PendingPermission; question?: PendingQuestion;
 }
 
-export interface SurfaceState { owners: OwnerSummary[]; inbox: InboxEntry[]; frictionCount: number; opencode?: { ok: boolean; error?: string } }
+import type { InboxReadError } from '../../src/inbox-errors.ts';
+export interface SurfaceState {
+  owners: OwnerSummary[];
+  inbox: InboxEntry[];
+  inboxErrors?: InboxReadError[];
+  frictionCount: number;
+  opencode?: { ok: boolean; error?: string };
+}
 
 export type { PublicFrictionRecord as FrictionRecord } from '../../src/friction-public.ts';
 export type { InitiativeSummary, OrgEntry, PublicAssignment, PublicInitiative } from '../../src/initiative-public.ts';

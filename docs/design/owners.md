@@ -47,6 +47,11 @@ in question order, support multiple selections and permitted custom responses, a
 show each finding's issue and suggestion using the engine's shared work-item type.
 OpenChamber and its Owner's Desk panel came first and were retired for it.
 
+If a chat directory, permission list or question list cannot be read, the surface reports the affected
+owner and operation while keeping other owners and engine gates available. A failed read never means there
+are no pending approvals. A successful refresh clears the warning. If the entire snapshot fails, the
+surface keeps its last snapshot and warns that displayed items may be stale.
+
 ## Engine and configuration
 
 Onionsoup is the engine. A person's owners are configuration that lives outside the repository:

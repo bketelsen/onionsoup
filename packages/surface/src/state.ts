@@ -13,6 +13,7 @@ import { readSessionMessages, readSessionsTitled } from './hire-store.ts';
 import { ordered, SettingsStore } from './settings.ts';
 import type { PublicFrictionRecord } from './friction-public.ts';
 import type { InitiativeSummary, OrgEntry, PublicAssignment, PublicInitiative } from './initiative-public.ts';
+import { InboxReadError } from './inbox-errors.ts';
 
 /**
  * The surface's view of onionsoup: owners with what waits on the person, one inbox across all of them, and the
@@ -153,6 +154,10 @@ export class SurfaceState {
 
   /** Everything waiting on the person, across owners: engine gates, then chat permissions and questions. */
   async inbox(): Promise<InboxEntry[]> {
+    return (await this.inboxSnapshot()).inbox;
+  }
+
+  async inboxSnapshot() {
     const items = await this.runtime.ledger.list();
     const requests = await this.runtime.requests.list();
     const attention = await listAttention(this.runtime);
@@ -174,17 +179,31 @@ export class SurfaceState {
       ...requests.filter(request => request.status === 'awaiting-create-approval').map(request => ({ kind: 'create' as const, id: request.id, owner: request.to, title: `${request.from} asks: ${describeAsk(request.ask)}`, detail: request.ask.purpose, at: request.updatedAt })),
       ...requests.filter(request => request.status === 'awaiting-delete-approval').map(request => ({ kind: 'delete' as const, id: request.id, owner: request.to, title: `Delete ${request.instance?.remote}:${request.instance?.name}`, detail: request.followUpResult?.summary ?? '', at: request.updatedAt })),
     ];
+    const chats = await this.chatInbox();
+    return { inbox: [...entries, ...chats.entries], inboxErrors: chats.errors };
+  }
+
+  private async chatInbox() {
+    const entries: InboxEntry[] = [];
+    const errors: InboxReadError[] = [];
     for (const owner of this.chatOwners()) {
-      const directory = await this.directory(owner.id).catch(() => undefined);
+      const unavailable = (code: InboxReadError['code']) => {
+        errors.push(InboxReadError.parse({ owner: owner.id, code }));
+        return [];
+      };
+      const directory = await this.directory(owner.id).catch(() => {
+        unavailable('chat_directory_failed');
+        return undefined;
+      });
       if (!directory) continue;
       const [permissions, questions] = await Promise.all([
-        this.opencode.permissions(directory).catch(() => []),
-        this.opencode.questions(directory).catch(() => []),
+        this.opencode.permissions(directory).catch(() => unavailable('permission_list_failed')),
+        this.opencode.questions(directory).catch(() => unavailable('question_list_failed')),
       ]);
       for (const permission of permissions) entries.push({ kind: 'permission', id: permission.id, owner: owner.id, sessionID: permission.sessionID, title: `${permission.permission}: ${permission.patterns.join(', ')}`, detail: '', permission });
       for (const question of questions) entries.push({ kind: 'question', id: question.id, owner: owner.id, sessionID: question.sessionID, title: question.questions[0]?.question ?? 'A question', detail: '', question });
     }
-    return entries;
+    return { entries, errors };
   }
 
   private nameOf(ownerId: string) {

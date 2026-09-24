@@ -59,15 +59,20 @@ test('the surface queues notebook maintenance alongside a running daemon and exp
   }
 });
 
-async function start() {
+async function start(
+  configure?: (api: OpencodeApi) => void,
+  directory: (runtime: Runtime, ownerId: string) => Promise<string> = async (_runtime, ownerId) => `/desks/${ownerId}`,
+) {
   const runtime = await Runtime.open({ declarations: 'packages/owners/test/fixtures/owners', state: await mkdtemp(join(tmpdir(), 'surface-')) });
   const { api, calls } = fakeOpencode();
+  configure?.(api);
   const hireSessions = (prefix: string) => [
     { id: 'ses_plan', title: 'w-1: plan', directory: '/checkouts/clippy', time: { created: 1, updated: 1 } },
     { id: 'ses_impl', title: 'w-1: implement 1', directory: '/worktrees/clippy/w-1', time: { created: 2, updated: 3 } },
     { id: 'ses_x', title: 'w-2: plan', directory: '/checkouts/clippy', time: { created: 1, updated: 1 } },
   ].filter(session => session.title.startsWith(prefix));
-  const state = new SurfaceState(runtime, api, async (_runtime, ownerId) => `/desks/${ownerId}`, undefined, sessionID => [{ info: { id: 'msg_1', sessionID, role: 'assistant' }, parts: [] }], hireSessions);
+  const state = new SurfaceState(runtime, api, directory, undefined,
+    sessionID => [{ info: { id: 'msg_1', sessionID, role: 'assistant' }, parts: [] }], hireSessions);
   const { server } = surfaceServer(state, { webRoot: '/nonexistent', by: 'tester' });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -93,6 +98,65 @@ test('the surface lists owners with what waits on the person, and chat permissio
     server.close();
   }
 });
+
+function failWhile<Value>(read: (directory: string) => Promise<Value>, hasFailure: () => boolean) {
+  return async (directory: string) => {
+    if (hasFailure() && directory.endsWith('homelab')) throw new Error('transport contains private credentials');
+    return read(directory);
+  };
+}
+
+test('a failed chat directory remains visible and retries without losing other owners', async () => {
+  let hasFailure = true;
+  const { server, call } = await start(undefined, async (_runtime, ownerId) => {
+    if (ownerId === 'homelab' && hasFailure) throw new Error('private directory details');
+    return `/desks/${ownerId}`;
+  });
+  try {
+    const failed = await call('GET', '/api/state');
+    assert.equal(failed.status, 200);
+    assert.deepEqual(failed.body.inboxErrors, [{ owner: 'homelab', code: 'chat_directory_failed' }]);
+    assert.doesNotMatch(JSON.stringify(failed.body), /private directory details/);
+    assert.ok((failed.body.inbox as { id: string }[]).some(entry => entry.id === 'per_1'));
+    hasFailure = false;
+    const recovered = await call('GET', '/api/state');
+    assert.deepEqual(recovered.body.inboxErrors, []);
+  } finally {
+    server.close();
+  }
+});
+
+for (const [method, code] of [['permissions', 'permission_list_failed'], ['questions', 'question_list_failed']] as const) {
+  test(`a failed ${method} list preserves other owners and persisted gates, and a later refresh clears the error`, async () => {
+    let hasFailure = true;
+    const { runtime, server, call } = await start(api => {
+      api.permissions = failWhile(api.permissions, () => hasFailure && method === 'permissions');
+      api.questions = failWhile(api.questions, () => hasFailure && method === 'questions');
+    });
+    try {
+      const item = await runtime.ledger.create('clippy', 'change', {
+        title: 'Needs approval', goal: 'g', rationale: 'r', acceptance: ['a'], size: 'small',
+      }, { status: 'awaiting-plan-approval' });
+      const failed = await call('GET', '/api/state');
+      assert.equal(failed.status, 200);
+      assert.deepEqual(failed.body.inboxErrors, [{ owner: 'homelab', code }]);
+      assert.doesNotMatch(JSON.stringify(failed.body), /private credentials/);
+      const available = failed.body.inbox as { id: string; kind: string }[];
+      assert.ok(available.some(entry => entry.id === item.id && entry.kind === 'plan'));
+      assert.ok(available.some(entry => entry.id === 'per_1' && entry.kind === 'permission'));
+      hasFailure = false;
+      const recovered = await call('GET', '/api/state');
+      assert.equal(recovered.status, 200);
+      assert.deepEqual(recovered.body.inboxErrors, []);
+      const inbox = recovered.body.inbox as { id: string; kind: string }[];
+      assert.ok(inbox.some(entry => entry.id === item.id && entry.kind === 'plan'));
+      assert.ok(inbox.some(entry => entry.id === 'per_1' && entry.kind === 'permission'));
+      assert.equal((await runtime.ledger.get(item.id)).status, 'awaiting-plan-approval');
+    } finally {
+      server.close();
+    }
+  });
+}
 
 test('HTTP friction views show bounded safe records and the originating chat without internal directory', async () => {
   const { runtime, server, call } = await start();
