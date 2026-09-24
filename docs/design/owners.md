@@ -73,7 +73,9 @@ An owner is declared once (`owners/<id>.yaml`) and keeps one identity across ses
   verification), `incus` (observe; create/delete behind gates),
   `truenas` (through truenas-mcp, with hosted sites) or `github-org` (observed with gh). A repository owner may
   also hold an `incus` section, and a `deploy` section for where its code runs (the ship action).
-- **Duties**: what it does on its own, on a schedule (`every: 15m | 1d | 7d`). Kinds: `survey` (look and
+- **Duties**: what it does on its own, on an elapsed interval (`every: 15m | 1d | 7d`), not at a local clock time.
+  Calendar chat briefings can use the [external systemd runner](../extending.md#calendar-briefings).
+  Kinds: `survey` (look and
   propose work, or raise attention items), `maintain-prs` (deterministic), `request-instance`, `app-updates`.
 - **Conversation mode**: per-pattern `allow` / `ask` / `deny` rules for chats; `ask` means the person approves
   in the chat. Owners reach for their own tools first and can do anything else with approval.

@@ -45,6 +45,10 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
 - **Charters are drafts written by Claude** for Bellonda, Miles Teg, Moneo and Leto. The person should rewrite
   them; they steer everything the owners do.
 - **Duties have no event triggers** yet (`on:` is declared but unused); everything is scheduled or chat-driven.
+- **Calendar briefings use an external timer.** The [systemd briefing runner](extending.md#calendar-briefings)
+  delivers to an existing owner chat and records completion, but there is no built-in calendar scheduler,
+  OpenChamber task import, or scheduling UI. Retiring OpenChamber stops its scheduled tasks even if their stored
+  configuration still says enabled. Briefing failures are visible in systemd and run records, not the inbox.
 - **Hires can loop until their time limit.** An implementer sometimes degenerates (hundreds of trivial commands such
   as `echo`), and nothing notices before the 20-minute limit ends the hire. The owner now hears about the failure,
   but a progress watchdog (stop a hire whose recent tool calls change nothing) or a retry with the other model family
@@ -67,4 +71,3 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
   loaded, and hires are created by the daemon's own servers, so the surface's opencode never listed a hire that
   started after the surface did. The activity rail finds an item's hire sessions by title in opencode's store
   (`readSessionsTitled` in `packages/surface/src/hire-store.ts`) instead.
-

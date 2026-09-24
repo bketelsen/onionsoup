@@ -1,0 +1,13 @@
+[Unit]
+Description=onionsoup scheduled briefing (%i)
+After=onionsoup-surface.service network-online.target
+Wants=onionsoup-surface.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+Environment=PATH=%h/.local/share/mise/shims:%h/.local/bin:/home/linuxbrew/.linuxbrew/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/.local/share/mise/shims/node %h/.local/share/onionsoup/tools/scheduled-briefing.mjs --config %h/.config/onionsoup/briefings/%i.json
+TimeoutStartSec=30min
+Restart=on-failure
+RestartSec=5min

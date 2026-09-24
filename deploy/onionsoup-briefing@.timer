@@ -1,0 +1,10 @@
+[Unit]
+Description=onionsoup daily briefing at 9 AM New York (%i)
+
+[Timer]
+OnCalendar=*-*-* 09:00:00 America/New_York
+Persistent=true
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target
