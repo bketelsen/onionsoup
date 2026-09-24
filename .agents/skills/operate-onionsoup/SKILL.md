@@ -44,6 +44,7 @@ cause, and the fix is either applied through the normal gates or reported to the
 ## Pitfalls
 
 - **Killing processes:** kill by PID. `pkill -f` patterns match the shell running them.
-- **Restarting the daemon:** a restart interrupts only items with an active runner. Prefer shipping, which
-  restarts with a health check.
+- **Restarting the daemon:** a manual restart interrupts items with an active runner. Shipping checks the
+  full ledger first and refuses with the active item IDs and stages; wait for or resolve those items and retry.
+  Once shipping proceeds, its delayed restart still has a health check and rollback.
 - **Credentials:** never print values from env files (`truenas-mcp/.envrc`, `secrets/`).

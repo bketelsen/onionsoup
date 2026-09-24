@@ -38,7 +38,8 @@ templates, conventions and review rubrics take precedence over this general writ
 The person talks to owners in the **surface** (`packages/surface`) or the opencode TUI. Each owner is an opencode
 agent whose chats run in its desk (or evidence folder). The surface is organized around owners: a rail of owners
 with what waits and what runs, one inbox of every gate and chat permission with the decision in place, and per owner
-its chats (drawn like OpenChamber's, whose styles it borrows under MIT), work, activity and notebook. It is a small
+its chats (drawn like OpenChamber's, whose styles it borrows under MIT), work, activity and notebook. The Friction
+rail lists bounded incident reports and links them to their first reporting chat. It is a small
 Node server that starts its own opencode (which loads the plugin from the person's real, host config — see the
 threat model below), imports the engine directly, relays opencode's events to the browser, and keeps the
 person's settings (owner order, per-chat auto-accept); the opencode password never reaches the browser. Inbox questions use the same form as chat: answers are collected
@@ -116,10 +117,11 @@ Owners hear how their work went: each daemon tick compares work items with what 
 owner should act on (landed, failed, rejected, PR merged or closed), and queues a notice that the plugin posts into
 the chat the work was opened from, marked as coming from the runtime, so the owner decides the next step in front
 of the person.
-An owner with a `deploy` section and a `ship` grant ships its repository where it runs: fast-forward, verify in
-the sandbox, restart through a delayed systemd unit that health-checks and rolls back. Both verification and
-health-check failures reset to the previous revision, reinstall dependencies, and rebuild engine and browser
-artifacts. Rollback failures are journaled as attention; the watchdog leaves services stopped if rebuilding fails.
+An owner with a `deploy` section and a `ship` grant ships its repository where it runs. Before touching the
+deploy checkout, ship checks the full ledger and refuses with the IDs, titles and statuses of any items with
+active runners, including other owners' work. Once clear, it fast-forwards, verifies in the sandbox, and
+restarts only the owner's configured deploy services through a delayed systemd unit that health-checks and
+rolls back. This up-front check does not prevent new work from starting during verification.
 
 ### Notebooks and memory
 
@@ -146,6 +148,15 @@ it reaches the notebook. Retractions in that window suppress earlier matching de
 `chatContext` policy bounds age, entries, characters and bytes read; malformed or incomplete lines are skipped.
 Recent raw decisions supplement answering briefs even before distillation, and can overlap distilled memory so
 concurrent decisions are not lost to a timestamp cutoff. They are context, never authority.
+
+An owner can use `onionsoup_friction` to capture unexpected engine behavior. The plugin attaches the chat origin,
+running checkout commit (marked dirty when the checkout has tracked changes) and observed model (or explicitly
+records them as unavailable), and only observed failed
+tool events, never raw arguments. Host-side records under `state/friction` are bounded and deduplicated by a
+versioned owner/tool/error-class signature; when no failure event was observed, prose-based matches are marked
+provisional. Each submission journals a short `friction` activity entry, and a new signature leaves one durable
+pending wake intent. The surface lists these reports and links to the first reporting chat. Capture does not yet
+consume the intent, notify Leto, provide a workaround or draft/publish a GitHub issue.
 
 ### Requests between owners
 
@@ -201,11 +212,9 @@ configuration, moves requests along, runs due duties, advances work items, and r
 work items run in the background beside the tick (one run per item, one item per owner, two of each at a time; requests reserve both participating owners and serialize shared resources), so
 a long hire never holds up a 15-minute check or a waiting request. Deterministic
 checks wake a model only when one is needed, and that model is the owner. Work a stopped runtime was actually
-doing is marked interrupted and never replayed; every tick also checks external runner claims so a stopped
-plugin or surface does not leave work stuck. A person resumes the recorded stage. Failed work can be retried
-with fresh revision and replan budgets; exhausted review decisions resume implementation or planning directly. The item page and CLI (`resume`, `retry`, `cancel --reason`) expose these decisions;
-queued work, unpublished local work and pending gates can be cancelled, while an active effect must finish first.
-Cancelling a rebase suppresses automatic replacement for the same PR head.
+doing is marked interrupted and never replayed; a person resumes it.
+Shipping refuses while any item has an active runner, so a ship must be retried after the named work finishes
+or is resolved. A manual daemon restart still interrupts active work.
 
 ### Safety
 

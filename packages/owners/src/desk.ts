@@ -16,7 +16,7 @@ const NOTE_KINDS = new Set([
   'chat-decision', 'chat-action', 'retracted', 'work-opened', 'plan-approved', 'plan-rejected', 'published', 'publish-failed',
   'rebase-pushed', 'attention', 'app-held', 'app-update-proposed', 'app-updated', 'request-accepted', 'request-declined',
   'request-refused', 'instance-created', 'instance-deleted', 'follow-up', 'asked', 'answered', 'ci-triage', 'owner-created',
-  'owner-updated', 'owner-retired', 'ship-started', 'shipped', 'work-status',
+  'owner-updated', 'owner-retired', 'ship-started', 'shipped', 'work-status', 'friction',
 ]);
 const DONE = new Set(['landed', 'failed', 'rejected', 'cancelled']);
 

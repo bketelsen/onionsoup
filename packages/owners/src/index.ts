@@ -21,3 +21,4 @@ export { domainSummary } from './roster.ts';
 export { listAttention, changeAttention, type Attention } from './attention.ts';
 export { requestWork } from './delegation.ts';
 export { recoverRequest, reconcileRequest } from './request-recovery.ts';
+export { listFriction, frictionDetail, reportFriction, type FrictionRecord, type FrictionSubmission } from './friction.ts';

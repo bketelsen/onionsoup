@@ -1,10 +1,26 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { createElement } from 'react';
+import { FrictionDetail } from '../web/src/components/FrictionView.tsx';
+import type { FrictionRecord } from '../web/src/types.ts';
 import { applyChatEvent, orderedMessages, type Messages } from '../web/src/chat/chatState.ts';
 import { addedFile, languageOf, parseUnifiedDiff } from '../web/src/chat/diff.ts';
 import type { Message, Part } from '../web/src/types.ts';
 
 const SESSION = 'ses_1';
+
+test('friction details render persisted HTML as inert text and link to the saved chat', () => {
+  const record: FrictionRecord = { version: 1, id: 'fr_012345678901234567890123', owner: 'bellonda',
+    summary: '<script>alert(1)</script>', expected: 'A reply', actual: '<img src=x onerror=alert(1)>',
+    sessionID: 'ses_origin', count: 1, firstSeen: '2026-09-24', lastSeen: '2026-09-24',
+    commit: 'unavailable', model: 'unavailable', failures: [], failureContext: 'unavailable', provisional: true };
+  const html = renderToStaticMarkup(createElement(FrictionDetail, { record }));
+  assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+  assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/);
+  assert.doesNotMatch(html, /<script>|<img/);
+  assert.match(html, /Open originating chat/);
+});
 
 function info(id: string, created: number, role: 'user' | 'assistant' = 'assistant') {
   return { id, sessionID: SESSION, role, time: { created } };

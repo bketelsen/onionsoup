@@ -64,6 +64,13 @@ mcp:
 
 Everything else follows the owner's `conversation:` rules: `allow`, `ask` (approve in the chat) or `deny`.
 
+`onionsoup_friction({ summary, expected, actual, evidence? })` captures unexpected engine behavior from an
+owner chat. The host adds the originating session, running engine checkout commit, observed model and bounded
+failed-tool context; it never stores raw tool arguments. Repeated safe error shapes share one report, while a
+missing failure event is marked provisional. Reports appear in the surface's Friction view; triage and issue
+publication are not yet available. `FRICTION_LIMITS` in `packages/owners/src/friction.ts` bounds prose, errors,
+session history, records and listings.
+
 ## Give an owner authority
 
 Authority comes only from your configuration:

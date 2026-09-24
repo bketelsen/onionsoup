@@ -10,7 +10,7 @@ import { exchangeClient } from '../src/exchange-client.ts';
 import { deliverExchangeNotices, ExchangeNotice, queueExchangeNotice, type ExchangeClient, type NoticeChat, type NoticeMessage } from '../src/exchange-notices.ts';
 import { NOTICE_PREFIX } from '../src/notices.ts';
 import type { HireRequest } from '../src/opencode.ts';
-import plugin from '../src/plugin.ts';
+import { withActiveHooks } from './active-hooks.ts';
 import { Runtime } from '../src/runtime.ts';
 
 const declarations = 'packages/owners/test/fixtures/owners';
@@ -205,7 +205,9 @@ test('plugin rereads recent activity on every system transform and its watcher n
     messages: async () => ({ data: fake.messages.get('person') }),
     create: async () => { watcherCreates += 1; throw new Error('watcher_must_not_wake'); },
   } };
-  const hooks = await plugin.server({ client } as unknown as Parameters<Plugin>[0], { declarations, state });
+  const originalSandbox = process.env.ONIONSOUP_SANDBOX;
+  const hooks = await withActiveHooks({ client } as unknown as Parameters<Plugin>[0], { declarations, state });
+  assert.equal(process.env.ONIONSOUP_SANDBOX, originalSandbox);
   await hooks['chat.message']!({ sessionID: 'person', agent: 'Miles Teg' }, {} as never);
   await hooks.event!({ event: { type: 'session.idle', properties: { sessionID: 'person' } } });
   assert.equal(watcherCreates, 1, 'ordinary person messages reach the watcher hire seam');

@@ -142,6 +142,11 @@ async function scheduleRestart(runtime: Runtime, owner: RepositoryOwner, previou
 export async function shipEngine(runtime: Runtime, ownerId: string, execution: ShipExecution = EXECUTION): Promise<ShipResult> {
   const owner = runtime.repositoryOwner(ownerId);
   if (!owner.deploy) throw new Error(`${ownerId} declares nothing to deploy`);
+  const running = (await runtime.ledger.list()).filter(item => item.activeRunner !== undefined);
+  if (running.length) {
+    const items = running.map(item => `${item.id} (${item.proposal.title}: ${item.status})`).join(', ');
+    return { outcome: 'failed', summary: `running_work_items: refusing to ship while active runners work on ${items}; wait for or resolve these items and retry.` };
+  }
   const checkout = expandHome(owner.deploy.checkout);
   if ((await git(checkout, ['status', '--porcelain', '--untracked-files=no'])).trim()) {
     return { outcome: 'failed', summary: `${checkout} has local changes; refusing to ship over them.` };

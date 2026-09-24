@@ -5,6 +5,7 @@ import { listAttention, changeAttention } from './attention.ts';
 import { requestWork } from './delegation.ts';
 import { ProposedWork } from './artifacts.ts';
 import { readdir, readFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { tool, type Plugin } from '@opencode-ai/plugin';
 import { hasIncus, repositoryShortName, type OwnerDeclaration, type Persona } from './declarations.ts';
@@ -21,6 +22,7 @@ import type { Notebook } from './notebook.ts';
 import { configDirectory, stateDirectory } from './paths.ts';
 import { domainSummary, rosterText } from './roster.ts';
 import { Runtime } from './runtime.ts';
+import { engineCommit, FrictionEvents, FrictionInput, reportFriction } from './friction.ts';
 import { REPOSITORY_WRITING } from './repository-writing.ts';
 
 /**
@@ -95,7 +97,8 @@ How you work with the person in this chat:
   onionsoup_status (your open work and anything waiting on the person), onionsoup_notebook (your full notebook),
   onionsoup_evidence (what other owners recorded), onionsoup_ask (ask another owner a question about its domain),
   onionsoup_open_work (hand a change to freelancers with a plan the person approves), onionsoup_propose_changes (turn
-  your desk edits into a verified, reviewed PR), onionsoup_record_decision and onionsoup_retract. Never commit, push or
+  your desk edits into a verified, reviewed PR), onionsoup_friction (report reproducible engine behavior that fails expectations),
+  onionsoup_record_decision and onionsoup_retract. Never commit, push or
   merge with git yourself; onionsoup_propose_changes does that with verification and review. When something belongs to another owner's domain, ask them instead of guessing or probing it yourself.
 - For substantial changes, prefer opening work so freelancers plan, implement and review it with the person's gates. For
   small, clearly requested actions you may act directly; anything outside your safe commands asks the person first.
@@ -174,6 +177,7 @@ const server: Plugin = async (input, options) => {
   const sessionOwner = new Map<string, OwnerDeclaration>();
   const journaledParts = new Set<string>();
   const watchedMessages = new Map<string, string>();
+  const frictionEvents = new FrictionEvents();
 
   /** Owners can be named by id or by persona name. */
   function resolveOwner(name: string) {
@@ -360,6 +364,7 @@ const server: Plugin = async (input, options) => {
     },
 
     async event({ event }) {
+      frictionEvents.observe(event);
       const typed = event as { type: string; properties: Record<string, any> };
       const isIdle = typed.type === 'session.idle' || (typed.type === 'session.status' && typed.properties.status?.type === 'idle');
       if (isIdle) {
@@ -383,6 +388,29 @@ const server: Plugin = async (input, options) => {
     },
 
     tool: {
+      onionsoup_friction: tool({
+        description: 'Report unexpected onionsoup engine behavior with expected/actual and reproducible evidence. Host code adds observed failures and origin; repeats are counted, not re-triaged. Do not include secrets.',
+        args: {
+          summary: tool.schema.string().min(1).max(800), expected: tool.schema.string().min(1).max(800),
+          actual: tool.schema.string().min(1).max(800), evidence: tool.schema.string().max(800).optional(),
+        },
+        async execute(args, context) {
+          const owner = requireOwner(context.agent);
+          const input = FrictionInput.parse(args);
+          const observed = frictionEvents.context(context.sessionID);
+          const record = await reportFriction(runtime, {
+            owner: owner.id, origin: { sessionID: context.sessionID, directory: context.directory },
+            model: observed.model, commit: await engineCommit(), failures: observed.failures,
+            input, submissionID: createHash('sha256').update(JSON.stringify([context.sessionID, context.messageID, input])).digest('hex'),
+          }).catch(error => {
+            if (error instanceof Error && error.message === 'friction_unsafe_text') {
+              throw new Error('friction_unsafe_text: remove private keys or patch bodies and describe the failure without their contents');
+            }
+            throw error;
+          });
+          return `Recorded ${record.id} (${record.count} report${record.count === 1 ? '' : 's'}). Failure events: ${record.failureContext}. Triage and issue publication are separate gates.`;
+        },
+      }),
       onionsoup_request_work: tool({
         description: 'Ask another declared owner to change its repository. The receiver accepts or declines, and accepted work uses the ordinary plan approval gate.',
         args: {
