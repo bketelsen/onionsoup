@@ -89,6 +89,25 @@ The surface (`npm run surface:build && npm run surface`, or `deploy/onionsoup-su
 their chats and one inbox of everything waiting on you at http://127.0.0.1:4747. It starts its own opencode, or
 attaches to one given `OPENCODE_URL`.
 
+## Notebook maintenance
+
+Notebook maintenance runs automatically for every owner. Override its defaults in an owner's declaration:
+
+```yaml
+memory:
+  enabled: true
+  everyMs: 3600000       # at most hourly when unread journal entries exist
+  retryMs: 300000        # retry failed runs after five minutes
+  minEntries: 1
+  maxEntries: 100        # one bounded batch per pass
+  maxChars: 24000
+```
+
+Use **Update notebook** in the surface notebook or `owners distill <owner>` to queue a pass even when automatic
+maintenance is disabled. The running daemon (or `owners tick`) consumes the request. New requests arriving during
+a hire remain queued; errors appear in the notebook controls. Increase `maxChars` if an individual journal entry
+exceeds the batch limit. Automatic maintenance waits while that owner has active work or a duty.
+
 ## What needs engine code
 
 New domain kinds (how an owner observes and changes something, like `git-repository`, `incus`, `truenas`, `github-org`), new

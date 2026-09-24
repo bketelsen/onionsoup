@@ -5,7 +5,9 @@ export { Ledger, WorkItem, WorkStatus, HireRecord, Verification } from './ledger
 export { Notebook, editSection } from './notebook.ts';
 export { Runtime } from './runtime.ts';
 export { Background } from './daemon.ts';
-export { wake, distill, recordLearnings } from './owner.ts';
+export { wake, recordLearnings } from './owner.ts';
+export { distill, requestDistill, memoryStatus, memoryFingerprint } from './memory.ts';
+export { MemoryPolicy, MemoryState, type MemoryStatus } from './memory-config.ts';
 export { advance, approvePlan, rejectPlan, revisePlan, resumeItem, retryItem, cancelItem } from './workflow.ts';
 export { publish } from './publish.ts';
 export { approvePush } from './rebase.ts';

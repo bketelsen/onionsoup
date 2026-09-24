@@ -1,9 +1,9 @@
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Learnings, OwnerAnswers, Survey } from './artifacts.ts';
 import { describeAsk, InstanceAsk } from './requests.ts';
 import { FOLLOW_UP_DESCRIPTIONS, requestInstance } from './brokering.ts';
-import { composeAskBrief, distillBrief, learningsBrief, ownerAnswerBrief, surveyBrief, workSoFarText } from './briefs.ts';
+import { composeAskBrief, learningsBrief, ownerAnswerBrief, surveyBrief, workSoFarText } from './briefs.ts';
 import { hasIncus, repositoryNames, repositoryShortName, type Duty, type OwnerDeclaration, type ResolvedOwner } from './declarations.ts';
 import { refreshIncusEvidence } from './incus.ts';
 import { refreshGithubOrgEvidence } from './github-org.ts';
@@ -134,18 +134,4 @@ export async function recordLearnings(runtime: Runtime, item: WorkItem) {
   await notebook.journal({ kind: 'work-ended', workItem: item.id, outcome: item.status, note: item.reason ?? item.proposal.title });
   await notebook.commit(`journal ${item.id}`);
   return learnings;
-}
-
-/** Fold the journal since the last distill into the registers. */
-export async function distill(runtime: Runtime, ownerId: string) {
-  const { owner, notebook } = await prepare(runtime, ownerId);
-  const markerPath = join(runtime.stateDirectory, `distill-${ownerId}.txt`);
-  const marker = await readFile(markerPath, 'utf8').then(text => text.trim(), () => undefined);
-  const journal = await notebook.journalSince(marker);
-  if (!journal.length) return { edits: 0, cost: 0 };
-  const brief = distillBrief(journal, await notebook.orientation());
-  const result = await runtime.hire(ownerId, { role: 'owner', model: owner.model, directory: owner.workspace, title: `${ownerId}: distill`, brief, schema: Learnings });
-  await notebook.apply(result.value.notebook, `distill ${journal.length} journal lines`);
-  await writeFile(markerPath, new Date().toISOString());
-  return { edits: result.value.notebook.length, cost: result.cost };
 }

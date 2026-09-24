@@ -34,6 +34,29 @@ function fakeOpencode() {
   return { api, calls };
 }
 
+test('the surface queues notebook maintenance alongside a running daemon and exposes failures', async () => {
+  const { server, runtime, call } = await start();
+  const { distill, memoryStatus } = await import('@onionsoup/owners');
+  const unlock = await runtime.lock();
+  try {
+    await runtime.notebook('clippy').ensure('# Charter\nTest owner\n');
+    await runtime.notebook('clippy').journal({ kind: 'chat-decision', note: 'remember this' });
+    const queued = await call('POST', '/api/owners/clippy/memory', {});
+    assert.equal(queued.status, 200);
+    assert.equal(queued.body.queued, true);
+    assert.equal((await memoryStatus(runtime, 'clippy')).queued, true);
+    runtime.hire = async () => { throw new Error('provider_unavailable'); };
+    await assert.rejects(distill(runtime, 'clippy'), /provider_unavailable/);
+    const status = await call('GET', '/api/owners/clippy/memory');
+    assert.equal(status.body.status, 'failed');
+    assert.match(String(status.body.error), /provider_unavailable/);
+    assert.equal(status.body.queued, true);
+  } finally {
+    await unlock();
+    server.close();
+  }
+});
+
 async function start() {
   const runtime = await Runtime.open({ declarations: 'packages/owners/test/fixtures/owners', state: await mkdtemp(join(tmpdir(), 'surface-')) });
   const { api, calls } = fakeOpencode();

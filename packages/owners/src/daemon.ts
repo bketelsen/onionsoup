@@ -4,13 +4,16 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { processRequests } from './brokering.ts';
 import { chatDirectory } from './chats.ts';
 import { noticeWorkChanges } from './notices.ts';
+import { distill, distillIsDue } from './memory.ts';
 import type { WorkItem, WorkStatus } from './ledger.ts';
 import { wake } from './owner.ts';
 import type { ResourceRequest } from './requests.ts';
 import type { Runtime } from './runtime.ts';
 import { advance } from './workflow.ts';
 
-export const DAEMON_LIMITS = { tickMs: 60_000, shutdownGraceMs: 5_000, parallelItems: 2, parallelDuties: 2 };
+export const DAEMON_LIMITS = {
+  tickMs: 60_000, shutdownGraceMs: 5_000, parallelItems: 2, parallelDuties: 2, parallelMemory: 1,
+};
 
 /**
  * Long work runs beside the tick, not inside it: a work item's hires take many minutes, and while the tick waited
@@ -50,10 +53,11 @@ export class Background {
 
 const items = new Background(DAEMON_LIMITS.parallelItems);
 const duties = new Background(DAEMON_LIMITS.parallelDuties);
+const memories = new Background(DAEMON_LIMITS.parallelMemory);
 
 /** Wait for background work the ticks started. */
 export async function drain() {
-  await Promise.all([items.drain(), duties.drain()]);
+  await Promise.all([items.drain(), duties.drain(), memories.drain()]);
 }
 
 const UNIT_MS: Record<string, number> = { m: 60_000, h: 3_600_000, d: 86_400_000 };
@@ -89,6 +93,7 @@ async function runDueDuties(runtime: Runtime, log: TickLog) {
   const statePath = join(runtime.stateDirectory, 'duties.json');
   const lastRun = await readDutyState(statePath);
   for (const owner of runtime.declarations.owners.values()) {
+    if (memories.has(owner.id)) continue;
     for (const duty of owner.duties.filter(candidate => candidate.every)) {
       const key = `${owner.id}/${duty.id}`;
       const previous = lastRun[key] ? Date.parse(lastRun[key]) : 0;
@@ -116,6 +121,7 @@ async function runDueDuties(runtime: Runtime, log: TickLog) {
 function advanceRunnable(runnable: readonly WorkItem[], runtime: Runtime, log: TickLog) {
   const busyOwners = new Set(items.keys().map(key => key.split('/')[0]));
   for (const item of runnable) {
+    if (memories.has(item.owner)) continue;
     if (busyOwners.has(item.owner) || items.has(`${item.owner}/${item.id}`)) continue;
     const started = items.start(`${item.owner}/${item.id}`, async () => {
       try {
@@ -125,6 +131,27 @@ function advanceRunnable(runnable: readonly WorkItem[], runtime: Runtime, log: T
       }
     });
     if (started) busyOwners.add(item.owner);
+  }
+}
+
+/** Memory hires run beside the tick, after the owner's existing work has finished. */
+export async function scheduleMemory(runtime: Runtime, log: TickLog, unavailable: ReadonlySet<string> = new Set()) {
+  const busy = new Set([...items.keys(), ...duties.keys()].map(key => key.split('/')[0]));
+  for (const ownerId of runtime.declarations.owners.keys()) {
+    if (busy.has(ownerId) || unavailable.has(ownerId) || memories.has(ownerId)) continue;
+    try {
+      if (!(await distillIsDue(runtime, ownerId))) continue;
+      memories.start(ownerId, async () => {
+        try {
+          const outcome = await distill(runtime, ownerId);
+          log.duty(ownerId, 'distill', `${outcome.entries} entries, ${outcome.edits} edits`);
+        } catch (error) {
+          log.error(`${ownerId}/distill`, error);
+        }
+      });
+    } catch (error) {
+      log.error(`${ownerId}/distill`, error);
+    }
   }
 }
 
@@ -144,6 +171,7 @@ export async function tick(runtime: Runtime, log: TickLog) {
   }
   await runDueDuties(runtime, log);
   advanceRunnable((await runtime.ledger.list()).filter(candidate => RUNNABLE.includes(candidate.status) && !candidate.activeRunner), runtime, log);
+  await scheduleMemory(runtime, log);
   try {
     for (const notice of await noticeWorkChanges(runtime, ownerId => chatDirectory(runtime, ownerId))) log.duty(notice.owner, 'notice', `${notice.workItem} ${notice.change}${notice.origin ? ' (to its chat)' : ''}`);
   } catch (error) {

@@ -4,6 +4,7 @@ import { api, navigate, opencodePayload, useEvents } from '../api.ts';
 import type { DeskState, InboxEntry, OwnerSummary, Session } from '../types.ts';
 import { ChatPane } from './ChatPane.tsx';
 import { Decision } from './Decision.tsx';
+import { MemoryMaintenance } from './MemoryMaintenance.tsx';
 import { Badge, BusyDots, Button, cx, Empty, OwnerIcon, Section, statusTone, timeAgo } from './ui.tsx';
 
 /** Sessions onionsoup itself ran in this directory (hires, reviews) are not the person's chats. */
@@ -203,6 +204,7 @@ function Notebook({ desk, onClose }: { desk: DeskState; onClose: () => void }) {
           ))}
           <button className="ml-auto text-muted-foreground hover:text-foreground" onClick={onClose}><RiCloseLine className="size-5" /></button>
         </div>
+        <MemoryMaintenance ownerId={desk.owner.id} />
         <pre className="overflow-y-auto p-4 typography-meta whitespace-pre-wrap font-sans">{desk.registers[tab] ?? ''}</pre>
       </div>
     </div>
