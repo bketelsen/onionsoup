@@ -1,7 +1,9 @@
+import { withRecordLock } from './record-lock.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
+import { ProposedWork } from './artifacts.ts';
 
 /**
  * Owners talk through requests. A resource request moves through a fixed lifecycle, and the two
@@ -29,6 +31,9 @@ export const RequestStatus = z.enum([
   'published',
   'updated',
   'failed',
+  'interrupted',
+  'work-running',
+  'completed',
 ]);
 export type RequestStatus = z.infer<typeof RequestStatus>;
 
@@ -60,11 +65,15 @@ export const UpdateAppAsk = z.object({
 });
 export type UpdateAppAsk = z.infer<typeof UpdateAppAsk>;
 
-export const ResourceAsk = z.discriminatedUnion('kind', [InstanceAsk, PublishAsk, UpdateAppAsk]);
+export const WorkAsk = z.object({ kind: z.literal('work'), purpose: z.string(), proposal: ProposedWork });
+export type WorkAsk = z.infer<typeof WorkAsk>;
+
+export const ResourceAsk = z.discriminatedUnion('kind', [InstanceAsk, PublishAsk, UpdateAppAsk, WorkAsk]);
 export type ResourceAsk = z.infer<typeof ResourceAsk>;
 
 export function describeAsk(ask: ResourceAsk) {
   const descriptions: Record<ResourceAsk['kind'], () => string> = {
+    work: () => `work: ${(ask as WorkAsk).proposal.title}`,
     instance: () => (ask as InstanceAsk).image,
     'publish-site': () => `publish ${(ask as PublishAsk).site}`,
     'update-app': () => `update ${(ask as UpdateAppAsk).app} ${(ask as UpdateAppAsk).fromVersion} → ${(ask as UpdateAppAsk).toVersion}`,
@@ -87,6 +96,13 @@ export const OwnerDecision = z.object({
 });
 export type OwnerDecision = z.infer<typeof OwnerDecision>;
 
+export const RequestCheckpoint = z.object({
+  jobId: z.number().optional(),
+  instance: z.object({ remote: z.string(), name: z.string(), image: z.string() }).optional(),
+  publication: z.object({ commit: z.string(), previous: z.string(), digest: z.string() }).optional(),
+});
+export type RequestCheckpoint = z.infer<typeof RequestCheckpoint>;
+
 export const ResourceRequest = z.object({
   id: z.string(),
   from: z.string(),
@@ -94,6 +110,12 @@ export const ResourceRequest = z.object({
   ask: ResourceAsk,
   status: RequestStatus,
   reason: z.string().optional(),
+  workItem: z.string().optional(),
+  operation: z.object({
+    id: z.string(), stage: RequestStatus, startedAt: z.string(), runner: z.number().optional(),
+    checkpoint: RequestCheckpoint.optional(),
+  }).optional(),
+  recovery: z.array(z.object({ by: z.string(), action: z.string(), reason: z.string(), at: z.string() })).default([]),
   decision: OwnerDecision.optional(),
   publishDecision: PublishDecision.optional(),
   published: z.object({ commit: z.string(), previous: z.string(), at: z.string() }).optional(),
@@ -133,12 +155,40 @@ export class Requests {
   }
 
   async save(request: ResourceRequest) {
+    return withRecordLock(`${this.path(request.id)}.lock`, () => this.write(request));
+  }
+
+  async update(id: string, change: (current: ResourceRequest) => ResourceRequest) {
+    return withRecordLock(`${this.path(id)}.lock`, async () => this.write(ResourceRequest.parse(change(await this.get(id)))));
+  }
+
+  private async write(request: ResourceRequest) {
     await mkdir(this.directory, { recursive: true });
     const updated = { ...request, updatedAt: new Date().toISOString() };
     const temporary = `${this.path(request.id)}.${randomUUID()}.tmp`;
     await writeFile(temporary, JSON.stringify(updated, null, 2) + '\n', { mode: 0o600 });
     await rename(temporary, this.path(request.id));
     return updated;
+  }
+
+  async checkpoint(id: string, checkpoint: RequestCheckpoint) {
+    return this.update(id, request => {
+      if (!request.operation) throw new Error(`request_operation_missing: ${id}`);
+      return { ...request, operation: {
+        ...request.operation, checkpoint: { ...request.operation.checkpoint, ...checkpoint },
+      } };
+    });
+  }
+
+  async markInterrupted() {
+    const active = (await this.list()).filter(request => request.operation?.runner !== undefined);
+    for (const request of active) {
+      await this.update(request.id, current => current.operation?.runner === undefined ? current : {
+        ...current, status: 'interrupted', reason: `request_interrupted: ${current.operation.stage}`,
+        operation: { ...current.operation, runner: undefined },
+      });
+    }
+    return active.length;
   }
 
   private path(id: string) {

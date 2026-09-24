@@ -1,3 +1,4 @@
+import { listAttention } from './attention.ts';
 import { readFile, readdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { OwnerDeclaration } from './declarations.ts';
@@ -78,7 +79,7 @@ export async function deskState(runtime: Runtime, query: DeskQuery) {
   const work = items.filter(item => !DONE.has(item.status)).map(item => ({ id: item.id, status: item.status, title: item.proposal.title }));
   const activity = requests.slice(-DESK_LIMITS.requests).reverse().map(request => ({
     id: request.id, status: request.status, title: describeAsk(request.ask), from: request.from, to: request.to,
-    detail: request.reason ?? request.followUpResult?.summary ?? request.ask.purpose, at: request.updatedAt,
+    detail: `${request.workItem ? `Work ${request.workItem}: ` : ''}${request.reason ?? request.followUpResult?.summary ?? request.ask.purpose}`, at: request.updatedAt,
   }));
   const recent = items.filter(item => DONE.has(item.status)).slice(-5).reverse().map(item => ({ id: item.id, status: item.status, title: item.proposal.title, url: item.publication?.url }));
   return {
@@ -90,6 +91,7 @@ export async function deskState(runtime: Runtime, query: DeskQuery) {
     activity,
     notes,
     registers,
+    attention: (await listAttention(runtime)).filter(entry => entry.owner === owner.id),
   };
 }
 
@@ -110,9 +112,11 @@ export function statusText(items: readonly WorkItem[], requests: readonly Resour
   const since = now.getTime() - STATUS_LIMITS.recentDays * 24 * 60 * 60 * 1000;
   const open = items.filter(item => !DONE.has(item.status));
   const recent = items.filter(item => DONE.has(item.status) && Date.parse(item.updatedAt) >= since).slice(-STATUS_LIMITS.recentItems).reverse();
-  const live = requests.filter(request => !['deleted', 'declined', 'denied', 'failed'].includes(request.status));
+  const live = requests.filter(request => !['deleted', 'declined', 'denied', 'failed', 'published', 'updated', 'completed'].includes(request.status));
+  const finishedRequests = requests.filter(request => !live.includes(request) && Date.parse(request.updatedAt) >= since).slice(-STATUS_LIMITS.recentItems).reverse();
   const sections = [
-    open.length || live.length ? ['Open:', ...open.map(item => `- work ${item.id}: ${item.status}: ${item.proposal.title}`), ...live.map(request => `- request ${request.id}: ${request.status}: ${request.from} → ${request.to} ${describeAsk(request.ask)}`)] : ['Open: nothing.'],
+    open.length || live.length ? ['Open:', ...open.map(item => `- work ${item.id}: ${item.status}: ${item.proposal.title}`), ...live.map(request => `- request ${request.id}: ${request.status}: ${request.from} → ${request.to} ${describeAsk(request.ask)}${request.workItem ? `; work ${request.workItem}` : ''}`)] : ['Open: nothing.'],
+    finishedRequests.length ? ['Recent requests:', ...finishedRequests.map(request => `- ${request.id}: ${request.status}: ${describeAsk(request.ask)}${request.workItem ? `; work ${request.workItem}` : ''}${request.reason ? `; ${request.reason}` : ''}`)] : [],
     recent.length ? [`Finished in the last ${STATUS_LIMITS.recentDays} days:`, ...recent.map(item => `- work ${item.id}: ${outcome(item)}: ${item.proposal.title}`)] : [],
   ];
   return sections.filter(section => section.length).map(section => section.join('\n')).join('\n\n');

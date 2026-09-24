@@ -129,3 +129,16 @@ Custom workflows should record `resumeStatus` before claiming an active stage an
 it finishes. Person decisions use `resumeItem`, `retryItem`, and `cancelItem`; cancellation of active work is
 refused. Desk publication uses the `desk-publication` workflow and its persisted stage to reconcile retries
 against the local commit and existing GitHub PR before repeating effects.
+
+## Delegation, attention and recovery
+
+An owner can call `onionsoup_request_work` with a declared receiver, title, goal, rationale, acceptance criteria,
+size, and (for repository groups) repository. Receivers need a declared workflow; unsupported domains are refused
+before a request is opened. Accepting creates ordinary proposed work and never bypasses the person's plan approval.
+The request keeps its linked work id and outcome; declines, failed work and closed unmerged PRs raise attention for both owners.
+
+Use `onionsoup_attention` to list an owner's attention, acknowledge it, resolve it with an outcome, or reopen it.
+The surface inbox also offers acknowledgement and resolution. All decisions keep the original journal entry and record
+who acted and why. Recovery controls for interrupted resource requests distinguish read-only outcome checks from an
+explicit retry after inspection; a retry or stop requires a reason. Incus instances created before request tagging cannot
+be automatically adopted from their names alone.

@@ -108,7 +108,8 @@ test('update completion requires a successful job and image completion, not just
     try {
       await processRequests(runtime);
       const failed = await runtime.requests.get(request.id);
-      assert.equal(failed.status, 'failed', scenario.name);
+      assert.equal(failed.status, 'interrupted', scenario.name);
+      assert.equal(failed.operation?.stage, 'create-approved', scenario.name);
       assert.match(failed.reason!, scenario.reason, scenario.name);
       assert.equal(writes.length, 1);
     } finally {

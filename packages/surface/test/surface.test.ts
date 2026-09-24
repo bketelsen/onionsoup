@@ -186,3 +186,28 @@ test('person recovery decisions resume the exact stage, retry failures and cance
     server.close();
   }
 });
+
+test('attention and uncertain requests have durable decisions in the inbox', async () => {
+  const { runtime, server, call } = await start();
+  try {
+    await runtime.notebook('bellonda').ensure('# Test');
+    await runtime.notebook('bellonda').journal({ kind: 'attention', note: 'Investigate failed deployment' });
+    const request = await runtime.requests.open('bellonda', 'bellonda', {
+      kind: 'work', purpose: 'fix it', proposal: { title: 'Fix', goal: 'Fix', rationale: 'Broken', acceptance: ['Fixed'], size: 'small' },
+    }, 'none');
+    await runtime.requests.save({ ...request, status: 'interrupted', operation: { id: 'operation-1', stage: 'pending-owner', startedAt: request.createdAt } });
+    const snapshot = (await call('GET', '/api/state')).body;
+    const inbox = snapshot.inbox as { id: string; kind: string }[];
+    const attention = inbox.find(entry => entry.kind === 'attention')!;
+    assert.ok(attention);
+    assert.ok(inbox.some(entry => entry.kind === 'request-recovery' && entry.id === request.id));
+    assert.equal((await call('POST', '/api/decide', { action: 'acknowledge-attention', id: attention.id, reason: 'Investigating' })).body.outcome, 'acknowledged');
+    assert.equal((await call('POST', '/api/decide', { action: 'resolve-attention', id: attention.id, reason: 'Recovered' })).body.outcome, 'resolved');
+    assert.equal((await call('POST', '/api/decide', { action: 'cancel-request', id: request.id, reason: 'No longer needed' })).body.outcome, 'failed');
+    const remaining = (await call('GET', '/api/state')).body.inbox as { id: string }[];
+    assert.ok(!remaining.some(entry => entry.id === attention.id || entry.id === request.id));
+    assert.equal((await runtime.requests.get(request.id)).recovery[0]?.reason, 'No longer needed');
+  } finally {
+    server.close();
+  }
+});

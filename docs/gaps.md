@@ -14,14 +14,10 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
 - **snosi builds run only in CI.** mkosi needs root, so Murbella verifies with snosi's static checks and relies on
   GitHub Actions for builds (CI failures wake her). Local builds would need a privileged build VM on minideb,
   requested from Miles Teg like the smoke-test instances.
-- **Odrade observes but cannot assign.** She watches the Frostyard org and knows its owners, but there is no
-  "owner of owners" mechanism yet: she cannot hand work to Murbella or propose new owners except through the person.
 - **Autonomous runs cannot use owner MCP tools.** Declared `mcp:` servers are available in chats only; duties and
   hires in the sandbox do not get them (the NAS owner's snapshot and updates use host code instead).
 - **No budgets.** Per-owner cost caps and wake-rate limits are designed but not enforced, and cost is only tracked
   for providers that report it (Copilot); ChatGPT OAuth reports $0.
-- **Owner-to-owner messages are limited** to questions and three request kinds. There is no general
-  `request.work` ("please change your domain") or escalation when an owner declines.
 
 ## Surfaces
 
@@ -39,7 +35,6 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
   next step.
 - **Sandbox: no network isolation.** After the credential proxy, outbound network access from a sandboxed process
   is still unrestricted; an allowlist or a proxy is the follow-up.
-- **Attention items are write-only:** raised to the journal and Desk, with no acknowledge or resolve.
 - **App updates cannot roll back:** truenas-mcp exposes no rollback, so a failed update is raised for the person.
 - **Held app updates are only re-read on a new version** or after 7 days; a person cannot say "this app's
   changelog lives in its commit log" except through the owner's notebook.

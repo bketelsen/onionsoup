@@ -2,6 +2,7 @@ import { join } from 'node:path';
 import {
   approveCreate, approveDelete, approvePlan, approvePush, awaitingPublish, chatDirectory, denyRequest, deskState, describeAsk,
   domainSummary, itemText, publish, rejectPlan, revisePlan, resumeItem, retryItem, cancelItem, memoryFingerprint, type Runtime,
+  listAttention, changeAttention, recoverRequest, reconcileRequest,
 } from '@onionsoup/owners';
 import type { OpencodeApi, PendingPermission, PendingQuestion } from './opencode.ts';
 import { readSessionMessages, readSessionsTitled } from './hire-store.ts';
@@ -16,12 +17,13 @@ const DONE = new Set(['landed', 'failed', 'rejected', 'cancelled']);
 const RUNNING = new Set(['planning', 'implementing', 'reviewing', 'landing']);
 
 export interface InboxEntry {
-  kind: 'plan' | 'push' | 'publish' | 'create' | 'delete' | 'permission' | 'question';
+  kind: 'plan' | 'push' | 'publish' | 'create' | 'delete' | 'permission' | 'question' | 'request-recovery' | 'attention';
   id: string;
   owner: string;
   title: string;
   detail: string;
   at?: string;
+  attentionStatus?: string;
   /** For permission and question entries: the chat they came from. */
   sessionID?: string;
   permission?: PendingPermission;
@@ -83,7 +85,17 @@ export class SurfaceState {
   async inbox(): Promise<InboxEntry[]> {
     const items = await this.runtime.ledger.list();
     const requests = await this.runtime.requests.list();
+    const attention = await listAttention(this.runtime);
     const entries: InboxEntry[] = [
+      ...attention.filter(entry => entry.status !== 'resolved').map(entry => ({
+        kind: 'attention' as const, id: entry.id, owner: entry.owner, title: entry.note,
+        detail: entry.decision ? `${entry.status}: ${entry.decision.reason} (${entry.decision.by})` : 'Needs attention',
+        attentionStatus: entry.status, at: entry.decision?.at ?? entry.at,
+      })),
+      ...requests.filter(request => request.status === 'interrupted').map(request => ({
+        kind: 'request-recovery' as const, id: request.id, owner: request.to, title: describeAsk(request.ask),
+        detail: `${request.reason ?? 'Interrupted'}; operation ${request.operation?.id ?? 'unknown'} (${request.operation?.stage ?? 'unknown'}). Inspect effects before retrying.`, at: request.updatedAt,
+      })),
       ...items.filter(item => item.status === 'awaiting-plan-approval').map(item => ({ kind: 'plan' as const, id: item.id, owner: item.owner, title: item.proposal.title, detail: item.plan?.summary ?? item.proposal.goal, at: item.updatedAt })),
       ...items.filter(item => item.status === 'awaiting-push-approval').map(item => ({ kind: 'push' as const, id: item.id, owner: item.owner, title: item.proposal.title, detail: item.rebaseOf?.prUrl ?? '', at: item.updatedAt })),
       ...items.filter(awaitingPublish).map(item => ({ kind: 'publish' as const, id: item.id, owner: item.owner, title: item.proposal.title, detail: `Landed on ${item.branch}; publishing opens a draft PR.`, at: item.updatedAt })),
@@ -155,6 +167,11 @@ export class SurfaceState {
       'resume-item': async () => (await resumeItem(this.runtime, decision.id, by)).status,
       'retry-item': async () => (await retryItem(this.runtime, decision.id, by)).status,
       'cancel-item': async () => (await cancelItem(this.runtime, decision.id, by, required(reason, 'reason'))).status,
+      'reconcile-request': async () => (await reconcileRequest(this.runtime, decision.id)).status,
+      'retry-request': async () => (await recoverRequest(this.runtime, decision.id, 'retry', by, required(reason, 'reason'))).status,
+      'cancel-request': async () => (await recoverRequest(this.runtime, decision.id, 'cancel', by, required(reason, 'reason'))).status,
+      'acknowledge-attention': async () => (await changeAttention(this.runtime, decision.id, 'acknowledged', by, required(reason, 'reason'))).status,
+      'resolve-attention': async () => (await changeAttention(this.runtime, decision.id, 'resolved', by, required(reason, 'reason'))).status,
     };
     const action = actions[decision.action];
     if (!action) throw new Error(`unknown_decision: ${decision.action}`);
@@ -209,6 +226,7 @@ export class SurfaceState {
       items.map(item => [item.id, item.status, item.updatedAt]),
       requests.map(request => [request.id, request.status, request.updatedAt]),
       await memoryFingerprint(this.runtime),
+      await listAttention(this.runtime),
     ]);
   }
 }
