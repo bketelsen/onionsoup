@@ -20,6 +20,9 @@ cause, and the fix is either applied through the normal gates or reported to the
 - **Initiatives:** `state/initiatives/<id>.json`, a manager's assignments to its reports. Read them with
   `npm run owners -- initiatives` and `npm run owners -- initiative <id>`; assignment state there is derived from
   the linked request and item. Only an `approved` initiative whose approval names its current `revision` dispatches.
+- **Desk review rounds:** `state/desk-reviews/<owner>--<repo>.json` holds the rounds of a desk change that asked
+  for changes. At the limit, `propose_changes` returns `needs-person` and hires no reviewer; after reading the diff,
+  `npm run owners -- desk-review-reset <owner> [repository]` clears it.
   A step that seems stuck is usually waiting on the person to publish or merge the previous PR, or on an open
   escalation from the report.
 - **Notebooks:** under state, one Git repo per owner. Read one with `npm run owners -- notebook <id>`.
