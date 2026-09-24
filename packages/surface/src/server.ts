@@ -4,6 +4,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { userInfo } from 'node:os';
 import { extname, join, normalize, resolve } from 'node:path';
 import type { SurfaceState } from './state.ts';
+import { memoryStatus, requestDistill } from '@onionsoup/owners';
 
 export const SURFACE_LIMITS = { pollMs: 3_000, reloadMs: 15_000, bodyBytes: 1024 * 1024, heartbeatMs: 25_000 };
 
@@ -68,8 +69,13 @@ export function surfaceServer(state: SurfaceState, options: { webRoot: string; b
     for (const client of clients) client.write(frame);
   };
 
-  const owned = async (ownerId: string) => {
+  const requireKnownOwner = (ownerId: string) => {
     if (!state.runtime.declarations.owners.has(ownerId)) throw new HttpError(404, `unknown owner: ${ownerId}`);
+    return ownerId;
+  };
+
+  const owned = async (ownerId: string) => {
+    requireKnownOwner(ownerId);
     return { directory: await state.directory(ownerId), agent: () => state.agentOf(ownerId) };
   };
 
@@ -87,6 +93,12 @@ export function surfaceServer(state: SurfaceState, options: { webRoot: string; b
       return settings;
     }),
     route('GET', '/api/owners/:owner', async params => state.owner(params.owner!)),
+    route('GET', '/api/owners/:owner/memory', async params => memoryStatus(state.runtime, requireKnownOwner(params.owner!))),
+    route('POST', '/api/owners/:owner/memory', async params => {
+      const status = await requestDistill(state.runtime, requireKnownOwner(params.owner!), by);
+      broadcast('onionsoup', { reason: 'memory' });
+      return status;
+    }),
     route('GET', '/api/items/:item', async params => state.item(params.item!)),
     route('GET', '/api/items/:item/sessions', async params => state.itemSessions(params.item!)),
     route('GET', '/api/items/:item/sessions/:session/messages', async params => {

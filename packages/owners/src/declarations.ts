@@ -2,6 +2,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { parse } from 'yaml';
 import { z } from 'zod';
+import { MemoryPolicy } from './memory-config.ts';
 
 export const ModelRef = z.string().regex(/^[^/\s]+\/\S+$/, 'model must be provider/model');
 export type ModelRef = z.infer<typeof ModelRef>;
@@ -166,6 +167,7 @@ export const OwnerDeclaration = z.object({
   workflow: z.string().optional(),
   duties: z.array(Duty),
   maxProposals: z.number().int().min(0).default(3),
+  memory: MemoryPolicy.default(() => MemoryPolicy.parse({})),
   grants: z.array(Grant).default([]),
   /** Where the owner's repository runs, for the ship action: the running checkout and the units to restart. */
   deploy: z.object({

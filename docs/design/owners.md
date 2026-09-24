@@ -106,6 +106,14 @@ Each owner has a notebook in a Git repository: `CHARTER`, `MAP`, `WISDOM`, `FAIL
 `open-questions`, and a journal. Everything the owner does is journaled; `distill` folds the journal into the
 registers, and the owner is the curator. A notebook is knowledge, never authority.
 
+Memory maintenance is automatic: the daemon checks for unread journal entries and runs bounded distillation
+batches beside its tick, at most one owner at a time and after that owner's work and duties finish. Owner
+`memory` configuration controls the interval, retry delay and batch limits. Empty journals never hire a model.
+The notebook's **Update notebook** button and `owners distill <owner>` queue a manual pass without stopping the
+daemon; the surface shows queued/running state and failures. A file-and-line cursor advances only through the
+consumed snapshot, so decisions recorded during a hire remain for the next pass. Failed hires retain the cursor
+and request for retry. Old timestamp markers are read on migration.
+
 Chat memory is deliberate. Tool calls that were not auto-allowed are journaled deterministically. After each
 exchange a watcher from another model family extracts only the person's decisions, kept only if the quote is
 verbatim; they land in the journal as candidates, and distill decides what enters the notebook. The person can

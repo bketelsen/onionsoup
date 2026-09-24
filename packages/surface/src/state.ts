@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import {
   approveCreate, approveDelete, approvePlan, approvePush, awaitingPublish, chatDirectory, denyRequest, deskState, describeAsk,
-  domainSummary, itemText, publish, rejectPlan, revisePlan, resumeItem, retryItem, cancelItem, type Runtime,
+  domainSummary, itemText, publish, rejectPlan, revisePlan, resumeItem, retryItem, cancelItem, memoryFingerprint, type Runtime,
 } from '@onionsoup/owners';
 import type { OpencodeApi, PendingPermission, PendingQuestion } from './opencode.ts';
 import { readSessionMessages, readSessionsTitled } from './hire-store.ts';
@@ -205,7 +205,11 @@ export class SurfaceState {
   async fingerprint() {
     const items = await this.runtime.ledger.list();
     const requests = await this.runtime.requests.list();
-    return JSON.stringify([items.map(item => [item.id, item.status, item.updatedAt]), requests.map(request => [request.id, request.status, request.updatedAt])]);
+    return JSON.stringify([
+      items.map(item => [item.id, item.status, item.updatedAt]),
+      requests.map(request => [request.id, request.status, request.updatedAt]),
+      await memoryFingerprint(this.runtime),
+    ]);
   }
 }
 
