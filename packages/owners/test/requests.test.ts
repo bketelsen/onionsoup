@@ -424,3 +424,24 @@ test('ambiguous reconciliation backs off so an older request cannot starve a new
   await drain();
   assert.equal((await runtime.requests.get(newer.id)).status, 'provisioned');
 });
+
+test('dead runner cleanup preserves a gate or result that the completed step already saved', async () => {
+  const runtime = await setup();
+  const gated = await runtime.requests.open('clippy', 'homelab', ask, 'none');
+  await runtime.requests.save({ ...gated, status: 'awaiting-create-approval', decision,
+    operation: operation('pending-owner'),
+  });
+  const provisioned = await approved(runtime, 'persisted');
+  await runtime.requests.save({ ...provisioned, status: 'provisioned',
+    instance: { remote: 'minideb', name: 'onionsoup-persisted' }, operation: operation('create-approved'),
+  });
+  await runtime.requests.markInterrupted();
+  const waiting = await runtime.requests.get(gated.id);
+  const finished = await runtime.requests.get(provisioned.id);
+  assert.equal(waiting.status, 'awaiting-create-approval');
+  assert.equal(waiting.operation?.runner, undefined);
+  assert.deepEqual(waiting.decision, decision);
+  assert.equal(finished.status, 'provisioned');
+  assert.equal(finished.instance?.name, 'onionsoup-persisted');
+  assert.equal(finished.operation?.runner, undefined);
+});

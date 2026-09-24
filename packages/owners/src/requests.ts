@@ -201,9 +201,12 @@ export class Requests {
   async markInterrupted() {
     const active = (await this.list()).filter(request => request.operation?.runner !== undefined && !requestRunnerIsAlive(request.operation.runner));
     for (const request of active) {
-      await this.update(request.id, current => current.operation?.runner === undefined || requestRunnerIsAlive(current.operation.runner) ? current : {
-        ...current, status: 'interrupted', reason: `request_interrupted: ${current.operation.stage}`,
-        operation: { ...current.operation, runner: undefined },
+      await this.update(request.id, current => {
+        if (current.operation?.runner === undefined || requestRunnerIsAlive(current.operation.runner)) return current;
+        const operation = { ...current.operation, runner: undefined };
+        // The step saved its next gate/result before its process died: preserve that durable transition.
+        if (current.status !== operation.stage) return { ...current, operation };
+        return { ...current, status: 'interrupted', reason: `request_interrupted: ${operation.stage}`, operation };
       });
     }
     return active.length;

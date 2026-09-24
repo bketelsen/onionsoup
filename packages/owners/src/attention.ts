@@ -94,7 +94,7 @@ async function scanFile(runtime: Runtime, index: AttentionIndex, owner: string, 
   if (isPast && cursor.complete) return false; // Journals append to today's file only.
   const path = join(runtime.notebook(owner).directory, 'journal', file);
   const size = (await stat(path)).size;
-  if (size === cursor.size) return false;
+  if (size === cursor.size && !(isPast && !cursor.complete)) return false;
   if (size < cursor.offset) Object.assign(cursor, { offset: 0, line: 0 });
   const handle = await open(path, 'r');
   try {
