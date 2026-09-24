@@ -15,6 +15,8 @@ export const NOTEBOOK_LIMITS = { orientationChars: 24_000 };
 /** The last commit queued per notebooks repository; see Notebook.commit. */
 const COMMITS = new Map<string, Promise<void>>();
 const JournalTimestamp = z.object({ at: z.string() });
+const JournalKind = z.object({ kind: z.string() });
+const HOUSEKEEPING = new Set(['wake', 'app-updates', 'maintain-prs']);
 
 const REGISTER_TITLES: Record<NotebookRegister, string> = {
   MAP: 'Map: layout of the domain',
@@ -104,17 +106,22 @@ export class Notebook {
       if (error.code === 'ENOENT') return [];
       throw error;
     })).filter(file => file.endsWith('.jsonl')).sort();
-    const snapshot = { lines: [] as string[], cursor, chars: 0 };
+    const snapshot = { lines: [] as string[], cursor, chars: 0, hasMore: false };
     for (const file of files) {
       if (cursor && file < cursor.file) continue;
       const lines = (await readFile(join(directory, file), 'utf8')).split('\n').slice(0, -1);
       const start = cursor?.file === file ? cursor.line : 0;
       for (let index = start; index < lines.length; index++) {
         const line = lines[index]!;
-        if (legacyMarker && JournalTimestamp.parse(JSON.parse(line)).at <= legacyMarker) continue;
-        if (snapshot.lines.length >= policy.maxEntries) return snapshot;
+        const parsed: unknown = JSON.parse(line);
+        const wasConsumed = legacyMarker && JournalTimestamp.parse(parsed).at <= legacyMarker;
+        if (wasConsumed || HOUSEKEEPING.has(JournalKind.parse(parsed).kind)) {
+          snapshot.cursor = { file, line: index + 1 };
+          continue;
+        }
+        if (snapshot.lines.length >= policy.maxEntries) return { ...snapshot, hasMore: true };
         if (snapshot.chars + line.length > policy.maxChars) {
-          if (snapshot.lines.length) return snapshot;
+          if (snapshot.lines.length) return { ...snapshot, hasMore: true };
           throw new Error(`memory_entry_too_large: ${file}:${index + 1}; increase memory.maxChars`);
         }
         snapshot.lines.push(line);

@@ -35,11 +35,17 @@ export function MemoryMaintenance({ ownerId }: { ownerId: string }) {
             : status?.status === 'running' ? 'Updating notebook…' : status?.queued ? 'Notebook update queued' : 'Update notebook'}
         </Button>
         <span className="text-muted-foreground">
-          {status?.lastCompleted ? `Updated ${timeAgo(status.lastCompleted)}` : 'Fold recorded decisions into memory'}
+          {status?.lastCompleted ? `Updated ${timeAgo(status.lastCompleted)}`
+            : status?.lastAttempt && status.status === 'idle' ? 'No new decisions to fold' : 'Fold recorded decisions into memory'}
           {status && !status.automatic ? ' · automatic updates off' : ''}
         </span>
       </div>
       {(error || status?.error) && <div className="text-status-error">{error || status?.error}</div>}
+      {status?.queued && <div>Queued for the daemon or the next <code>owners tick</code>.</div>}
+      {status?.hasMore && <div>More journal entries remain; the next batch is queued.</div>}
+      {status?.status === 'failed' && status.nextAttemptAt && (
+        <div>Next retry after {new Date(status.nextAttemptAt).toLocaleTimeString()}, or retry now.</div>
+      )}
     </div>
   );
 }

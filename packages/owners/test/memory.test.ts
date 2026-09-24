@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { Runtime } from '../src/runtime.ts';
@@ -129,4 +129,66 @@ test('legacy timestamp cursors migrate without replaying previously consumed ent
   assert.equal((await memoryStatus(runtime, 'clippy')).cursor?.line, 2);
   assert.doesNotMatch(briefs[0]!, /12:00:00Z/);
   assert.match(await readFile(join(runtime.stateDirectory, 'memory/clippy/state.json'), 'utf8'), /12:01|cursor/);
+});
+
+test('manual batches stay queued until drained and automatic backlogs use the shorter batch delay', async () => {
+  const { runtime, notebook } = await fixture();
+  const owner = runtime.declarations.owners.get('clippy')!;
+  owner.memory.maxEntries = 1;
+  await notebook.journal({ kind: 'chat-decision', note: 'first' });
+  await notebook.journal({ kind: 'chat-decision', note: 'second' });
+  await requestDistill(runtime, 'clippy', 'person');
+  await distill(runtime, 'clippy');
+  const partial = await memoryStatus(runtime, 'clippy');
+  assert.equal(partial.hasMore, true);
+  assert.equal(partial.queued, true);
+  assert.equal(await distillIsDue(runtime, 'clippy'), true);
+  await distill(runtime, 'clippy');
+  assert.equal((await memoryStatus(runtime, 'clippy')).queued, false);
+  await notebook.journal({ kind: 'chat-decision', note: 'third' });
+  await notebook.journal({ kind: 'chat-decision', note: 'fourth' });
+  await distill(runtime, 'clippy');
+  const automatic = await memoryStatus(runtime, 'clippy');
+  const nextBatch = Date.parse(automatic.lastAttempt!) + owner.memory.batchDelayMs + 1;
+  assert.equal(await distillIsDue(runtime, 'clippy', nextBatch), true);
+});
+
+test('disappearing queue entries cannot rewind a successfully consumed cursor', async () => {
+  const { runtime, notebook, script, briefs } = await fixture();
+  await notebook.journal({ kind: 'chat-decision', note: 'exactly once in this run' });
+  await requestDistill(runtime, 'clippy', 'person');
+  script.run = async () => {
+    const queue = join(runtime.stateDirectory, 'memory/clippy/queue');
+    for (const file of await readdir(queue)) await unlink(join(queue, file));
+    return { notebook: [] };
+  };
+  await distill(runtime, 'clippy');
+  assert.equal((await memoryStatus(runtime, 'clippy')).cursor?.line, 1);
+  await distill(runtime, 'clippy');
+  assert.equal(briefs.length, 1);
+});
+
+test('interrupted memory jobs expose a retryable failure instead of a permanently running control', async () => {
+  const { runtime } = await fixture();
+  await requestDistill(runtime, 'clippy', 'person');
+  await writeFile(join(runtime.stateDirectory, 'memory/clippy/state.json'), JSON.stringify({
+    status: 'running', lastAttempt: '2026-01-01T00:00:00Z', activeRunner: 2147483647,
+  }));
+  const status = await memoryStatus(runtime, 'clippy');
+  assert.equal(status.status, 'failed');
+  assert.match(status.error!, /distill_interrupted/);
+  assert.equal(await distillIsDue(runtime, 'clippy'), true);
+});
+
+test('housekeeping advances deterministically without a memory hire', async () => {
+  const { runtime, notebook, briefs } = await fixture();
+  await notebook.journal({ kind: 'app-updates', note: 'no updates' });
+  await notebook.journal({ kind: 'maintain-prs', note: 'all green' });
+  assert.equal(await distillIsDue(runtime, 'clippy'), true);
+  await distill(runtime, 'clippy');
+  const status = await memoryStatus(runtime, 'clippy');
+  assert.equal(status.cursor?.line, 2);
+  assert.equal(status.lastCompleted, undefined);
+  assert.equal(briefs.length, 0);
+  assert.equal(await distillIsDue(runtime, 'clippy'), false);
 });

@@ -4,6 +4,7 @@ export const MEMORY_DEFAULTS = {
   enabled: true,
   everyMs: 60 * 60_000,
   retryMs: 5 * 60_000,
+  batchDelayMs: 60_000,
   minEntries: 1,
   maxEntries: 100,
   maxChars: 24_000,
@@ -13,6 +14,7 @@ export const MemoryPolicy = z.object({
   enabled: z.boolean().default(MEMORY_DEFAULTS.enabled),
   everyMs: z.number().int().positive().default(MEMORY_DEFAULTS.everyMs),
   retryMs: z.number().int().positive().default(MEMORY_DEFAULTS.retryMs),
+  batchDelayMs: z.number().int().positive().default(MEMORY_DEFAULTS.batchDelayMs),
   minEntries: z.number().int().positive().default(MEMORY_DEFAULTS.minEntries),
   maxEntries: z.number().int().positive().default(MEMORY_DEFAULTS.maxEntries),
   maxChars: z.number().int().positive().default(MEMORY_DEFAULTS.maxChars),
@@ -32,10 +34,13 @@ export const MemoryState = z.object({
   error: z.string().optional(),
   entries: z.number().int().nonnegative().default(0),
   edits: z.number().int().nonnegative().default(0),
+  hasMore: z.boolean().default(false),
+  activeRunner: z.number().int().positive().optional(),
 });
 export type MemoryState = z.infer<typeof MemoryState>;
 
 export interface MemoryStatus extends MemoryState {
   queued: boolean;
   automatic: boolean;
+  nextAttemptAt?: string;
 }

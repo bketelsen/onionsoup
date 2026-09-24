@@ -69,8 +69,13 @@ export function surfaceServer(state: SurfaceState, options: { webRoot: string; b
     for (const client of clients) client.write(frame);
   };
 
-  const owned = async (ownerId: string) => {
+  const requireKnownOwner = (ownerId: string) => {
     if (!state.runtime.declarations.owners.has(ownerId)) throw new HttpError(404, `unknown owner: ${ownerId}`);
+    return ownerId;
+  };
+
+  const owned = async (ownerId: string) => {
+    requireKnownOwner(ownerId);
     return { directory: await state.directory(ownerId), agent: () => state.agentOf(ownerId) };
   };
 
@@ -88,9 +93,9 @@ export function surfaceServer(state: SurfaceState, options: { webRoot: string; b
       return settings;
     }),
     route('GET', '/api/owners/:owner', async params => state.owner(params.owner!)),
-    route('GET', '/api/owners/:owner/memory', async params => memoryStatus(state.runtime, params.owner!)),
+    route('GET', '/api/owners/:owner/memory', async params => memoryStatus(state.runtime, requireKnownOwner(params.owner!))),
     route('POST', '/api/owners/:owner/memory', async params => {
-      const status = await requestDistill(state.runtime, params.owner!, by);
+      const status = await requestDistill(state.runtime, requireKnownOwner(params.owner!), by);
       broadcast('onionsoup', { reason: 'memory' });
       return status;
     }),

@@ -51,6 +51,8 @@ test('the surface queues notebook maintenance alongside a running daemon and exp
     assert.equal(status.body.status, 'failed');
     assert.match(String(status.body.error), /provider_unavailable/);
     assert.equal(status.body.queued, true);
+    assert.equal((await call('GET', '/api/owners/nobody/memory')).status, 404);
+    assert.equal((await call('POST', '/api/owners/nobody/memory', {})).status, 404);
   } finally {
     await unlock();
     server.close();

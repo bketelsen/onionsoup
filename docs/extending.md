@@ -98,6 +98,7 @@ memory:
   enabled: true
   everyMs: 3600000       # at most hourly when unread journal entries exist
   retryMs: 300000        # retry failed runs after five minutes
+  batchDelayMs: 60000    # continue automatic backlogs after one minute
   minEntries: 1
   maxEntries: 100        # one bounded batch per pass
   maxChars: 24000
@@ -106,7 +107,10 @@ memory:
 Use **Update notebook** in the surface notebook or `owners distill <owner>` to queue a pass even when automatic
 maintenance is disabled. The running daemon (or `owners tick`) consumes the request. New requests arriving during
 a hire remain queued; errors appear in the notebook controls. Increase `maxChars` if an individual journal entry
-exceeds the batch limit. Automatic maintenance waits while that owner has active work or a duty.
+exceeds the batch limit. Automatic maintenance waits while that owner has active work or a duty. Manual requests
+remain queued until their backlog drains; automatic backlogs use `batchDelayMs` between batches. Housekeeping
+entries (`wake`, `app-updates`, `maintain-prs`) advance the cursor without a model hire. Interrupted hires appear
+as retryable failures. Journal entries are retained on size/parse errors so decisions cannot silently disappear.
 
 ## What needs engine code
 
