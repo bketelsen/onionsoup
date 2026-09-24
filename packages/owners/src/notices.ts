@@ -87,7 +87,7 @@ export function describeForManager(item: WorkItem, previous: string | undefined)
   const what = MANAGER_TEXT[described.change]?.(item) ?? described.change;
   return {
     change: described.change,
-    text: `${item.owner}'s work ${item.id} "${item.proposal.title}" (assignment ${assignment} of initiative ${initiative}) ${what}. Decide whether anything needs you or the person, and say so.`,
+    text: `${item.owner}'s work ${item.id} "${item.proposal.title}" (assignment ${assignment} of initiative ${initiative}) ${what}. See the initiative with onionsoup_initiative show ${initiative}; decide whether anything needs you or the person, and say so.`,
   };
 }
 

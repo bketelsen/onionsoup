@@ -37,6 +37,12 @@ test('configured owner prompts carry repository writing guidance alongside each 
   assert.match(config.agent!.Odrade!.prompt!, /<org>\nYour direct reports: Bellonda/);
   assert.match(config.agent!.Bellonda!.prompt!, /<org>\nYour manager: Odrade/);
   assert.doesNotMatch(config.agent!['Miles Teg']!.prompt!, /<org>/);
+  assert.match(config.agent!.Odrade!.prompt!, /draft an initiative with onionsoup_initiative/);
+  assert.doesNotMatch(config.agent!.Bellonda!.prompt!, /onionsoup_initiative/);
+  const permissions = (name: string) => config.agent![name]!.permission as Record<string, string>;
+  assert.equal((config.permission as Record<string, string>).onionsoup_initiative, 'deny', 'hidden from everyone');
+  assert.equal(permissions('Odrade').onionsoup_initiative, 'allow', 'shown to owners with direct reports');
+  assert.equal(permissions('Bellonda').onionsoup_initiative, undefined);
   assert.match(config.agent!.Bellonda!.prompt!, /Exact\./, 'the persona remains available for conversation');
 });
 

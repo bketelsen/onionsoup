@@ -30,6 +30,16 @@ export const Assignment = z.object({
 });
 export type Assignment = z.infer<typeof Assignment>;
 
+/**
+ * Where an assignment stands, derived from its request and work item (never stored). awaiting-publish and
+ * awaiting-merge mean the work waits on the person, since an assignment completes only when its PR merges.
+ */
+export const AssignmentState = z.enum([
+  'cancelled', 'not-dispatched', 'requested', 'working', 'plan-waiting', 'awaiting-publish', 'awaiting-merge',
+  'awaiting-person', 'blocked', 'completed', 'failed',
+]);
+export type AssignmentState = z.infer<typeof AssignmentState>;
+
 export const InitiativeStatus = z.enum(['drafting', 'awaiting-approval', 'approved', 'completed', 'failed', 'cancelled']);
 export type InitiativeStatus = z.infer<typeof InitiativeStatus>;
 
@@ -84,6 +94,13 @@ export const InitiativeDraft = Initiative.pick({ title: true, goal: true, ration
   assignments: z.array(Assignment.pick({ id: true, to: true, proposal: true, after: true })),
 });
 export type InitiativeDraft = z.infer<typeof InitiativeDraft>;
+
+/** Parse a draft from chat input, naming every problem the manager needs to fix. */
+export function parseInitiativeDraft(value: unknown) {
+  const parsed = InitiativeDraft.safeParse(value);
+  if (parsed.success) return parsed.data;
+  throw new Error(`initiative_invalid: ${parsed.error.issues.map(issue => `${issue.path.join('.') || '(root)'}: ${issue.message}`).join('; ')}`);
+}
 
 const INITIATIVE_ID = /^i-\d{8}-[0-9a-f]{6}$/;
 

@@ -3,6 +3,8 @@ import { listAttention } from './attention.ts';
 import { readFile, readdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { OwnerDeclaration } from './declarations.ts';
+import type { AssignmentState } from './initiatives.ts';
+import type { AssignmentView, InitiativeView } from './org-work.ts';
 import type { WorkItem } from './ledger.ts';
 import { describeAsk, type ResourceRequest } from './requests.ts';
 import type { Runtime } from './runtime.ts';
@@ -141,4 +143,44 @@ export function itemText(item: WorkItem) {
   item.verdicts.forEach((verdict, index) => lines.push(`Review ${index + 1}: ${verdict.decision}: ${verdict.summary}`));
   lines.push(`Hires: ${item.hires.map(hire => `${hire.stage} ${hire.model} ${hire.outcome}${hire.error ? ` (${hire.error.slice(0, 120)})` : ''}`).join('; ') || 'none'}`);
   return lines.join('\n');
+}
+
+const ASSIGNMENT_WORDS: Partial<Record<AssignmentState, string>> = {
+  'not-dispatched': 'not dispatched yet',
+  'plan-waiting': 'plan waiting for approval',
+  'awaiting-publish': 'landed; waiting on the person to publish it',
+  'awaiting-merge': 'PR open; waiting on the person to merge it',
+  'awaiting-person': 'waiting on the person',
+  blocked: 'interrupted; waiting on the person',
+};
+
+function assignmentLine(assignment: AssignmentView) {
+  const after = assignment.after.length ? ` after ${assignment.after.join(', ')}` : '';
+  const work = assignment.item ? `; work ${assignment.item.id}` : '';
+  const pr = assignment.item?.publication ? ` ${assignment.item.publication.url}` : '';
+  return `- ${assignment.id} → ${assignment.to}${after}: ${assignment.proposal.title} [${ASSIGNMENT_WORDS[assignment.state] ?? assignment.state}]${work}${pr}`;
+}
+
+/** One initiative in full, for its manager and the person. */
+export function initiativeText(view: InitiativeView) {
+  const approval = view.approval ? `approved by ${view.approval.by} for revision ${view.approval.revision}` : 'not approved';
+  const lines = [
+    `${view.id}: ${view.title} [${view.status}; revision ${view.revision}; ${approval}]`,
+    `Goal: ${view.goal}`,
+    `Why: ${view.rationale}`,
+    'Assignments:',
+    ...view.assignments.map(assignmentLine),
+    ...view.feedback.map(entry => `Sent back by ${entry.by} (revision ${entry.revision}): ${entry.note}`),
+  ];
+  if (view.outcome) lines.push(`Outcome: ${view.outcome}`);
+  return lines.join('\n');
+}
+
+/** Initiatives, one line each. */
+export function initiativesText(views: readonly InitiativeView[]) {
+  if (!views.length) return 'No initiatives.';
+  return views.map(view => {
+    const merged = view.assignments.filter(assignment => assignment.state === 'completed').length;
+    return `- ${view.id} [${view.status}]: ${view.title} (${merged}/${view.assignments.length} merged)`;
+  }).join('\n');
 }

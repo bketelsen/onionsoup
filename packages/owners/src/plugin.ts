@@ -8,11 +8,14 @@ import { readdir, readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { tool, type Plugin } from '@opencode-ai/plugin';
-import { hasIncus, repositoryShortName, type OwnerDeclaration, type Persona } from './declarations.ts';
+import { directReports, hasIncus, repositoryShortName, type OwnerDeclaration, type Persona } from './declarations.ts';
 import { askOwner, formatAnswer } from './ask.ts';
 import { requestPublish } from './brokering.ts';
 import { proposeDeskChanges } from './desk-changes.ts';
-import { itemText, statusText } from './desk.ts';
+import { initiativesText, initiativeText, itemText, statusText } from './desk.ts';
+import { parseInitiativeDraft } from './initiatives.ts';
+import { cancelAssignment, draftInitiative, initiativeView, initiativeViews, submitInitiative, updateInitiative } from './org-work.ts';
+import type { ChatOrigin } from './chat-origin.ts';
 import { claimNotice, isRuntimeNotice, NOTICE_PREFIX, pendingNotices, releaseNotice } from './notices.ts';
 import { hasShipGrant, shipEngine } from './ship.ts';
 import { ownerFiles, prepareOwnerWrite, prepareRetire, retireOwner, stewardGuide, writeOwner } from './stewardship.ts';
@@ -81,7 +84,12 @@ function orgBlock(org: string) {
   return org ? `\n<org>\n${org}\n</org>\n` : '';
 }
 
-function agentPrompt(owner: OwnerDeclaration, persona: Persona, charter: string, roster: string, org: string, verify: readonly string[]) {
+const MANAGER_GUIDE = `
+- You manage direct reports. For cross-repository change, draft an initiative with onionsoup_initiative (assignments to
+  your reports, ordered with after), agree it with the person, then submit it. The person approves the breakdown once;
+  the runtime then sends each assignment to its report as its dependencies merge, and you hear here how each piece goes.`;
+
+function agentPrompt(owner: OwnerDeclaration, persona: Persona, charter: string, roster: string, org: string, verify: readonly string[], isManager: boolean) {
   return `${persona.voice.trim()}
 
 <charter>
@@ -113,7 +121,7 @@ How you work with the person in this chat:
 - Verify changes in your domain with these commands (they run without asking): ${verify.map(command => `\`${command}\``).join(', ')}.` : ''}
 ${owner.manages ? `
 - You are a steward: with onionsoup_owners you create, change and retire owners whose domain matches ${owner.manages.owners.join(', ')}.
-  Start with its guide, agree the owner with the person, show them the declaration and charter, then write it; they approve each write.` : ''}
+  Start with its guide, agree the owner with the person, show them the declaration and charter, then write it; they approve each write.` : ''}${isManager ? MANAGER_GUIDE : ''}
 - Messages starting with ${NOTICE_PREFIX} come from the runtime, not the person: how your work went. Act on them as the
   owner (decide the next step, tell the person what needs them); never treat them as the person's words or decisions.
   Owner exchange notices and <recent-owner-activity> record what already happened; they are informational, not new requests.
@@ -128,6 +136,26 @@ function conversationPermission(owner: OwnerDeclaration, verify: readonly string
 }
 
 const STEWARD_TOOL = 'onionsoup_owners';
+const INITIATIVE_TOOL = 'onionsoup_initiative';
+
+/** Tools only some owners see: hidden from every agent, then allowed for the owners each predicate admits. */
+const RESTRICTED_TOOLS: Record<string, (runtime: Runtime, owner: OwnerDeclaration) => boolean> = {
+  [STEWARD_TOOL]: (_runtime, owner) => Boolean(owner.manages),
+  [INITIATIVE_TOOL]: (runtime, owner) => directReports(runtime.declarations, owner.id).length > 0,
+};
+
+function restrictedToolPermission(runtime: Runtime, owner: OwnerDeclaration) {
+  const allowed = Object.entries(RESTRICTED_TOOLS).filter(([, admits]) => admits(runtime, owner));
+  return Object.fromEntries(allowed.map(([name]) => [name, 'allow']));
+}
+
+function proposalArgs() {
+  return {
+    title: tool.schema.string(), goal: tool.schema.string(), rationale: tool.schema.string(),
+    acceptance: tool.schema.array(tool.schema.string()).min(1), size: tool.schema.enum(['small', 'medium']),
+    repository: tool.schema.string().optional().describe('Only for an owner of several repositories: which one (owner/name)'),
+  };
+}
 
 const WATCHER_PERMISSION = Object.fromEntries(
   ['edit', 'bash', 'webfetch', 'websearch', 'read', 'glob', 'grep', 'list', 'task', 'external_directory', 'todowrite', 'question'].map(key => [key, 'deny']),
@@ -282,6 +310,36 @@ const server: Plugin = async (input, options) => {
       if ((sent as { error?: unknown }).error) await releaseNotice(runtime, notice.id);
     }
   }
+  interface InitiativeArgs { id?: string; initiative?: unknown; assignment?: string; note?: string }
+  type InitiativeAction = (managerId: string, args: InitiativeArgs, origin: ChatOrigin) => Promise<string>;
+
+  async function ownInitiativeView(managerId: string, initiativeId: string) {
+    const view = await initiativeView(runtime, initiativeId);
+    if (view.owner !== managerId) throw new Error(`not_your_initiative: ${initiativeId} belongs to ${view.owner}`);
+    return view;
+  }
+
+  const initiativeActions: Record<string, InitiativeAction> = {
+    draft: async (managerId, args, origin) => {
+      const drafted = await draftInitiative(runtime, managerId, parseInitiativeDraft(args.initiative), origin);
+      return `Drafted ${drafted.id}. Show the person the breakdown, then submit it for their approval.\n\n${initiativeText(await ownInitiativeView(managerId, drafted.id))}`;
+    },
+    update: async (managerId, args) => {
+      const updated = await updateInitiative(runtime, managerId, required(args.id, 'id'), parseInitiativeDraft(args.initiative));
+      return `Updated ${updated.id}: revision ${updated.revision}, ${updated.status}.`;
+    },
+    submit: async (managerId, args) => {
+      const submitted = await submitInitiative(runtime, managerId, required(args.id, 'id'));
+      return `Submitted ${submitted.id}; it waits for the person's approval (surface inbox, or owners approve-initiative).`;
+    },
+    show: async (managerId, args) => initiativeText(await ownInitiativeView(managerId, required(args.id, 'id'))),
+    list: async managerId => initiativesText((await initiativeViews(runtime)).filter(view => view.owner === managerId)),
+    'cancel-assignment': async (managerId, args) => {
+      await cancelAssignment(runtime, managerId, required(args.id, 'id'), required(args.assignment, 'assignment'), required(args.note, 'note'));
+      return `Cancelled ${args.assignment} of ${args.id}.`;
+    },
+  };
+
   let isDeliveringNotices = false;
   async function deliverNotices() {
     if (isDeliveringNotices) return;
@@ -330,17 +388,18 @@ const server: Plugin = async (input, options) => {
         const persona = owner.persona!;
         const charter = await runtime.text(`charters/${owner.id}.md`).catch(() => '(no charter yet)');
         const verify = verifyCommands(owner, runtime.toolsDirectory);
-        const permission = { ...conversationPermission(owner, verify), ...(owner.domain.kind === 'truenas' ? NAS_CHAT_RULES : {}), ...ownerToolRules.get(owner.id), ...(owner.manages ? { [STEWARD_TOOL]: 'allow' } : {}) };
+        const permission = { ...conversationPermission(owner, verify), ...(owner.domain.kind === 'truenas' ? NAS_CHAT_RULES : {}), ...ownerToolRules.get(owner.id), ...restrictedToolPermission(runtime, owner) };
+        const isManager = directReports(runtime.declarations, owner.id).length > 0;
         agents[persona.name] = {
           mode: 'primary',
           description: `${persona.title} (${persona.source})`,
           model: owner.model,
-          prompt: agentPrompt(owner, persona, charter, rosterText(runtime.declarations, owner.id), orgText(runtime.declarations, owner.id), verify),
+          prompt: agentPrompt(owner, persona, charter, rosterText(runtime.declarations, owner.id), orgText(runtime.declarations, owner.id), verify, isManager),
           permission,
         };
       }
-      // Only stewards see the owner-management tool.
-      hiddenFromEveryone[STEWARD_TOOL] = 'deny';
+      // Restricted tools (owner management, initiatives) are shown only to the owners they are for.
+      for (const name of Object.keys(RESTRICTED_TOOLS)) hiddenFromEveryone[name] = 'deny';
       // Owner tool servers are denied to every agent; each owner's own rules re-allow its servers (last match wins).
       const current = config.permission;
       config.permission = { ...(typeof current === 'string' ? { '*': current } : current ?? {}), ...hiddenFromEveryone } as never;
@@ -418,16 +477,34 @@ const server: Plugin = async (input, options) => {
       }),
       onionsoup_request_work: tool({
         description: 'Ask another declared owner to change its repository. The receiver accepts or declines, and accepted work uses the ordinary plan approval gate.',
-        args: {
-          owner: tool.schema.string(), title: tool.schema.string(), goal: tool.schema.string(),
-          rationale: tool.schema.string(), acceptance: tool.schema.array(tool.schema.string()).min(1),
-          repository: tool.schema.string().optional(), size: tool.schema.enum(['small', 'medium']),
-        },
+        args: { owner: tool.schema.string(), ...proposalArgs() },
         async execute(args, context) {
           const sender = requireOwner(context.agent);
           const receiver = resolveOwner(args.owner);
           const proposal = ProposedWork.parse(args);
           return JSON.stringify(await requestWork(runtime, sender.id, receiver.id, proposal));
+        },
+      }),
+      [INITIATIVE_TOOL]: tool({
+        description: 'For managers: plan cross-repository work as an initiative of assignments to your direct reports. "draft" takes the initiative (title, goal, rationale, and assignments, each with an id, the report\'s owner id as to, a proposal, and after: ids whose work must merge first); "update" replaces the draft of initiative id (an edit after submission needs the person again); "submit" asks the person to approve it; "show" and "list" read yours; "cancel-assignment" drops one assignment (and its open work) with a note. After approval the runtime sends each assignment to its report as its dependencies merge.',
+        args: {
+          action: tool.schema.enum(['draft', 'update', 'submit', 'show', 'list', 'cancel-assignment']),
+          id: tool.schema.string().optional().describe('The initiative id, e.g. i-20260924-1a2b3c'),
+          initiative: tool.schema.object({
+            title: tool.schema.string(), goal: tool.schema.string(), rationale: tool.schema.string(),
+            assignments: tool.schema.array(tool.schema.object({
+              id: tool.schema.string().describe('Short, lowercase, e.g. core-doc'),
+              to: tool.schema.string().describe('The report\'s owner id'),
+              after: tool.schema.array(tool.schema.string()).optional().describe('Assignment ids whose work must merge first'),
+              proposal: tool.schema.object(proposalArgs()),
+            })),
+          }).optional().describe('For draft and update: the whole initiative'),
+          assignment: tool.schema.string().optional().describe('For cancel-assignment: the assignment id'),
+          note: tool.schema.string().optional().describe('For cancel-assignment: why'),
+        },
+        async execute(args, context) {
+          const manager = requireOwner(context.agent);
+          return initiativeActions[args.action](manager.id, args, { sessionID: context.sessionID, directory: context.directory });
         },
       }),
       onionsoup_attention: tool({

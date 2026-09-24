@@ -6,6 +6,7 @@ import { processRequest, requestCanRun } from './brokering.ts';
 import { chatDirectory } from './chats.ts';
 import { requestParticipants } from './delegation.ts';
 import { noticeWorkChanges } from './notices.ts';
+import { superviseInitiatives } from './org-work.ts';
 import { distill, distillIsDue } from './memory.ts';
 import type { WorkItem, WorkStatus } from './ledger.ts';
 import { wake } from './owner.ts';
@@ -214,7 +215,7 @@ async function reservedRequestOwners(runtime: Runtime) {
   return reserved;
 }
 
-/** One pass: configuration, requests (people may be waiting on an instance), due duties, work items, notices. */
+/** One pass: configuration, requests (people may be waiting on an instance), initiatives, due duties, work items, notices. */
 export async function tick(runtime: Runtime, log: TickLog) {
   const stranded = await runtime.ledger.markInterrupted();
   if (stranded) log.error('recovery', new Error(`${stranded} work items lost their runner and await a person`));
@@ -228,6 +229,11 @@ export async function tick(runtime: Runtime, log: TickLog) {
     await runRequests(runtime, log);
   } catch (error) {
     log.error('requests', error);
+  }
+  try {
+    await superviseInitiatives(runtime, { onError: log.error });
+  } catch (error) {
+    log.error('initiatives', error);
   }
   let reserved: ReadonlySet<string>;
   try {
