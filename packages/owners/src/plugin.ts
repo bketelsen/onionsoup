@@ -20,7 +20,7 @@ import { expandHome, readEnvFile, truenasMcpEnvironment } from './truenas.ts';
 import { pickModel } from './families.ts';
 import type { Notebook } from './notebook.ts';
 import { configDirectory, stateDirectory } from './paths.ts';
-import { domainSummary, rosterText } from './roster.ts';
+import { domainSummary, orgText, rosterText } from './roster.ts';
 import { Runtime } from './runtime.ts';
 import { engineCommit, FrictionEvents, FrictionInput, reportFriction } from './friction.ts';
 import { REPOSITORY_WRITING } from './repository-writing.ts';
@@ -77,7 +77,11 @@ function verifyCommands(owner: OwnerDeclaration, toolsDirectory: string) {
   return [...new Set(verify.map(words => words.map(word => word.replaceAll('{tools}', toolsDirectory)).join(' ')))];
 }
 
-function agentPrompt(owner: OwnerDeclaration, persona: Persona, charter: string, roster: string, verify: readonly string[]) {
+function orgBlock(org: string) {
+  return org ? `\n<org>\n${org}\n</org>\n` : '';
+}
+
+function agentPrompt(owner: OwnerDeclaration, persona: Persona, charter: string, roster: string, org: string, verify: readonly string[]) {
   return `${persona.voice.trim()}
 
 <charter>
@@ -87,7 +91,7 @@ ${charter.trim()}
 <roster>
 ${roster}
 </roster>
-
+${orgBlock(org)}
 <repository-writing>
 ${REPOSITORY_WRITING}
 </repository-writing>
@@ -96,7 +100,8 @@ How you work with the person in this chat:
 - You own ${domainSummary(owner)}.${owner.domain.kind === 'repository-group' ? ` Your desk has one worktree per repository (./${owner.domain.repositories.map(repository => repositoryShortName(repository.name)).join(', ./')}); name the repository when you open work or propose changes.` : ''} Reach for your onionsoup tools first:
   onionsoup_status (your open work and anything waiting on the person), onionsoup_notebook (your full notebook),
   onionsoup_evidence (what other owners recorded), onionsoup_ask (ask another owner a question about its domain),
-  onionsoup_open_work (hand a change to freelancers with a plan the person approves), onionsoup_propose_changes (turn
+  onionsoup_open_work (hand a change to freelancers with a plan the person approves), onionsoup_request_work (ask another
+  owner to change its repository), onionsoup_propose_changes (turn
   your desk edits into a verified, reviewed PR), onionsoup_friction (report reproducible engine behavior that fails expectations),
   onionsoup_record_decision and onionsoup_retract. Never commit, push or
   merge with git yourself; onionsoup_propose_changes does that with verification and review. When something belongs to another owner's domain, ask them instead of guessing or probing it yourself.
@@ -330,7 +335,7 @@ const server: Plugin = async (input, options) => {
           mode: 'primary',
           description: `${persona.title} (${persona.source})`,
           model: owner.model,
-          prompt: agentPrompt(owner, persona, charter, rosterText(runtime.declarations, owner.id), verify),
+          prompt: agentPrompt(owner, persona, charter, rosterText(runtime.declarations, owner.id), orgText(runtime.declarations, owner.id), verify),
           permission,
         };
       }

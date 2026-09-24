@@ -32,7 +32,11 @@ test('configured owner prompts carry repository writing guidance alongside each 
   for (const owner of owners) {
     assertWritingRule(owner.prompt!);
     assert.match(owner.prompt!, /onionsoup_friction \(report reproducible engine behavior/);
+    assert.match(owner.prompt!, /onionsoup_request_work \(ask another\s+owner/);
   }
+  assert.match(config.agent!.Odrade!.prompt!, /<org>\nYour direct reports: Bellonda/);
+  assert.match(config.agent!.Bellonda!.prompt!, /<org>\nYour manager: Odrade/);
+  assert.doesNotMatch(config.agent!['Miles Teg']!.prompt!, /<org>/);
   assert.match(config.agent!.Bellonda!.prompt!, /Exact\./, 'the persona remains available for conversation');
 });
 

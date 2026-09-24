@@ -1,4 +1,4 @@
-import type { Declarations, OwnerDeclaration } from './declarations.ts';
+import { directReports, managerOf, type Declarations, type OwnerDeclaration } from './declarations.ts';
 
 type DomainSummary = (owner: OwnerDeclaration) => string;
 
@@ -25,17 +25,44 @@ function displayName(owner: OwnerDeclaration) {
   return owner.persona ? `${owner.persona.name}, ${owner.persona.title}` : `${owner.id} (no persona)`;
 }
 
+function ownerLine(owner: OwnerDeclaration, selfId: string) {
+  const incus = owner.incus ? `; and incus on ${owner.incus.remotes.map(remote => `${remote.name} (${remote.host}; ${remote.allow.join('/')})`).join(', ')}` : '';
+  const you = owner.id === selfId ? ' (you)' : '';
+  return `${displayName(owner)}${you} [owner id: ${owner.id}]: owns ${DOMAIN_SUMMARIES[owner.domain.kind](owner)}${incus}.`;
+}
+
+/** Owners under a manager (or, without one, the owners nobody manages), each followed by its own reports. */
+function treeLines(declarations: Declarations, selfId: string, managerId: string | undefined, depth: number): string[] {
+  const owners = managerId === undefined
+    ? [...declarations.owners.values()].filter(owner => !managerOf(declarations, owner.id))
+    : directReports(declarations, managerId);
+  return owners.flatMap(owner => [
+    `${'  '.repeat(depth)}- ${ownerLine(owner, selfId)}`,
+    ...treeLines(declarations, selfId, owner.id, depth + 1),
+  ]);
+}
+
 /**
- * Who owns what, generated from the declarations so it never drifts. Owners use it to know whose
- * evidence to consult and whom to ask, instead of guessing about systems they do not own.
+ * Who owns what, generated from the declarations so it never drifts, drawn as the org chart: an owner's direct
+ * reports are indented under it. Owners use it to know whose evidence to consult and whom to ask, instead of
+ * guessing about systems they do not own.
  */
 export function rosterText(declarations: Declarations, selfId: string) {
-  const lines = [...declarations.owners.values()]
-    .filter(owner => owner.id !== selfId)
-    .map(owner => {
-      const incus = owner.incus ? `; and incus on ${owner.incus.remotes.map(remote => `${remote.name} (${remote.host}; ${remote.allow.join('/')})`).join(', ')}` : '';
-      return `- ${displayName(owner)} [owner id: ${owner.id}]: owns ${DOMAIN_SUMMARIES[owner.domain.kind](owner)}${incus}.`;
-    });
-  return `Other owners (consult their evidence with onionsoup_evidence, ask them with onionsoup_ask; never operate their systems):
-${lines.join('\n') || '(none)'}`;
+  return `Owners by reporting line (consult others' evidence with onionsoup_evidence, ask them with onionsoup_ask; never operate their systems):
+${treeLines(declarations, selfId, undefined, 0).join('\n')}`;
+}
+
+function reference(owner: OwnerDeclaration) {
+  return `${displayName(owner)} [owner id: ${owner.id}]`;
+}
+
+/** Where an owner sits in the org chart, in its own terms; empty when it has neither a manager nor reports. */
+export function orgText(declarations: Declarations, selfId: string) {
+  const manager = managerOf(declarations, selfId);
+  const reports = directReports(declarations, selfId);
+  const lines = [
+    ...(manager ? [`Your manager: ${reference(manager)}.`] : []),
+    ...(reports.length ? [`Your direct reports: ${reports.map(reference).join('; ')}. Delegate work in their domains to them (onionsoup_request_work) instead of doing it yourself.`] : []),
+  ];
+  return lines.join('\n');
 }

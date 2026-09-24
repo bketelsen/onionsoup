@@ -56,6 +56,7 @@ export function checkOwnerWrite(declarations: Declarations, stewardId: string, c
     const before = existing?.[field] ?? OwnerDeclaration.shape[field].parse(undefined);
     if (!isDeepStrictEqual(candidate[field], before)) throw new Error(`refused: ${field} is authority only the person edits; leave it ${existing ? 'as it is' : 'out'}`);
   }
+  checkReportingLine(steward.id, existing, candidate);
   const sameName = [...declarations.owners.values()].find(owner => owner.id !== candidate.id && owner.persona && owner.persona.name === candidate.persona?.name);
   if (sameName) throw new Error(`refused: ${sameName.id} is already called ${sameName.persona!.name}`);
   const sameDomain = [...declarations.owners.values()].find(owner => owner.id !== candidate.id && owner.domain.kind === candidate.domain.kind && domainKey(owner.domain) === domainKey(candidate.domain));
@@ -67,6 +68,17 @@ export function checkOwnerWrite(declarations: Declarations, stewardId: string, c
   }
   familyOf(declarations.families, candidate.model);
   if (candidate.workflow && !declarations.workflows.has(candidate.workflow)) throw new Error(`refused: unknown workflow ${candidate.workflow}`);
+}
+
+/**
+ * A steward may put owners in its scope under itself, or take them back out, but a reporting line to anyone
+ * else is the person's: it is never set, changed or cleared by a steward.
+ */
+function checkReportingLine(stewardId: string, existing: OwnerDeclaration | undefined, candidate: OwnerDeclaration) {
+  const before = existing?.reportsTo;
+  if (candidate.reportsTo === before) return;
+  const namesAnother = (managerId: string | undefined) => managerId !== undefined && managerId !== stewardId;
+  if (namesAnother(before) || namesAnother(candidate.reportsTo)) throw new Error('refused: reportsTo may only name you');
 }
 
 /** Commit only the paths this write touched, so the person's own uncommitted edits stay theirs. */

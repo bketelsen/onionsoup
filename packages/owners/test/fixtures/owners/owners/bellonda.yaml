@@ -4,3 +4,4 @@ domain: { kind: git-repository, name: example/wiki, remote: https://example.inva
 model: github-copilot/claude-sonnet-5
 workflow: change
 duties: []
+reportsTo: odrade

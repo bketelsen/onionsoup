@@ -183,6 +183,8 @@ export const OwnerDeclaration = z.object({
   manages: z.object({ owners: z.array(z.string()).min(1) }).optional(),
   /** MCP tool servers this owner uses in chats, keyed by a short name. */
   mcp: z.record(z.string().regex(/^[a-z][a-z0-9]*$/), OwnerToolServer).default({}),
+  /** The owner this one reports to: its manager's assignments are accepted automatically. Read it through managerOf. */
+  reportsTo: z.string().optional(),
 });
 export type OwnerDeclaration = z.infer<typeof OwnerDeclaration>;
 /**
@@ -267,15 +269,50 @@ async function loadAll<T>(directory: string, schema: z.ZodType<T>) {
   return (await yamlFiles(directory)).map(document => schema.parse(document));
 }
 
+/** The reporting line must name declared owners and never loop back on itself. */
+export function checkOrgChart(owners: ReadonlyMap<string, OwnerDeclaration>) {
+  for (const owner of owners.values()) {
+    if (owner.reportsTo === undefined) continue;
+    if (owner.reportsTo === owner.id) throw new Error(`org_chart_self: ${owner.id} reports to itself`);
+    if (!owners.has(owner.reportsTo)) throw new Error(`org_chart_unknown_manager: ${owner.id} reports to ${owner.reportsTo}, which is not declared`);
+  }
+  for (const owner of owners.values()) checkNoCycle(owners, owner.id);
+}
+
+function checkNoCycle(owners: ReadonlyMap<string, OwnerDeclaration>, start: string) {
+  const seen = new Set<string>([start]);
+  for (let current = owners.get(start)?.reportsTo; current; current = owners.get(current)?.reportsTo) {
+    if (seen.has(current)) throw new Error(`org_chart_cycle: ${[...seen, current].join(' → ')}`);
+    seen.add(current);
+  }
+}
+
+/** The owner an owner reports to, if any. */
+export function managerOf(declarations: Declarations, ownerId: string) {
+  const managerId = declarations.owners.get(ownerId)?.reportsTo;
+  return managerId ? declarations.owners.get(managerId) : undefined;
+}
+
+/** The owners that report to this one. */
+export function directReports(declarations: Declarations, managerId: string) {
+  return [...declarations.owners.values()].filter(owner => owner.reportsTo === managerId);
+}
+
+export function isDirectReport(declarations: Declarations, managerId: string, reportId: string) {
+  return managerOf(declarations, reportId)?.id === managerId;
+}
+
 export async function loadDeclarations(root: string): Promise<Declarations> {
   const base = resolve(root);
   const owners = await loadAll(join(base, 'owners'), OwnerDeclaration);
   const freelancers = await loadAll(join(base, 'freelancers'), FreelancerDeclaration);
   const workflows = await loadAll(join(base, 'workflows'), WorkflowDeclaration);
   const families = FamilyTable.parse(parse(await readFile(join(base, 'families.yaml'), 'utf8')));
+  const ownersById = new Map(owners.map(owner => [owner.id, owner]));
+  checkOrgChart(ownersById);
   return {
     root: base,
-    owners: new Map(owners.map(owner => [owner.id, owner])),
+    owners: ownersById,
     freelancers: new Map(freelancers.map(freelancer => [freelancer.craft, freelancer])),
     workflows: new Map(workflows.map(workflow => [workflow.id, workflow])),
     families,

@@ -83,6 +83,41 @@ test('example declarations load and reference known models', async () => {
   familyOf(declarations.families, clippy.model);
 });
 
+test('the org chart comes from reportsTo, refuses unknown managers, self-reports and cycles, and renders as a tree', async () => {
+  const { cp: copy, writeFile: write, readFile: read } = await import('node:fs/promises');
+  const { directReports, isDirectReport, managerOf } = await import('@onionsoup/owners');
+  const { orgText, rosterText } = await import('../src/roster.ts');
+  const declarations = await loadDeclarations('packages/owners/test/fixtures/owners');
+  assert.equal(managerOf(declarations, 'clippy')?.id, 'odrade');
+  assert.equal(managerOf(declarations, 'odrade'), undefined);
+  assert.deepEqual(directReports(declarations, 'odrade').map(owner => owner.id).sort(), ['bellonda', 'clippy']);
+  assert.equal(isDirectReport(declarations, 'odrade', 'bellonda'), true);
+  assert.equal(isDirectReport(declarations, 'homelab', 'bellonda'), false);
+
+  const roster = rosterText(declarations, 'clippy');
+  assert.match(roster, /\n- Odrade, Mother Superior of the test org \[owner id: odrade\]/);
+  assert.match(roster, /\n {2}- Bellonda, Keeper of the test wiki \[owner id: bellonda\]/);
+  assert.match(roster, /\n {2}- clippy \(no persona\) \(you\) \[owner id: clippy\]/);
+  assert.match(orgText(declarations, 'clippy'), /^Your manager: Odrade/);
+  assert.match(orgText(declarations, 'odrade'), /Your direct reports: .*bellonda.*clippy/);
+  assert.equal(orgText(declarations, 'homelab'), '');
+
+  const config = await mkdtemp(join(tmpdir(), 'owners-org-'));
+  await copy('packages/owners/test/fixtures/owners', config, { recursive: true });
+  const homelab = await read(join(config, 'owners', 'homelab.yaml'), 'utf8');
+  const cases: [string, RegExp][] = [
+    ['reportsTo: nobody', /org_chart_unknown_manager: homelab reports to nobody/],
+    ['reportsTo: homelab', /org_chart_self: homelab/],
+    ['reportsTo: clippy', /org_chart_cycle/],
+  ];
+  const odrade = await read(join(config, 'owners', 'odrade.yaml'), 'utf8');
+  await write(join(config, 'owners', 'odrade.yaml'), `${odrade}reportsTo: homelab\n`);
+  for (const [line, expected] of cases) {
+    await write(join(config, 'owners', 'homelab.yaml'), `${homelab}${line}\n`);
+    await assert.rejects(loadDeclarations(config), expected);
+  }
+});
+
 test('a person can send a plan back with feedback, or reject it, and both are recorded', async () => {
   const { Runtime, revisePlan, rejectPlan } = await import('@onionsoup/owners');
   const runtime = await Runtime.open({ declarations: 'packages/owners/test/fixtures/owners', state: await mkdtemp(join(tmpdir(), 'owners-state-')) });
@@ -278,6 +313,16 @@ test('a steward creates and retires owners in its scope, and never writes author
   await assert.rejects(prepareOwnerWrite(runtime, 'odrade', 'id: odrade\ndomain: { kind: github-org, org: example }\nmodel: openai/gpt-5.6-sol\nduties: []\nmanages: { owners: ["*"] }\n'), /own declaration/);
   await assert.rejects(prepareOwnerWrite(runtime, 'clippy', widget, '# c'), /not_a_steward/);
 
+  await assert.rejects(prepareOwnerWrite(runtime, 'odrade', `${widget}reportsTo: bellonda\n`, '# c'), /reportsTo may only name you/);
+  const underOdrade = await prepareOwnerWrite(runtime, 'odrade', `${widget}reportsTo: odrade\n`, '# c');
+  assert.equal(underOdrade.candidate.reportsTo, 'odrade');
+  await write(join(config, 'owners', 'homelab.yaml'), `${execFileSync('cat', [join(config, 'owners', 'homelab.yaml')])}reportsTo: bellonda\n`);
+  await runtime.reloadDeclarations();
+  const homelabNow = execFileSync('cat', [join(config, 'owners', 'homelab.yaml')]).toString();
+  await assert.rejects(prepareOwnerWrite(runtime, 'odrade', homelabNow.replace('reportsTo: bellonda\n', '')), /reportsTo may only name you/);
+  await assert.rejects(prepareOwnerWrite(runtime, 'odrade', homelabNow.replace('reportsTo: bellonda', 'reportsTo: odrade')), /reportsTo may only name you/);
+  await write(join(config, 'owners', 'homelab.yaml'), homelabNow.replace('reportsTo: bellonda\n', ''));
+  await runtime.reloadDeclarations();
   const prepared = await prepareOwnerWrite(runtime, 'odrade', widget, '# Charter: widget\n');
   assert.equal(prepared.created, true);
   await writeOwner(runtime, 'odrade', prepared);
