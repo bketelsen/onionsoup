@@ -9,7 +9,7 @@ import { freePort, spawnSandboxed, stopSandboxed } from './sandbox.ts';
 
 const run = promisify(execFile);
 
-export const HIRE_LIMITS = { heartbeatMs: 30_000, timeoutMs: 20 * 60_000, serverStartMs: 30_000 };
+export const HIRE_LIMITS = { heartbeatMs: 30_000, timeoutMs: 20 * 60_000, serverStartMs: 30_000, permissionPollMs: 2_000 };
 
 /**
  * The onionsoup plugin, as a file:// URL sitting next to this module: sibling `plugin.ts` running from
@@ -80,8 +80,19 @@ export const IMPLEMENTER_BASH: Record<string, 'allow' | 'deny'> = {
   'sudo *': 'deny',
 };
 
+/**
+ * opencode asks before reading env-named files (`*.env`, `*.env.*`), and nobody can answer inside a hire, so a review
+ * of an Ansible `coder.env.j2` template waited until its deadline. A hire's tree holds the repository's tracked files
+ * and what the hire generated, and the sandbox is the boundary, so hires read them. opencode appends agent rules
+ * after its defaults and the last match wins, so these patterns override its `ask` for the same names.
+ */
+const HIRE_READ = { '*': 'allow', '*.env': 'allow', '*.env.*': 'allow' } as const;
+
 function rolePermission(bash: Record<string, 'allow' | 'deny'>, edit: 'allow' | 'deny') {
-  return { edit, bash, webfetch: 'deny', websearch: 'deny', external_directory: 'deny', question: 'deny', task: 'deny', doom_loop: 'deny' };
+  return {
+    read: HIRE_READ, edit, bash,
+    webfetch: 'deny', websearch: 'deny', external_directory: 'deny', question: 'deny', task: 'deny', doom_loop: 'deny',
+  };
 }
 
 const ROLE_AGENTS: Record<Role, { prompt: string; permission: ReturnType<typeof rolePermission> }> = {
@@ -216,6 +227,22 @@ async function startServer(role: Role, directory: string, notesFile: string | un
   return { url, close: () => stopSandboxed(child) };
 }
 
+type HireClient = ReturnType<typeof createOpencodeClient>;
+
+/**
+ * Any permission question a hire still raises has nobody to answer it: reject it at once with a reason the model
+ * can read, so it works without it or reports the need, instead of waiting silently until the hire's deadline.
+ */
+export async function rejectPendingPermissions(client: Pick<HireClient, 'permission'>, directory: string, title: string) {
+  const pending = (await client.permission.list({ directory })).data ?? [];
+  for (const request of pending) {
+    const asked = `${request.permission} ${request.patterns.join(', ')}`;
+    const message = `permission_needs_person: ${asked}. Nobody can approve this inside a hire; work without it, or say in your deliverable that you needed it.`;
+    await client.permission.reply({ directory, requestID: request.id, reply: 'reject', message });
+    log(`  … ${title}: rejected permission ${asked}`);
+  }
+}
+
 export class Freelancers {
   static async start() {
     return new Freelancers();
@@ -241,6 +268,8 @@ export class Freelancers {
     if (!sessionID) throw new Error(`session_create_failed: ${JSON.stringify(session.error)}`);
     const heartbeat = setInterval(() => log(`  … ${request.title}: ${request.model} working ${elapsedSeconds(startedAt)}s`), HIRE_LIMITS.heartbeatMs);
     const deadline = setTimeout(() => void client.session.abort({ sessionID }), HIRE_LIMITS.timeoutMs);
+    // A failed poll is retried on the next interval; the hire's own deadline still bounds it.
+    const refuser = setInterval(() => void rejectPendingPermissions(client, request.directory, request.title).catch(() => undefined), HIRE_LIMITS.permissionPollMs);
     try {
       // Synchronous on purpose: opencode 1.18.32 cannot list a session's messages once a prompt carried
       // a json_schema format ("Expected OutputFormatJsonSchema"), so the reply must come from this call.
@@ -271,6 +300,7 @@ export class Freelancers {
       return { value: parsed.data, sessionID, cost, startedAt, finishedAt: new Date().toISOString() };
     } finally {
       clearInterval(heartbeat);
+      clearInterval(refuser);
       clearTimeout(deadline);
     }
   }

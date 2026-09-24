@@ -614,6 +614,34 @@ test('PLUGIN_URL resolves to an existing sibling plugin from source, and agentCo
   assert.deepEqual(agentConfig('/tmp', '/tmp', undefined).plugin, [sourceUrl]);
 });
 
+test("every hire role reads env-named files without asking, since nobody can answer a hire's question", async () => {
+  const { agentConfig } = await import('../src/opencode.ts');
+  const agents = agentConfig('/tmp', '/tmp', '/tmp/notes/findings.md').agent;
+  for (const [name, agent] of Object.entries(agents)) {
+    assert.deepEqual(agent.permission.read, { '*': 'allow', '*.env': 'allow', '*.env.*': 'allow' }, name);
+  }
+});
+
+test('a permission question raised inside a hire is rejected at once with a reason the model can read', async () => {
+  const { rejectPendingPermissions } = await import('../src/opencode.ts');
+  const replies: { requestID: string; reply: string; message?: string }[] = [];
+  const pending = [{ id: 'per_1', permission: 'read', patterns: ['templates/coder.env.j2'] }];
+  const client = {
+    permission: {
+      list: async () => ({ data: pending.splice(0) }),
+      reply: async (options: { requestID: string; reply: string; message?: string }) => {
+        replies.push(options);
+        return { data: true };
+      },
+    },
+  } as unknown as Parameters<typeof rejectPendingPermissions>[0];
+  await rejectPendingPermissions(client, '/tmp', 'w-1: review 1');
+  await rejectPendingPermissions(client, '/tmp', 'w-1: review 1');
+  assert.equal(replies.length, 1, 'each question is answered once');
+  assert.equal(replies[0]!.reply, 'reject');
+  assert.match(replies[0]!.message!, /^permission_needs_person: read templates\/coder\.env\.j2\./);
+});
+
 test('the built plugin.js exists next to the built opencode.js, and its agentConfig loads it explicitly', async () => {
   const { execFile } = await import('node:child_process');
   const { promisify } = await import('node:util');
