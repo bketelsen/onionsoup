@@ -630,6 +630,41 @@ test("every hire role reads env-named files without asking, since nobody can ans
   }
 });
 
+test('a model that refuses forced tool choice gets its hire in text mode: JSON in the reply, parsed and validated', async () => {
+  const { hireWithFallback } = await import('../src/opencode.ts');
+  const { Verdict } = await import('../src/artifacts.ts');
+  const refusal = 'tool_choice: type "tool" and "any" are not supported for this model.';
+  const prompts: { format?: unknown; text: string }[] = [];
+  const client = {
+    session: {
+      create: async () => ({ data: { id: `ses_${prompts.length}` } }),
+      abort: async () => ({ data: true }),
+      prompt: async (options: { format?: unknown; parts: { text: string }[] }) => {
+        prompts.push({ format: options.format, text: options.parts[0]!.text });
+        if (options.format) return { data: { info: { role: 'assistant', error: { name: 'APIError', data: { message: refusal } } } } };
+        return { data: { info: { role: 'assistant', cost: 0.01 }, parts: [{ type: 'text', text: 'Reviewed.\n```json\n{"decision":"approve","summary":"Looks right","findings":[]}\n```' }] } };
+      },
+    },
+    permission: { list: async () => ({ data: [] }), reply: async () => ({ data: true }) },
+  } as unknown as Parameters<typeof hireWithFallback>[0];
+  const request = { role: 'reviewer' as const, model: 'github-copilot/test-refuses-tool-choice', directory: '/tmp', title: 'w-1: review', brief: 'Review it.', schema: Verdict };
+  const hired = await hireWithFallback(client, request);
+  assert.deepEqual(hired.value, { decision: 'approve', summary: 'Looks right', findings: [] });
+  assert.ok(prompts[0]!.format, 'structured output is tried first');
+  assert.equal(prompts[1]!.format, undefined);
+  assert.match(prompts[1]!.text, /^Review it\.\n\nWhen you are done, your final reply must be only one JSON object that matches this JSON Schema/);
+  await hireWithFallback(client, request);
+  assert.equal(prompts.length, 3, 'the model is remembered: its next hire starts in text mode');
+  assert.equal(prompts[2]!.format, undefined);
+});
+
+test('jsonFromText takes a fenced json block, else the outermost braces, else leaves the text for the schema to reject', async () => {
+  const { jsonFromText } = await import('../src/opencode.ts');
+  assert.deepEqual(jsonFromText('Here:\n```json\n{"a":1}\n```\nThen:\n```json\n{"a":2}\n```'), { a: 2 });
+  assert.deepEqual(jsonFromText('The answer is {"answer": "ok", "observed": ["x"]} as asked.'), { answer: 'ok', observed: ['x'] });
+  assert.equal(jsonFromText('no json here'), 'no json here');
+});
+
 test('a permission question raised inside a hire is rejected at once with a reason the model can read', async () => {
   const { rejectPendingPermissions } = await import('../src/opencode.ts');
   const replies: { requestID: string; reply: string; message?: string }[] = [];

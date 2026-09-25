@@ -256,48 +256,120 @@ export class Freelancers {
 
   private async hireOn<T>(url: string, request: HireRequest<T>): Promise<HireResult<T>> {
     const client = createOpencodeClient({ baseUrl: url, directory: request.directory, fetch: untimedFetch });
-    const [providerID, ...rest] = request.model.split('/');
-    const startedAt = new Date().toISOString();
-    const session = await client.session.create({ title: request.title });
-    const sessionID = session.data?.id;
-    if (!sessionID) throw new Error(`session_create_failed: ${JSON.stringify(session.error)}`);
-    const heartbeat = setInterval(() => log(`  … ${request.title}: ${request.model} working ${elapsedSeconds(startedAt)}s`), HIRE_LIMITS.heartbeatMs);
-    const deadline = setTimeout(() => void client.session.abort({ sessionID }), HIRE_LIMITS.timeoutMs);
-    // A failed poll is retried on the next interval; the hire's own deadline still bounds it.
-    const refuser = setInterval(() => void rejectPendingPermissions(client, request.directory, request.title).catch(() => undefined), HIRE_LIMITS.permissionPollMs);
+    return hireWithFallback(client, request);
+  }
+}
+
+/**
+ * opencode asks for structured output by forcing a tool call, and some models refuse forced tool choice (Copilot's
+ * claude-opus-5.5: anomalyco/opencode#46735). The refusal comes before any work, so such a hire starts again in a
+ * new session in text mode: the brief ends with the JSON Schema and the reply's JSON is parsed here. The model is
+ * remembered for this process, so its later hires start in text mode.
+ */
+const FORCED_TOOL_REFUSED = /tool_choice: type "tool" and "any" are not supported/;
+const textModeModels = new Set<string>();
+
+export type DeliveryMode = 'structured' | 'text';
+
+export async function hireWithFallback<T>(client: HireSessionClient, request: HireRequest<T>): Promise<HireResult<T>> {
+  const mode: DeliveryMode = textModeModels.has(request.model) ? 'text' : 'structured';
+  try {
+    return await runHire(client, request, mode);
+  } catch (error) {
+    if (mode !== 'structured' || !(error instanceof HireError) || !FORCED_TOOL_REFUSED.test(error.message)) throw error;
+    textModeModels.add(request.model);
+    log(`  … ${request.title}: ${request.model} refuses forced tool choice; asking for the JSON in its reply instead`);
+    return runHire(client, request, 'text');
+  }
+}
+
+/** The parts of the opencode client a hire uses, so tests can script it. */
+export type HireSessionClient = Pick<HireClient, 'session' | 'permission'>;
+
+interface ReplyData { info?: AssistantInfo; parts?: { type: string; text?: string }[] }
+
+interface DeliveryModeSpec {
+  format: (schema: Record<string, unknown>) => Record<string, unknown> | undefined;
+  instruction: (schema: Record<string, unknown>) => string;
+  deliverable: (reply: ReplyData) => unknown;
+}
+
+const DELIVERY_MODES: Record<DeliveryMode, DeliveryModeSpec> = {
+  structured: {
+    format: schema => ({ type: 'json_schema', schema, retryCount: 2 }),
+    instruction: () => '',
+    deliverable: reply => reply.info?.structured,
+  },
+  text: {
+    format: () => undefined,
+    instruction: schema => `\n\nWhen you are done, your final reply must be only one JSON object that matches this JSON Schema, with no other text:\n${JSON.stringify(schema)}`,
+    deliverable: reply => jsonFromText((reply.parts ?? []).filter(part => part.type === 'text').map(part => part.text ?? '').join('')),
+  },
+};
+
+/** The JSON object in a reply: a fenced json block if there is one, else the outermost braces; the text if neither parses. */
+export function jsonFromText(text: string): unknown {
+  const fenced = [...text.matchAll(/```(?:json)?\s*\n([\s\S]*?)```/g)].at(-1)?.[1];
+  const braces = text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1);
+  for (const candidate of [fenced, braces]) {
+    if (!candidate?.trim()) continue;
     try {
-      // Synchronous on purpose: opencode 1.18.32 cannot list a session's messages once a prompt carried
-      // a json_schema format ("Expected OutputFormatJsonSchema"), so the reply must come from this call.
-      const prompt = async (text: string) => {
-        const reply = await client.session.prompt({
-          sessionID,
-          agent: `onionsoup-${request.role}`,
-          model: { providerID: providerID!, modelID: rest.join('/') },
-          format: { type: 'json_schema', schema: z.toJSONSchema(request.schema) as Record<string, unknown>, retryCount: 2 },
-          parts: [{ type: 'text', text }],
-        });
-        const info = reply.data?.info as AssistantInfo | undefined;
-        if (!info) throw new HireError(`no_assistant_reply: ${describeReplyError(reply.error)}`, sessionID);
-        if (info.error) throw new HireError(`${info.error.name ?? 'error'}: ${info.error.data?.message ?? ''}`.trim(), sessionID);
-        return info;
-      };
-      const first = await prompt(request.notesFile ? `${request.brief}\n\n${notesInstruction(request.notesFile)}` : request.brief);
-      let cost = first.cost ?? 0;
-      let parsed = parseDeliverable(request.schema, first.structured);
-      if (!parsed.success) {
-        // The work is done; only the shape is wrong. Ask once, in the same session, for the corrected deliverable.
-        log(`  … ${request.title}: deliverable did not match its schema; asking ${request.model} to resend it`);
-        const second = await prompt(resendInstruction(parsed.error));
-        cost += second.cost ?? 0;
-        parsed = parseDeliverable(request.schema, second.structured);
-        if (!parsed.success) throw new HireError(`deliverable_invalid: ${parsed.error.message.slice(0, 500)}`, sessionID, second.structured ?? first.structured);
-      }
-      return { value: parsed.data, sessionID, cost, startedAt, finishedAt: new Date().toISOString() };
-    } finally {
-      clearInterval(heartbeat);
-      clearInterval(refuser);
-      clearTimeout(deadline);
+      return JSON.parse(candidate);
+    } catch {
+      // Not JSON: try the next candidate, and let the schema reject the text if none parses.
     }
+  }
+  return text;
+}
+
+/** One hire session in one delivery mode: the brief, then at most one request to resend a malformed deliverable. */
+export async function runHire<T>(client: HireSessionClient, request: HireRequest<T>, mode: DeliveryMode): Promise<HireResult<T>> {
+  const [providerID, ...rest] = request.model.split('/');
+  const spec = DELIVERY_MODES[mode];
+  const schema = z.toJSONSchema(request.schema) as Record<string, unknown>;
+  const startedAt = new Date().toISOString();
+  const session = await client.session.create({ title: request.title });
+  const sessionID = session.data?.id;
+  if (!sessionID) throw new Error(`session_create_failed: ${JSON.stringify(session.error)}`);
+  const heartbeat = setInterval(() => log(`  … ${request.title}: ${request.model} working ${elapsedSeconds(startedAt)}s`), HIRE_LIMITS.heartbeatMs);
+  const deadline = setTimeout(() => void client.session.abort({ sessionID }), HIRE_LIMITS.timeoutMs);
+  // A failed poll is retried on the next interval; the hire's own deadline still bounds it.
+  const refuser = setInterval(() => void rejectPendingPermissions(client, request.directory, request.title).catch(() => undefined), HIRE_LIMITS.permissionPollMs);
+  try {
+    // Synchronous on purpose: opencode 1.18.32 cannot list a session's messages once a prompt carried
+    // a json_schema format ("Expected OutputFormatJsonSchema"), so the reply must come from this call.
+    const prompt = async (text: string) => {
+      const format = spec.format(schema);
+      const reply = await client.session.prompt({
+        sessionID,
+        agent: `onionsoup-${request.role}`,
+        model: { providerID: providerID!, modelID: rest.join('/') },
+        ...(format ? { format } : {}),
+        parts: [{ type: 'text', text }],
+      } as Parameters<HireClient['session']['prompt']>[0]);
+      const data = reply.data as ReplyData | undefined;
+      const info = data?.info;
+      if (!info) throw new HireError(`no_assistant_reply: ${describeReplyError(reply.error)}`, sessionID);
+      if (info.error) throw new HireError(`${info.error.name ?? 'error'}: ${info.error.data?.message ?? ''}`.trim(), sessionID);
+      return { info, deliverable: spec.deliverable(data) };
+    };
+    const brief = request.notesFile ? `${request.brief}\n\n${notesInstruction(request.notesFile)}` : request.brief;
+    const first = await prompt(`${brief}${spec.instruction(schema)}`);
+    let cost = first.info.cost ?? 0;
+    let parsed = parseDeliverable(request.schema, first.deliverable);
+    if (!parsed.success) {
+      // The work is done; only the shape is wrong. Ask once, in the same session, for the corrected deliverable.
+      log(`  … ${request.title}: deliverable did not match its schema; asking ${request.model} to resend it`);
+      const second = await prompt(`${resendInstruction(parsed.error)}${spec.instruction(schema)}`);
+      cost += second.info.cost ?? 0;
+      parsed = parseDeliverable(request.schema, second.deliverable);
+      if (!parsed.success) throw new HireError(`deliverable_invalid: ${parsed.error.message.slice(0, 500)}`, sessionID, second.deliverable ?? first.deliverable);
+    }
+    return { value: parsed.data, sessionID, cost, startedAt, finishedAt: new Date().toISOString() };
+  } finally {
+    clearInterval(heartbeat);
+    clearInterval(refuser);
+    clearTimeout(deadline);
   }
 }
 
@@ -336,5 +408,5 @@ export function parseDeliverable<T>(schema: z.ZodType<T>, value: unknown) {
 }
 
 function resendInstruction(error: z.ZodError) {
-  return `Your structured output did not match the required schema:\n${z.prettifyError(error)}\n\nSend the complete structured output again with these problems corrected. Lists must be JSON arrays (not strings containing JSON), and every required field must be present. Do not redo the work.`;
+  return `Your deliverable did not match the required schema:\n${z.prettifyError(error)}\n\nSend the complete deliverable again with these problems corrected. Lists must be JSON arrays (not strings containing JSON), and every required field must be present. Do not redo the work.`;
 }
