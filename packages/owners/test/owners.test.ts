@@ -97,7 +97,9 @@ test('the org chart comes from reportsTo, refuses unknown managers, self-reports
   const roster = rosterText(declarations, 'clippy');
   assert.match(roster, /\n- Odrade, Mother Superior of the test org \[owner id: odrade\]/);
   assert.match(roster, /\n {2}- Bellonda, Keeper of the test wiki \[owner id: bellonda\]/);
-  assert.match(roster, /\n {2}- clippy \(no persona\) \(you\) \[owner id: clippy\]/);
+  assert.match(roster, /\n {2}- Clippy, Keeper of the test tool \(you\) \[owner id: clippy\]/);
+  declarations.owners.set('clippy', { ...declarations.owners.get('clippy')!, persona: undefined });
+  assert.match(rosterText(declarations, 'clippy'), /\n {2}- clippy \(no persona\) \(you\) \[owner id: clippy\]/);
   assert.match(orgText(declarations, 'clippy'), /^Your manager: Odrade/);
   assert.match(orgText(declarations, 'odrade'), /Your direct reports: .*bellonda.*clippy/);
   assert.equal(orgText(declarations, 'homelab'), '');
@@ -119,33 +121,39 @@ test('the org chart comes from reportsTo, refuses unknown managers, self-reports
   }
 });
 
-test('a person can send a plan back with feedback, or reject it, and both are recorded', async () => {
-  const { Runtime, revisePlan, rejectPlan } = await import('@onionsoup/owners');
+test('a person sends an owner plan back with feedback; only owner plans are approved, and the retired pipeline\'s work is failed once', async () => {
+  const { Runtime, approvePlan, revisePlan, retirePipelineItems } = await import('@onionsoup/owners');
   const runtime = await Runtime.open({ declarations: 'packages/owners/test/fixtures/owners', state: await mkdtemp(join(tmpdir(), 'owners-state-')) });
   await runtime.notebook('clippy').ensure('# Charter\n');
   const proposal = { title: 't', goal: 'g', rationale: 'r', acceptance: ['a'], size: 'small' as const };
-  const plan = { summary: 's', steps: [{ description: 'd', files: ['main.go'] }], tests: ['t'], risks: [], outOfScope: [], questionsForOwner: [] };
-  const first = await runtime.ledger.create('clippy', 'change', proposal);
-  await runtime.ledger.save({ ...first, status: 'awaiting-plan-approval', plan });
-  const revised = await revisePlan(runtime, first.id, 'bjk', 'also bound -font-size');
+  const planDocument = { markdown: '1. Bound the font size', digest: 'd' };
+  const planned = await runtime.ledger.create('clippy', 'owner-change', proposal, { status: 'awaiting-plan-approval', planDocument });
+  const revised = await revisePlan(runtime, planned.id, 'bjk', 'also bound -font-size');
   assert.equal(revised.status, 'planning');
   assert.deepEqual(revised.humanNotes.map(note => [note.kind, note.note]), [['plan-feedback', 'also bound -font-size']]);
-  const second = await runtime.ledger.create('clippy', 'change', proposal);
-  await runtime.ledger.save({ ...second, status: 'awaiting-plan-approval', plan });
-  const rejected = await rejectPlan(runtime, second.id, 'bjk', 'busywork');
-  assert.equal(rejected.status, 'rejected');
-  await assert.rejects(rejectPlan(runtime, second.id, 'bjk', 'again'), /not_rejectable: rejected/);
+  const legacy = await runtime.ledger.create('clippy', 'change', proposal, { status: 'awaiting-plan-approval' });
+  await assert.rejects(approvePlan(runtime, legacy.id, 'bjk'), /not_an_owner_plan/);
+  const implementing = await runtime.ledger.create('clippy', 'change', proposal, { status: 'implementing' });
+  const landed = await runtime.ledger.create('clippy', 'change', proposal, { status: 'landed' });
+  assert.deepEqual((await retirePipelineItems(runtime)).sort(), [legacy.id, implementing.id].sort());
+  assert.equal((await runtime.ledger.get(implementing.id)).reason, 'pipeline_removed');
+  assert.equal((await runtime.ledger.get(landed.id)).status, 'landed', 'finished work stays as it was');
+  assert.equal((await runtime.ledger.get(planned.id)).status, 'planning', 'owner plans are not touched');
+  assert.deepEqual(await retirePipelineItems(runtime), [], 'once');
 });
 
 test('survey context says when landed work is not yet on the base branch', async () => {
   const { workSoFarText } = await import('../src/briefs.ts');
-  const base = { owner: 'clippy', workflow: 'change', implementations: [], verdicts: [], replans: 0, hires: [], humanNotes: [], createdAt: '', updatedAt: '' };
+  const base = { owner: 'clippy', workflow: 'desk-publication', implementations: [], verdicts: [], replans: 0, hires: [], humanNotes: [], createdAt: '', updatedAt: '' };
   const proposal = { title: 'Alignment tests', goal: 'g', rationale: 'r', acceptance: ['a'], size: 'small' as const };
+  const publication = { url: 'https://github.com/x/y/pull/2', branch: 'owners/w-3', by: 'clippy', at: '', state: 'open' as const };
   const text = workSoFarText([
     { ...base, id: 'w-1', proposal, status: 'landed', branch: 'owners/w-1' },
     { ...base, id: 'w-2', proposal: { ...proposal, title: 'Clipboard note' }, status: 'rejected', reason: 'busywork' },
+    { ...base, id: 'w-3', proposal: { ...proposal, title: 'Cursor fix' }, status: 'landed', publication },
   ]);
-  assert.match(text, /Alignment tests \[w-1\]: landed on local branch owners\/w-1, NOT yet on the base branch/);
+  assert.match(text, /Alignment tests \[w-1\]: landed on owners\/w-1, NOT on the base branch/);
+  assert.match(text, /Cursor fix \[w-3\]: published as https:\/\/github.com\/x\/y\/pull\/2 \(open\)/);
   assert.match(text, /Clipboard note \[w-2\]: plan rejected by a person: busywork/);
 });
 
@@ -236,13 +244,27 @@ test('the starter a new person begins from loads and its models belong to known 
   assert.ok(example?.persona);
   familyOf(declarations.families, example.model);
   for (const freelancer of declarations.freelancers.values()) for (const model of freelancer.models) familyOf(declarations.families, model);
-  assert.ok(declarations.workflows.get('change'));
+  assert.deepEqual([...declarations.freelancers.keys()].sort(), ['implementation', 'review']);
 });
 
-test('status shows recent outcomes, and landed work that is not yet a PR waits on the person', async () => {
-  const { awaitingPublish, statusText } = await import('../src/desk.ts');
+test('a config that still declares the retired planner and workflows loads, and its workflow lines are ignored', async () => {
+  const { cp, writeFile: write, mkdir: makeDirectory, readFile: read } = await import('node:fs/promises');
+  const config = await mkdtemp(join(tmpdir(), 'owners-retired-config-'));
+  await cp('examples/starter', config, { recursive: true });
+  await write(join(config, 'freelancers', 'planner.yaml'), 'craft: planning\nrubric: rubrics/planning.md\nmodels: [openai/gpt-5.6-sol]\n');
+  await makeDirectory(join(config, 'workflows'));
+  await write(join(config, 'workflows', 'change.yaml'), 'id: change\n');
+  const owner = join(config, 'owners', 'example.yaml');
+  await write(owner, `${await read(owner, 'utf8')}workflow: change\n`);
+  const declarations = await loadDeclarations(config);
+  assert.ok(!declarations.freelancers.has('planning' as never));
+  assert.equal('workflow' in declarations.owners.get('example')!, false);
+});
+
+test('status shows recent outcomes of finished work', async () => {
+  const { statusText } = await import('../src/desk.ts');
   const now = new Date('2026-09-23T12:00:00Z');
-  const base = { owner: 'murbella', workflow: 'change', implementations: [], verdicts: [], replans: 0, hires: [], humanNotes: [], createdAt: '2026-09-23T09:30:00Z', updatedAt: '2026-09-23T09:40:00Z' };
+  const base = { owner: 'murbella', workflow: 'desk-publication', implementations: [], verdicts: [], replans: 0, hires: [], humanNotes: [], createdAt: '2026-09-23T09:30:00Z', updatedAt: '2026-09-23T09:40:00Z' };
   const proposal = { title: 'Fix vscode sysext', goal: 'g', rationale: 'r', acceptance: ['a'], size: 'small' as const };
   const landed = { ...base, id: 'w-1', proposal, status: 'landed' as const, branch: 'owners/w-1', landedCommit: 'a077b107d06000bd' };
   const rebase = { ...landed, id: 'w-2', rebaseOf: { itemId: 'w-0', branch: 'owners/w-0', prUrl: 'https://github.com/x/y/pull/1', previousHead: 'abc' } };
@@ -250,10 +272,9 @@ test('status shows recent outcomes, and landed work that is not yet a PR waits o
   const old = { ...landed, id: 'w-4', updatedAt: '2026-09-01T00:00:00Z' };
   const text = statusText([old, landed, rebase, failed], [], now);
   assert.match(text, /^Open: nothing\./);
-  assert.match(text, /w-1: landed on owners\/w-1 \(a077b107d060\); not yet a PR: waiting on the person to publish it/);
+  assert.match(text, /w-1: landed on owners\/w-1 \(a077b107d060\); no PR/);
   assert.match(text, /w-3: failed: MessageAbortedError: Aborted: Deploy action/);
   assert.doesNotMatch(text, /w-4/);
-  assert.deepEqual([landed, rebase, failed].filter(awaitingPublish).map(item => item.id), ['w-1']);
 });
 
 test('a deliverable with a list sent as a JSON string is repaired; a missing field is not invented', async () => {
@@ -402,11 +423,11 @@ test('owners hear how their work went: changes are journaled and queued for the 
   const runtime = await Runtime.open({ declarations: 'packages/owners/test/fixtures/owners', state: await mkdtemp(join(tmpdir(), 'owners-notices-')) });
   await runtime.notebook('clippy').ensure('# Charter\n');
   const proposal = { title: 'Fix it', goal: 'g', rationale: 'r', acceptance: ['a'], size: 'small' as const };
-  const item = await runtime.ledger.create('clippy', 'change', proposal, { origin: { sessionID: 'ses_1', directory: '/desks/clippy' } });
+  const item = await runtime.ledger.create('clippy', 'owner-change', proposal, { origin: { sessionID: 'ses_1', directory: '/desks/clippy' } });
   const chatDirectory = async (ownerId: string) => `/desks/${ownerId}`;
 
   assert.deepEqual(await noticeWorkChanges(runtime, chatDirectory), [], 'the first run records the present and replays nothing');
-  await runtime.ledger.save({ ...item, status: 'planning' });
+  await runtime.ledger.save({ ...item, status: 'working' });
   assert.deepEqual(await noticeWorkChanges(runtime, chatDirectory), [], 'progress the owner need not act on is not a notice');
   await runtime.ledger.save({ ...item, status: 'failed', reason: 'MessageAbortedError: Aborted' });
   const [notice] = await noticeWorkChanges(runtime, chatDirectory);
@@ -425,10 +446,9 @@ test('owners hear how their work went: changes are journaled and queued for the 
   assert.equal(describeChange(published, 'landed|open'), undefined);
 });
 
-test('an owner reads its charter as the person wrote it now, and briefs carry only what each role needs', async () => {
-  const { mkdtemp: temp, writeFile: write, readFile: read, mkdir: makeDirectory } = await import('node:fs/promises');
+test('an owner reads its charter as the person wrote it now', async () => {
+  const { mkdtemp: temp, readFile: read } = await import('node:fs/promises');
   const { Notebook } = await import('@onionsoup/owners');
-  const { implementBrief, reviewBrief } = await import('../src/briefs.ts');
   const root = await temp(join(tmpdir(), 'owners-charter-'));
   let charter = '# Charter: v1\n\n- the person merges\n';
   const notebook = new Notebook(root, 'leto', async () => charter);
@@ -440,18 +460,6 @@ test('an owner reads its charter as the person wrote it now, and briefs carry on
   await notebook.ensure(charter);
   assert.match(await read(join(root, 'leto', 'CHARTER.md'), 'utf8'), /v2/, 'the copy follows the person\'s edits');
 
-  await makeDirectory(join(root, 'leto'), { recursive: true });
-  await write(join(root, 'leto', 'FAILURES.md'), '# Failures\n\n## Aborted items\n\nthe implementer looped on echo\n');
-  await write(join(root, 'leto', 'WISDOM.md'), '# Wisdom\n\n- tests live in packages/*/test\n');
-  const knowledge = await notebook.read(['MAP', 'WISDOM', 'decisions']);
-  const item = { id: 'w-1', owner: 'leto', workflow: 'change', status: 'implementing' as const, implementations: [], verdicts: [], replans: 0, hires: [], humanNotes: [], createdAt: '', updatedAt: '',
-    proposal: { title: 'Isolate config', goal: 'mask the host config', rationale: 'Reopening: the last implementer looped on echo', acceptance: ['config unreachable'], size: 'small' as const } };
-  const plan = { summary: 's', steps: [{ description: 'do it', files: ['sandbox.ts'] }], tests: ['t'], risks: [], outOfScope: [], questionsForOwner: [] };
-  const brief = implementBrief(item, plan as never, knowledge, 'rubric');
-  assert.match(brief, /mask the host config/);
-  assert.match(brief, /tests live in packages/);
-  assert.doesNotMatch(brief, /looped on echo/, 'neither the rationale nor the failures log reaches the implementer');
-  assert.match(reviewBrief(item, plan as never, 'diff', [], knowledge, 'rubric'), /Why: Reopening/, 'the reviewer weighs the purpose');
 });
 
 test('long work runs beside the tick: once per key, within a cap, and a CLI tick can wait for it', async () => {
@@ -701,14 +709,14 @@ test('a sandboxed process cannot read or write the host opencode config, and a r
     await mkdir(sessionRoot, { recursive: true });
     const directory = await mkdtemp(join(sessionRoot, 'owners-smoke-'));
     const result = await freelancers.hire({
-      role: 'planner',
+      role: 'reviewer',
       model: process.env.ONIONSOUP_REAL_SANDBOX_SMOKE_MODEL ?? 'github-copilot/claude-sonnet-5',
       directory,
       title: 'sandbox smoke',
       brief: 'Say "isolated" in the "summary" field and nothing else.',
       schema: (await import('zod')).z.object({ summary: (await import('zod')).z.string() }),
     });
-    assert.match(result.value.summary, /isolated/i, 'a real planner hire must still complete through the explicitly loaded plugin');
+    assert.match(result.value.summary, /isolated/i, 'a real reviewer hire must still complete through the explicitly loaded plugin');
   } finally {
     await rm(sentinelPath, { force: true });
     await rm(writeAttemptPath, { force: true });

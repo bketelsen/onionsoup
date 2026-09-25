@@ -1,3 +1,2 @@
 craft: implementation
-rubric: rubrics/implementation.md
 models: [github-copilot/claude-sonnet-5, openai/gpt-5.6-sol]

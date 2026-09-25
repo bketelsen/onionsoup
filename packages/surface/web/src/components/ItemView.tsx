@@ -46,7 +46,7 @@ export function ItemView({ itemId }: { itemId: string }) {
         {waiting && (
           <div className="flex flex-col gap-1">
             <Decision entry={waiting} compact onDone={() => void load()} />
-            {waiting.kind === 'plan' && <span className="typography-micro text-muted-foreground">The plan is below; your note goes with an approval, and is required to send it back or reject it.</span>}
+            {waiting.kind === 'plan' && <span className="typography-micro text-muted-foreground">The plan is below; your note goes with an approval, and is required to send it back.</span>}
           </div>
         )}
         <WorkRecovery item={item} onDone={() => void load()} />
@@ -125,6 +125,5 @@ function waitingOn(item: WorkItem): InboxEntry | undefined {
   const base = { id: item.id, owner: item.owner, title: item.proposal.title, at: item.updatedAt };
   if (item.status === 'awaiting-plan-approval') return { ...base, kind: 'plan', detail: '' };
   if (item.status === 'awaiting-push-approval') return { ...base, kind: 'push', detail: item.rebaseOf?.prUrl ?? '' };
-  if (item.status === 'landed' && !item.publication && !item.rebaseOf) return { ...base, kind: 'publish', detail: `Landed on ${item.branch}; publishing opens a draft PR.` };
   return undefined;
 }

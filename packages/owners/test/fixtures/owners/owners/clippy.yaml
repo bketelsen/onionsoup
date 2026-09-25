@@ -1,7 +1,7 @@
 id: clippy
+persona: { name: Clippy, title: Keeper of the test tool, source: "Dune", voice: "Brief.", icon: terminal }
 domain: { kind: git-repository, name: example/clippy, remote: https://example.invalid/clippy.git, baseBranch: main, verify: [[go, test, ./...]] }
 model: github-copilot/claude-sonnet-5
-workflow: change
 duties:
   - { id: prs, kind: maintain-prs, instructions: "Keep published PRs mergeable." }
 reportsTo: odrade

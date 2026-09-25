@@ -11,7 +11,7 @@ export type PendingQuestion = QuestionRequest;
 export type PendingPermission = PermissionRequest;
 
 export interface InboxEntry {
-  kind: 'plan' | 'push' | 'publish' | 'create' | 'delete' | 'permission' | 'question' | 'attention' | 'request-recovery' | 'initiative';
+  kind: 'plan' | 'push' | 'create' | 'delete' | 'permission' | 'question' | 'attention' | 'request-recovery' | 'initiative';
   id: string; owner: string; title: string; detail: string; at?: string; sessionID?: string;
   attentionStatus?: string;
   permission?: PendingPermission; question?: PendingQuestion;

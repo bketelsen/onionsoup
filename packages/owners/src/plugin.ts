@@ -11,7 +11,7 @@ import { tool, type Plugin } from '@opencode-ai/plugin';
 import { directReports, hasIncus, isDirectReport, managerOf, repositoryShortName, type OwnerDeclaration, type Persona } from './declarations.ts';
 import { askOwner, formatAnswer } from './ask.ts';
 import { requestPublish } from './brokering.ts';
-import { proposeDeskChanges } from './desk-changes.ts';
+import { checkoutPullRequest, proposeDeskChanges } from './desk-changes.ts';
 import { initiativeSection, initiativesText, initiativeText, itemText, reportsWorkText, statusText } from './desk.ts';
 import { parseInitiativeDraft } from './initiatives.ts';
 import {
@@ -145,13 +145,13 @@ How you work with the person in this chat:
 - You own ${domainSummary(owner)}.${owner.domain.kind === 'repository-group' ? ` Your desk has one worktree per repository (./${owner.domain.repositories.map(repository => repositoryShortName(repository.name)).join(', ./')}); name the repository when you open work or propose changes.` : ''} Reach for your onionsoup tools first:
   onionsoup_status (your open work and anything waiting on the person), onionsoup_notebook (your full notebook),
   onionsoup_evidence (what other owners recorded), onionsoup_ask (ask another owner a question about its domain),
-  onionsoup_open_work (hand a change to freelancers with a plan the person approves), onionsoup_request_work (ask another
+  onionsoup_submit_plan (a plan the person approves; it then runs in its own session), onionsoup_request_work (ask another
   owner to change its repository), onionsoup_propose_changes (turn
   your desk edits into a verified, reviewed PR), onionsoup_friction (report reproducible engine behavior that fails expectations),
   onionsoup_record_decision and onionsoup_retract. Never commit, push or
   merge with git yourself; onionsoup_propose_changes does that with verification and review. When something belongs to another owner's domain, ask them instead of guessing or probing it yourself.
-- For substantial changes, prefer opening work so freelancers plan, implement and review it with the person's gates. For
-  small, clearly requested actions you may act directly; anything outside your safe commands asks the person first.
+- For substantial changes, plan with the person and submit the plan. For small, clearly requested changes, edit your
+  desk and propose them directly; anything outside your safe commands asks the person first.
 - Record a decision only when the person states one or explicitly agrees to your proposal, and quote their words. A
   watcher also notes decisions after each exchange; you do not need to record everything.
 - Your notebook, current work and recent journal activity are appended to your context each turn. Never put secrets into notes or files.${verify.length ? `
@@ -680,7 +680,7 @@ const server: Plugin = async (input, options) => {
           title: tool.schema.string(),
           summary: tool.schema.string().describe('What changed and why, for the reviewer and the PR'),
           repository: tool.schema.string().optional().describe('Only if you own several repositories: which desk to propose from (owner/name)'),
-          item: tool.schema.string().optional().describe('The approved plan these changes carry out (its work item id), when there is one'),
+          item: tool.schema.string().optional().describe('The approved plan these changes carry out, or the work item whose open PR they repair (after onionsoup_checkout_pr)'),
         },
         async execute(args, context) {
           const owner = requireOwner(context.agent);
@@ -688,6 +688,15 @@ const server: Plugin = async (input, options) => {
           const origin = { sessionID: context.sessionID, directory: context.directory };
           const result = await proposeDeskChanges(runtime, owner.id, { ...args, origin });
           return `${result.outcome}: ${result.summary}`;
+        },
+      }),
+      onionsoup_checkout_pr: tool({
+        description: 'Put your desk on the head of one of your open PRs (by its work item), to fix it, for example when its CI fails. Your desk must have no uncommitted changes. Then fix, verify and propose with onionsoup_propose_changes with the same item: host code reviews the fix and pushes it onto that PR.',
+        args: { item: tool.schema.string().describe('The work item whose PR you repair') },
+        async execute(args, context) {
+          const owner = requireOwner(context.agent);
+          const desk = await checkoutPullRequest(runtime, owner.id, args.item);
+          return `Your desk ${desk.path} is on ${desk.pullRequest} at ${desk.head.slice(0, 12)}. Fix it there, then propose with item "${args.item}".`;
         },
       }),
       onionsoup_submit_plan: tool({
@@ -752,27 +761,6 @@ const server: Plugin = async (input, options) => {
           const owner = requireOwner(context.agent);
           const request = await requestPublish(runtime, owner.id, args.site, args.purpose);
           return `Opened ${request.id}. The host owner decides, then it is published (a standing grant may pre-approve it) and verified; check onionsoup_status.`;
-        },
-      }),
-      onionsoup_open_work: tool({
-        description: 'Hand a change to freelancers: opens a work item that is planned, approved by the person, implemented and reviewed.',
-        args: {
-          title: tool.schema.string(),
-          goal: tool.schema.string(),
-          rationale: tool.schema.string(),
-          acceptance: tool.schema.array(tool.schema.string()).min(1),
-          size: tool.schema.enum(['small', 'medium']),
-          repository: tool.schema.string().optional().describe('Only if you own several repositories: which one (owner/name)'),
-        },
-        async execute(args, context) {
-          const owner = requireOwner(context.agent);
-          if (!owner.workflow) return `${owner.persona!.name} has no workflow for change work; raise it with the person instead.`;
-          runtime.repositoryOwner(owner.id, args.repository);
-          const item = await runtime.ledger.create(owner.id, owner.workflow, args, { origin: { sessionID: context.sessionID, directory: context.directory } });
-          const notebook = runtime.notebook(owner.id);
-          await notebook.journal({ kind: 'work-opened', workItem: item.id, note: args.title, session: context.sessionID });
-          await commitQuietly(notebook, `journal ${item.id}`);
-          return `Opened ${item.id}. The daemon plans it next; the person approves the plan before anything is implemented.`;
         },
       }),
       onionsoup_record_decision: tool({

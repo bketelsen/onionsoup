@@ -86,7 +86,9 @@ async function start(
 test('the surface lists owners with what waits on the person, and chat permissions land in the inbox', async () => {
   const { runtime, server, call } = await start();
   try {
-    await runtime.ledger.create('clippy', 'change', { title: 'Fix it', goal: 'g', rationale: 'r', acceptance: ['a'], size: 'small' }, { status: 'awaiting-plan-approval' });
+    const clippy = runtime.declarations.owners.get('clippy')!;
+    runtime.declarations.owners.set('clippy', { ...clippy, persona: undefined });
+    await runtime.ledger.create('clippy', 'owner-change', { title: 'Fix it', goal: 'g', rationale: 'r', acceptance: ['a'], size: 'small' }, { status: 'awaiting-plan-approval', request: 'r-1' });
     const { status, body } = await call('GET', '/api/state');
     assert.equal(status, 200);
     const inbox = body.inbox as { kind: string; owner: string; title: string }[];
@@ -134,9 +136,9 @@ for (const [method, code] of [['permissions', 'permission_list_failed'], ['quest
       api.questions = failWhile(api.questions, () => hasFailure && method === 'questions');
     });
     try {
-      const item = await runtime.ledger.create('clippy', 'change', {
+      const item = await runtime.ledger.create('clippy', 'owner-change', {
         title: 'Needs approval', goal: 'g', rationale: 'r', acceptance: ['a'], size: 'small',
-      }, { status: 'awaiting-plan-approval' });
+      }, { status: 'awaiting-plan-approval', request: 'r-1' });
       const failed = await call('GET', '/api/state');
       assert.equal(failed.status, 200);
       assert.deepEqual(failed.body.inboxErrors, [{ owner: 'homelab', code }]);
@@ -191,13 +193,15 @@ test('HTTP friction views show bounded safe records and the originating chat wit
 });
 
 test('chats go to the owner\'s directory with its persona as the agent; bad input is refused', async () => {
-  const { server, call, calls } = await start();
+  const { server, call, calls, runtime } = await start();
   try {
     assert.equal((await call('POST', '/api/owners/bellonda/sessions/ses_1/prompt', { text: 'publish the wiki' })).status, 200);
     assert.deepEqual(calls.at(-1), ['prompt', '/desks/bellonda', 'ses_1', 'Bellonda', 'publish the wiki']);
     assert.equal((await call('POST', '/api/owners/bellonda/permissions/per_1', { reply: 'once' })).status, 200);
     assert.deepEqual(calls.at(-1), ['permission', '/desks/bellonda', 'per_1', 'once']);
     assert.equal((await call('POST', '/api/owners/bellonda/permissions/per_1', { reply: 'sure' })).status, 400);
+    const clippy = runtime.declarations.owners.get('clippy')!;
+    runtime.declarations.owners.set('clippy', { ...clippy, persona: undefined });
     assert.match(String((await call('POST', '/api/owners/clippy/sessions', {})).body.error), /no_chat: clippy/);
     assert.equal((await call('GET', '/api/owners/nobody/sessions')).status, 404);
     assert.match(String((await call('POST', '/api/decide', { action: 'launch', id: 'x' })).body.error), /unknown_decision|not found|ENOENT/);
@@ -278,7 +282,7 @@ test('auto-accept never answers a plan approval, and only delegated plans wait i
 test('a work item\'s hires are found by title in opencode\'s store, and read from it', async () => {
   const { runtime, server, call } = await start();
   try {
-    const item = await runtime.ledger.create('clippy', 'change', { title: 'Fix it', goal: 'g', rationale: 'r', acceptance: ['a'], size: 'small' });
+    const item = await runtime.ledger.create('clippy', 'rebase', { title: 'Fix it', goal: 'g', rationale: 'r', acceptance: ['a'], size: 'small' });
     await runtime.ledger.save({ ...item, id: 'w-1' });
     const sessions = (await call('GET', '/api/items/w-1/sessions')).body as unknown as { id: string; title: string }[];
     assert.deepEqual(sessions.map(session => session.title), ['w-1: plan', 'w-1: implement 1']);
@@ -295,7 +299,7 @@ test('person recovery decisions resume the exact stage, retry failures and cance
   try {
     await runtime.notebook('clippy').ensure('# Charter\n');
     const proposal = { title: 'Recover', goal: 'g', rationale: 'r', acceptance: ['a'], size: 'small' as const };
-    const item = await runtime.ledger.create('clippy', 'change', proposal, { status: 'interrupted', resumeStatus: 'reviewing' });
+    const item = await runtime.ledger.create('clippy', 'rebase', proposal, { status: 'interrupted', resumeStatus: 'reviewing' });
     assert.equal((await call('POST', '/api/decide', { action: 'resume-item', id: item.id })).status, 200);
     assert.equal((await runtime.ledger.get(item.id)).status, 'reviewing');
     await runtime.ledger.update(item.id, current => ({ ...current, status: 'failed', resumeStatus: 'landing' }));
@@ -309,27 +313,6 @@ test('person recovery decisions resume the exact stage, retry failures and cance
     assert.equal(cancelled.status, 'cancelled');
     assert.equal(cancelled.humanNotes.at(-1)?.by, 'tester');
     assert.equal(cancelled.reason, 'Keep the existing head');
-  } finally {
-    server.close();
-  }
-});
-
-test('the person lands a verified item over its reviewer findings, with a note', async () => {
-  const { runtime, server, call } = await start();
-  try {
-    await runtime.notebook('clippy').ensure('# Charter\n');
-    const proposal = { title: 'Converge', goal: 'g', rationale: 'r', acceptance: ['a'], size: 'small' as const };
-    const item = await runtime.ledger.create('clippy', 'change', proposal, {
-      status: 'failed', reason: 'revision_limit_reached',
-      implementations: [{ report: { summary: 's', filesChanged: [], deviationsFromPlan: [] }, diffStat: 'x', verification: [] }],
-      verdicts: [{ decision: 'revise', summary: 'More', findings: [{ severity: 'minor', file: 'x', issue: 'wording', suggestion: 'reword' }] }],
-    });
-    assert.notEqual((await call('POST', '/api/decide', { action: 'land-over-findings', id: item.id })).status, 200, 'a note is required');
-    assert.equal((await call('POST', '/api/decide', { action: 'land-over-findings', id: item.id, reason: 'Wording is fine' })).status, 200);
-    const overridden = await runtime.ledger.get(item.id);
-    assert.equal(overridden.status, 'landing');
-    assert.equal(overridden.humanNotes.at(-1)?.kind, 'override');
-    assert.ok((await runtime.ledger.list()).some(entry => entry.status === 'proposed' && entry.proposal.goal.includes('wording')));
   } finally {
     server.close();
   }
@@ -422,15 +405,15 @@ test('a report plan under its manager grant says so in the inbox; without a gran
     ] });
     await submitInitiative(runtime, 'odrade', drafted.id);
     await approveInitiative(runtime, drafted.id, 'person');
-    const plan = { summary: 'The plan', steps: [{ description: 's', files: [] }], tests: ['t'], risks: [], outOfScope: [], questionsForOwner: [] };
-    const assigned = (owner: string, assignment: string) => runtime.ledger.create(owner, 'change', proposal, {
-      status: 'awaiting-plan-approval', plan, assignment: { initiative: drafted.id, assignment },
+    const planDocument = { markdown: '1. Change core', digest: 'd' };
+    const assigned = (owner: string, assignment: string) => runtime.ledger.create(owner, 'owner-change', proposal, {
+      status: 'awaiting-plan-approval', planDocument, assignment: { initiative: drafted.id, assignment },
     });
     const clippyItem = await assigned('clippy', 'core');
     const bellondaItem = await assigned('bellonda', 'wiki');
     const inbox = (await call('GET', '/api/state')).body.inbox as { kind: string; id: string; detail: string }[];
-    assert.equal(inbox.find(entry => entry.id === clippyItem.id)?.detail, 'Odrade reviews under standing grant. The plan');
-    assert.equal(inbox.find(entry => entry.id === bellondaItem.id)?.detail, 'The plan');
+    assert.equal(inbox.find(entry => entry.id === clippyItem.id)?.detail, 'Odrade reviews under standing grant. Change core');
+    assert.equal(inbox.find(entry => entry.id === bellondaItem.id)?.detail, 'Change core');
   } finally {
     server.close();
   }

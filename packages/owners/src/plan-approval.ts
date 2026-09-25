@@ -4,7 +4,7 @@ import type { WorkItem } from './ledger.ts';
 import { openOwnerSession, type OwnerSessionClient } from './owner-sessions.ts';
 import { isDelegated, PLAN_APPROVAL_PERMISSION, recordPlanFeedback } from './plan-work.ts';
 import type { Runtime } from './runtime.ts';
-import { approvePlan } from './workflow.ts';
+import { approvePlan } from './work-recovery.ts';
 
 /**
  * The person approves an owner's plan in the chat it was submitted from, through opencode's permission prompt. The

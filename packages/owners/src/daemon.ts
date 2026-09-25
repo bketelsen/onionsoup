@@ -13,11 +13,10 @@ import { wake } from './owner.ts';
 import { refreshPublications } from './rebase.ts';
 import { requestRunnerIsAlive, type ResourceRequest } from './requests.ts';
 import type { Runtime } from './runtime.ts';
-import { advance, isRunnable } from './workflow.ts';
+import { advance, isRunnable, retirePipelineItems } from './work-recovery.ts';
 
 export const DAEMON_LIMITS = {
   tickMs: 60_000, shutdownGraceMs: 5_000, parallelItems: 4, parallelDuties: 2, parallelMemory: 1, parallelRequests: 2,
-  parallelReviews: 1,
 };
 
 /**
@@ -62,12 +61,10 @@ const requestOwners = new Set<string>();
 const items = new Background(DAEMON_LIMITS.parallelItems);
 const duties = new Background(DAEMON_LIMITS.parallelDuties);
 const memories = new Background(DAEMON_LIMITS.parallelMemory);
-/** Managers' plan reviews under approve-plans grants. */
-const reviews = new Background(DAEMON_LIMITS.parallelReviews);
 
 /** Wait for background work the ticks started. */
 export async function drain() {
-  await Promise.all([items.drain(), duties.drain(), memories.drain(), requests.drain(), reviews.drain()]);
+  await Promise.all([items.drain(), duties.drain(), memories.drain(), requests.drain()]);
 }
 
 const UNIT_MS: Record<string, number> = { m: 60_000, h: 3_600_000, d: 86_400_000 };
@@ -241,7 +238,7 @@ export async function tick(runtime: Runtime, log: TickLog) {
     log.error('requests', error);
   }
   try {
-    await superviseInitiatives(runtime, { onError: log.error, startReview: (key, review) => reviews.start(key, review) });
+    await superviseInitiatives(runtime, { onError: log.error });
   } catch (error) {
     log.error('initiatives', error);
   }
@@ -267,6 +264,8 @@ export async function tick(runtime: Runtime, log: TickLog) {
 export async function daemon(runtime: Runtime, log: TickLog, signal: AbortSignal) {
   const stranded = await runtime.ledger.markInterrupted();
   if (stranded) log.error('startup', new Error(`${stranded} work items were interrupted by the last stop`));
+  const retired = await retirePipelineItems(runtime);
+  if (retired.length) log.error('startup', new Error(`pipeline_removed: ${retired.join(', ')} failed; plan them again if they are still wanted`));
   while (!signal.aborted) {
     await tick(runtime, log);
     await sleep(DAEMON_LIMITS.tickMs, undefined, { signal }).catch(() => {});

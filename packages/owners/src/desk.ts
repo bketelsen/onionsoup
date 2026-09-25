@@ -27,13 +27,6 @@ function isOpenWork(item: WorkItem) {
   return !DONE.has(item.status) || item.publication?.state === 'open';
 }
 
-/** Landed on a local branch but not yet a PR: the person publishes it. Rebases update an existing PR instead. */
-export function awaitingPublish(item: WorkItem) {
-  return item.status === 'landed' && !item.publication && !item.rebaseOf;
-}
-
-
-
 async function journal(directory: string) {
   const files = (await readdir(join(directory, 'journal')).catch(() => [])).filter(name => name.endsWith('.jsonl')).sort();
   const lines = (await Promise.all(files.map(file => readFile(join(directory, 'journal', file), 'utf8')))).join('').split('\n').filter(Boolean);
@@ -81,7 +74,6 @@ export async function deskState(runtime: Runtime, query: DeskQuery) {
   const requests = (await runtime.requests.list()).filter(request => request.from === owner.id || request.to === owner.id);
   const pending = [
     ...items.filter(item => item.status === 'awaiting-plan-approval').map(item => ({ kind: 'plan', id: item.id, title: item.proposal.title, detail: item.plan?.summary ?? item.proposal.goal })),
-    ...items.filter(awaitingPublish).map(item => ({ kind: 'publish', id: item.id, title: item.proposal.title, detail: `Landed on ${item.branch}; publishing opens a draft PR.` })),
     ...items.filter(item => item.status === 'awaiting-push-approval').map(item => ({ kind: 'push', id: item.id, title: item.proposal.title, detail: item.rebaseOf?.prUrl ?? '' })),
     ...requests.filter(request => request.status === 'awaiting-create-approval').map(request => ({
       kind: 'create', id: request.id, detail: request.ask.purpose,
@@ -115,7 +107,7 @@ function outcome(item: WorkItem) {
   if (item.status === 'landed') {
     if (item.publication) return `landed; PR ${item.publication.url} (${item.publication.state})`;
     if (item.rebaseOf) return `landed; updated ${item.rebaseOf.prUrl}`;
-    return `landed on ${item.branch} (${item.landedCommit?.slice(0, 12)}); not yet a PR: waiting on the person to publish it`;
+    return `landed on ${item.branch} (${item.landedCommit?.slice(0, 12)}); no PR`;
   }
   return `${item.status}${item.reason ? `: ${item.reason}` : ''}`;
 }
@@ -151,7 +143,6 @@ export function itemText(item: WorkItem) {
 const ASSIGNMENT_WORDS: Partial<Record<AssignmentState, string>> = {
   'not-dispatched': 'not dispatched yet',
   'plan-waiting': 'plan waiting for approval',
-  'awaiting-publish': 'landed; waiting on the person to publish it',
   'awaiting-merge': 'PR open; waiting on the person to merge it',
   'awaiting-person': 'waiting on the person',
   blocked: 'interrupted; waiting on the person',

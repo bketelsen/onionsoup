@@ -1,8 +1,8 @@
 import { join } from 'node:path';
 import { z } from 'zod';
 import {
-  approveCreate, approveDelete, approvePlan, approvePush, awaitingPublish, chatDirectory, denyRequest, deskState, describeAsk,
-  domainSummary, itemText, publish, rejectPlan, revisePlan, resumeItem, retryItem, landOverFindings, cancelItem, memoryFingerprint, type ResourceRequest, type Runtime,
+  approveCreate, approveDelete, approvePlan, approvePush, chatDirectory, denyRequest, deskState, describeAsk,
+  domainSummary, itemText, revisePlan, resumeItem, retryItem, cancelItem, memoryFingerprint, type ResourceRequest, type Runtime,
   listAttention, changeAttention, recoverRequest, reconcileRequest,
   listFriction, frictionDetail, type FrictionRecord,
   approveInitiative, reviseInitiative, cancelInitiative, initiativeViews, managerOf, planGrantFor,
@@ -41,9 +41,9 @@ function requestRecoveryDetail(request: ResourceRequest) {
 /** Gates asked in chat that only the person answers: auto-accept never approves a plan, a ship or an owner change. */
 const PERSON_GATES = new Set([PLAN_APPROVAL_PERMISSION, 'onionsoup_ship', 'onionsoup_owner_change']);
 
-/** A plan waits in the inbox unless it was asked in the owner's chat, where the person answers it instead. */
+/** Delegated plans wait in the inbox; a plan submitted from the person's chat is answered there instead. */
 function waitsInInbox(item: WorkItem) {
-  return item.status === 'awaiting-plan-approval' && (item.workflow !== OWNER_CHANGE_WORKFLOW || isDelegated(item));
+  return item.status === 'awaiting-plan-approval' && item.workflow === OWNER_CHANGE_WORKFLOW && isDelegated(item);
 }
 
 /** A person's decision on an engine gate, parsed once at the HTTP edge. */
@@ -57,7 +57,7 @@ export const Decision = z.object({
 export type Decision = z.infer<typeof Decision>;
 
 export interface InboxEntry {
-  kind: 'plan' | 'push' | 'publish' | 'create' | 'delete' | 'permission' | 'question' | 'request-recovery' | 'attention' | 'initiative';
+  kind: 'plan' | 'push' | 'create' | 'delete' | 'permission' | 'question' | 'request-recovery' | 'attention' | 'initiative';
   id: string;
   owner: string;
   title: string;
@@ -184,7 +184,6 @@ export class SurfaceState {
       ...initiatives.filter(initiative => initiative.status === 'awaiting-approval').map(initiative => this.initiativeEntry(initiative)),
       ...items.filter(waitsInInbox).map(item => this.planEntry(item, initiatives)),
       ...items.filter(item => item.status === 'awaiting-push-approval').map(item => ({ kind: 'push' as const, id: item.id, owner: item.owner, title: item.proposal.title, detail: item.rebaseOf?.prUrl ?? '', at: item.updatedAt })),
-      ...items.filter(awaitingPublish).map(item => ({ kind: 'publish' as const, id: item.id, owner: item.owner, title: item.proposal.title, detail: `Landed on ${item.branch}; publishing opens a draft PR.`, at: item.updatedAt })),
       ...requests.filter(request => request.status === 'awaiting-create-approval').map(request => ({ kind: 'create' as const, id: request.id, owner: request.to, title: `${request.from} asks: ${describeAsk(request.ask)}`, detail: request.ask.purpose, at: request.updatedAt })),
       ...requests.filter(request => request.status === 'awaiting-delete-approval').map(request => ({ kind: 'delete' as const, id: request.id, owner: request.to, title: `Delete ${request.instance?.remote}:${request.instance?.name}`, detail: request.followUpResult?.summary ?? '', at: request.updatedAt })),
     ];
@@ -238,7 +237,7 @@ export class SurfaceState {
 
   private planEntry(item: WorkItem, initiatives: readonly Initiative[]): InboxEntry {
     const reviewer = this.planReviewer(item, initiatives);
-    const summary = item.plan?.summary ?? item.proposal.goal;
+    const summary = item.proposal.goal;
     return {
       kind: 'plan', id: item.id, owner: item.owner, title: item.proposal.title, at: item.updatedAt,
       detail: reviewer ? `${reviewer} reviews under standing grant. ${summary}` : summary,
@@ -320,15 +319,12 @@ export class SurfaceState {
     const actions: Record<string, () => Promise<string>> = {
       'approve-plan': async () => (await approvePlan(this.runtime, decision.id, by, decision.note)).status,
       'revise-plan': async () => (await revisePlan(this.runtime, decision.id, by, required(decision.note, 'note'))).status,
-      'reject-plan': async () => (await rejectPlan(this.runtime, decision.id, by, required(reason, 'reason'))).status,
       'approve-push': async () => (await approvePush(this.runtime, decision.id, by)).status,
-      'publish': async () => (await publish(this.runtime, decision.id, by)).publication?.url ?? 'published',
       'approve-create': async () => (await approveCreate(this.runtime, decision.id, by, decision.withDelete ?? true)).status,
       'approve-delete': async () => (await approveDelete(this.runtime, decision.id, by)).status,
       'deny-request': async () => (await denyRequest(this.runtime, decision.id, by, reason || 'denied from the surface')).status,
       'resume-item': async () => (await resumeItem(this.runtime, decision.id, by, reason)).status,
       'retry-item': async () => (await retryItem(this.runtime, decision.id, by, reason)).status,
-      'land-over-findings': async () => (await landOverFindings(this.runtime, decision.id, by, reason ?? '')).item.status,
       'cancel-item': async () => (await cancelItem(this.runtime, decision.id, by, required(reason, 'reason'))).status,
       'reconcile-request': async () => (await reconcileRequest(this.runtime, decision.id)).status,
       'retry-request': async () => (await recoverRequest(this.runtime, decision.id, 'retry', by, required(reason, 'reason'))).status,

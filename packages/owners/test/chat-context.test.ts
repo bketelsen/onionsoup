@@ -279,6 +279,8 @@ test('retired and personless owners archive pending notices with a reason instea
   await deliverExchangeNotices(runtime, fake.client);
   assert.equal((await records(runtime, 'pending')).length, 0);
   assert.equal((await records(runtime, 'undeliverable'))[0]!.undeliverableReason, 'owner_retired');
+  const clippy = runtime.declarations.owners.get('clippy')!;
+  runtime.declarations.owners.set('clippy', { ...clippy, persona: undefined });
   await queueExchangeNotice(runtime, 'clippy', 'Legacy personless notice');
   await deliverExchangeNotices(runtime, fake.client);
   assert.ok((await records(runtime, 'undeliverable')).some(notice => notice.undeliverableReason === 'owner_has_no_persona'));

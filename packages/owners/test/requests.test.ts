@@ -184,7 +184,7 @@ test('declined work and failed delegated work escalate to durable actionable att
   assert.equal((await listAttention(runtime)).find(candidate => candidate.id === entry.id)?.decision?.reason, 'Deferred until next month');
   await changeAttention(runtime, entry.id, 'open', 'person', 'Priority changed');
   assert.equal((await listAttention(runtime)).find(candidate => candidate.id === entry.id)?.status, 'open');
-  await assert.rejects(requestWork(runtime, 'homelab', 'moneo', proposal), /owner_has_no_workflow/);
+  await assert.rejects(requestWork(runtime, 'homelab', 'moneo', proposal), /owner_cannot_change: moneo/);
 });
 
 test('a completed recorded NAS job reconciles without an update; missing job evidence stays interrupted', async () => {

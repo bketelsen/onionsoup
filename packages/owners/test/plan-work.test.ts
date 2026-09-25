@@ -10,7 +10,7 @@ import type { ChatOrigin } from '../src/chat-origin.ts';
 import { openNeededSessions, type OwnerSessionClient, type PermissionRule } from '../src/owner-sessions.ts';
 import { PLAN_APPROVAL_PERMISSION, submitPlan } from '../src/plan-work.ts';
 import { Runtime } from '../src/runtime.ts';
-import { approvePlan } from '../src/workflow.ts';
+import { approvePlan } from '../src/work-recovery.ts';
 import { git } from '../src/workspace.ts';
 import { withActiveHooks } from './active-hooks.ts';
 

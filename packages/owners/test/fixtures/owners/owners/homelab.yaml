@@ -7,5 +7,4 @@ incus:
     - { name: minideb, host: 192.0.2.20, allow: [observe, create, delete] }
   images: ["images:debian/13", "images:debian/12"]
 model: openai/gpt-5.6-sol
-workflow: change
 duties: []

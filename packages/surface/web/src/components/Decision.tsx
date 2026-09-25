@@ -7,13 +7,13 @@ import type { InboxEntry, OwnerSummary } from '../types.ts';
 import { Badge, Button, cx, OwnerIcon, timeAgo } from './ui.tsx';
 
 const KIND_LABELS: Record<InboxEntry['kind'], string> = {
-  plan: 'Plan to approve', push: 'Force-push to approve', publish: 'Ready to publish', create: 'Create request', delete: 'Delete request',
+  plan: 'Plan to approve', push: 'Force-push to approve', create: 'Create request', delete: 'Delete request',
   attention: 'Attention', 'request-recovery': 'Request interrupted', initiative: 'Initiative to approve',
   permission: 'Permission', question: 'Question',
 };
 
 const NOTE_PLACEHOLDERS: Partial<Record<InboxEntry['kind'], string>> = {
-  plan: 'Note (sent with approval, required to send back or reject)',
+  plan: 'Note (sent with approval, required to send back)',
   create: 'Reason (for deny)',
   push: 'Reason (required to decline force-push)',
   attention: 'Reason or observed outcome',

@@ -13,7 +13,6 @@ const STATE_CHIPS: Record<PublicAssignment['state'], { label: string; tone: Tone
   requested: { label: 'requested', tone: 'info' },
   working: { label: 'working', tone: 'info' },
   'plan-waiting': { label: 'plan waiting', tone: 'warning' },
-  'awaiting-publish': { label: 'waiting on you to publish', tone: 'warning' },
   'awaiting-merge': { label: 'waiting on you to merge', tone: 'warning' },
   'awaiting-person': { label: 'waiting on you', tone: 'warning' },
   blocked: { label: 'interrupted', tone: 'error' },

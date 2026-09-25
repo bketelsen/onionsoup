@@ -19,7 +19,6 @@ function PlanActions(props: DecisionActionProps) {
   return <>
     <Button variant="primary" disabled={busy} onClick={() => void decide('approve-plan', { note: text || undefined })}>Approve plan</Button>
     <Button disabled={busy || !text.trim()} onClick={() => void decide('revise-plan', { note: text })}>Send back</Button>
-    <Button variant="destructive" disabled={busy || !text.trim()} onClick={() => void decide('reject-plan', { reason: text })}>Reject</Button>
     <ItemLink entry={entry} label="Full plan" />
   </>;
 }
@@ -30,14 +29,6 @@ function PushActions(props: DecisionActionProps) {
     <Button variant="primary" disabled={busy} onClick={() => void decide('approve-push')}>Approve force-push</Button>
     <Button variant="destructive" disabled={busy || !text.trim()}
       onClick={() => void decide('cancel-item', { reason: text.trim() })}>Decline force-push</Button>
-  </>;
-}
-
-function PublishActions(props: DecisionActionProps) {
-  const { entry, busy, decide } = props;
-  return <>
-    <Button variant="primary" disabled={busy} onClick={() => void decide('publish')}>Publish draft PR</Button>
-    <ItemLink entry={entry} label="Details" />
   </>;
 }
 
@@ -113,7 +104,6 @@ function ItemLink({ entry, label }: { entry: InboxEntry; label: string }) {
 const ACTIONS: Record<InboxEntry['kind'], (props: DecisionActionProps) => ReactNode> = {
   plan: PlanActions,
   push: PushActions,
-  publish: PublishActions,
   create: CreateActions,
   delete: DeleteActions,
   permission: PermissionActions,

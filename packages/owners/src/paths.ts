@@ -3,7 +3,7 @@ import { join, resolve } from 'node:path';
 
 /**
  * Where a person's owners and onionsoup's state live. Onionsoup ships the engine; your owners (declarations,
- * charters, freelancers, workflows, rubrics) live in your own config directory, and everything the runtime
+ * charters, freelancer models, model families) live in your own config directory, and everything the runtime
  * writes (notebooks, ledger, checkouts, desks, evidence, tools) lives in its home.
  */
 export function configDirectory() {

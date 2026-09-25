@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { ManagerPlanVerdict, ProposedWork } from './artifacts.ts';
+import { ProposedWork } from './artifacts.ts';
 import { ChatOrigin } from './chat-origin.ts';
 import { withRecordLock } from './record-lock.ts';
 
@@ -38,11 +38,11 @@ export const Assignment = z.object({
 export type Assignment = z.infer<typeof Assignment>;
 
 /**
- * Where an assignment stands, derived from its request and work item (never stored). awaiting-publish and
- * awaiting-merge mean the work waits on the person, since an assignment completes only when its PR merges.
+ * Where an assignment stands, derived from its request and work item (never stored). awaiting-merge means the work
+ * waits on the person, since an assignment completes only when its PR merges.
  */
 export const AssignmentState = z.enum([
-  'cancelled', 'not-dispatched', 'requested', 'working', 'plan-waiting', 'awaiting-publish', 'awaiting-merge',
+  'cancelled', 'not-dispatched', 'requested', 'working', 'plan-waiting', 'awaiting-merge',
   'awaiting-person', 'blocked', 'completed', 'failed',
 ]);
 export type AssignmentState = z.infer<typeof AssignmentState>;
@@ -50,11 +50,17 @@ export type AssignmentState = z.infer<typeof AssignmentState>;
 export const InitiativeStatus = z.enum(['drafting', 'awaiting-approval', 'approved', 'completed', 'failed', 'cancelled']);
 export type InitiativeStatus = z.infer<typeof InitiativeStatus>;
 
-/** A manager's review of one plan (by digest) under a standing approve-plans grant. */
+/**
+ * A step in a manager's review of one plan (by digest): the runtime asked her to review it, she approved it under the
+ * person's standing grant or sent it back, or the runtime left it for the person.
+ */
+export const PlanReviewVerdict = z.enum(['asked', 'approve', 'revise', 'escalate']);
+export type PlanReviewVerdict = z.infer<typeof PlanReviewVerdict>;
+
 export const PlanReview = z.object({
   item: z.string(),
   digest: z.string(),
-  verdict: ManagerPlanVerdict.shape.decision,
+  verdict: PlanReviewVerdict,
   note: z.string(),
   by: z.string(),
   at: z.string(),

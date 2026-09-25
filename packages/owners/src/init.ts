@@ -8,7 +8,7 @@ import { homeDirectory } from './paths.ts';
 
 const run = promisify(execFile);
 
-/** The starter declarations shipped with onionsoup: one example owner, freelancers, a workflow, rubrics. */
+/** The starter declarations shipped with onionsoup: one example owner, its charter, freelancer models and families. */
 function starterDirectory() {
   return resolve(dirname(fileURLToPath(import.meta.url)), '../../../examples/starter');
 }

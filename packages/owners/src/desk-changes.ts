@@ -29,13 +29,13 @@ function hasMergeGrant(owner: RepositoryOwner) {
   return owner.grants.some(grant => grant.to === owner.id && grant.action === 'merge' && (grant.target === owner.domain.name || grant.target === '*'));
 }
 
-function reviewBrief(owner: RepositoryOwner, title: string, summary: string, patch: string, previousReview?: string) {
+function reviewBrief(owner: RepositoryOwner, title: string, summary: string, base: string, patch: string, previousReview?: string) {
   return [
     `You have been hired to review a change ${owner.persona?.name ?? owner.id} made in ${owner.domain.name}. Do not edit anything.`,
     REPOSITORY_REVIEW,
     `<title>${title}</title>`,
     `<what-the-owner-says-it-does>\n${summary}\n</what-the-owner-says-it-does>`,
-    `<diff-against-${owner.domain.baseBranch}>\n${patch}\n</diff-against-${owner.domain.baseBranch}>`,
+    `<diff against="${base}">\n${patch}\n</diff>`,
     previousReview,
     `Approve only if the diff does what the owner says and nothing else, is correct, and keeps to the repository's
 conventions. Revise, with specific findings, otherwise. Replan is not available here; use revise. Only blocker
@@ -69,7 +69,7 @@ async function recordNeedsWork(runtime: Runtime, owner: RepositoryOwner, title: 
   await notebook.journal({ kind: 'attention', note: `desk change "${title}" in ${owner.domain.name}: ${rounds.length} review rounds asked for changes; the person reads the diff and decides` });
 }
 
-/** What an owner proposes from its desk; `item` names the approved plan the changes carry out. */
+/** What an owner proposes from its desk; `item` names the approved plan the changes carry out, or the open PR they repair. */
 export interface DeskProposal {
   title: string;
   summary: string;
@@ -78,13 +78,41 @@ export interface DeskProposal {
   item?: string;
 }
 
-/** A plan item may carry desk changes only while its approved plan is being worked on, and only for its owner. */
-async function planItemFor(runtime: Runtime, ownerId: string, itemId: string) {
+/**
+ * Where reviewed desk changes go: a new PR, the approved plan item they carry out, or an open PR they repair. A repair
+ * is reviewed against the PR's head (the desk was put there with checkoutPullRequest) and pushed onto that PR.
+ */
+type DeskTarget = { kind: 'new' } | { kind: 'plan'; item: WorkItem } | { kind: 'repair'; item: WorkItem; head: string };
+
+function requireWorking(item: WorkItem) {
+  if (item.workflow !== OWNER_CHANGE_WORKFLOW) throw new Error(`not_an_owner_plan: ${item.id} is ${item.workflow} work`);
+  if (item.status !== 'working') throw new Error(`plan_item_not_working: ${item.id} is ${item.status}`);
+}
+
+/** A repair starts from the PR's current head: the desk must still be exactly there, apart from its uncommitted changes. */
+async function repairHead(deskPath: string, item: WorkItem) {
+  await git(deskPath, ['fetch', '-q', 'origin']);
+  const head = (await git(deskPath, ['rev-parse', 'HEAD'])).trim();
+  const prHead = (await git(deskPath, ['rev-parse', `origin/${item.publication!.branch}`])).trim();
+  if (head !== prHead) throw new Error(`desk_not_on_pr: put your desk on ${item.publication!.url} with onionsoup_checkout_pr first`);
+  return head;
+}
+
+async function ownItem(runtime: Runtime, ownerId: string, itemId: string) {
   const item = await runtime.ledger.get(itemId);
-  if (item.owner !== ownerId) throw new Error(`plan_item_not_yours: ${itemId} belongs to ${item.owner}`);
-  if (item.workflow !== OWNER_CHANGE_WORKFLOW) throw new Error(`not_an_owner_plan: ${itemId} is ${item.workflow} work`);
-  if (item.status !== 'working') throw new Error(`plan_item_not_working: ${itemId} is ${item.status}`);
+  if (item.owner !== ownerId) throw new Error(`item_not_yours: ${item.id} belongs to ${item.owner}`);
   return item;
+}
+
+async function deskTarget(deskPath: string, item: WorkItem | undefined): Promise<DeskTarget> {
+  if (!item) return { kind: 'new' };
+  if (item.publication?.state === 'open') return { kind: 'repair', item, head: await repairHead(deskPath, item) };
+  requireWorking(item);
+  return { kind: 'plan', item };
+}
+
+function reviewBase(owner: RepositoryOwner, target: DeskTarget) {
+  return target.kind === 'repair' ? target.head : `origin/${owner.domain.baseBranch}`;
 }
 
 async function verifyDesk(owner: RepositoryOwner, deskPath: string, toolsDirectory: string) {
@@ -98,12 +126,12 @@ interface DeskReview { verdict: Verdict; reviewer: string; patch: string; tree: 
 interface ReviewedDesk extends DeskReview { owner: RepositoryOwner; path: string; verification: Verification[] }
 
 /** Hire the required reviewer from another family, with the previous round when there was one. */
-async function reviewDesk(runtime: Runtime, owner: RepositoryOwner, deskPath: string, proposal: DeskProposal): Promise<DeskReview> {
+async function reviewDesk(runtime: Runtime, owner: RepositoryOwner, deskPath: string, proposal: DeskProposal, base: string): Promise<DeskReview> {
   const rounds = await deskReviewRounds(runtime, owner.id, owner.domain.name);
   await git(deskPath, ['add', '-A', '--intent-to-add']);
-  const patch = (await git(deskPath, ['diff', `origin/${owner.domain.baseBranch}`])).slice(0, DESK_CHANGE_LIMITS.diffChars);
+  const patch = (await git(deskPath, ['diff', base])).slice(0, DESK_CHANGE_LIMITS.diffChars);
   const tree = await snapshotTree(deskPath);
-  const brief = reviewBrief(owner, proposal.title, proposal.summary, patch, await previousReviewSection(deskPath, rounds, tree));
+  const brief = reviewBrief(owner, proposal.title, proposal.summary, base, patch, await previousReviewSection(deskPath, rounds, tree));
   const reviewer = pickModel(runtime.declarations.families, requireFreelancer(runtime.declarations, 'review').models, [runtime.family(owner.model)]);
   const hired = await runtime.hire(owner.id, { role: 'reviewer', model: reviewer.model, directory: deskPath, title: `${owner.id}: review desk change`, brief, schema: Verdict });
   return { verdict: hired.value, reviewer: reviewer.model, patch, tree };
@@ -119,41 +147,65 @@ function publicationFields(desk: ReviewedDesk, proposal: DeskProposal, reviewedH
   };
 }
 
-/** The ledger item that publishes reviewed desk changes: the plan item they carry out, or a new desk publication. */
-async function publicationItem(runtime: Runtime, desk: ReviewedDesk, proposal: DeskProposal) {
-  const reviewedHead = (await git(desk.path, ['rev-parse', 'HEAD'])).trim();
-  const reviewedTree = (await git(desk.path, ['write-tree'])).trim();
-  const fields = publicationFields(desk, proposal, reviewedHead, reviewedTree);
-  if (proposal.item) {
-    return runtime.ledger.update(proposal.item, current => ({
-      ...current, ...fields, proposal: { ...current.proposal, title: proposal.title, goal: proposal.summary },
-    }));
-  }
+function newPublication(runtime: Runtime, desk: ReviewedDesk, proposal: DeskProposal, fields: Partial<WorkItem>) {
   return runtime.ledger.create(desk.owner.id, DESK_WORKFLOW, {
     title: proposal.title, goal: proposal.summary, rationale: 'Reviewed changes from the owner desk',
     acceptance: ['Host verification and cross-family review pass'], size: 'small', repository: proposal.repository,
   }, { ...fields, origin: proposal.origin });
 }
 
+type PublicationItem = (runtime: Runtime, desk: ReviewedDesk, proposal: DeskProposal, fields: Partial<WorkItem>, target: DeskTarget) => Promise<WorkItem>;
+
+/** The ledger item that publishes reviewed desk changes, by where they go. */
+const PUBLICATION_ITEMS: Record<DeskTarget['kind'], PublicationItem> = {
+  new: newPublication,
+  plan: (runtime, _desk, proposal, fields) => runtime.ledger.update(proposal.item!, current => ({
+    ...current, ...fields, proposal: { ...current.proposal, title: proposal.title, goal: proposal.summary },
+  })),
+  repair: (runtime, desk, proposal, fields, target) => {
+    const { item, head } = target as Extract<DeskTarget, { kind: 'repair' }>;
+    const repairOf = { itemId: item.id, branch: item.publication!.branch, prUrl: item.publication!.url, previousHead: head };
+    return newPublication(runtime, desk, proposal, { ...fields, repairOf, origin: item.session ?? item.origin ?? proposal.origin });
+  },
+};
+
+async function publicationItem(runtime: Runtime, desk: ReviewedDesk, proposal: DeskProposal, target: DeskTarget) {
+  const reviewedHead = (await git(desk.path, ['rev-parse', 'HEAD'])).trim();
+  const reviewedTree = (await git(desk.path, ['write-tree'])).trim();
+  const fields = publicationFields(desk, proposal, reviewedHead, reviewedTree);
+  return PUBLICATION_ITEMS[target.kind](runtime, desk, proposal, fields, target);
+}
+
 async function prepareDeskChanges(runtime: Runtime, ownerId: string, proposal: DeskProposal): Promise<DeskChangeResult> {
-  if (proposal.item) await planItemFor(runtime, ownerId, proposal.item);
+  const proposedItem = proposal.item ? await ownItem(runtime, ownerId, proposal.item) : undefined;
   const owner = runtime.repositoryOwner(ownerId, proposal.repository);
   const desk = await ensureDesk(owner, runtime.desksRoot);
+  const target = await deskTarget(desk.path, proposedItem);
   if (!(await git(desk.path, ['status', '--porcelain'])).trim()) return { outcome: 'nothing-to-do', summary: 'The desk has no changes.' };
   await git(desk.path, ['fetch', '-q', 'origin']);
   const { verification, failure } = await verifyDesk(owner, desk.path, runtime.toolsDirectory);
   if (failure) return failure;
   const waiting = waitingForPerson(owner, await deskReviewRounds(runtime, owner.id, owner.domain.name));
   if (waiting) return waiting;
-  const review = await reviewDesk(runtime, owner, desk.path, proposal);
+  const review = await reviewDesk(runtime, owner, desk.path, proposal, reviewBase(owner, target));
   if (effectiveDecision(review.verdict) !== 'approve') {
     await recordNeedsWork(runtime, owner, proposal.title, { at: new Date().toISOString(), reviewer: review.reviewer, ...review.verdict, tree: review.tree });
     return { outcome: 'needs-work', summary: `${review.reviewer} asked for changes; nothing was committed.\n${review.verdict.summary}\n${findingsText(review.verdict.findings)}` };
   }
   await clearDeskReviews(runtime, owner.id, owner.domain.name);
   await git(desk.path, ['add', '-A']);
-  const item = await publicationItem(runtime, { owner, path: desk.path, verification, ...review }, proposal);
-  return continueDeskPublication(runtime, item.id);
+  const published = await publicationItem(runtime, { owner, path: desk.path, verification, ...review }, proposal, target);
+  return continueDeskPublication(runtime, published.id);
+}
+
+/** Put the owner's desk on the head of one of its open PRs, so it can repair it and propose the fix with that item. */
+export async function checkoutPullRequest(runtime: Runtime, ownerId: string, itemId: string) {
+  const item = await runtime.ledger.get(itemId);
+  if (item.owner !== ownerId) throw new Error(`item_not_yours: ${item.id} belongs to ${item.owner}`);
+  if (item.publication?.state !== 'open') throw new Error(`no_open_pr: ${item.id} has no open PR`);
+  const owner = runtime.repositoryFor(item);
+  const desk = await ensureDesk(owner, runtime.desksRoot, `origin/${item.publication.branch}`);
+  return { path: desk.path, head: (await git(desk.path, ['rev-parse', 'HEAD'])).trim(), pullRequest: item.publication.url };
 }
 
 /** The person has read the diff: the next proposal is reviewed afresh, with no earlier rounds and a new budget. */
@@ -238,13 +290,36 @@ const commitDesk: DeskStep = async (_runtime, item) => {
     const message = await git(desk, ['log', '-1', '--format=%B']);
     if (!message.split('\n').includes(`Work-item: ${item.id}`)) throw new Error('desk_head_changed');
   }
-  return { landedCommit: (await git(desk, ['rev-parse', 'HEAD'])).trim(), branch: `owners/${item.id}`, deskPublication: checkpoint(item, 'push') };
+  const branch = item.repairOf?.branch ?? `owners/${item.id}`;
+  return { landedCommit: (await git(desk, ['rev-parse', 'HEAD'])).trim(), branch, deskPublication: checkpoint(item, 'push') };
 };
 
-const pushDesk: DeskStep = async (runtime, item) => {
+const pushNewBranch: DeskStep = async (runtime, item) => {
   await git(runtime.repositoryFor(item).workspace, ['push', '-q', 'origin', `${item.landedCommit}:refs/heads/${item.branch}`]);
   return { deskPublication: checkpoint(item, 'open') };
 };
+
+const RemoteHead = z.object({ state: z.string(), headRefOid: z.string() });
+
+/** A repair goes onto the PR it repairs, and only over the head it was reviewed against; a moved head is refused. */
+const pushRepair: DeskStep = async (runtime, item) => {
+  const target = item.repairOf!;
+  const workspace = runtime.repositoryFor(item).workspace;
+  const { stdout } = await run('gh', ['pr', 'view', target.prUrl, '--json', 'state,headRefOid']);
+  const remote = RemoteHead.parse(JSON.parse(stdout));
+  if (remote.state !== 'OPEN') throw new Error('repair_pr_not_open');
+  const wasPushed = remote.headRefOid === item.landedCommit;
+  if (!wasPushed && remote.headRefOid !== target.previousHead) throw new Error('repair_head_changed');
+  if (!wasPushed) {
+    await git(workspace, ['merge-base', '--is-ancestor', target.previousHead, item.landedCommit!]);
+    await git(workspace, ['push', '-q', `--force-with-lease=${target.branch}:${target.previousHead}`, 'origin', `${item.landedCommit}:refs/heads/${target.branch}`]);
+  }
+  await runtime.ledger.update(target.itemId, source => ({ ...source, landedCommit: item.landedCommit }));
+  const publication = { url: target.prUrl, branch: target.branch, by: item.owner, at: new Date().toISOString(), state: 'open' as const };
+  return { publication, deskPublication: checkpoint(item, 'complete') };
+};
+
+const pushDesk: DeskStep = (runtime, item) => (item.repairOf ? pushRepair : pushNewBranch)(runtime, item);
 
 const PullRequest = z.object({ url: z.string(), state: z.enum(['OPEN', 'MERGED', 'CLOSED']) });
 

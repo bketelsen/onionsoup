@@ -1,3 +1,0 @@
-craft: planning
-rubric: rubrics/planning.md
-models: [openai/gpt-5.6-sol, github-copilot/claude-sonnet-5]

@@ -158,13 +158,14 @@ test('the org tree nests reports under their manager', () => {
   assert.match(html, /Odrade.*<ul[^>]*>.*clippy.*<\/ul>.*Miles Teg/s);
 });
 
-test('a failure at the revision limit offers landing over the findings; other failures do not', () => {
+test('failed work offers a retry, except work of the retired pipeline, which can only be cancelled', () => {
   const failed = (reason: string) => WorkItem.parse({
-    id: 'w-1', owner: 'clippy', workflow: 'change', status: 'failed', reason, createdAt: '', updatedAt: '',
+    id: 'w-1', owner: 'clippy', workflow: 'owner-change', status: 'failed', reason, createdAt: '', updatedAt: '',
     proposal: { title: 't', goal: 'g', rationale: 'r', acceptance: ['a'], size: 'small' },
   });
   const render = (reason: string) => renderToStaticMarkup(createElement(WorkRecovery, { item: failed(reason), onDone: () => {} }));
-  assert.match(render('revision_limit_reached'), /Land over findings/);
-  assert.match(render('revision_limit_reached'), /why to land over the findings/);
-  assert.doesNotMatch(render('verification_failed_after_revisions'), /Land over findings/);
+  assert.match(render('desk_pr_closed'), /Retry failed stage/);
+  assert.doesNotMatch(render('pipeline_removed'), /Retry failed stage/);
+  assert.match(render('pipeline_removed'), /Cancel work/);
+  assert.doesNotMatch(render('desk_pr_closed'), /Land over findings/);
 });

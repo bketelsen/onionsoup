@@ -1,5 +1,5 @@
 import { ProposedWork } from './artifacts.ts';
-import { isDirectReport } from './declarations.ts';
+import { canChange, isDirectReport } from './declarations.ts';
 import { OWNER_CHANGE_WORKFLOW } from './plan-work.ts';
 import type { AssignmentRef } from './initiatives.ts';
 import { PublishDecision, requireStatus, type ResourceRequest, type WorkAsk } from './requests.ts';
@@ -13,11 +13,11 @@ export async function journalRequest(runtime: Runtime, request: ResourceRequest,
   }
 }
 
-/** Delegation chooses an existing receiver and its existing workflow; it never grants new authority. */
+/** Delegation chooses an existing receiver that changes its own repository; it never grants new authority. */
 export async function requestWork(runtime: Runtime, from: string, to: string, proposal: ProposedWork, assignment?: AssignmentRef) {
   runtime.owner(from);
   const receiver = runtime.owner(to);
-  if (!receiver.workflow) throw new Error(`owner_has_no_workflow: ${to}`);
+  if (!canChange(receiver)) throw new Error(`owner_cannot_change: ${to} does not change its repository itself`);
   runtime.repositoryOwner(to, proposal.repository);
   const request = await runtime.requests.open(from, to, { kind: 'work', purpose: proposal.goal, proposal, assignment }, 'none');
   await journalRequest(runtime, request, 'request-opened', proposal.title);
@@ -64,7 +64,7 @@ export async function decideWork(runtime: Runtime, request: ResourceRequest) {
     await journalRequest(runtime, declined, 'attention', `delegation declined: ${decision.reply}; the person can resolve or redirect it`);
     return declined;
   }
-  if (!owner.workflow) throw new Error(`owner_has_no_workflow: ${owner.id}`);
+  if (!canChange(owner)) throw new Error(`owner_cannot_change: ${owner.id} does not change its repository itself`);
   runtime.repositoryOwner(owner.id, request.ask.proposal.repository);
   // Deterministic identity closes the crash window between ledger creation and saving the request link. The owner
   // plans it in a session the plugin opens for it; its plan is approved in the inbox or under a manager's grant.
