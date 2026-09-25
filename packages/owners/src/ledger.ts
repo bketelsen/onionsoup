@@ -76,6 +76,10 @@ export type Implementation = z.infer<typeof Implementation>;
 export const PlanDocument = z.object({ markdown: z.string(), digest: z.string() });
 export type PlanDocument = z.infer<typeof PlanDocument>;
 
+/** Why a cleanup pass left a finished plan's worktree in place. */
+export const PlanWorktreeKept = z.enum(['kept-uncommitted', 'kept-unpublished', 'failed']);
+export type PlanWorktreeKept = z.infer<typeof PlanWorktreeKept>;
+
 const PullRequestTarget = z.object({ itemId: z.string(), branch: z.string(), prUrl: z.string(), previousHead: z.string() });
 
 export const WorkItem = z.object({
@@ -99,8 +103,10 @@ export const WorkItem = z.object({
   /** Exact stage to continue after a failure or interruption. */
   resumeStatus: WorkStatus.optional(),
   worktree: z.string().optional(),
-  /** An approved plan's own worktree while it exists; unset once host code removes it (merged or cancelled). */
+  /** An approved plan's own worktree while it exists; unset once the cleanup pass removes it (finished and idle). */
   planWorktree: z.string().optional(),
+  /** Why the last cleanup pass kept the plan's worktree, so the person hears of it once, not every pass. */
+  planWorktreeKept: PlanWorktreeKept.optional(),
   branch: z.string().optional(),
   landedCommit: z.string().optional(),
   hires: z.array(HireRecord).default([]),

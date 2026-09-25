@@ -16,7 +16,7 @@ import { askOwner, formatAnswer } from './ask.ts';
 import { requestPublish } from './brokering.ts';
 import { checkoutPullRequest, proposeDeskChanges } from './desk-changes.ts';
 import { deskSyncText, syncOwnerDesk } from './desk-sync.ts';
-import { syncPlanWorktree } from './plan-worktrees.ts';
+import { removeIdlePlanWorktrees, syncPlanWorktree } from './plan-worktrees.ts';
 import { initiativeSection, initiativesText, initiativeText, itemText, reminderSection, reportsWorkText, statusText } from './desk.ts';
 import { parseInitiativeDraft } from './initiatives.ts';
 import {
@@ -500,7 +500,10 @@ const server: Plugin = async (input, options) => {
   // Read when needed: tests and the config hook construct the plugin without an opencode client.
   const sessionClient = () => ownerSessionClient(input.client);
 
-  /** Runtime work only this opencode can do: post notices into owners' chats and open the sessions plans need. */
+  /**
+   * Runtime work only this opencode can do: post notices into owners' chats, open the sessions plans need, and remove
+   * finished plans' worktrees once their sessions have gone idle.
+   */
   let isDeliveringNotices = false;
   async function deliverNotices() {
     if (isDeliveringNotices) return;
@@ -510,6 +513,7 @@ const server: Plugin = async (input, options) => {
       await deliverExchangeNotices(runtime, exchangeClient(input.client));
       await openNeededSessions(runtime, sessionClient(), (itemId, error) => console.warn('owner_session_failed', itemId, error));
       await openDueReminders(runtime, sessionClient(), (reminderId, error) => console.warn('reminder_session_failed', reminderId, error));
+      await removeIdlePlanWorktrees(runtime, sessionClient(), (itemId, error) => console.warn('plan_worktree_cleanup_failed', itemId, error));
     } finally {
       isDeliveringNotices = false;
     }

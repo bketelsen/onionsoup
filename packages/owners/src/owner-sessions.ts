@@ -14,10 +14,14 @@ import type { Runtime } from './runtime.ts';
  */
 export interface PermissionRule { permission: string; pattern: string; action: 'allow' | 'ask' | 'deny' }
 
+/** Whether a session is working now, and when it last changed (ms since the epoch); undefined when it is gone. */
+export interface SessionActivity { isBusy: boolean; updatedAt: number | undefined }
+
 export interface OwnerSessionClient {
   create(directory: string, title: string, permission: readonly PermissionRule[]): Promise<string>;
   prompt(target: ChatOrigin, agent: string, text: string): Promise<void>;
   remove(target: ChatOrigin): Promise<void>;
+  activity(target: ChatOrigin): Promise<SessionActivity>;
 }
 
 /** Where a session runs, and what its first message adds about that place (how a sync went, if it said anything). */
@@ -164,5 +168,19 @@ export function ownerSessionClient(client: Parameters<Plugin>[0]['client']): Own
     async remove(target) {
       await client.session.delete({ path: { id: target.sessionID }, query: { directory: target.directory } });
     },
+    async activity(target) {
+      const query = { directory: target.directory };
+      const [statuses, session] = await Promise.all([
+        client.session.status({ query }), client.session.get({ path: { id: target.sessionID }, query }),
+      ]);
+      if (statuses.error) throw new Error('owner_session_status_failed');
+      const isGone = session.response?.status === 404;
+      if (session.error && !isGone) throw new Error('owner_session_read_failed');
+      const state = statuses.data?.[target.sessionID]?.type ?? 'idle';
+      return { isBusy: IS_WORKING[state], updatedAt: session.data?.time.updated };
+    },
   };
 }
+
+/** opencode lists only sessions that are not idle; a retrying session is still working. */
+const IS_WORKING: Record<'idle' | 'busy' | 'retry', boolean> = { idle: false, busy: true, retry: true };

@@ -2,16 +2,19 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { RepositoryOwner } from './declarations.ts';
 import { recordSync, syncDesk } from './desk-sync.ts';
-import type { WorkItem } from './ledger.ts';
+import { PlanWorktreeKept, type WorkItem, type WorkStatus } from './ledger.ts';
+import type { OwnerSessionClient } from './owner-sessions.ts';
 import type { Runtime } from './runtime.ts';
-import { ensureClone, ensureDesk, git } from './workspace.ts';
+import { ensureClone, git } from './workspace.ts';
 
 /**
  * Each approved plan works in its own git worktree, made by host code from the repository's checkout at the current
  * `origin/<base>`, at `<plansRoot>/<owner>/<item>` on branch `plan/<item>`. Two plans in one repository once shared
  * the owner's desk: proposing either would have bundled the other's unreviewed changes, so both stopped. With a
  * worktree each, they proceed and propose independently; the desk stays for chat and small direct changes. The
- * worktree is removed once its PR merges or the item is cancelled, unless that would lose work.
+ * worktree outlives its PR, since the plan's session may still be working there (a rollout after the merge): a
+ * cleanup pass removes it once the item is finished and its session has been idle for a while, unless that would
+ * lose work.
  */
 export function planBranch(itemId: string) {
   return `plan/${itemId}`;
@@ -49,25 +52,19 @@ export async function syncPlanWorktree(runtime: Runtime, ownerId: string, itemId
   return recordSync(runtime, ownerId, report, item.id);
 }
 
-export type PlanWorktreeRemoval = 'removed' | 'absent' | 'kept-uncommitted' | 'kept-unpublished' | 'failed';
+export type PlanWorktreeRemoval = 'removed' | 'absent' | PlanWorktreeKept;
 
 /** Why a plan's worktree must stay: removing it would lose changes no commit holds, or commits no remote holds. */
-async function keepReason(path: string, landedCommit: string | undefined): Promise<PlanWorktreeRemoval | undefined> {
+async function keepReason(path: string, landedCommit: string | undefined): Promise<PlanWorktreeKept | undefined> {
   if ((await git(path, ['status', '--porcelain'])).trim()) return 'kept-uncommitted';
   const published = landedCommit ? ['--remotes', landedCommit] : ['--remotes'];
   const unpublished = (await git(path, ['rev-list', 'HEAD', '--not', ...published])).trim();
   return unpublished ? 'kept-unpublished' : undefined;
 }
 
-/**
- * Forget the worktree on the item. Its session moves to the repository's desk (the same repository, so opencode
- * still finds it), so later notices about the work reach a directory that exists.
- */
+/** Forget the worktree on the item. Its session keeps its real directory: that is where opencode knows it. */
 async function forgetPlanWorktree(runtime: Runtime, item: WorkItem) {
-  const desk = await ensureDesk(runtime.repositoryFor(item), runtime.desksRoot);
-  await runtime.ledger.update(item.id, current => ({
-    ...current, planWorktree: undefined, session: current.session && { ...current.session, directory: desk.path },
-  }));
+  await runtime.ledger.update(item.id, current => ({ ...current, planWorktree: undefined, planWorktreeKept: undefined }));
 }
 
 async function detachPlanWorktree(runtime: Runtime, item: WorkItem, path: string): Promise<PlanWorktreeRemoval> {
@@ -100,16 +97,69 @@ const REMOVAL_JOURNAL: Record<PlanWorktreeRemoval, RemovalJournal | undefined> =
   failed: (path, detail) => ({ kind: 'attention', note: `plan worktree ${path} could not be removed: ${detail}` }),
 };
 
-/** Remove a finished plan's worktree and its branch (merged or cancelled); never one that holds unpublished work. */
-export async function removePlanWorktree(runtime: Runtime, item: WorkItem): Promise<PlanWorktreeRemoval> {
-  const path = item.planWorktree;
-  if (!path) return 'absent';
+/** A worktree that stays records why, so later passes journal only a change of reason. */
+async function recordKept(runtime: Runtime, item: WorkItem, outcome: PlanWorktreeRemoval) {
+  const kept = PlanWorktreeKept.safeParse(outcome);
+  if (kept.success) await runtime.ledger.update(item.id, current => ({ ...current, planWorktreeKept: kept.data }));
+}
+
+/** Remove a finished plan's worktree and its branch; never one that holds uncommitted or unpublished work. */
+async function removePlanWorktree(runtime: Runtime, item: WorkItem, path: string): Promise<PlanWorktreeRemoval> {
   const { outcome, detail } = await detachPlanWorktree(runtime, item, path)
     .then(removal => ({ outcome: removal, detail: '' }))
     .catch((error: unknown) => ({
       outcome: 'failed' as const, detail: `plan_worktree_remove_failed: ${error instanceof Error ? error.message : String(error)}`,
     }));
-  const entry = REMOVAL_JOURNAL[outcome]?.(path, detail);
+  const isRepeat = outcome === item.planWorktreeKept;
+  const entry = isRepeat ? undefined : REMOVAL_JOURNAL[outcome]?.(path, detail);
   if (entry) await runtime.notebook(item.owner).journal({ ...entry, workItem: item.id, outcome });
+  await recordKept(runtime, item, outcome);
   return outcome;
+}
+
+/** How long a finished plan's session must have been idle before the cleanup pass removes its worktree. */
+export const PLAN_WORKTREE_LIMITS = { idleBeforeRemovalHours: 24 };
+
+const HOUR_MS = 3_600_000;
+
+/**
+ * The states in which a plan is done with its worktree: landed with its PR merged or closed (a landed item cannot be
+ * cancelled, so a closed PR would otherwise keep it forever), or cancelled. A failed item can still be resumed.
+ */
+const IS_FINISHED: Partial<Record<WorkStatus, (item: WorkItem) => boolean>> = {
+  landed: item => item.publication?.state === 'merged' || item.publication?.state === 'closed',
+  cancelled: () => true,
+};
+
+function isFinishedPlan(item: WorkItem) {
+  return Boolean(item.planWorktree) && (IS_FINISHED[item.status]?.(item) ?? false);
+}
+
+type ActivityReader = Pick<OwnerSessionClient, 'activity'>;
+
+/**
+ * Whether the plan's session has been idle for the limit: not busy (or retrying), and last updated before it. An
+ * item without a session, or whose session is gone, counts from the item's own last update.
+ */
+async function hasIdleSession(item: WorkItem, sessions: ActivityReader, now: Date) {
+  const activity = item.session ? await sessions.activity(item.session) : { isBusy: false, updatedAt: undefined };
+  const lastActive = activity.updatedAt ?? Date.parse(item.updatedAt);
+  const isQuiet = now.getTime() - lastActive >= PLAN_WORKTREE_LIMITS.idleBeforeRemovalHours * HOUR_MS;
+  return !activity.isBusy && isQuiet;
+}
+
+async function removeIfIdle(runtime: Runtime, item: WorkItem, sessions: ActivityReader, now: Date) {
+  if (await hasIdleSession(item, sessions, now)) await removePlanWorktree(runtime, item, item.planWorktree!);
+}
+
+/**
+ * The cleanup pass. Merging or cancelling a plan never removes its worktree at once: the session may still be working
+ * there. Each finished plan's worktree goes once its session has been idle for `PLAN_WORKTREE_LIMITS`. The plugin
+ * runs this, since it holds the opencode client; a failure leaves that item for the next pass.
+ */
+export async function removeIdlePlanWorktrees(
+  runtime: Runtime, sessions: ActivityReader, onError: (itemId: string, error: unknown) => void, now = new Date(),
+) {
+  const finished = (await runtime.ledger.list()).filter(isFinishedPlan);
+  for (const item of finished) await removeIfIdle(runtime, item, sessions, now).catch((error: unknown) => onError(item.id, error));
 }
