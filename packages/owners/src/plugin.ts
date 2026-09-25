@@ -49,6 +49,7 @@ import { parseReminderRequest } from './reminders.ts';
 import { PLAN_APPROVAL_PERMISSION, PlanSubmission, submitPlan } from './plan-work.ts';
 import { requestPlanApproval } from './plan-approval.ts';
 import { HOST_ONLY_VARIABLES } from './sandbox.ts';
+import { CHAT_EXTERNAL_DIRECTORIES, chatBash } from './chat-permissions.ts';
 
 /**
  * onionsoup as an opencode plugin: every owner with a persona becomes an agent a person can chat with
@@ -200,9 +201,9 @@ ${owner.manages ? `
 
 function conversationPermission(owner: OwnerDeclaration, verify: readonly string[]) {
   const mode = owner.conversation ?? { bash: { '*': 'ask' }, edit: 'ask', webfetch: 'ask' };
-  const bash = { ...mode.bash, ...Object.fromEntries(verify.map(command => [`${command}*`, 'allow'])) };
   return {
-    edit: mode.edit, bash, webfetch: mode.webfetch, external_directory: 'ask', doom_loop: 'ask', task: taskPermission(owner.id),
+    edit: mode.edit, bash: chatBash(mode.bash, verify), webfetch: mode.webfetch, external_directory: CHAT_EXTERNAL_DIRECTORIES,
+    doom_loop: 'ask', task: taskPermission(owner.id),
     // opencode denies its question tool unless an agent allows it; answering is always the person's, so it grants nothing.
     question: 'allow', [PLAN_APPROVAL_PERMISSION]: 'ask', ...NO_OPERATOR_SKILLS,
   };
