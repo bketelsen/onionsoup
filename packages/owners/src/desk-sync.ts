@@ -22,10 +22,20 @@ async function isAncestor(deskPath: string, ancestor: string, descendant: string
   return git(deskPath, ['merge-base', '--is-ancestor', ancestor, descendant]).then(() => true, () => false);
 }
 
-/** Commits on the desk that no remote branch holds (e.g. never pushed) would be lost by moving the desk. */
+/**
+ * Whether the base already has everything the desk's commits change: merging the desk into the base leaves the base's
+ * tree as it is. True after a squash merge, whose original commits no remote holds once the PR branch is deleted.
+ */
+async function isContainedInBase(deskPath: string, base: string) {
+  const merged = await git(deskPath, ['merge-tree', '--write-tree', base, 'HEAD']).then(output => output.split('\n')[0]!.trim(), () => undefined);
+  return merged === (await git(deskPath, ['rev-parse', `${base}^{tree}`])).trim();
+}
+
+/** Commits on the desk that no remote branch holds and the base does not contain would be lost by moving the desk. */
 async function requireNothingUnpublished(deskPath: string, base: string) {
   const unpublished = (await git(deskPath, ['rev-list', 'HEAD', '--not', base, '--remotes'])).trim();
-  if (unpublished) throw new Error(`desk_has_unpublished_commits: ${unpublished.split('\n').length} commit(s) on the desk are in no remote branch; propose them first`);
+  if (!unpublished || await isContainedInBase(deskPath, base)) return;
+  throw new Error(`desk_has_unpublished_commits: ${unpublished.split('\n').length} commit(s) on the desk are in no remote branch and not in ${base}; propose them first`);
 }
 
 async function stashWork(deskPath: string) {

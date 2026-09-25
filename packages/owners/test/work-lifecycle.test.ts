@@ -760,7 +760,9 @@ test('a sync that conflicts keeps the work in a stash and names the files; unpub
 
   const fresh = await fixture();
   const freshDesk = await ensureDesk(fresh.runtime.repositoryOwner('clippy'), fresh.runtime.desksRoot);
-  await git(freshDesk.path, ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'local only']);
+  await writeFile(join(freshDesk.path, 'local-only.txt'), 'never pushed\n');
+  await git(freshDesk.path, ['add', 'local-only.txt']);
+  await git(freshDesk.path, ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'local only']);
   await landUpstream(fresh.seed, 'upstream.txt', 'x\n');
   await assert.rejects(syncOwnerDesk(fresh.runtime, 'clippy'), /desk_has_unpublished_commits/);
 });
@@ -929,4 +931,19 @@ test('a plan\'s worktree syncs with its base on its own, keeping its uncommitted
   assert.equal((await git(plan!.planWorktree!, ['rev-parse', 'HEAD'])).trim(), upstream);
   assert.equal(await readFile(join(plan!.planWorktree!, 'mine.txt'), 'utf8'), 'mine\n');
   assert.notEqual((await git(desk.path, ['rev-parse', 'HEAD'])).trim(), upstream, 'the desk is not moved');
+});
+
+test('a desk whose commits were squash-merged moves to the base even though no remote holds those commits', async () => {
+  const { runtime, seed } = await fixture();
+  const { syncOwnerDesk } = await import('../src/desk-sync.ts');
+  const desk = await ensureDesk(runtime.repositoryOwner('clippy'), runtime.desksRoot);
+  const commit = (message: string) => git(desk.path, ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qam', message]);
+  await writeFile(join(desk.path, 'base'), 'base\nfirst\n');
+  await commit('First part');
+  await writeFile(join(desk.path, 'base'), 'base\nfirst\nsecond\n');
+  await commit('Second part');
+  const squashed = await landUpstream(seed, 'base', 'base\nfirst\nsecond\n');
+  const synced = await syncOwnerDesk(runtime, 'clippy');
+  assert.equal(synced.outcome, 'updated');
+  assert.equal((await git(desk.path, ['rev-parse', 'HEAD'])).trim(), squashed);
 });
