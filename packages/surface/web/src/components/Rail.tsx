@@ -2,9 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import { RiDraggable, RiInbox2Line, RiNotification3Line, RiErrorWarningLine, RiOrganizationChart } from '@remixicon/react';
 import { navigate, useConnected } from '../api.ts';
 import type { OwnerSummary, SurfaceState } from '../types.ts';
-import { BusyDots, cx, OwnerIcon } from './ui.tsx';
+import { BusyDots, cx } from './ui.tsx';
+import { OwnerActivityIcon } from './OwnerActivityIcon.tsx';
 
-/** The owners down the left, each with what waits on the person and whether it is working. */
+/** The owners down the left, each with what waits on the person, whether its work runs and what its chats are doing. */
 export function Rail({ state, route, onReorder }: { state?: SurfaceState; route: string[]; onReorder: (order: string[]) => void }) {
   const connected = useConnected();
   // Re-ordering with pointer events rather than HTML5 drag and drop: it behaves the same everywhere and needs no
@@ -89,7 +90,7 @@ export function Rail({ state, route, onReorder }: { state?: SurfaceState; route:
               dragging === owner.id && 'opacity-40',
               over?.id === owner.id && dragging !== owner.id && (over.after ? 'shadow-[inset_0_-2px_0_var(--primary)]' : 'shadow-[inset_0_2px_0_var(--primary)]'))}>
             <RiDraggable className="absolute -left-1 size-3.5 opacity-0 group-hover/owner:opacity-40" />
-            <OwnerIcon icon={owner.icon} />
+            <OwnerActivityIcon owner={owner} />
             <span className="flex flex-col min-w-0 flex-1">
               <span className="typography-ui-label truncate">{owner.name}</span>
               <span className="typography-micro text-muted-foreground truncate text-[0.7rem]">{owner.title || owner.domain}</span>
@@ -119,7 +120,7 @@ function OperatorEntry({ operator, isActive }: { operator: OwnerSummary; isActiv
       <div className="mt-3 mb-1 px-2 typography-micro uppercase tracking-wide text-muted-foreground text-[0.68rem]">Operator</div>
       <button onClick={() => navigate('owner', operator.id)} title={`${operator.title}\nworks in ${operator.domain}`}
         className={cx('flex items-center gap-2 rounded-md px-2 py-1.5 text-left', isActive ? 'bg-interactive-active text-foreground' : 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground')}>
-        <OwnerIcon icon={operator.icon} />
+        <OwnerActivityIcon owner={operator} />
         <span className="flex flex-col min-w-0 flex-1">
           <span className="typography-ui-label truncate">{operator.name}</span>
           <span className="typography-micro text-muted-foreground truncate text-[0.7rem]">{operator.title}</span>

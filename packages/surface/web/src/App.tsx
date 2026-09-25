@@ -10,7 +10,7 @@ import { OrgView } from './components/OrgView.tsx';
 import { InboxErrors } from './components/InboxErrors.tsx';
 import type { SurfaceState } from './types.ts';
 
-const REFRESH_TYPES = new Set(['permission.asked', 'permission.replied', 'question.asked', 'question.replied', 'question.rejected', 'session.status']);
+const REFRESH_TYPES = new Set(['permission.asked', 'permission.replied', 'question.asked', 'question.replied', 'question.rejected', 'session.status', 'session.idle']);
 
 export function App() {
   const route = useRoute();

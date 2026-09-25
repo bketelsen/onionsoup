@@ -224,7 +224,7 @@ test('the operator has a chat of its own in its directory, apart from the owners
     const state = (await call('GET', '/api/state')).body as { operator: Record<string, unknown>; owners: { id: string }[]; inbox: { id: string; owner: string }[] };
     assert.deepEqual(state.operator, {
       id: OPERATOR_ID, name: 'Operator', title: 'Acts for you', source: '', icon: 'terminal', color: 'primary', model: 'github-copilot/gpt-6-sol',
-      domain: directory, chat: true, hasDesk: false, waiting: 1, running: 0,
+      domain: directory, chat: true, hasDesk: false, waiting: 1, running: 0, activity: 'waiting',
     });
     assert.ok(!state.owners.some(owner => owner.id === OPERATOR_ID), 'the operator is not an owner');
     assert.ok(state.inbox.some(entry => entry.id === 'per_op' && entry.owner === OPERATOR_ID));
@@ -290,6 +290,65 @@ test('a merged plan whose session is still working is listed in its worktree, wi
     assert.deepEqual(listed.directories, ['/desks/bellonda', planWorktree]);
     assert.ok(listed.sessions.some(session => session.id === 'ses_rollout'), 'the merged plan\'s session is still listed');
     assert.deepEqual(listed.status.ses_rollout, { type: 'busy' });
+  } finally {
+    server.close();
+  }
+});
+
+type ActivityRead = { owners: { id: string; activity: string }[]; operator?: { activity: string } };
+
+test('an owner\'s rail activity: busy desk or plan sessions work, pending prompts or questions wait, else idle', async () => {
+  const planWorktree = '/plans/clippy/w-busy';
+  const operatorDirectory = await mkdtemp(join(tmpdir(), 'surface-activity-'));
+  const busy = new Map<string, Record<string, unknown>>([
+    ['/desks/bellonda', { ses_1: { type: 'busy' } }],
+    [planWorktree, { ses_sub: { type: 'retry', attempt: 2, message: 'rate limited', next: 1 } }],
+    [operatorDirectory, { ses_op: { type: 'busy' } }],
+  ]);
+  const { server, call, runtime } = await start(api => {
+    api.status = async directory => {
+      if (directory.endsWith('homelab')) throw new Error('status_failed');
+      return busy.get(directory) ?? { ses_idle: { type: 'idle' } };
+    };
+    api.questions = async directory => directory === operatorDirectory
+      ? [{ id: 'que_op', sessionID: 'ses_op', questions: [{ question: 'Restart?', header: 'Restart', options: [] }] }]
+      : [];
+  });
+  try {
+    await runtime.ledger.create('clippy', 'owner-change', { title: 'Busy plan', goal: 'g', rationale: 'r', acceptance: ['a'], size: 'small' }, {
+      status: 'working', planWorktree, session: { sessionID: 'ses_work', directory: planWorktree },
+    });
+    runtime.declarations.operator = OperatorDeclaration.parse({ name: 'Operator', title: 'Acts for you', model: 'github-copilot/gpt-6-sol', directory: operatorDirectory });
+    const { status, body } = await call('GET', '/api/state');
+    assert.equal(status, 200, 'a failed status read does not fail the state');
+    const read = body as ActivityRead;
+    const activity = Object.fromEntries(read.owners.map(owner => [owner.id, owner.activity]));
+    assert.equal(activity.bellonda, 'waiting', 'a pending prompt outranks a busy desk session');
+    assert.equal(activity.clippy, 'working', 'a subagent retrying in a plan worktree counts as working');
+    assert.equal(activity.homelab, 'idle', 'an unreadable status is idle');
+    assert.equal(activity.moneo, 'idle');
+    assert.equal(read.operator?.activity, 'waiting', 'a pending question stops the operator on the person');
+
+    busy.delete(planWorktree);
+    busy.delete(operatorDirectory);
+    const settled = (await call('GET', '/api/state')).body as ActivityRead;
+    assert.equal(settled.owners.find(owner => owner.id === 'clippy')?.activity, 'idle');
+  } finally {
+    server.close();
+  }
+});
+
+test('an owner whose only busy session is on its desk is working, and the operator works without a prompt', async () => {
+  const operatorDirectory = await mkdtemp(join(tmpdir(), 'surface-activity-'));
+  const { server, call, runtime } = await start(api => {
+    api.permissions = async () => [];
+    api.status = async directory => [operatorDirectory, '/desks/bellonda'].includes(directory) ? { ses_1: { type: 'busy' } } : {};
+  });
+  try {
+    runtime.declarations.operator = OperatorDeclaration.parse({ name: 'Operator', title: 'Acts for you', model: 'github-copilot/gpt-6-sol', directory: operatorDirectory });
+    const read = (await call('GET', '/api/state')).body as ActivityRead;
+    assert.equal(read.owners.find(owner => owner.id === 'bellonda')?.activity, 'working');
+    assert.equal(read.operator?.activity, 'working');
   } finally {
     server.close();
   }
