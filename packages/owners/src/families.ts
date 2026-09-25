@@ -7,7 +7,7 @@ function globToPattern(glob: string) {
 
 export function familyOf(table: FamilyTable, model: ModelRef) {
   const entry = table.families.find(candidate => candidate.match.some(glob => globToPattern(glob).test(model)));
-  if (!entry) throw new Error(`unknown_model_family: ${model}`);
+  if (!entry) throw new Error(`unknown_model_family: ${model}; add a family whose match covers it to families.yaml`);
   return entry.family;
 }
 

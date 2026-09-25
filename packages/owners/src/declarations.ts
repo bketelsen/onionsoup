@@ -6,6 +6,7 @@ import { parse } from 'yaml';
 import { z } from 'zod';
 import { MemoryPolicy } from './memory-config.ts';
 import { expandHome } from './paths.ts';
+import { loadProviders, type DeclaredProviders } from './providers.ts';
 
 export const ModelRef = z.string().regex(/^[^/\s]+\/\S+$/, 'model must be provider/model');
 export type ModelRef = z.infer<typeof ModelRef>;
@@ -281,6 +282,8 @@ export interface Declarations {
   freelancers: Map<Craft, FreelancerDeclaration>;
   families: FamilyTable;
   operator?: OperatorDeclaration;
+  /** Model providers from providers.yaml, keyed by provider id; empty without the file. */
+  providers: DeclaredProviders;
 }
 
 async function yamlFiles(directory: string) {
@@ -376,6 +379,7 @@ export async function loadDeclarations(root: string): Promise<Declarations> {
   const freelancers = await loadFreelancers(join(base, 'freelancers'));
   const families = FamilyTable.parse(parse(await readFile(join(base, 'families.yaml'), 'utf8')));
   const operator = await loadOperator(base);
+  const providers = await loadProviders(base);
   const ownersById = new Map(owners.map(owner => [owner.id, owner]));
   checkOrgChart(ownersById);
   checkOperatorReserved(ownersById, operator);
@@ -385,6 +389,7 @@ export async function loadDeclarations(root: string): Promise<Declarations> {
     freelancers: new Map(freelancers.map(freelancer => [freelancer.craft, freelancer])),
     families,
     operator,
+    providers,
   };
 }
 

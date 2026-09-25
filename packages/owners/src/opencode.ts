@@ -5,11 +5,12 @@ import { createOpencodeClient } from '@opencode-ai/sdk/v2/client';
 import { Agent } from 'undici';
 import { z } from 'zod';
 import type { ModelRef } from './declarations.ts';
+import { lacksStructuredOutput, opencodeProviders, redactApiKeys, type DeclaredProviders } from './providers.ts';
 import { freePort, spawnSandboxed, stopSandboxed } from './sandbox.ts';
 
 const run = promisify(execFile);
 
-export const HIRE_LIMITS = { heartbeatMs: 30_000, timeoutMs: 20 * 60_000, serverStartMs: 30_000, permissionPollMs: 2_000 };
+export const HIRE_LIMITS = { heartbeatMs: 30_000, timeoutMs: 20 * 60_000, serverStartMs: 30_000, permissionPollMs: 2_000, serverOutputChars: 500 };
 
 /**
  * The onionsoup plugin, as a file:// URL sitting next to this module: sibling `plugin.ts` running from
@@ -168,10 +169,14 @@ async function worktreeOf(directory: string) {
   }
 }
 
-/** Exported for tests: the per-hire opencode config, so the explicit plugin load can be checked directly. */
-export function agentConfig(worktree: string, directory: string, notesFile: string | undefined, extra: Record<string, string> = {}) {
+/**
+ * Exported for tests: the per-hire opencode config, so the explicit plugin load can be checked directly. The host's
+ * opencode config is masked in the sandbox, so the person's declared providers come in here too.
+ */
+export function agentConfig(worktree: string, directory: string, notesFile: string | undefined, extra: Record<string, string> = {}, providers: DeclaredProviders = {}) {
   return {
     plugin: [PLUGIN_URL],
+    provider: opencodeProviders(providers),
     agent: Object.fromEntries(Object.entries(ROLE_AGENTS).map(([role, definition]) => [
       `onionsoup-${role}`,
       { mode: 'primary', prompt: definition.prompt, permission: { ...withNotes(definition.permission, worktree, directory, notesFile), ...extra } },
@@ -191,18 +196,24 @@ interface SandboxedServer {
   close: () => void;
 }
 
-/** One opencode server per hire, inside a sandbox shaped for the role. */
-async function startServer(role: Role, directory: string, notesFile: string | undefined, extra?: Record<string, string>): Promise<SandboxedServer> {
+/**
+ * One opencode server per hire, inside a sandbox shaped for the role. Its config (API keys included) travels in
+ * the child's environment only; the server output quoted in errors is redacted, since errors reach the ledger.
+ */
+async function startServer<T>(request: HireRequest<T>, providers: DeclaredProviders): Promise<SandboxedServer> {
+  const { role, directory, notesFile, extraPermission } = request;
   const port = await freePort();
   const notesWritable = notesFile ? [dirname(notesFile)] : [];
+  const config = agentConfig(await worktreeOf(directory), directory, notesFile, extraPermission, providers);
   const child = spawnSandboxed('opencode', ['serve', '--hostname=127.0.0.1', `--port=${port}`], {
     cwd: directory,
     writable: [...ROLE_WRITES[role](directory), ...notesWritable],
-    env: { OPENCODE_CONFIG_CONTENT: JSON.stringify(agentConfig(await worktreeOf(directory), directory, notesFile, extra)) },
+    env: { OPENCODE_CONFIG_CONTENT: JSON.stringify(config) },
   });
   const url = await new Promise<string>((resolve, reject) => {
     let output = '';
-    const timer = setTimeout(() => reject(new Error(`server_start_timeout: ${output.slice(-500)}`)), HIRE_LIMITS.serverStartMs);
+    const recent = () => redactApiKeys(output.slice(-HIRE_LIMITS.serverOutputChars), providers);
+    const timer = setTimeout(() => reject(new Error(`server_start_timeout: ${recent()}`)), HIRE_LIMITS.serverStartMs);
     child.stdout?.on('data', (chunk: Buffer) => {
       output += chunk.toString();
       const match = output.match(/opencode server listening on\s+(https?:\/\/\S+)/);
@@ -216,7 +227,7 @@ async function startServer(role: Role, directory: string, notesFile: string | un
     });
     child.on('exit', code => {
       clearTimeout(timer);
-      reject(new Error(`server_exited: ${code} ${output.slice(-500)}`));
+      reject(new Error(`server_exited: ${code} ${recent()}`));
     });
   });
   return { url, close: () => stopSandboxed(child) };
@@ -239,46 +250,67 @@ export async function rejectPendingPermissions(client: Pick<HireClient, 'permiss
 }
 
 export class Freelancers {
-  static async start() {
-    return new Freelancers();
+  /** Read at every hire, so providers declared since start take effect after the runtime reloads declarations. */
+  private constructor(private readonly providers: () => DeclaredProviders) {}
+
+  static async start(providers: () => DeclaredProviders = () => ({})) {
+    return new Freelancers(providers);
   }
 
   close() {}
 
   async hire<T>(request: HireRequest<T>): Promise<HireResult<T>> {
-    const server = await startServer(request.role, request.directory, request.notesFile, request.extraPermission);
+    const providers = this.providers();
+    const server = await startServer(request, providers);
     try {
-      return await this.hireOn(server.url, request);
+      const client = createOpencodeClient({ baseUrl: server.url, directory: request.directory, fetch: untimedFetch });
+      return await hireWithFallback(client, request, providers);
     } finally {
       server.close();
     }
-  }
-
-  private async hireOn<T>(url: string, request: HireRequest<T>): Promise<HireResult<T>> {
-    const client = createOpencodeClient({ baseUrl: url, directory: request.directory, fetch: untimedFetch });
-    return hireWithFallback(client, request);
   }
 }
 
 /**
  * opencode asks for structured output by forcing a tool call, and some models refuse forced tool choice (Copilot's
- * claude-opus-5.5: anomalyco/opencode#46735). The refusal comes before any work, so such a hire starts again in a
- * new session in text mode: the brief ends with the JSON Schema and the reply's JSON is parsed here. The model is
- * remembered for this process, so its later hires start in text mode.
+ * claude-opus-5.5: anomalyco/opencode#46735), or answer without ever calling the tool (opencode then fails the turn
+ * with a StructuredOutputError). Either comes on the first round, so such a hire starts again, once, in a new session
+ * in text mode: the brief ends with the JSON Schema and the reply's JSON is parsed here. The model is remembered for
+ * this process, so its later hires start in text mode. A declared provider with `structuredOutput: false` starts
+ * its models' hires in text mode outright.
  */
 const FORCED_TOOL_REFUSED = /tool_choice: type "tool" and "any" are not supported/;
+const NO_STRUCTURED_OUTPUT = /StructuredOutputError|Model did not produce structured output/;
+
+/** Known ways a model turns down structured output, each with what the log says about it. */
+const STRUCTURED_OUTPUT_REFUSALS: Record<string, { signature: RegExp; reason: string }> = {
+  forcedToolChoice: { signature: FORCED_TOOL_REFUSED, reason: 'refuses forced tool choice' },
+  noStructuredOutput: { signature: NO_STRUCTURED_OUTPUT, reason: 'did not produce structured output' },
+};
+
 const textModeModels = new Set<string>();
 
 export type DeliveryMode = 'structured' | 'text';
 
-export async function hireWithFallback<T>(client: HireSessionClient, request: HireRequest<T>): Promise<HireResult<T>> {
-  const mode: DeliveryMode = textModeModels.has(request.model) ? 'text' : 'structured';
+/** Why a first-round failure is a refusal of structured output, or undefined if it is some other failure. */
+function refusalReason(error: unknown) {
+  if (!(error instanceof HireError)) return undefined;
+  return Object.values(STRUCTURED_OUTPUT_REFUSALS).find(refusal => refusal.signature.test(error.message))?.reason;
+}
+
+function startingMode(model: ModelRef, providers: DeclaredProviders): DeliveryMode {
+  return textModeModels.has(model) || lacksStructuredOutput(providers, model) ? 'text' : 'structured';
+}
+
+export async function hireWithFallback<T>(client: HireSessionClient, request: HireRequest<T>, providers: DeclaredProviders = {}): Promise<HireResult<T>> {
+  const mode = startingMode(request.model, providers);
   try {
     return await runHire(client, request, mode);
   } catch (error) {
-    if (mode !== 'structured' || !(error instanceof HireError) || !FORCED_TOOL_REFUSED.test(error.message)) throw error;
+    const reason = mode === 'structured' ? refusalReason(error) : undefined;
+    if (!reason) throw error;
     textModeModels.add(request.model);
-    log(`  … ${request.title}: ${request.model} refuses forced tool choice; asking for the JSON in its reply instead`);
+    log(`  … ${request.title}: ${request.model} ${reason}; asking for the JSON in its reply instead`);
     return runHire(client, request, 'text');
   }
 }

@@ -86,6 +86,9 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
   path (`~/.config/opencode`), but `~/.local/share/opencode/auth.json` stays writable in every sandbox because
   hires must keep authenticating; a credential proxy that hides the real tokens from the sandboxed process is the
   next step.
+- **Declared provider keys reach the sandbox's environment.** A `providers.yaml` API key is written into each
+  hire's `OPENCODE_CONFIG_CONTENT`, so anything the hire runs can read it, like `auth.json`; the credential proxy
+  would cover these keys too. The surface opencode also holds them in its config, which its API can return.
 - **Sandbox: no network isolation.** After the credential proxy, outbound network access from a sandboxed process
   is still unrestricted; an allowlist or a proxy is the follow-up.
 - **App updates cannot roll back:** truenas-mcp exposes no rollback, so a failed update is raised for the person.
