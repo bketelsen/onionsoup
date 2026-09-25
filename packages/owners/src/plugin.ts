@@ -48,6 +48,7 @@ import { cancelReminder, openDueReminders, setReminder } from './reminder-work.t
 import { parseReminderRequest } from './reminders.ts';
 import { PLAN_APPROVAL_PERMISSION, PlanSubmission, submitPlan } from './plan-work.ts';
 import { requestPlanApproval } from './plan-approval.ts';
+import { HOST_ONLY_VARIABLES } from './sandbox.ts';
 
 /**
  * onionsoup as an opencode plugin: every owner with a persona becomes an agent a person can chat with
@@ -59,6 +60,18 @@ import { requestPlanApproval } from './plan-approval.ts';
  * The daemon's sandboxed servers load the same global config; ONIONSOUP_SANDBOX keeps this plugin inert
  * there, so autonomous runs keep their deny-by-default rules.
  */
+/**
+ * Chat shells (owners, the operator and their subagents) run on the host and inherit the surface opencode's
+ * environment, which holds that server's password. A command could read it and answer another session's permission
+ * prompt, a plan approval included, through the API. opencode lets a plugin set shell variables but not remove them,
+ * so each host-only variable present here is set to empty for every shell command.
+ */
+export async function hideHostCredentials(_input: unknown, output: { env: Record<string, string> }) {
+  for (const name of HOST_ONLY_VARIABLES) {
+    if (process.env[name] !== undefined) output.env[name] = '';
+  }
+}
+
 export const PLUGIN_LIMITS = { exchangeChars: 8_000, contextChars: 28_000, noticeMs: 15_000 };
 
 const WATCHER_AGENT = 'onionsoup-watcher';
@@ -508,6 +521,7 @@ const server: Plugin = async (input, options) => {
 
   return {
     'tool.execute.before': prepareToolArguments,
+    'shell.env': hideHostCredentials,
     async config(config) {
       const agents = (config.agent ??= {}) as Record<string, unknown>;
       const servers = (config.mcp ??= {}) as Record<string, unknown>;

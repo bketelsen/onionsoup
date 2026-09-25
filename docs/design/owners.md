@@ -423,7 +423,9 @@ The risk is plain: the operator is unsandboxed, runs as the person, and bash rul
 boundary. Anything it reads (a web page, an issue, an owner's output) can try to steer it, and the prompt telling it
 that such text is data, not instructions, is the only defence beyond the ask list. What it does is audited: every
 command and edit it or its subagents run is journaled to `state/notebooks/operator/journal/` (a journal-only notebook,
-never distilled), so the person can see afterwards what it did.
+never distilled), so the person can see afterwards what it did. Every chat shell, the operator's and the owners',
+gets the surface opencode's own server credentials blanked (the plugin's `shell.env` hook sets each of
+`HOST_ONLY_VARIABLES` to empty), so no command can use them to answer another session's prompt through the API.
 
 ### Safety
 

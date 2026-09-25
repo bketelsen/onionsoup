@@ -111,7 +111,7 @@ export function sandboxCommand(command: string, args: readonly string[], options
  * Variables a host process (the surface's opencode, a TUI) may carry that must not leak into a sandboxed
  * opencode: an inherited server password makes the nested server reject our unauthenticated client.
  */
-const HOST_ONLY_VARIABLES = new Set(['OPENCODE_SERVER_PASSWORD', 'OPENCODE_SERVER_USERNAME', 'OPENCODE_CONFIG', 'OPENCODE_CONFIG_DIR', 'OPENCODE_CONFIG_CONTENT']);
+export const HOST_ONLY_VARIABLES = new Set(['OPENCODE_SERVER_PASSWORD', 'OPENCODE_SERVER_USERNAME', 'OPENCODE_CONFIG', 'OPENCODE_CONFIG_DIR', 'OPENCODE_CONFIG_CONTENT']);
 
 /**
  * Environment keys that must always point at the private config/state roots: stripped from both the

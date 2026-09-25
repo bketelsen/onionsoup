@@ -124,3 +124,22 @@ test('a fact the owner records is journaled with its source and is in its contex
   NOTEBOOK_LIMITS.factChars = 80;
   assert.equal((await runtime.notebook('homelab').facts()).split('\n').length, 1, 'older facts past the bound are left out');
 });
+
+test("chat shells get the surface opencode's own credentials blanked, so a command cannot answer another session's prompt", async (context) => {
+  const state = await mkdtemp(join(tmpdir(), 'owners-shell-env-'));
+  const hooks = await withActiveHooks({} as Parameters<Plugin>[0], { declarations, state });
+  const saved = { password: process.env.OPENCODE_SERVER_PASSWORD, username: process.env.OPENCODE_SERVER_USERNAME };
+  context.after(() => {
+    for (const [name, value] of [['OPENCODE_SERVER_PASSWORD', saved.password], ['OPENCODE_SERVER_USERNAME', saved.username]] as const) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  });
+  process.env.OPENCODE_SERVER_PASSWORD = 'secret';
+  process.env.OPENCODE_SERVER_USERNAME = 'opencode';
+  const output = { env: { KEEP: 'me' } as Record<string, string> };
+  await hooks['shell.env']!({ cwd: '/tmp', sessionID: 'ses_1', callID: 'call_1' }, output);
+  assert.equal(output.env.OPENCODE_SERVER_PASSWORD, '');
+  assert.equal(output.env.OPENCODE_SERVER_USERNAME, '');
+  assert.equal(output.env.KEEP, 'me');
+});
