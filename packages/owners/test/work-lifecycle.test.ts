@@ -699,3 +699,18 @@ test('a conflict resolution is verified as its commit, without what the resolver
   assert.ok(reviewed);
   assert.match(replayed.implementations.at(-1)!.report.summary, /Left out of the commit .*scratch\.txt/);
 });
+
+test('a failed verification shows the owner the error, not just the last lines of a long test run', async () => {
+  const { failedVerificationSummary } = await import('../src/desk-changes.ts');
+  const error = 'Failed to create temporary directory: mkdir -p /var/home/bjk/.ansible/tmp';
+  const pytest = `${'.'.repeat(3_000)}\n${error}\n${'E   AssertionError\n'.repeat(55)}9 failed, 10 passed`;
+  const summary = failedVerificationSummary([
+    { command: 'git diff --check', exitCode: 0, output: '' },
+    { command: 'python -m pytest -q tests', exitCode: 1, output: pytest },
+  ]);
+  assert.match(summary, /\$ python -m pytest -q tests \(exit 1\)/);
+  assert.ok(summary.includes(error), 'the cause, about 1,000 characters before the end, is kept');
+  assert.match(summary, /9 failed, 10 passed/);
+  assert.match(summary, /read-only home and private \/tmp/);
+  assert.doesNotMatch(summary, /git diff --check/, 'passing commands are left out');
+});
