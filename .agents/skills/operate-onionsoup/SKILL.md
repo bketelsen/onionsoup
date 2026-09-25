@@ -23,10 +23,12 @@ cause, and the fix is either applied through the normal gates or reported to the
   work session opens; `npm run owners -- show <item>` prints it (`Plan worktree:`), and its session runs there.
   Inspect it with `git -C <path> status` and `git -C <path> diff`, and list them all with
   `git -C <checkout> worktree list`. Proposing with the item publishes that worktree only; the owner's desk is for
-  chat and direct changes. Host code removes it (and its branch) once the PR merges or the item is cancelled; one with
-  uncommitted changes or unpushed commits is kept and raises an attention item: look at it, then remove it with
-  `git -C <checkout> worktree remove <path>`. A plan approved before plan worktrees existed has no `planWorktree` and
-  still works on the desk.
+  chat and direct changes. It outlives the merge (the session may still run a rollout from it): the plugin's cleanup
+  pass removes it (and its branch) once the item is landed with its PR merged or closed, or cancelled, and its session
+  has been idle (not busy, no update) for `PLAN_WORKTREE_LIMITS.idleBeforeRemovalHours` (24). One with uncommitted
+  changes or unpushed commits is kept (`planWorktreeKept` on the item) and raises one attention item: look at it,
+  then remove it with `git -C <checkout> worktree remove <path>`. A plan approved before plan worktrees existed has
+  no `planWorktree` and still works on the desk.
 - **Initiatives:** `state/initiatives/<id>.json`, a manager's assignments to its reports. Read them with
   `npm run owners -- initiatives` and `npm run owners -- initiative <id>`; assignment state there is derived from
   the linked request and item. Only an `approved` initiative whose approval names its current `revision` dispatches.

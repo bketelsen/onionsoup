@@ -8,8 +8,8 @@ import { Runtime, advance, approvePlan, cancelItem, resumeItem, retryItem } from
 import { git, refreshCheckout, ensureDesk, createWorktree } from '../src/workspace.ts';
 import { REBASE_WORKFLOW, maintainPullRequests, refreshPublications } from '../src/rebase.ts';
 import { deskSyncText } from '../src/desk-sync.ts';
-import { openOwnerSession, type OwnerSessionClient } from '../src/owner-sessions.ts';
-import { syncPlanWorktree } from '../src/plan-worktrees.ts';
+import { openOwnerSession, type OwnerSessionClient, type SessionActivity } from '../src/owner-sessions.ts';
+import { PLAN_WORKTREE_LIMITS, removeIdlePlanWorktrees, syncPlanWorktree } from '../src/plan-worktrees.ts';
 import { checkoutPullRequest, DESK_CHANGE_LIMITS, proposeDeskChanges, resetDeskReviews } from '../src/desk-changes.ts';
 import { deskReviewRounds } from '../src/desk-reviews.ts';
 import type { HireRequest } from '../src/opencode.ts';
@@ -784,20 +784,27 @@ test("a desk behind its base is reviewed against where it meets the base, so new
 
 interface OpenedSession { directory: string; title: string; text?: string }
 
-/** opencode as the session opener sees it: sessions are recorded with their directory and first message; nothing runs. */
+/**
+ * opencode as the session opener sees it: sessions are recorded with their directory and first message; nothing runs.
+ * Each session's activity is scripted: it starts idle, updated when it opened.
+ */
 function scriptedSessions() {
   const opened: OpenedSession[] = [];
+  const activity = new Map<string, SessionActivity>();
   const client: OwnerSessionClient = {
     create: async (directory, title) => {
       opened.push({ directory, title });
-      return `ses_plan_${opened.length}`;
+      const sessionID = `ses_plan_${opened.length}`;
+      activity.set(sessionID, { isBusy: false, updatedAt: Date.now() });
+      return sessionID;
     },
     prompt: async (target, _agent, text) => {
       opened[Number(target.sessionID.split('_').at(-1)) - 1]!.text = text;
     },
     remove: async () => {},
+    activity: async target => activity.get(target.sessionID) ?? { isBusy: false, updatedAt: undefined },
   };
-  return { client, opened };
+  return { client, opened, activity };
 }
 
 /** Approved plans for clippy, each with its execution session opened the way the plugin opens it. */
@@ -812,7 +819,21 @@ async function openPlans(runtime: Runtime, titles: readonly string[]) {
     await openOwnerSession(runtime, sessions.client, submitted.id);
     items.push(await runtime.ledger.get(submitted.id));
   }
-  return { items, opened: sessions.opened };
+  return { items, opened: sessions.opened, sessions };
+}
+
+const HOUR_MS = 3_600_000;
+
+/** A moment just past the idle limit, from now. */
+function pastIdleLimit() {
+  return new Date(Date.now() + (PLAN_WORKTREE_LIMITS.idleBeforeRemovalHours + 1) * HOUR_MS);
+}
+
+/** Run the plugin's cleanup pass as of `now`; any failure fails the test. */
+async function cleanUp(runtime: Runtime, sessions: OwnerSessionClient, now: Date) {
+  const failures: unknown[] = [];
+  await removeIdlePlanWorktrees(runtime, sessions, (_itemId, error) => failures.push(error), now);
+  assert.deepEqual(failures, []);
 }
 
 async function pushedFiles(remote: string, branch: string) {
@@ -875,47 +896,83 @@ test('proposing one plan publishes only its worktree; the other plan and the des
   });
 });
 
-test('a merged plan\'s worktree is removed; a cancelled one only when nothing in it would be lost', async () => {
+test('a plan merged under its grant keeps its worktree and session; the cleanup pass removes it once the session is idle', async () => {
   const { runtime, root, remote } = await fixture();
   runtime.declarations.owners.get('clippy')!.grants.push({ to: 'clippy', action: 'merge', target: 'example/clippy' });
-  const { items: [merged, dirty, clean] } = await openPlans(runtime, ['Merged plan', 'Dirty plan', 'Clean plan']);
-  await writeFile(join(merged!.planWorktree!, 'merged.txt'), 'merged\n');
-  await writeFile(join(dirty!.planWorktree!, 'dirty.txt'), 'unfinished\n');
+  const { items: [plan], sessions } = await openPlans(runtime, ['Merged plan']);
+  const path = plan!.planWorktree!;
+  await writeFile(join(path, 'merged.txt'), 'merged\n');
   scriptHires(runtime, async () => verdict);
   await fakeGithub(root, remote, async () => {
-    const result = await proposeDeskChanges(runtime, 'clippy', { title: 'Merged', summary: 'Merge it', item: merged!.id });
+    const result = await proposeDeskChanges(runtime, 'clippy', { title: 'Merged', summary: 'Merge it', item: plan!.id });
     assert.equal(result.outcome, 'merged', result.summary);
   });
-  const landed = await runtime.ledger.get(merged!.id);
-  const desk = await ensureDesk(runtime.repositoryOwner('clippy'), runtime.desksRoot);
-  assert.equal(landed.planWorktree, undefined);
-  assert.equal(existsSync(merged!.planWorktree!), false);
-  assert.equal((await git(desk.path, ['branch', '--list', `plan/${merged!.id}`])).trim(), '', 'its branch goes with it');
-  assert.deepEqual(landed.session, { sessionID: 'ses_plan_1', directory: desk.path }, 'later notices reach a directory that exists');
+  const landed = await runtime.ledger.get(plan!.id);
+  assert.equal(landed.status, 'landed');
+  assert.equal(landed.planWorktree, path, 'the session may still be working there (a rollout)');
+  assert.ok(existsSync(path));
+  assert.deepEqual(landed.session, { sessionID: 'ses_plan_1', directory: path });
 
-  await cancelItem(runtime, dirty!.id, 'person', 'Not now');
-  assert.equal(await readFile(join(dirty!.planWorktree!, 'dirty.txt'), 'utf8'), 'unfinished\n');
-  assert.equal((await runtime.ledger.get(dirty!.id)).planWorktree, dirty!.planWorktree);
-  await cancelItem(runtime, clean!.id, 'person', 'Not needed');
-  assert.equal(existsSync(clean!.planWorktree!), false);
-  const kinds = await journalKinds(runtime, 'clippy');
-  assert.equal(kinds.filter(kind => kind === 'plan-worktree-removed').length, 2);
-  assert.ok(kinds.includes('attention'), 'the kept worktree is raised to the person');
+  await cleanUp(runtime, sessions.client, new Date());
+  assert.ok(existsSync(path), 'a session active within the limit keeps it');
+  sessions.activity.set('ses_plan_1', { isBusy: true, updatedAt: 0 });
+  await cleanUp(runtime, sessions.client, pastIdleLimit());
+  assert.ok(existsSync(path), 'a busy session keeps it, however long ago it last changed');
+
+  sessions.activity.set('ses_plan_1', { isBusy: false, updatedAt: Date.now() });
+  await cleanUp(runtime, sessions.client, pastIdleLimit());
+  const cleaned = await runtime.ledger.get(plan!.id);
+  assert.equal(existsSync(path), false);
+  assert.equal(cleaned.planWorktree, undefined);
+  assert.deepEqual(cleaned.session, { sessionID: 'ses_plan_1', directory: path }, 'the session keeps its real directory');
+  const { workspace } = runtime.repositoryOwner('clippy');
+  assert.equal((await git(workspace, ['branch', '--list', `plan/${plan!.id}`])).trim(), '', 'its branch goes with it');
+  assert.equal((await journalKinds(runtime, 'clippy')).filter(kind => kind === 'plan-worktree-removed').length, 1);
 });
 
-test('a plan merged by the person is noticed on refresh, and its worktree removed', async () => {
+test('a plan merged by the person is noticed on refresh; its worktree stays until its session is idle', async () => {
   const { runtime, root, remote } = await fixture();
-  const { items: [plan] } = await openPlans(runtime, ['Person merges']);
-  await writeFile(join(plan!.planWorktree!, 'change'), 'planned\n');
+  const { items: [plan], sessions } = await openPlans(runtime, ['Person merges']);
+  const path = plan!.planWorktree!;
+  await writeFile(join(path, 'change'), 'planned\n');
   scriptHires(runtime, async () => verdict);
   await fakeGithub(root, remote, async () => {
     assert.equal((await proposeDeskChanges(runtime, 'clippy', { title: 'Plan', summary: 'Plan', item: plan!.id })).outcome, 'opened');
-    assert.ok(existsSync(plan!.planWorktree!), 'an open PR keeps its worktree');
+    await cleanUp(runtime, sessions.client, pastIdleLimit());
+    assert.ok(existsSync(path), 'an open PR keeps its worktree');
     await writeFile(join(root, 'github.json'), JSON.stringify({ created: 1, state: 'MERGED' }));
     await refreshPublications(runtime, 'clippy');
   });
-  assert.equal((await runtime.ledger.get(plan!.id)).publication?.state, 'merged');
-  assert.equal(existsSync(plan!.planWorktree!), false);
+  const merged = await runtime.ledger.get(plan!.id);
+  assert.equal(merged.publication?.state, 'merged');
+  assert.equal(merged.planWorktree, path);
+  assert.deepEqual(merged.session, { sessionID: 'ses_plan_1', directory: path });
+  assert.ok(existsSync(path), 'the merge alone does not remove it');
+  await cleanUp(runtime, sessions.client, pastIdleLimit());
+  assert.equal(existsSync(path), false);
+  assert.equal((await runtime.ledger.get(plan!.id)).planWorktree, undefined);
+});
+
+test('a cancelled plan\'s worktree waits for its idle session, and is never removed while it holds work', async () => {
+  const { runtime } = await fixture();
+  const { items: [dirty, clean], sessions } = await openPlans(runtime, ['Dirty plan', 'Clean plan']);
+  await writeFile(join(dirty!.planWorktree!, 'dirty.txt'), 'unfinished\n');
+  await cancelItem(runtime, dirty!.id, 'person', 'Not now');
+  await cancelItem(runtime, clean!.id, 'person', 'Not needed');
+  assert.ok(existsSync(clean!.planWorktree!), 'cancelling does not remove it at once');
+  await cleanUp(runtime, sessions.client, new Date());
+  assert.ok(existsSync(clean!.planWorktree!), 'a recently active session keeps it');
+
+  await cleanUp(runtime, sessions.client, pastIdleLimit());
+  await cleanUp(runtime, sessions.client, pastIdleLimit());
+  assert.equal(existsSync(clean!.planWorktree!), false);
+  assert.equal(await readFile(join(dirty!.planWorktree!, 'dirty.txt'), 'utf8'), 'unfinished\n');
+  const kept = await runtime.ledger.get(dirty!.id);
+  assert.equal(kept.planWorktree, dirty!.planWorktree);
+  assert.equal(kept.planWorktreeKept, 'kept-uncommitted');
+  const kinds = await journalKinds(runtime, 'clippy');
+  assert.equal(kinds.filter(kind => kind === 'plan-worktree-removed').length, 1);
+  assert.equal(kinds.filter(kind => kind === 'attention').length, 1, 'the kept worktree is raised to the person once, not every pass');
 });
 
 test('a plan\'s worktree syncs with its base on its own, keeping its uncommitted work', async () => {

@@ -272,6 +272,29 @@ test('a plan\'s work session is listed, prompted and answered in the plan\'s own
   }
 });
 
+test('a merged plan whose session is still working is listed in its worktree, with its status', async () => {
+  const planWorktree = '/plans/bellonda/w-rollout';
+  const { server, call, runtime } = await start(api => {
+    const listSessions = api.listSessions;
+    api.listSessions = async directory => directory === planWorktree
+      ? [{ id: 'ses_rollout', title: 'Plan w-rollout: Roll out', directory, time: { created: 5, updated: 6 } }]
+      : listSessions(directory);
+    api.status = async directory => directory === planWorktree ? { ses_rollout: { type: 'busy' } } : {};
+  });
+  try {
+    await runtime.ledger.create('bellonda', 'owner-change', { title: 'Roll out', goal: 'g', rationale: 'r', acceptance: ['a'], size: 'small' }, {
+      status: 'landed', planWorktree, session: { sessionID: 'ses_rollout', directory: planWorktree },
+      publication: { url: 'https://github.com/example/wiki/pull/7', branch: 'owners/w-rollout', by: 'bellonda', at: '2026-09-25T00:00:00Z', state: 'merged' },
+    });
+    const listed = (await call('GET', '/api/owners/bellonda/sessions')).body as { directories: string[]; sessions: { id: string }[]; status: Record<string, unknown> };
+    assert.deepEqual(listed.directories, ['/desks/bellonda', planWorktree]);
+    assert.ok(listed.sessions.some(session => session.id === 'ses_rollout'), 'the merged plan\'s session is still listed');
+    assert.deepEqual(listed.status.ses_rollout, { type: 'busy' });
+  } finally {
+    server.close();
+  }
+});
+
 test('the person\'s owner order is kept by the server and new owners follow it', async () => {
   const { ordered } = await import('@onionsoup/surface');
   assert.deepEqual(ordered([{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }], ['c', 'a']).map(owner => owner.id), ['c', 'a', 'b', 'd']);

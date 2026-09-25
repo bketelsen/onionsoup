@@ -49,6 +49,7 @@ function scriptedSessions(isPromptFailing = false) {
     remove: async target => {
       removed.push(target.sessionID);
     },
+    activity: async () => ({ isBusy: false, updatedAt: undefined }),
   };
   return { client, created, prompts, removed };
 }

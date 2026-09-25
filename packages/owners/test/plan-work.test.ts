@@ -7,7 +7,7 @@ import type { Plugin } from '@opencode-ai/plugin';
 import { processRequest } from '../src/brokering.ts';
 import { requestWork } from '../src/delegation.ts';
 import type { ChatOrigin } from '../src/chat-origin.ts';
-import { openNeededSessions, type OwnerSessionClient, type PermissionRule } from '../src/owner-sessions.ts';
+import { openNeededSessions, ownerSessionClient, type OwnerSessionClient, type PermissionRule } from '../src/owner-sessions.ts';
 import { PLAN_APPROVAL_PERMISSION, submitPlan } from '../src/plan-work.ts';
 import { Runtime } from '../src/runtime.ts';
 import { approvePlan } from '../src/work-recovery.ts';
@@ -63,6 +63,7 @@ function scriptedOpencode() {
     create: async (directory, title, permission) => (await client.session.create({ body: { title, permission: [...permission] }, query: { directory } })).data.id,
     prompt: async (target, agent, text) => { await client.session.promptAsync({ path: { id: target.sessionID }, query: target, body: { agent, parts: [{ text }] } }); },
     remove: async () => {},
+    activity: async () => ({ isBusy: false, updatedAt: undefined }),
   };
   return { client, sessions, created, prompts };
 }
@@ -156,4 +157,25 @@ test('delegated work opens a planning session, its plan waits for approval outsi
   await openNeededSessions(runtime, opencode.sessions, onError);
   assert.deepEqual(opencode.created.map(session => session.title).at(-1), `Plan ${itemId}: Patch the fleet`);
   assert.equal((await runtime.ledger.get(itemId)).session?.sessionID, 'ses_opened_2');
+});
+
+interface ScriptedSessionRead { status: number; updated?: number }
+
+/** opencode's session status and read, as the plugin's client answers them. */
+function sessionReads(statuses: Record<string, { type: string }>, session: ScriptedSessionRead) {
+  const read = session.updated === undefined
+    ? { error: { name: 'NotFoundError' }, response: { status: session.status } }
+    : { data: { time: { created: 1, updated: session.updated } }, response: { status: session.status } };
+  const client = { session: { status: async () => ({ data: statuses }), get: async () => read } };
+  return ownerSessionClient(client as unknown as Parameters<Plugin>[0]['client']);
+}
+
+test('a session\'s activity reads opencode\'s status and last update; a gone session has none, other failures throw', async () => {
+  const origin = { sessionID: 'ses_plan', directory: '/plans/miles-teg/w-1' };
+  const activity = (statuses: Record<string, { type: string }>, session: ScriptedSessionRead) => sessionReads(statuses, session).activity(origin);
+  assert.deepEqual(await activity({}, { status: 200, updated: 42 }), { isBusy: false, updatedAt: 42 });
+  assert.deepEqual(await activity({ ses_plan: { type: 'busy' } }, { status: 200, updated: 42 }), { isBusy: true, updatedAt: 42 });
+  assert.deepEqual(await activity({ ses_plan: { type: 'retry' } }, { status: 200, updated: 42 }), { isBusy: true, updatedAt: 42 });
+  assert.deepEqual(await activity({}, { status: 404 }), { isBusy: false, updatedAt: undefined });
+  await assert.rejects(activity({}, { status: 500 }), /owner_session_read_failed/);
 });

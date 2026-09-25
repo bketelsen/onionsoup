@@ -48,9 +48,13 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
   shipped has no `planWorktree`; it proposes from the desk as before, so two such plans in one repository still
   bundle each other's changes. The person untangles them (cancel one, or move its changes by hand); new plans each
   get their own worktree.
-- **A finished plan's work session drops out of the lists.** opencode lists sessions by the directory they were
-  made in. Once a merged or cancelled plan's worktree is removed, the ledger points its session at the desk (so
-  notices still arrive), but the owner's chat list and the item page no longer list it; the item page still links it.
+- **A finished plan's work session drops out of the lists a day after it goes quiet.** opencode lists sessions by
+  the directory they were made in, and the surface lists an owner's desk and the plan worktrees that still exist.
+  A finished plan's worktree is removed once its session has been idle for
+  `PLAN_WORKTREE_LIMITS.idleBeforeRemovalHours` (24); after that the owner's chat list no longer shows the session
+  (the item still records it, in its old directory), and a prompt sent to it fails because the directory is gone.
+- **Only the surface's opencode removes finished plans' worktrees.** The cleanup pass needs the session's activity,
+  so it runs in the plugin; while the surface is down, finished plans keep their worktrees.
 
 ## Surfaces
 

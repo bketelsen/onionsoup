@@ -181,11 +181,16 @@ round's findings for the person who merges, then folds in the approved plan. Wit
 (against its merge base, with its own review rounds) and committed; the desk and other plans are untouched, and an
 unfinished publication blocks only proposals from the same worktree. Plans approved before plan worktrees existed
 still propose from the desk. The item moves through `landing` to `landed`; completion of delegated work still means
-its PR merged. Once the PR merges (the finish step under a grant, or the next publication refresh when the person
-merges) or the item is cancelled, host code removes the worktree and its branch and points the item's session at the
-desk, so later notices reach a directory that exists. A worktree with uncommitted changes, or commits no remote
-holds, is never removed: it stays and raises the person's attention. A closed PR keeps its worktree until the item is
-cancelled.
+its PR merged. The worktree outlives the merge: the plan's session often keeps working there after its PR merges
+(a rollout run from the worktree), so neither the finish step, the publication refresh nor a cancellation removes it,
+and the item's session keeps its real directory. A plan is finished once it is `landed` with its PR merged or closed,
+or `cancelled`. The plugin's cleanup pass (`removeIdlePlanWorktrees` in `plan-worktrees.ts`, on the same
+`PLUGIN_LIMITS.noticeMs` pass that opens sessions) looks only at finished items that still have a `planWorktree`,
+asks opencode for the session's status and last update, and removes the worktree and its branch once the session is
+not busy (or retrying) and has not changed for `PLAN_WORKTREE_LIMITS.idleBeforeRemovalHours` (24); an item without
+a session, or whose session is gone, counts from the item's own last update. A worktree with uncommitted changes, or
+commits no remote holds, is never removed: it stays, the item records why (`planWorktreeKept`), and the person's
+attention is raised once per reason, not every pass. Each removal is journaled (`plan-worktree-removed`).
 
 **Repairs on the desk.** The `maintain-prs` duty keeps published PRs mergeable and green. Failing CI on a new head
 commit hires the owner once for that commit to decide fix, flaky or person; no work item is opened. `fix` wakes the

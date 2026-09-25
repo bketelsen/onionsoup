@@ -6,7 +6,6 @@ import { join } from 'node:path';
 import { ImplementationReport, Verdict } from './artifacts.ts';
 import { canChange, requireFreelancer } from './declarations.ts';
 import { tellOwner } from './plan-work.ts';
-import { removePlanWorktree } from './plan-worktrees.ts';
 import { pickModel } from './families.ts';
 import type { WorkItem, WorkStatus } from './ledger.ts';
 import type { Runtime } from './runtime.ts';
@@ -68,9 +67,8 @@ export async function refreshPublications(runtime: Runtime, ownerId?: string): P
     const state = await publicationState(url).catch(() => undefined);
     if (!state) refresh.unreadable.push(url);
     if (!state || state === 'open') continue;
-    const updated = await runtime.ledger.update(item.id, current => ({ ...current, publication: { ...current.publication!, state } }));
-    // A merged plan is done with its worktree; a closed PR may still be reopened, so its worktree stays until cancel.
-    if (state === 'merged') await removePlanWorktree(runtime, updated);
+    // A merged plan's worktree stays: its session may still be working there. The plugin's cleanup pass removes it.
+    await runtime.ledger.update(item.id, current => ({ ...current, publication: { ...current.publication!, state } }));
     refresh.changed.push(`${url} ${state}`);
   }
   return refresh;

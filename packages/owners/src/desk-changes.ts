@@ -8,7 +8,6 @@ import { effectiveDecision, Verdict } from './artifacts.ts';
 import { requestPublish } from './brokering.ts';
 import { findingsSection, findingsText, previousReviewText } from './briefs.ts';
 import { clearDeskReviews, deskReviewRounds, recordDeskReview, reviewSubject, type DeskReviewRound } from './desk-reviews.ts';
-import { removePlanWorktree } from './plan-worktrees.ts';
 import { requireFreelancer, type RepositoryOwner } from './declarations.ts';
 import { pickModel } from './families.ts';
 import type { Runtime } from './runtime.ts';
@@ -435,7 +434,8 @@ async function resetMergedDesk(runtime: Runtime, item: WorkItem) {
 }
 
 const finishDesk: DeskStep = async (runtime, item) => {
-  await (item.planWorktree ? removePlanWorktree : resetMergedDesk)(runtime, item);
+  // A plan's worktree stays after its merge (its session may carry on there); the plugin's cleanup pass removes it.
+  if (!item.planWorktree) await resetMergedDesk(runtime, item);
   const site = [...runtime.declarations.owners.values()]
     .flatMap(candidate => candidate.domain.kind === 'truenas' ? candidate.domain.sites : [])
     .find(candidate => candidate.source === item.owner);
