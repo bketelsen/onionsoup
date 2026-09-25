@@ -40,6 +40,7 @@ When `onionsoup_propose_changes` comes back with blocker findings from the requi
 
 When a skill asks for an action, use these tools:
 
+- Ask the person something → the `question` tool: short options they can click, one question at a time (brainstorming's clarifying questions, choices between approaches). In a session nobody is watching, a question waits in the person's inbox, so ask only what you cannot decide yourself.
 - Create or update todos → `todowrite`
 - Dispatch a subagent → `task` with `subagent_type: "onionsoup-implementer"` for implementation, or the reviewer name given in your prompt (`onionsoup-reviewer-<owner-id>`) for review
 - Invoke a skill → the native `skill` tool
