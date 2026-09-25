@@ -25,7 +25,7 @@ task:
     The implementer's fix report:
     [fix report, verbatim]
 
-    Work in: [desk path]
+    Work in: [the plan's worktree in an execution session, otherwise the desk path]
     Files the fix touched: [list]
 
     Read the current state of those files and `git diff -- <files>`. Your

@@ -37,6 +37,7 @@ const { values: options, positionals } = parseArgs({
     directory: { type: 'string' },
     owner: { type: 'string' },
     repository: { type: 'string' },
+    item: { type: 'string' },
   },
 });
 
@@ -54,6 +55,7 @@ function detail(item: WorkItem) {
   if (item.planDocument) out.push('', `Plan (${item.planDocument.digest}):`, item.planDocument.markdown);
   if (item.planApproval) out.push(`Plan approved by ${item.planApproval.by} at ${item.planApproval.at}`);
   if (item.session) out.push(`Working in session ${item.session.sessionID}`);
+  if (item.planWorktree) out.push(`Plan worktree: ${item.planWorktree}`);
   item.implementations.forEach((implementation, index) => {
     const verified = implementation.verification.map(result => `${result.command}=${result.exitCode}`).join(' ');
     out.push('', `Implementation ${index + 1}: ${implementation.report.summary}`, `  ${implementation.diffStat.split('\n').at(-1) ?? ''}`, `  verify: ${verified}`);
@@ -217,7 +219,7 @@ const COMMANDS: Record<string, Command> = {
     console.log(requestLine(await denyRequest(runtime, required(requestId, 'request'), userInfo().username, required(options.reason, '--reason'))));
   },
   async 'desk-review-reset'(runtime, [ownerId, repository]) {
-    const cleared = await resetDeskReviews(runtime, required(ownerId, 'owner'), repository, userInfo().username);
+    const cleared = await resetDeskReviews(runtime, required(ownerId, 'owner'), repository, userInfo().username, options.item);
     console.log(`${ownerId}: ${cleared} review rounds cleared; the next proposal is reviewed afresh`);
   },
   async initiatives(runtime) {

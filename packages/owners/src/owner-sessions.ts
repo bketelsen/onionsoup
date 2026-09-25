@@ -1,9 +1,10 @@
 import type { Plugin } from '@opencode-ai/plugin';
 import type { ChatOrigin } from './chat-origin.ts';
 import { chatDirectory } from './chats.ts';
-import { deskSyncText, syncOwnerDesk } from './desk-sync.ts';
+import { deskSyncText, syncOwnerDesk, type DeskSyncReport } from './desk-sync.ts';
 import type { WorkItem } from './ledger.ts';
 import { executionPrompt, OWNER_CHANGE_WORKFLOW, planningPrompt } from './plan-work.ts';
+import { ensurePlanWorktree, syncPlanWorktree } from './plan-worktrees.ts';
 import type { Runtime } from './runtime.ts';
 
 /**
@@ -19,23 +20,49 @@ export interface OwnerSessionClient {
   remove(target: ChatOrigin): Promise<void>;
 }
 
+/** Where a session runs, and what its first message adds about that place (how a sync went, if it said anything). */
+interface SessionPlace { directory: string; note: string }
+
 interface SessionKind {
   isNeeded: (item: WorkItem) => boolean;
   title: (item: WorkItem) => string;
   prompt: (item: WorkItem) => string;
+  /** Ready the directory the session runs in, before it opens. */
+  place: (runtime: Runtime, item: WorkItem) => Promise<SessionPlace>;
   /** What the item records about its session; undefined takes the record back when the session never started. */
   recorded: (origin: ChatOrigin | undefined) => Partial<WorkItem>;
-  /** Session-level rules on top of the owner's agent: the execution session edits the desk without asking. */
+  /** Session-level rules on top of the owner's agent: the execution session edits its worktree without asking. */
   permission: readonly PermissionRule[];
 }
 
-/** Planning and carrying out a plan start from the base branch as it is now, not from where the desk was left. */
-async function syncBeforeSession(runtime: Runtime, item: WorkItem) {
+function syncNote(sync: DeskSyncReport | undefined) {
+  return sync ? `\n\n${deskSyncText(sync)}` : '';
+}
+
+/**
+ * Planning reads the repository in the owner's chat directory, so the desk is synced first: the plan is made against
+ * the base branch as it is now, not where the desk was left.
+ */
+async function planningPlace(runtime: Runtime, item: WorkItem): Promise<SessionPlace> {
   const sync = await syncOwnerDesk(runtime, item.owner, item.proposal.repository).catch((error: unknown) => {
     console.warn('owner_session_desk_sync_failed', item.id, error);
     return undefined;
   });
-  return sync ? `\n\n${deskSyncText(sync)}` : '';
+  return { directory: await chatDirectory(runtime, item.owner), note: syncNote(sync) };
+}
+
+/**
+ * Carrying out a plan happens in the plan's own worktree, new from the current base; one that already exists (a
+ * session reopened after a failed start) is brought up to date instead.
+ */
+async function executionPlace(runtime: Runtime, item: WorkItem): Promise<SessionPlace> {
+  const worktree = await ensurePlanWorktree(runtime, item);
+  if (worktree.isNew) return { directory: worktree.path, note: '' };
+  const sync = await syncPlanWorktree(runtime, item.owner, item.id).catch((error: unknown) => {
+    console.warn('owner_session_plan_sync_failed', item.id, error);
+    return undefined;
+  });
+  return { directory: worktree.path, note: syncNote(sync) };
 }
 
 function isOwnerPlan(item: WorkItem) {
@@ -47,6 +74,7 @@ export const OWNER_SESSIONS = {
     isNeeded: item => isOwnerPlan(item) && item.status === 'planning' && !item.origin,
     title: item => `Request ${item.request ?? item.id}: ${item.proposal.title}`,
     prompt: planningPrompt,
+    place: planningPlace,
     recorded: origin => ({ origin }),
     permission: [],
   },
@@ -54,6 +82,7 @@ export const OWNER_SESSIONS = {
     isNeeded: item => isOwnerPlan(item) && item.status === 'working' && !item.session,
     title: item => `Plan ${item.id}: ${item.proposal.title}`,
     prompt: executionPrompt,
+    place: executionPlace,
     recorded: origin => ({ session: origin }),
     permission: [{ permission: 'edit', pattern: '*', action: 'allow' }],
   },
@@ -89,7 +118,7 @@ export async function openOwnerSession(runtime: Runtime, client: OwnerSessionCli
   const persona = runtime.owner(item.owner).persona;
   if (!kindName || !persona) return undefined;
   const kind: SessionKind = OWNER_SESSIONS[kindName];
-  const directory = await chatDirectory(runtime, item.owner);
+  const { directory, note } = await kind.place(runtime, item);
   const origin = { sessionID: await client.create(directory, kind.title(item), kind.permission), directory };
   const claimed = await claim(runtime, item, kind, origin);
   if (!claimed) {
@@ -97,7 +126,7 @@ export async function openOwnerSession(runtime: Runtime, client: OwnerSessionCli
     return undefined;
   }
   try {
-    await client.prompt(origin, persona.name, `${kind.prompt(claimed)}${await syncBeforeSession(runtime, claimed)}`);
+    await client.prompt(origin, persona.name, `${kind.prompt(claimed)}${note}`);
   } catch (error) {
     await unclaim(runtime, claimed, kind);
     await client.remove(origin).catch(() => undefined);

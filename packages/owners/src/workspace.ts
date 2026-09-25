@@ -86,6 +86,11 @@ export async function matchHead(worktree: string) {
   await git(worktree, ['clean', '-q', '-f', '-d', '-x']);
 }
 
+/** A new owner has no checkout yet: clone it, so worktrees can be made from it. */
+export async function ensureClone(owner: RepositoryOwner) {
+  if (!existsSync(join(owner.workspace, '.git'))) await run('git', ['clone', '-q', owner.domain.remote, owner.workspace]);
+}
+
 /**
  * An owner's desk: its own worktree on a desk branch, where chats with a person do their work. With `start`, the desk
  * branch is moved to that commit (a PR's head, to repair it); only a desk without uncommitted changes moves.
@@ -93,8 +98,7 @@ export async function matchHead(worktree: string) {
 export async function ensureDesk(owner: RepositoryOwner, desksRoot: string, start?: string) {
   const path = owner.desk ?? join(desksRoot, owner.id);
   const branch = `desk/${owner.id}`;
-  // A new owner has no checkout yet: clone it first.
-  if (!existsSync(join(owner.workspace, '.git'))) await run('git', ['clone', '-q', owner.domain.remote, owner.workspace]);
+  await ensureClone(owner);
   if (!existsSync(path)) {
     await git(owner.workspace, ['fetch', '-q', 'origin']);
     await git(owner.workspace, ['worktree', 'add', '-q', '-B', branch, path, `origin/${owner.domain.baseBranch}`]);

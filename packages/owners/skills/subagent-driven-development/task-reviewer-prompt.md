@@ -26,7 +26,7 @@ task:
 
     ## Changes Under Review
 
-    Work in: [desk path]
+    Work in: [the plan's worktree in an execution session, otherwise the desk path]
     Files this task changed: [list]
     Desk state before the task: [the `git diff --stat` noted before dispatch]
 

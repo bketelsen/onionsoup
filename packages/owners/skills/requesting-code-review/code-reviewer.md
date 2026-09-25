@@ -127,6 +127,6 @@ task:
 **Placeholders:**
 - `[DESCRIPTION]`: a short summary of what was built
 - `[PLAN_OR_REQUIREMENTS]`: the plan or requirements text, verbatim
-- `[DESK_PATH]`: the desk, or the repository subfolder for a group
+- `[DESK_PATH]`: the plan's worktree in an execution session; otherwise the desk, or the repository subfolder for a group
 
 **Reviewer returns:** strengths, issues (Critical / Important / Minor), declined-to-judge list, and an assessment.

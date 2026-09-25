@@ -71,7 +71,7 @@ Onionsoup is the engine. A person's owners are configuration that lives outside 
 | --- | --- | --- |
 | Engine: runtime, CLI, opencode plugin, Owner's Desk | this repository | |
 | Your owners: declarations, charters, freelancer models, model families | `ONIONSOUP_CONFIG` | `~/.config/onionsoup` |
-| Runtime state: notebooks, ledger, requests, checkouts, desks, evidence, tools | `ONIONSOUP_HOME` | `~/.local/share/onionsoup` |
+| Runtime state: notebooks, ledger, requests, checkouts, desks, plan worktrees, evidence, tools | `ONIONSOUP_HOME` | `~/.local/share/onionsoup` |
 
 `npm run owners -- init` creates a config directory from [`examples/starter`](../../examples/starter) as its
 own Git repository. Declarations contain no machine paths: an owner's workspace defaults to
@@ -106,7 +106,7 @@ An owner is declared once (`owners/<id>.yaml`) and keeps one identity across ses
 - **Reporting line**: `reportsTo` names an owner's manager. The roster every owner reads is drawn as that tree, and
   a manager plans cross-repository work through its reports (see [Org chart and initiatives](#org-chart-and-initiatives)).
 - **Desk**: a worktree on a `desk/<id>` branch (or the evidence folder for non-repository owners) where chat
-  work happens. Desk changes become a verified, reviewed PR through `onionsoup_propose_changes`; only blocker findings send them back. The review diffs the desk against where it meets its base branch (the merge base), so a desk that fell behind shows only its own change. `onionsoup_sync_desk` brings a desk up to date in host code: uncommitted work (intent-to-add entries included) is set aside under a unique stash, the desk moves to `origin/<base>`, and the work comes back; a conflict keeps the stash and names the files, and commits no remote holds are never moved (`desk_has_unpublished_commits`). Planning and execution sessions start from a synced desk. Review converges: each round with blockers is kept (`state/desk-reviews/`), and the next reviewer gets its findings and the diff since, checks those first, and blocks new points in already-reviewed text only for real errors. After `DESK_CHANGE_LIMITS.reviewRoundsBeforePerson` rounds (4) no reviewer is hired: the person reads the diff, and `owners desk-review-reset <owner> [repository]` starts afresh. An approval clears the history. Publication is a ledger workflow: commit, push, PR creation, merge and site follow-up have durable checkpoints. Retrying a clean desk continues its unfinished publication, and its PR participates in maintenance. An active publication reports its progress; permanent failures name the cancellation needed before a new proposal. Journal failures remain visible without changing a completed publication back to failed.
+  work happens. Desk changes become a verified, reviewed PR through `onionsoup_propose_changes`; only blocker findings send them back. The review diffs the desk against where it meets its base branch (the merge base), so a desk that fell behind shows only its own change. `onionsoup_sync_desk` (with a plan's `item`, that plan's worktree) brings a desk up to date in host code: uncommitted work (intent-to-add entries included) is set aside under a unique stash, the desk moves to `origin/<base>`, and the work comes back; a conflict keeps the stash and names the files, and commits no remote holds are never moved (`desk_has_unpublished_commits`). Planning sessions start from a synced desk; an approved plan works in its own worktree, not the desk (see Execution sessions). Review converges: each round with blockers is kept (`state/desk-reviews/`), and the next reviewer gets its findings and the diff since, checks those first, and blocks new points in already-reviewed text only for real errors. After `DESK_CHANGE_LIMITS.reviewRoundsBeforePerson` rounds (4) no reviewer is hired: the person reads the diff, and `owners desk-review-reset <owner> [repository] [--item <plan>]` starts afresh (a plan's worktree keeps its own rounds). An approval clears the history. Publication is a ledger workflow: commit, push, PR creation, merge and site follow-up have durable checkpoints. Retrying a clean desk continues its unfinished publication, and its PR participates in maintenance. An active publication reports its progress; permanent failures name the cancellation needed before a new proposal. Journal failures remain visible without changing a completed publication back to failed.
 
 ### Owners run their work
 
@@ -156,8 +156,13 @@ note as plan feedback; the owner revises it with them and submits again with `it
 and moves the item to `working`.
 
 **Execution sessions.** An approved plan runs in a new owner session on the surface's opencode, titled
-`Plan <id>: <title>`, where the person can watch and step in. The session may edit the desk without asking (a
-session-level rule; the owner's other chats keep their rules). Its first message, marked as a runtime notice, is the
+`Plan <id>: <title>`, where the person can watch and step in. The session runs in the plan's own git worktree, not
+the owner's desk: host code makes it from the repository's checkout at the current `origin/<base>` (fetched first),
+at `<home>/plans/<owner>/<item>` on branch `plan/<item>`, and records it on the item (`planWorktree`). Two plans in
+one repository once shared a desk, so proposing either would have bundled the other's unreviewed changes and both
+stopped; with a worktree each they proceed and propose independently, and the desk stays for chat and small direct
+changes. A session reopened after a failed start reuses the worktree and syncs it. The session may edit its worktree
+without asking (a session-level rule; the owner's other chats keep their rules). Its first message, marked as a runtime notice, is the
 approved plan with any conditions of approval, and tells the owner to carry it out with
 `subagent-driven-development` (an implementer subagent for each small task, its reviewer subagent after each), to
 make and record the rulings the plan leaves open, and to end with `onionsoup_propose_changes` for the item. The item
@@ -172,8 +177,15 @@ review hired from the `review` freelancer outside the owner's family, then commi
 merge under a `merge` grant, and a site publish follow-up when the owner is a site source. Only blocker findings send
 the change back; the review brief defines the severities (blocker, major, minor, nit), and the PR body lists the last
 round's findings for the person who merges, then folds in the approved plan. Without `item` a proposal opens its own
-`desk-publication` item as before. The item moves through `landing` to `landed`; completion of delegated work still
-means its PR merged.
+`desk-publication` item as before. With an item that has a plan worktree, that worktree is what is verified, reviewed
+(against its merge base, with its own review rounds) and committed; the desk and other plans are untouched, and an
+unfinished publication blocks only proposals from the same worktree. Plans approved before plan worktrees existed
+still propose from the desk. The item moves through `landing` to `landed`; completion of delegated work still means
+its PR merged. Once the PR merges (the finish step under a grant, or the next publication refresh when the person
+merges) or the item is cancelled, host code removes the worktree and its branch and points the item's session at the
+desk, so later notices reach a directory that exists. A worktree with uncommitted changes, or commits no remote
+holds, is never removed: it stays and raises the person's attention. A closed PR keeps its worktree until the item is
+cancelled.
 
 **Repairs on the desk.** The `maintain-prs` duty keeps published PRs mergeable and green. Failing CI on a new head
 commit hires the owner once for that commit to decide fix, flaky or person; no work item is opened. `fix` wakes the

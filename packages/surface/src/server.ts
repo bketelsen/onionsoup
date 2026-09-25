@@ -99,6 +99,18 @@ export function surfaceServer(state: SurfaceState, options: { webRoot: string; b
     return { directory: await state.directory(ownerId), agent: () => state.agentOf(ownerId) };
   };
 
+  /** One of an owner's sessions, addressed where it runs: a plan's session in the plan's worktree. */
+  const ownedSession = async (ownerId: string, sessionID: string) => {
+    requireKnownOwner(ownerId);
+    return { directory: await state.sessionDirectory(ownerId, sessionID), agent: () => state.agentOf(ownerId) };
+  };
+
+  /** A waiting prompt or question of an owner's, addressed in the directory it waits in. */
+  const ownedPending = async (ownerId: string, kind: 'permission' | 'question', requestID: string) => {
+    requireKnownOwner(ownerId);
+    return state.pendingDirectory(ownerId, kind, requestID);
+  };
+
   const routes: Route[] = [
     route('GET', '/api/state', async () => {
       const [{ inbox, inboxErrors }, opencode] = await Promise.all([state.inboxSnapshot(), state.opencode.health()]);
@@ -143,12 +155,12 @@ export function surfaceServer(state: SurfaceState, options: { webRoot: string; b
       return { outcome: 'retracted' };
     }),
     route('GET', '/api/owners/:owner/sessions', async params => {
-      const { directory } = await owned(params.owner!);
-      const [sessions, status, settings] = await Promise.all([state.opencode.listSessions(directory), state.opencode.status(directory).catch(() => ({})), state.settings.read()]);
-      return { directory, sessions, status, autoAccept: settings.autoAccept };
+      requireKnownOwner(params.owner!);
+      const [chats, settings] = await Promise.all([state.chatSessions(params.owner!), state.settings.read()]);
+      return { ...chats, autoAccept: settings.autoAccept };
     }),
     route('PUT', '/api/owners/:owner/sessions/:session/auto-accept', async (params, body) => {
-      const { directory } = await owned(params.owner!);
+      const { directory } = await ownedSession(params.owner!, params.session!);
       const enabled = (await body()).enabled;
       if (typeof enabled !== 'boolean') throw new HttpError(400, 'enabled must be true or false');
       const current = (await state.settings.read()).autoAccept;
@@ -164,25 +176,25 @@ export function surfaceServer(state: SurfaceState, options: { webRoot: string; b
       return state.opencode.createSession(directory, typeof input.title === 'string' ? input.title : undefined, agent());
     }),
     route('PATCH', '/api/owners/:owner/sessions/:session', async (params, body) => {
-      const { directory } = await owned(params.owner!);
+      const { directory } = await ownedSession(params.owner!, params.session!);
       return state.opencode.renameSession(directory, params.session!, text((await body()).title, 'title'));
     }),
     route('GET', '/api/owners/:owner/sessions/:session/messages', async params => {
-      const { directory } = await owned(params.owner!);
+      const { directory } = await ownedSession(params.owner!, params.session!);
       return state.opencode.messages(directory, params.session!);
     }),
     route('POST', '/api/owners/:owner/sessions/:session/prompt', async (params, body) => {
-      const { directory, agent } = await owned(params.owner!);
+      const { directory, agent } = await ownedSession(params.owner!, params.session!);
       await state.opencode.prompt(directory, params.session!, agent(), text((await body()).text, 'text'));
       return { outcome: 'sent' };
     }),
     route('POST', '/api/owners/:owner/sessions/:session/abort', async params => {
-      const { directory } = await owned(params.owner!);
+      const { directory } = await ownedSession(params.owner!, params.session!);
       await state.opencode.abort(directory, params.session!);
       return { outcome: 'aborted' };
     }),
     route('POST', '/api/owners/:owner/permissions/:request', async (params, body) => {
-      const { directory } = await owned(params.owner!);
+      const directory = await ownedPending(params.owner!, 'permission', params.request!);
       const input = await body();
       const reply = input.reply;
       if (reply !== 'once' && reply !== 'always' && reply !== 'reject') throw new HttpError(400, 'reply must be once, always or reject');
@@ -190,7 +202,7 @@ export function surfaceServer(state: SurfaceState, options: { webRoot: string; b
       return { outcome: reply };
     }),
     route('POST', '/api/owners/:owner/questions/:request', async (params, body) => {
-      const { directory } = await owned(params.owner!);
+      const directory = await ownedPending(params.owner!, 'question', params.request!);
       const input = await body();
       if (input.reject === true) await state.opencode.rejectQuestion(directory, params.request!);
       else if (Array.isArray(input.answers) && input.answers.every(answer => Array.isArray(answer) && answer.every(entry => typeof entry === 'string'))) {

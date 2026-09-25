@@ -42,7 +42,7 @@ task:
     4. Self-review (below)
     5. Report back
 
-    Work in: [desk path, or the repository subfolder for a group]
+    Work in: [the plan's worktree in an execution session; otherwise the desk path, or the repository subfolder for a group]
 
     Leave your changes in the working tree. Do not commit, push, create
     branches or worktrees, or use gh; the owner's host code commits after

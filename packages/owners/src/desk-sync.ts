@@ -66,6 +66,19 @@ export async function syncDesk(deskPath: string, baseBranch: string): Promise<De
   return { outcome: conflicts.length ? 'conflicts' : 'updated', from, to, conflicts, stash: conflicts.length ? stash : undefined };
 }
 
+/** A sync as the owner hears of it: which worktree moved (`place`, e.g. "desk for org/repo") and where it is. */
+export interface DeskSyncReport extends DeskSync { desk: string; repository: string; place: string }
+
+/** Journal a sync in the owner's notebook, naming the plan item when it was a plan's worktree. */
+export async function recordSync(runtime: Runtime, ownerId: string, report: DeskSyncReport, workItem?: string) {
+  const conflicts = report.conflicts.length ? `; conflicts in ${report.conflicts.join(', ')}` : '';
+  const note = `${report.place}: ${report.from.slice(0, 12)} → ${report.to.slice(0, 12)}${conflicts}`;
+  const notebook = runtime.notebook(ownerId);
+  await notebook.journal({ kind: 'desk-synced', workItem, outcome: report.outcome, note });
+  await notebook.commit('journal desk-synced').catch(() => undefined);
+  return report;
+}
+
 /** An owner's desk for one of its repositories, synced; a desk on a PR (a repair) is left where it is. */
 export async function syncOwnerDesk(runtime: Runtime, ownerId: string, repository?: string) {
   const owner = runtime.repositoryOwner(ownerId, repository);
@@ -73,18 +86,16 @@ export async function syncOwnerDesk(runtime: Runtime, ownerId: string, repositor
   const branch = (await git(desk.path, ['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
   if (branch !== desk.branch) throw new Error(`desk_on_pull_request: the desk is on ${branch}; propose or finish that repair first`);
   const sync = await syncDesk(desk.path, owner.domain.baseBranch);
-  const notebook = runtime.notebook(ownerId);
-  await notebook.journal({ kind: 'desk-synced', outcome: sync.outcome, note: `${owner.domain.name}: ${sync.from.slice(0, 12)} → ${sync.to.slice(0, 12)}${sync.conflicts.length ? `; conflicts in ${sync.conflicts.join(', ')}` : ''}` });
-  await notebook.commit('journal desk-synced').catch(() => undefined);
-  return { ...sync, desk: desk.path, repository: owner.domain.name };
+  const place = `desk for ${owner.domain.name}`;
+  return recordSync(runtime, ownerId, { ...sync, desk: desk.path, repository: owner.domain.name, place });
 }
 
-const SYNC_TEXT: Record<DeskSyncOutcome, (sync: DeskSync & { desk: string; repository: string }) => string> = {
-  current: sync => `Your desk for ${sync.repository} already includes origin at ${sync.to.slice(0, 12)}; nothing to do.`,
-  updated: sync => `Your desk for ${sync.repository} moved from ${sync.from.slice(0, 12)} to ${sync.to.slice(0, 12)}, with your uncommitted work restored. Re-run your checks before proposing.`,
-  conflicts: sync => `Your desk for ${sync.repository} moved to ${sync.to.slice(0, 12)}, but restoring your work conflicted in: ${sync.conflicts.join(', ')}. Resolve the conflict markers in those files (your work is also kept in stash ${sync.stash?.slice(0, 12)}), then re-run your checks.`,
+const SYNC_TEXT: Record<DeskSyncOutcome, (sync: DeskSyncReport) => string> = {
+  current: sync => `Your ${sync.place} already includes origin at ${sync.to.slice(0, 12)}; nothing to do.`,
+  updated: sync => `Your ${sync.place} moved from ${sync.from.slice(0, 12)} to ${sync.to.slice(0, 12)}, with your uncommitted work restored. Re-run your checks before proposing.`,
+  conflicts: sync => `Your ${sync.place} moved to ${sync.to.slice(0, 12)}, but restoring your work conflicted in: ${sync.conflicts.join(', ')}. Resolve the conflict markers in those files (your work is also kept in stash ${sync.stash?.slice(0, 12)}), then re-run your checks.`,
 };
 
-export function deskSyncText(sync: DeskSync & { desk: string; repository: string }) {
+export function deskSyncText(sync: DeskSyncReport) {
   return SYNC_TEXT[sync.outcome](sync);
 }

@@ -14,24 +14,32 @@ export const DeskReviewRound = z.object({
 export type DeskReviewRound = z.infer<typeof DeskReviewRound>;
 const DeskReviewHistory = z.object({ rounds: z.array(DeskReviewRound) });
 
-function historyPath(runtime: Runtime, ownerId: string, repository: string) {
-  return join(runtime.stateDirectory, 'desk-reviews', `${ownerId}--${repository.replaceAll('/', '--')}.json`);
+/**
+ * Whose rounds they are: the desk's for a repository, or an approved plan's worktree's, which keeps its own so two
+ * plans in one repository never share a history or a budget.
+ */
+export function reviewSubject(repository: string, planItem?: string) {
+  return planItem ? `${repository}/plans/${planItem}` : repository;
 }
 
-export async function deskReviewRounds(runtime: Runtime, ownerId: string, repository: string) {
-  const text = await readFile(historyPath(runtime, ownerId, repository), 'utf8').catch(() => undefined);
+function historyPath(runtime: Runtime, ownerId: string, subject: string) {
+  return join(runtime.stateDirectory, 'desk-reviews', `${ownerId}--${subject.replaceAll('/', '--')}.json`);
+}
+
+export async function deskReviewRounds(runtime: Runtime, ownerId: string, subject: string) {
+  const text = await readFile(historyPath(runtime, ownerId, subject), 'utf8').catch(() => undefined);
   return text ? DeskReviewHistory.parse(JSON.parse(text)).rounds : [];
 }
 
-export async function recordDeskReview(runtime: Runtime, ownerId: string, repository: string, round: DeskReviewRound) {
-  const path = historyPath(runtime, ownerId, repository);
-  const rounds = [...await deskReviewRounds(runtime, ownerId, repository), round];
+export async function recordDeskReview(runtime: Runtime, ownerId: string, subject: string, round: DeskReviewRound) {
+  const path = historyPath(runtime, ownerId, subject);
+  const rounds = [...await deskReviewRounds(runtime, ownerId, subject), round];
   await mkdir(join(runtime.stateDirectory, 'desk-reviews'), { recursive: true });
   await writeFile(path, JSON.stringify({ rounds }, null, 2) + '\n');
   return rounds;
 }
 
 /** An approved change, or the person's reset, starts the next desk change with no history. */
-export async function clearDeskReviews(runtime: Runtime, ownerId: string, repository: string) {
-  await rm(historyPath(runtime, ownerId, repository), { force: true });
+export async function clearDeskReviews(runtime: Runtime, ownerId: string, subject: string) {
+  await rm(historyPath(runtime, ownerId, subject), { force: true });
 }
