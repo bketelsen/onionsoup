@@ -15,7 +15,11 @@ import { changesSince, ensureDesk, git, snapshotTree, verificationPassed, verify
 
 const run = promisify(execFile);
 
-export const DESK_CHANGE_LIMITS = { diffChars: 60_000, reviewRoundsBeforePerson: 4 };
+/**
+ * `failedOutputChars`: how much of each failing verification command's output the owner sees. The sandbox already
+ * keeps the tail of each command; 600 characters cut pytest failures before their cause, so owners guessed.
+ */
+export const DESK_CHANGE_LIMITS = { diffChars: 60_000, reviewRoundsBeforePerson: 4, failedOutputChars: 6_000 };
 
 /**
  * An owner's desk work becomes a reviewed change: host code verifies the desk in the sandbox, hires a reviewer
@@ -115,11 +119,17 @@ function reviewBase(owner: RepositoryOwner, target: DeskTarget) {
   return target.kind === 'repair' ? target.head : `origin/${owner.domain.baseBranch}`;
 }
 
+/** What the owner reads when host verification fails: each failing command with the end of its output. */
+export function failedVerificationSummary(verification: readonly Verification[]) {
+  const failed = verification.filter(result => result.exitCode !== 0)
+    .map(result => `$ ${result.command} (exit ${result.exitCode})\n${result.output.slice(-DESK_CHANGE_LIMITS.failedOutputChars)}`);
+  return `Verification failed in the sandbox; nothing was committed. The sandbox has a read-only home and private /tmp, so a test that writes outside the desk can pass on the desk and fail here.\n${failed.join('\n\n')}`;
+}
+
 async function verifyDesk(owner: RepositoryOwner, deskPath: string, toolsDirectory: string) {
   const verification = await verify(owner, deskPath, toolsDirectory);
   if (verificationPassed(verification)) return { verification };
-  const failed = verification.filter(result => result.exitCode !== 0).map(result => `${result.command}: ${result.output.slice(-600)}`).join('\n');
-  return { verification, failure: { outcome: 'needs-work' as const, summary: `Verification failed; nothing was committed.\n${failed}` } };
+  return { verification, failure: { outcome: 'needs-work' as const, summary: failedVerificationSummary(verification) } };
 }
 
 interface DeskReview { verdict: Verdict; reviewer: string; patch: string; tree: string }

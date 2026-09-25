@@ -68,6 +68,12 @@ domain:
 
 A group owner cannot be a site source or ship (both need exactly one repository).
 
+Verification commands (`verify:`) run in the sandbox, not on the desk: the home directory is read-only and `/tmp` is
+private, and only the desk and the tool caches are writable. A test that writes under `$HOME` (for example Ansible's
+default `~/.ansible/tmp`) passes on the desk and fails verification, so point such tools at a temporary directory
+the test creates (`ANSIBLE_LOCAL_TEMP`, `ANSIBLE_REMOTE_TEMP`). A failed verification returns the end of each failing
+command's output (`DESK_CHANGE_LIMITS.failedOutputChars`) to the owner.
+
 ## Give an owner tools
 
 Any MCP server can be an owner's tool, visible to that owner alone:
