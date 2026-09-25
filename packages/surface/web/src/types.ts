@@ -27,6 +27,7 @@ export interface SurfaceState {
 }
 
 export type { PublicFrictionRecord as FrictionRecord } from '../../src/friction-public.ts';
+export type { ItemSession } from '../../src/item-session-public.ts';
 export type { InitiativeSummary, OrgEntry, PublicAssignment, PublicInitiative } from '../../src/initiative-public.ts';
 
 export interface JournalNote { at: string; kind: string; note?: string; quote?: string; outcome?: string; stage?: string; session?: string; workItem?: string; retracted?: boolean }

@@ -294,6 +294,35 @@ test('a work item\'s hires are found by title in opencode\'s store, and read fro
   }
 });
 
+test('an item page carries the decision it waits on, and its activity lists the work session and its subagents', async () => {
+  const { runtime, server, call } = await start(api => {
+    api.listSessions = async directory => [
+      { id: 'ses_work', title: 'Plan w-2: Wiki page', directory, time: { created: 5, updated: 6 } },
+      { id: 'ses_sub', title: 'Task 1 (@onionsoup-implementer subagent)', parentID: 'ses_work', directory, time: { created: 7, updated: 8 } },
+      { id: 'ses_other', title: 'Another chat', directory, time: { created: 1, updated: 1 } },
+    ];
+    api.messages = async (_directory, sessionID) => [{ info: { id: 'msg_owner', sessionID, role: 'user' }, parts: [] }];
+  });
+  try {
+    const proposal = { title: 'Wiki page', goal: 'Write it', rationale: 'r', acceptance: ['a'], size: 'small' as const };
+    const planDocument = { markdown: '1. Write the page', digest: 'd' };
+    const delegated = await runtime.ledger.create('bellonda', 'owner-change', proposal, { status: 'awaiting-plan-approval', planDocument, request: 'r-1' });
+    assert.equal((await call('GET', `/api/items/${delegated.id}`)).body.waiting && ((await call('GET', `/api/items/${delegated.id}`)).body.waiting as { kind: string }).kind, 'plan');
+    const inChat = await runtime.ledger.create('bellonda', 'owner-change', proposal, { status: 'awaiting-plan-approval', planDocument });
+    assert.equal((await call('GET', `/api/items/${inChat.id}`)).body.waiting, undefined, 'answered in the owner\'s chat');
+    const working = await runtime.ledger.create('bellonda', 'owner-change', proposal, { status: 'working', planDocument, session: { sessionID: 'ses_work', directory: '/desks/bellonda' } });
+    const sessions = (await call('GET', `/api/items/${working.id}/sessions`)).body as unknown as { id: string; label: string; kind: string }[];
+    assert.deepEqual(sessions.map(session => [session.id, session.label, session.kind]), [
+      ['ses_work', 'work session', 'owner'], ['ses_sub', 'Task 1 (@onionsoup-implementer subagent)', 'owner'],
+    ]);
+    const messages = (await call('GET', `/api/items/${working.id}/sessions/ses_sub/messages`)).body as unknown as { info: { id: string } }[];
+    assert.equal(messages[0]?.info.id, 'msg_owner', 'owner sessions are read from the surface\'s opencode');
+    assert.equal((await call('GET', `/api/items/${working.id}/sessions/ses_other/messages`)).status, 404);
+  } finally {
+    server.close();
+  }
+});
+
 test('person recovery decisions resume the exact stage, retry failures and cancel a pending push', async () => {
   const { runtime, server, call } = await start();
   try {

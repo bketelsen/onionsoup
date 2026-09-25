@@ -9,7 +9,7 @@ export { wake } from './owner.ts';
 export { distill, requestDistill, memoryStatus, memoryFingerprint } from './memory.ts';
 export { MemoryPolicy, MemoryState, type MemoryStatus } from './memory-config.ts';
 export { advance, approvePlan, revisePlan, resumeItem, retryItem, cancelItem, retirePipelineItems } from './work-recovery.ts';
-export { isDelegated, OWNER_CHANGE_WORKFLOW, PLAN_APPROVAL_PERMISSION, submitPlan } from './plan-work.ts';
+export { isDelegated, OWNER_CHANGE_WORKFLOW, PLAN_APPROVAL_PERMISSION } from './plan-work.ts';
 export { approvePush } from './rebase.ts';
 export { approveCreate, approveDelete, denyRequest } from './brokering.ts';
 export { deskState, itemText, statusText } from './desk.ts';

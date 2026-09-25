@@ -15,6 +15,9 @@ import { ordered, SettingsStore } from './settings.ts';
 import type { PublicFrictionRecord } from './friction-public.ts';
 import type { InitiativeSummary, OrgEntry, PublicAssignment, PublicInitiative } from './initiative-public.ts';
 import { InboxReadError } from './inbox-errors.ts';
+import type { ItemSession } from './item-session-public.ts';
+
+interface OpencodeSession { id: string; title: string; directory: string; parentID?: string; time: { created: number; updated: number } }
 
 /**
  * The surface's view of onionsoup: owners with what waits on the person, one inbox across all of them, and the
@@ -44,6 +47,14 @@ const PERSON_GATES = new Set([PLAN_APPROVAL_PERMISSION, 'onionsoup_ship', 'onion
 /** Delegated plans wait in the inbox; a plan submitted from the person's chat is answered there instead. */
 function waitsInInbox(item: WorkItem) {
   return item.status === 'awaiting-plan-approval' && item.workflow === OWNER_CHANGE_WORKFLOW && isDelegated(item);
+}
+
+function awaitsPush(item: WorkItem) {
+  return item.status === 'awaiting-push-approval';
+}
+
+function pushEntry(item: WorkItem): InboxEntry {
+  return { kind: 'push', id: item.id, owner: item.owner, title: item.proposal.title, detail: item.rebaseOf?.prUrl ?? '', at: item.updatedAt };
 }
 
 /** A person's decision on an engine gate, parsed once at the HTTP edge. */
@@ -183,7 +194,7 @@ export class SurfaceState {
       })),
       ...initiatives.filter(initiative => initiative.status === 'awaiting-approval').map(initiative => this.initiativeEntry(initiative)),
       ...items.filter(waitsInInbox).map(item => this.planEntry(item, initiatives)),
-      ...items.filter(item => item.status === 'awaiting-push-approval').map(item => ({ kind: 'push' as const, id: item.id, owner: item.owner, title: item.proposal.title, detail: item.rebaseOf?.prUrl ?? '', at: item.updatedAt })),
+      ...items.filter(awaitsPush).map(pushEntry),
       ...requests.filter(request => request.status === 'awaiting-create-approval').map(request => ({ kind: 'create' as const, id: request.id, owner: request.to, title: `${request.from} asks: ${describeAsk(request.ask)}`, detail: request.ask.purpose, at: request.updatedAt })),
       ...requests.filter(request => request.status === 'awaiting-delete-approval').map(request => ({ kind: 'delete' as const, id: request.id, owner: request.to, title: `Delete ${request.instance?.remote}:${request.instance?.name}`, detail: request.followUpResult?.summary ?? '', at: request.updatedAt })),
     ];
@@ -285,9 +296,15 @@ export class SurfaceState {
     return deskState(this.runtime, { owner: ownerId });
   }
 
+  /** A work item, with the decision it waits on in the inbox's terms, so its page can take it with the same card. */
   async item(itemId: string) {
     const item = await this.runtime.ledger.get(itemId);
-    return { item, text: itemText(item), done: DONE.has(item.status) };
+    const initiatives = await this.runtime.initiatives.list();
+    const decisions: [(candidate: WorkItem) => boolean, (candidate: WorkItem) => InboxEntry][] = [
+      [waitsInInbox, candidate => this.planEntry(candidate, initiatives)], [awaitsPush, pushEntry],
+    ];
+    const waiting = decisions.find(([applies]) => applies(item))?.[1](item);
+    return { item, waiting, text: itemText(item), done: DONE.has(item.status) };
   }
 
   /** Public view excludes the saved directory, which is only for host-side notice delivery. */
@@ -304,13 +321,36 @@ export class SurfaceState {
     return this.publicFriction(await frictionDetail(this.runtime, id));
   }
 
+  /** The owner session carrying out an item's plan, and the subagent sessions it started. */
+  private async ownerSessions(item: WorkItem): Promise<ItemSession[]> {
+    if (!item.session) return [];
+    const { sessionID, directory } = item.session;
+    const sessions = await this.opencode.listSessions(directory).catch(() => []) as OpencodeSession[];
+    const related = sessions.filter(session => session.id === sessionID || session.parentID === sessionID);
+    return related.map(session => ({
+      ...session, kind: 'owner' as const, label: session.id === sessionID ? 'work session' : session.title,
+    }));
+  }
+
   /**
-   * The sessions onionsoup ran for a work item (plan, owner answers, implementations, reviews, learnings), found by
-   * the title every hire gets ("<item>: <stage>"). Oldest first; each carries the directory it lives in.
+   * The sessions of a work item, oldest first: the hires onionsoup ran for it (found by the title every hire gets,
+   * "<item>: <stage>"), and the owner session carrying out its plan with its subagents. Each carries its directory.
    */
-  async itemSessions(itemId: string) {
+  async itemSessions(itemId: string): Promise<ItemSession[]> {
     const item = await this.runtime.ledger.get(itemId);
-    return this.hireSessions(`${item.id}: `);
+    const hires = this.hireSessions(`${item.id}: `).map(session => ({ ...session, kind: 'hire' as const, label: session.title.slice(item.id.length + 2) }));
+    return [...hires, ...await this.ownerSessions(item)].sort((left, right) => left.time.created - right.time.created);
+  }
+
+  /** One of an item's sessions, read where it lives. */
+  async itemSessionMessages(itemId: string, sessionID: string) {
+    const session = (await this.itemSessions(itemId)).find(candidate => candidate.id === sessionID);
+    if (!session) return undefined;
+    const readers: Record<ItemSession['kind'], () => Promise<unknown[]> | unknown[]> = {
+      hire: () => this.hireMessages(session.id),
+      owner: () => this.opencode.messages(session.directory, session.id),
+    };
+    return readers[session.kind]();
   }
 
   /** A person's decision on an engine gate. Returns a one-line outcome. */

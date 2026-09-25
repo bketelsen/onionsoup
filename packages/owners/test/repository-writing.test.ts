@@ -29,7 +29,7 @@ test('configured owner prompts carry repository writing guidance alongside each 
   assert.ok(owners.length > 1);
   for (const owner of owners) {
     assertWritingRule(owner.prompt!);
-    assert.match(owner.prompt!, /onionsoup_friction \(report reproducible engine behavior/);
+    assert.match(owner.prompt!, /onionsoup_friction \(report reproducible engine\s+behavior/);
     assert.match(owner.prompt!, /onionsoup_request_work \(ask another\s+owner/);
   }
   assert.match(config.agent!.Odrade!.prompt!, /<org>\nYour direct reports: Bellonda/);
@@ -42,6 +42,17 @@ test('configured owner prompts carry repository writing guidance alongside each 
   assert.equal(permissions('Odrade').onionsoup_initiative, 'allow', 'shown to owners with direct reports');
   assert.equal(permissions('Bellonda').onionsoup_initiative, undefined);
   assert.match(config.agent!.Bellonda!.prompt!, /Exact\./, 'the persona remains available for conversation');
+  const milesTeg = config.agent!['Miles Teg']!.prompt!;
+  assert.match(milesTeg, /Skills drive how you work/);
+  assert.match(milesTeg, /Small, clear changes: edit your desk, run the verification commands, and end with\s+onionsoup_propose_changes/);
+  assert.match(milesTeg, /submit it with\s+onionsoup_submit_plan\. The person approves it here/);
+  assert.match(milesTeg, /onionsoup_checkout_pr/);
+  assert.match(milesTeg, /onionsoup_record_fact: they come back to you word\s+for word/);
+  assert.doesNotMatch(milesTeg, /freelancer|onionsoup_open_work/);
+  assert.doesNotMatch(config.agent!.Moneo!.prompt!, /onionsoup_submit_plan/, 'an owner that only observes is not told to plan changes');
+  assert.match(config.agent!.Moneo!.prompt!, /You do not change your domain yourself/);
+  assert.match(config.agent!.Odrade!.prompt!, /you are woken here when it submits a plan/);
+  assert.match(config.agent!.Bellonda!.prompt!, /Work it assigns opens a session where you plan it alone/);
 });
 
 test('the host review brief applies the same rule and says which severities send a change back', () => {

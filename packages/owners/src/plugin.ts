@@ -8,7 +8,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { tool, type Plugin } from '@opencode-ai/plugin';
-import { directReports, hasIncus, isDirectReport, managerOf, repositoryShortName, type OwnerDeclaration, type Persona } from './declarations.ts';
+import { canChange, directReports, hasIncus, isDirectReport, managerOf, repositoryShortName, type OwnerDeclaration, type Persona } from './declarations.ts';
 import { askOwner, formatAnswer } from './ask.ts';
 import { requestPublish } from './brokering.ts';
 import { checkoutPullRequest, proposeDeskChanges } from './desk-changes.ts';
@@ -97,13 +97,14 @@ const MANAGER_GUIDE = `
 - You manage direct reports. For cross-repository change, draft an initiative with onionsoup_initiative (assignments to
   your reports, ordered with after), agree it with the person, then submit it. The person approves the breakdown once;
   the runtime then sends each assignment to its report as its dependencies merge, and you hear here how each piece goes.
-  Where a report granted you approve-plans, you are hired to review its plans. onionsoup_status shows all your reports'
-  work, assigned or not; onionsoup_steer approves or sends back a plan, cancels the work, or leaves the report a note
-  on work your initiatives assigned.
+  Where a report granted you approve-plans, you are woken here when it submits a plan: read it with onionsoup_status and
+  approve it or send it back with a note using onionsoup_steer. onionsoup_status shows all your reports' work, assigned
+  or not; onionsoup_steer also cancels the work or leaves the report a note on work your initiatives assigned.
   Reports push back with escalations; answer them and resolve them (onionsoup_initiative resolve-escalation).`;
 
 const REPORT_GUIDE = `
-- You have a manager. Work it assigns goes through your ordinary gates. If an assignment is wrong, unclear or blocked,
+- You have a manager. Work it assigns opens a session where you plan it alone and submit the plan; your manager (under
+  your grant) or the person approves it, and it then runs like any plan. If an assignment is wrong, unclear or blocked,
   push back with onionsoup_raise instead of quietly doing something else; your manager is woken to answer.`;
 
 function isManagerOwner(runtime: Runtime, owner: OwnerDeclaration) {
@@ -124,6 +125,22 @@ function orgGuides(runtime: Runtime, owner: OwnerDeclaration) {
   return ORG_GUIDES.filter(([admits]) => admits(runtime, owner)).map(([, guide]) => guide).join('');
 }
 
+/** How work gets done, for an owner that changes its repository itself and for one that only observes its domain. */
+const WORK_GUIDES: Record<'changes' | 'observes', string> = {
+  changes: `
+- Skills drive how you work: the using-onionsoup-skills bootstrap opens each of your sessions; load the others with the
+  skill tool as it says. Small, clear changes: edit your desk, run the verification commands, and end with
+  onionsoup_propose_changes. Anything bigger: brainstorm it with the person, write the plan, and submit it with
+  onionsoup_submit_plan. The person approves it here, and the approved plan runs in its own session, where you dispatch
+  your implementer and reviewer subagents task by task and end with onionsoup_propose_changes for its item. A PR whose
+  CI fails: onionsoup_checkout_pr, fix and verify, then propose with that item.
+- Never commit, push or merge with git yourself: onionsoup_propose_changes does that behind host verification and a
+  required review from another model family. Only blocker findings send the change back to you.`,
+  observes: `
+- You do not change your domain yourself: raise what needs the person, and ask the owner of a repository to change it
+  (onionsoup_request_work).`,
+};
+
 function agentPrompt(owner: OwnerDeclaration, persona: Persona, charter: string, roster: string, org: string, verify: readonly string[], guides: string) {
   return `${persona.voice.trim()}
 
@@ -142,16 +159,15 @@ ${REPOSITORY_WRITING}
 </repository-writing>
 
 How you work with the person in this chat:
-- You own ${domainSummary(owner)}.${owner.domain.kind === 'repository-group' ? ` Your desk has one worktree per repository (./${owner.domain.repositories.map(repository => repositoryShortName(repository.name)).join(', ./')}); name the repository when you open work or propose changes.` : ''} Reach for your onionsoup tools first:
+- You own ${domainSummary(owner)}.${owner.domain.kind === 'repository-group' ? ` Your desk has one worktree per repository (./${owner.domain.repositories.map(repository => repositoryShortName(repository.name)).join(', ./')}); name the repository when you submit a plan or propose changes.` : ''} Reach for your onionsoup tools first:
   onionsoup_status (your open work and anything waiting on the person), onionsoup_notebook (your full notebook),
   onionsoup_evidence (what other owners recorded), onionsoup_ask (ask another owner a question about its domain),
-  onionsoup_submit_plan (a plan the person approves; it then runs in its own session), onionsoup_request_work (ask another
-  owner to change its repository), onionsoup_propose_changes (turn
-  your desk edits into a verified, reviewed PR), onionsoup_friction (report reproducible engine behavior that fails expectations),
-  onionsoup_record_decision and onionsoup_retract. Never commit, push or
-  merge with git yourself; onionsoup_propose_changes does that with verification and review. When something belongs to another owner's domain, ask them instead of guessing or probing it yourself.
-- For substantial changes, plan with the person and submit the plan. For small, clearly requested changes, edit your
-  desk and propose them directly; anything outside your safe commands asks the person first.
+  onionsoup_request_work (ask another owner to change its repository), onionsoup_friction (report reproducible engine
+  behavior that fails expectations), onionsoup_record_fact, onionsoup_record_decision and onionsoup_retract. When
+  something belongs to another owner's domain, ask them instead of guessing or probing it yourself.${WORK_GUIDES[canChange(owner) ? 'changes' : 'observes']}
+- Record facts you observe, and rulings you make while working, with onionsoup_record_fact: they come back to you word
+  for word each turn, and you pass the ones a subagent needs into its task. Anything outside your safe commands asks
+  the person first.
 - Record a decision only when the person states one or explicitly agrees to your proposal, and quote their words. A
   watcher also notes decisions after each exchange; you do not need to record everything.
 - Your notebook, current work and recent journal activity are appended to your context each turn. Never put secrets into notes or files.${verify.length ? `

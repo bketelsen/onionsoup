@@ -7,6 +7,7 @@ import { InitiativeView } from '../web/src/components/InitiativeView.tsx';
 import { OrgTree } from '../web/src/components/OrgView.tsx';
 import { InboxErrors } from '../web/src/components/InboxErrors.tsx';
 import { WorkRecovery } from '../web/src/components/WorkRecovery.tsx';
+import { ITEM_SECTIONS } from '../web/src/components/ItemSections.tsx';
 import { WorkItem } from '@onionsoup/owners';
 import type { FrictionRecord, PublicInitiative } from '../web/src/types.ts';
 import { applyChatEvent, orderedMessages, type Messages } from '../web/src/chat/chatState.ts';
@@ -168,4 +169,26 @@ test('failed work offers a retry, except work of the retired pipeline, which can
   assert.doesNotMatch(render('pipeline_removed'), /Retry failed stage/);
   assert.match(render('pipeline_removed'), /Cancel work/);
   assert.doesNotMatch(render('desk_pr_closed'), /Land over findings/);
+});
+
+test('an owner plan\'s page shows the plan, its approval, the session doing it, then how it was verified, reviewed and published', () => {
+  const item = WorkItem.parse({
+    id: 'w-1', owner: 'homelab', workflow: 'owner-change', status: 'landed', createdAt: '', updatedAt: '',
+    proposal: { title: 'Rotate logs', goal: 'Keep the disk free', rationale: 'r', acceptance: ['a'], size: 'medium' },
+    planDocument: { markdown: '## Tasks\n\n1. Add a weekly logrotate config', digest: 'd' },
+    planApproval: { by: 'bjk', at: new Date().toISOString() },
+    session: { sessionID: 'ses_work', directory: '/desks/homelab' },
+    implementations: [{ report: { summary: 's', filesChanged: [], deviationsFromPlan: [] }, diffStat: 'x', verification: [{ command: 'pytest', exitCode: 0, output: 'ok' }] }],
+    verdicts: [{ decision: 'approve', summary: 'Does what the plan says', findings: [{ severity: 'nit', file: 'logrotate.conf', issue: 'Terse', suggestion: 'Fine' }] }],
+    deskPublication: { stage: 'complete', reviewer: 'openai/gpt-5.6-sol', reviewedHead: 'h', reviewedTree: 't' },
+    publication: { url: 'https://github.com/example/fleet/pull/7', branch: 'owners/w-1', by: 'homelab', at: '', state: 'open' },
+  });
+  // The plan renders through the chat's Markdown, which needs a browser DOM to sanitize; the rest renders here.
+  assert.deepEqual(ITEM_SECTIONS.map(Section => Section.name), ['WorkSession', 'Proposal', 'Plan', 'Notes', 'Publication', 'Verification', 'Reviews', 'Hires']);
+  const html = ITEM_SECTIONS.filter(Section => Section.name !== 'Plan').map(Section => renderToStaticMarkup(createElement(Section, { item }))).join('');
+  assert.match(html, /Open the work session/);
+  assert.match(html, /published<\/span>.*reviewed by .*openai\/gpt-5\.6-sol/s);
+  assert.match(html, /pytest/);
+  assert.match(html, /\[nit\] logrotate\.conf: Terse/);
+  assert.doesNotMatch(html, /Hires/, 'no hire table for work the owner did itself');
 });

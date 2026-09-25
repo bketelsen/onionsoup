@@ -1,6 +1,7 @@
 # Onionsoup
 
-Owners: persistent agents that each own one domain, hire freelancers, and work under runtime-enforced gates.
+Owners: persistent agents that each own one domain, run their work with skills and subagents, and work under
+runtime-enforced gates.
 Read [docs/design/owners.md](docs/design/owners.md) first, then [docs/gaps.md](docs/gaps.md).
 
 `AGENTS.md` is canonical; `CLAUDE.md` and `GEMINI.md` are symlinks to it.
@@ -13,12 +14,14 @@ Read [docs/design/owners.md](docs/design/owners.md) first, then [docs/gaps.md](d
    a person unless a standing grant in configuration says otherwise, and every use of a grant is journaled.
 3. **The sandbox is the boundary.** Model-driven processes and verification run in bwrap with a read-only root
    inside a memory-capped systemd scope. Bash allowlists are a convenience, never a security boundary.
-4. **Freelancer claims are not evidence.** Host code runs verification; reviews come from another model family.
+4. **Freelancer and subagent claims are not evidence.** Host code runs verification; the required review comes from
+   another model family.
 5. **Deterministic first.** Periodic checks are host code; they wake a model (the owner) only when needed.
 
 ## Layout
 
 - `packages/owners`: the engine (`@onionsoup/owners`): runtime, CLI, daemon, opencode plugin (`src/plugin.ts`).
+- `packages/owners/skills`: the skills owners work by, vendored and adapted from obra/superpowers (MIT, see `NOTICE`).
 - `packages/surface`: the surface (`@onionsoup/surface`): a server over opencode and the engine, and the web UI in
   `web/` (React, Vite, Tailwind; styles borrowed from OpenChamber under MIT, see `web/NOTICE`).
 - `examples/starter`: the configuration `owners init` copies. A person's own owners never live in this repository

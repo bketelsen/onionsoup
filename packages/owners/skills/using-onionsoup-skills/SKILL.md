@@ -30,6 +30,7 @@ You never run `git commit`, `git push`, `gh`, merges or deploys yourself. Work e
 - **Small, clear change** (a typo, a one-file fix whose design is obvious): edit the desk, run the verification commands from your prompt (verification-before-completion), then call `onionsoup_propose_changes { title, summary }`.
 - **Anything bigger:** brainstorming (with the person when they are in the chat; alone when the work was delegated) → writing-plans → `onionsoup_submit_plan`. The person approves the plan in the chat (delegated work is approved in the surface inbox or under a manager's standing grant). You never approve your own plan. On approval the runtime starts a new execution session whose first message is the plan; there you use subagent-driven-development and end with `onionsoup_propose_changes` passing the plan's `item`.
 - **A bug or failing test:** systematic-debugging first, then the flow above.
+- **One of your PRs fails CI** (the runtime tells you): `onionsoup_checkout_pr { item }` puts your clean desk on the PR's head; debug, fix and verify there, then `onionsoup_propose_changes` with the same `item`. Host code reviews the fix and pushes it onto that PR.
 
 When `onionsoup_propose_changes` comes back with blocker findings from the required review, use receiving-code-review, fix, verify and propose again.
 
@@ -49,6 +50,7 @@ Onionsoup tools only you have (subagents have none of them):
 
 - `onionsoup_submit_plan { title, goal, plan, repository?, item? }`: submit a plan for approval; resubmit a revision with `item`.
 - `onionsoup_propose_changes { title, summary, repository?, item? }`: the only way work ends.
+- `onionsoup_checkout_pr { item }`: put your desk on the head of one of your open PRs, to repair it.
 - `onionsoup_record_fact { fact, source }`: journal an observation word for word in your notebook.
 - `onionsoup_record_decision { statement, quote }`: record a decision the person made, quoting them.
 - `onionsoup_status`, `onionsoup_notebook`, `onionsoup_ask`, `onionsoup_request_work`, `onionsoup_friction`.
