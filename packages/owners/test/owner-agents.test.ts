@@ -1,3 +1,4 @@
+import { tmpdir } from 'node:os';
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import { mkdtemp, readdir, readFile } from 'node:fs/promises';
@@ -13,7 +14,7 @@ import { withActiveHooks } from './active-hooks.ts';
 const declarations = 'packages/owners/test/fixtures/owners';
 
 async function configured() {
-  const state = await mkdtemp('/tmp/onionsoup-agents-');
+  const state = await mkdtemp(join(tmpdir(), 'onionsoup-agents-'));
   const hooks = await withActiveHooks({} as Parameters<Plugin>[0], { declarations, state });
   const config: Config = {};
   await hooks.config!(config);
@@ -22,7 +23,7 @@ async function configured() {
 
 test('the config hook registers the skills and defines an implementer and, per owner, a reviewer from another family', async () => {
   const { config, agents } = await configured();
-  const runtime = await Runtime.open({ declarations, state: await mkdtemp('/tmp/onionsoup-agents-runtime-') });
+  const runtime = await Runtime.open({ declarations, state: await mkdtemp(join(tmpdir(), 'onionsoup-agents-runtime-')) });
   assert.deepEqual((config as { skills?: { paths?: string[] } }).skills?.paths, [SKILLS_DIRECTORY]);
   const implementer = agents[IMPLEMENTER_AGENT]!;
   assert.equal(implementer.mode, 'subagent');
@@ -52,7 +53,7 @@ function chat(sessionID: string, agent: string): { messages: FakeMessage[] } {
 }
 
 async function sessionHooks(parents: Record<string, string | undefined>) {
-  const state = await mkdtemp('/tmp/onionsoup-agents-sessions-');
+  const state = await mkdtemp(join(tmpdir(), 'onionsoup-agents-sessions-'));
   const client = { session: { get: async ({ path }: { path: { id: string } }) => ({ data: { id: path.id, parentID: parents[path.id] } }) } };
   const hooks = await withActiveHooks({ client } as unknown as Parameters<Plugin>[0], { declarations, state });
   return { hooks, state };

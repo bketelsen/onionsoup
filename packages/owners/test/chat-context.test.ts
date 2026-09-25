@@ -1,3 +1,4 @@
+import { tmpdir } from 'node:os';
 import assert from 'node:assert/strict';
 import { appendFile, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -15,7 +16,7 @@ import { Runtime } from '../src/runtime.ts';
 
 const declarations = 'packages/owners/test/fixtures/owners';
 async function fixture() {
-  const state = await mkdtemp('/tmp/onionsoup-context-test-');
+  const state = await mkdtemp(join(tmpdir(), 'onionsoup-context-test-'));
   const runtime = await Runtime.open({ declarations, state });
   const notebook = runtime.notebook('homelab');
   await notebook.ensure('# Test charter');
