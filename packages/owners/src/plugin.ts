@@ -12,6 +12,7 @@ import { canChange, directReports, hasIncus, isDirectReport, managerOf, reposito
 import { askOwner, formatAnswer } from './ask.ts';
 import { requestPublish } from './brokering.ts';
 import { checkoutPullRequest, proposeDeskChanges } from './desk-changes.ts';
+import { deskSyncText, syncOwnerDesk } from './desk-sync.ts';
 import { initiativeSection, initiativesText, initiativeText, itemText, reportsWorkText, statusText } from './desk.ts';
 import { parseInitiativeDraft } from './initiatives.ts';
 import {
@@ -133,7 +134,8 @@ const WORK_GUIDES: Record<'changes' | 'observes', string> = {
   onionsoup_propose_changes. Anything bigger: brainstorm it with the person, write the plan, and submit it with
   onionsoup_submit_plan. The person approves it here, and the approved plan runs in its own session, where you dispatch
   your implementer and reviewer subagents task by task and end with onionsoup_propose_changes for its item. A PR whose
-  CI fails: onionsoup_checkout_pr, fix and verify, then propose with that item.
+  CI fails: onionsoup_checkout_pr, fix and verify, then propose with that item. When your desk is behind its base
+  branch, onionsoup_sync_desk brings it up to date and keeps your uncommitted work; never pull, stash or reset yourself.
 - Never commit, push or merge with git yourself: onionsoup_propose_changes does that behind host verification and a
   required review from another model family. Only blocker findings send the change back to you.`,
   observes: `
@@ -713,6 +715,15 @@ const server: Plugin = async (input, options) => {
           const owner = requireOwner(context.agent);
           const desk = await checkoutPullRequest(runtime, owner.id, args.item);
           return `Your desk ${desk.path} is on ${desk.pullRequest} at ${desk.head.slice(0, 12)}. Fix it there, then propose with item "${args.item}".`;
+        },
+      }),
+      onionsoup_sync_desk: tool({
+        description: 'Bring your desk up to date with its base branch (origin), keeping your uncommitted work: host code sets it aside, moves the desk and restores it, and names any files that conflict. Use it before starting work and whenever your desk is behind; never pull, stash or reset with git yourself.',
+        args: { repository: tool.schema.string().optional().describe('Only if you own several repositories: which one (owner/name)') },
+        async execute(args, context) {
+          const owner = requireOwner(context.agent);
+          context.metadata({ title: 'syncing desk' });
+          return deskSyncText(await syncOwnerDesk(runtime, owner.id, args.repository));
         },
       }),
       onionsoup_submit_plan: tool({

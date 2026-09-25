@@ -714,3 +714,65 @@ test('a failed verification shows the owner the error, not just the last lines o
   assert.match(summary, /read-only home and private \/tmp/);
   assert.doesNotMatch(summary, /git diff --check/, 'passing commands are left out');
 });
+
+/** The base moves on after the desk was made: someone else's commit lands on main. */
+async function landUpstream(seed: string, file: string, text: string) {
+  await git(seed, ['pull', '-q', 'origin', 'main']);
+  await writeFile(join(seed, file), text);
+  await git(seed, ['add', '.']);
+  await git(seed, ['commit', '-qm', `Upstream ${file}`]);
+  await git(seed, ['push', '-q', 'origin', 'main']);
+  return (await git(seed, ['rev-parse', 'HEAD'])).trim();
+}
+
+test('syncing a desk moves it to the base and restores uncommitted work, including intent-to-add files', async () => {
+  const { runtime, seed } = await fixture();
+  const { syncOwnerDesk } = await import('../src/desk-sync.ts');
+  const desk = await ensureDesk(runtime.repositoryOwner('clippy'), runtime.desksRoot);
+  assert.equal((await syncOwnerDesk(runtime, 'clippy')).outcome, 'current');
+  const upstream = await landUpstream(seed, 'upstream.txt', 'from main\n');
+  await writeFile(join(desk.path, 'base'), 'base\nmine\n');
+  await writeFile(join(desk.path, 'new.txt'), 'new file\n');
+  await git(desk.path, ['add', '-A', '--intent-to-add']);
+  const synced = await syncOwnerDesk(runtime, 'clippy');
+  assert.equal(synced.outcome, 'updated');
+  assert.equal((await git(desk.path, ['rev-parse', 'HEAD'])).trim(), upstream);
+  assert.equal(await readFile(join(desk.path, 'base'), 'utf8'), 'base\nmine\n');
+  assert.equal(await readFile(join(desk.path, 'new.txt'), 'utf8'), 'new file\n');
+  assert.equal(await readFile(join(desk.path, 'upstream.txt'), 'utf8'), 'from main\n');
+  assert.equal((await git(desk.path, ['stash', 'list'])).trim(), '', 'a clean restore leaves no stash behind');
+});
+
+test('a sync that conflicts keeps the work in a stash and names the files; unpublished commits are never moved', async () => {
+  const { runtime, seed } = await fixture();
+  const { syncOwnerDesk } = await import('../src/desk-sync.ts');
+  const desk = await ensureDesk(runtime.repositoryOwner('clippy'), runtime.desksRoot);
+  await landUpstream(seed, 'base', 'theirs\n');
+  await writeFile(join(desk.path, 'base'), 'mine\n');
+  const conflicted = await syncOwnerDesk(runtime, 'clippy');
+  assert.equal(conflicted.outcome, 'conflicts');
+  assert.deepEqual(conflicted.conflicts, ['base']);
+  assert.match(await readFile(join(desk.path, 'base'), 'utf8'), /<<<<<<<[\s\S]*mine[\s\S]*theirs|<<<<<<<[\s\S]*theirs[\s\S]*mine/);
+  assert.ok((await git(desk.path, ['stash', 'list', '--format=%H'])).includes(conflicted.stash!), 'the work is still in its stash');
+
+  const fresh = await fixture();
+  const freshDesk = await ensureDesk(fresh.runtime.repositoryOwner('clippy'), fresh.runtime.desksRoot);
+  await git(freshDesk.path, ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'local only']);
+  await landUpstream(fresh.seed, 'upstream.txt', 'x\n');
+  await assert.rejects(syncOwnerDesk(fresh.runtime, 'clippy'), /desk_has_unpublished_commits/);
+});
+
+test("a desk behind its base is reviewed against where it meets the base, so newer merges don't read as reversions", async () => {
+  const { runtime, seed } = await fixture();
+  const desk = await ensureDesk(runtime.repositoryOwner('clippy'), runtime.desksRoot);
+  await landUpstream(seed, 'upstream.txt', 'merged by someone else\n');
+  await writeFile(join(desk.path, 'change'), 'my change\n');
+  const briefs: string[] = [];
+  scriptHires(runtime, async request => {
+    briefs.push(request.brief);
+    return { decision: 'revise', summary: 'Stop here', findings: [{ severity: 'blocker', file: 'change', issue: 'x', suggestion: 'y' }] };
+  });
+  assert.equal((await proposeDeskChanges(runtime, 'clippy', { title: 'Desk change', summary: 'Update' })).outcome, 'needs-work');
+  assert.match(briefs[0]!, /\+my change/);
+  assert.doesNotMatch(briefs[0]!, /upstream\.txt/, 'the base\'s newer commit is not shown as removed');
+});
