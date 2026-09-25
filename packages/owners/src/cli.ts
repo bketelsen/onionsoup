@@ -209,7 +209,8 @@ const COMMANDS: Record<string, Command> = {
     console.log(`${result.outcome}: ${result.summary}`);
   },
   async propose(runtime, [ownerId]) {
-    const result = await proposeDeskChanges(runtime, required(ownerId, 'owner'), required(options.note, '--note (title)'), options.reason ?? options.note!, options.repository);
+    const title = required(options.note, '--note (title)');
+    const result = await proposeDeskChanges(runtime, required(ownerId, 'owner'), { title, summary: options.reason ?? title, repository: options.repository });
     console.log(`${result.outcome}: ${result.summary}`);
   },
   async 'desk-state'(runtime) {

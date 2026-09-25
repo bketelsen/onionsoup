@@ -10,6 +10,7 @@ export { distill, requestDistill, memoryStatus, memoryFingerprint } from './memo
 export { MemoryPolicy, MemoryState, type MemoryStatus } from './memory-config.ts';
 export { advance, approvePlan, rejectPlan, revisePlan, resumeItem, retryItem, cancelItem, landOverFindings } from './workflow.ts';
 export { publish } from './publish.ts';
+export { isDelegated, OWNER_CHANGE_WORKFLOW, PLAN_APPROVAL_PERMISSION, submitPlan } from './plan-work.ts';
 export { approvePush } from './rebase.ts';
 export { approveCreate, approveDelete, denyRequest } from './brokering.ts';
 export { awaitingPublish, deskState, itemText, statusText } from './desk.ts';

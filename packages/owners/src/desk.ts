@@ -139,7 +139,9 @@ export function statusText(items: readonly WorkItem[], requests: readonly Resour
 export function itemText(item: WorkItem) {
   const lines = [`${item.id}: ${item.proposal.title}`, `Status: ${DONE.has(item.status) ? outcome(item) : item.status}`, `Opened ${item.createdAt}; updated ${item.updatedAt}`, `Goal: ${item.proposal.goal}`];
   if (item.plan) lines.push(`Plan: ${item.plan.summary}`, ...item.plan.steps.map((step, index) => `  ${index + 1}. ${step.description}`));
+  if (item.planDocument) lines.push(`Plan (${item.planDocument.digest}):`, item.planDocument.markdown);
   if (item.planApproval) lines.push(`Plan approved by ${item.planApproval.by} at ${item.planApproval.at}`);
+  if (item.session) lines.push(`Working in session ${item.session.sessionID}`);
   item.implementations.forEach((implementation, index) => lines.push(`Implementation ${index + 1}: ${implementation.report.summary}`, `  verify: ${implementation.verification.map(result => `${result.command.slice(0, 60)}=${result.exitCode}`).join(', ')}`));
   item.verdicts.forEach((verdict, index) => lines.push(`Review ${index + 1}: ${verdict.decision}: ${verdict.summary}`));
   lines.push(`Hires: ${item.hires.map(hire => `${hire.stage} ${hire.model} ${hire.outcome}${hire.error ? ` (${hire.error.slice(0, 120)})` : ''}`).join('; ') || 'none'}`);

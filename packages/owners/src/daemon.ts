@@ -8,11 +8,11 @@ import { requestParticipants } from './delegation.ts';
 import { noticeWorkChanges } from './notices.ts';
 import { superviseInitiatives } from './org-work.ts';
 import { distill, distillIsDue } from './memory.ts';
-import type { WorkItem, WorkStatus } from './ledger.ts';
+import type { WorkItem } from './ledger.ts';
 import { wake } from './owner.ts';
 import { requestRunnerIsAlive, type ResourceRequest } from './requests.ts';
 import type { Runtime } from './runtime.ts';
-import { advance } from './workflow.ts';
+import { advance, isRunnable } from './workflow.ts';
 
 export const DAEMON_LIMITS = {
   tickMs: 60_000, shutdownGraceMs: 5_000, parallelItems: 4, parallelDuties: 2, parallelMemory: 1, parallelRequests: 2,
@@ -75,9 +75,6 @@ export function everyMs(every: string) {
   const unit = every.at(-1)!;
   return Number(every.slice(0, -1)) * UNIT_MS[unit]!;
 }
-
-/** Statuses the runtime moves on its own; everything else waits for a person or is finished. */
-const RUNNABLE: readonly WorkStatus[] = ['proposed', 'planning', 'implementing', 'reviewing', 'landing'];
 
 export interface TickLog {
   duty(ownerId: string, dutyId: string, summary: string): void;
@@ -246,7 +243,7 @@ export async function tick(runtime: Runtime, log: TickLog) {
     return; // Retry next tick when the owner reservations can be read safely.
   }
   await runDueDuties(runtime, log, reserved);
-  const runnable = (await runtime.ledger.list()).filter(candidate => RUNNABLE.includes(candidate.status) && !candidate.activeRunner);
+  const runnable = (await runtime.ledger.list()).filter(isRunnable);
   advanceRunnable(runnable, runtime, log, reserved);
   await scheduleMemory(runtime, log, reserved);
   try {

@@ -1,5 +1,6 @@
 import { ProposedWork } from './artifacts.ts';
 import { isDirectReport } from './declarations.ts';
+import { OWNER_CHANGE_WORKFLOW } from './plan-work.ts';
 import type { AssignmentRef } from './initiatives.ts';
 import { PublishDecision, requireStatus, type ResourceRequest, type WorkAsk } from './requests.ts';
 import type { Runtime } from './runtime.ts';
@@ -35,7 +36,7 @@ const ACCEPTANCE: Record<'manager' | 'peer', Acceptance> = {
     const notebook = runtime.notebook(owner.id);
     return (await runtime.hire(owner.id, {
       role: 'owner', model: owner.model, directory: owner.workspace, title: `${request.id}: decide work`,
-      brief: `Owner ${request.from} requests this work in your declared domain. Accept if appropriate, or decline with a reason. Acceptance opens work at the normal plan gate.\n${JSON.stringify(ask.proposal)}\n${await notebook.orientation()}`,
+      brief: `Owner ${request.from} requests this work in your declared domain. Accept if appropriate, or decline with a reason. If you accept, you plan it yourself and the plan waits for approval like any other.\n${JSON.stringify(ask.proposal)}\n${await notebook.orientation()}`,
       schema: PublishDecision,
     })).value;
   },
@@ -65,8 +66,11 @@ export async function decideWork(runtime: Runtime, request: ResourceRequest) {
   }
   if (!owner.workflow) throw new Error(`owner_has_no_workflow: ${owner.id}`);
   runtime.repositoryOwner(owner.id, request.ask.proposal.repository);
-  // Deterministic identity closes the crash window between ledger creation and saving the request link.
-  await runtime.ledger.create(owner.id, owner.workflow, request.ask.proposal, { id: workItem, assignment: request.ask.assignment });
+  // Deterministic identity closes the crash window between ledger creation and saving the request link. The owner
+  // plans it in a session the plugin opens for it; its plan is approved in the inbox or under a manager's grant.
+  await runtime.ledger.create(owner.id, OWNER_CHANGE_WORKFLOW, request.ask.proposal, {
+    id: workItem, status: 'planning', request: request.id, assignment: request.ask.assignment,
+  });
   const accepted = await runtime.requests.save({ ...request, status: 'work-running', workItem, publishDecision: decision });
   await journalRequest(runtime, accepted, 'request-accepted', `${decision.reply}; linked work ${workItem}`);
   return accepted;

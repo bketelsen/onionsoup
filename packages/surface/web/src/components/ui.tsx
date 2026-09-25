@@ -92,6 +92,6 @@ export function statusTone(status: string): 'muted' | 'primary' | 'success' | 'e
   if (status === 'landed') return 'success';
   if (status === 'failed' || status === 'rejected') return 'error';
   if (status.startsWith('awaiting')) return 'warning';
-  if (['planning', 'implementing', 'reviewing', 'landing'].includes(status)) return 'info';
+  if (['planning', 'working', 'implementing', 'reviewing', 'landing'].includes(status)) return 'info';
   return 'muted';
 }

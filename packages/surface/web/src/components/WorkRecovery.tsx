@@ -4,7 +4,7 @@ import type { WorkItem } from '../types.ts';
 import { Button } from './ui.tsx';
 
 const CANCELLABLE = new Set([
-  'proposed', 'planning', 'awaiting-plan-approval', 'implementing', 'reviewing', 'landing',
+  'proposed', 'planning', 'awaiting-plan-approval', 'working', 'implementing', 'reviewing', 'landing',
   'awaiting-push-approval', 'failed', 'interrupted', 'landed',
 ]);
 

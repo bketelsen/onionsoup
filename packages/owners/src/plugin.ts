@@ -33,6 +33,9 @@ import { REPOSITORY_WRITING } from './repository-writing.ts';
 import { prepareToolArguments } from './tool-arguments.ts';
 import { BOOTSTRAP_MARKER, bootstrapText, registerSkills, subagents, subagentsText, taskPermission } from './owner-agents.ts';
 import { SessionOwners } from './session-owners.ts';
+import { openNeededSessions, ownerSessionClient } from './owner-sessions.ts';
+import { PLAN_APPROVAL_PERMISSION, PlanSubmission, submitPlan } from './plan-work.ts';
+import { requestPlanApproval } from './plan-approval.ts';
 
 /**
  * onionsoup as an opencode plugin: every owner with a persona becomes an agent a person can chat with
@@ -166,7 +169,10 @@ ${owner.manages ? `
 function conversationPermission(owner: OwnerDeclaration, verify: readonly string[]) {
   const mode = owner.conversation ?? { bash: { '*': 'ask' }, edit: 'ask', webfetch: 'ask' };
   const bash = { ...mode.bash, ...Object.fromEntries(verify.map(command => [`${command}*`, 'allow'])) };
-  return { edit: mode.edit, bash, webfetch: mode.webfetch, external_directory: 'ask', doom_loop: 'ask', task: taskPermission(owner.id) };
+  return {
+    edit: mode.edit, bash, webfetch: mode.webfetch, external_directory: 'ask', doom_loop: 'ask', task: taskPermission(owner.id),
+    [PLAN_APPROVAL_PERMISSION]: 'ask',
+  };
 }
 
 const STEWARD_TOOL = 'onionsoup_owners';
@@ -399,6 +405,10 @@ const server: Plugin = async (input, options) => {
     },
   };
 
+  // Read when needed: tests and the config hook construct the plugin without an opencode client.
+  const sessionClient = () => ownerSessionClient(input.client);
+
+  /** Runtime work only this opencode can do: post notices into owners' chats and open the sessions plans need. */
   let isDeliveringNotices = false;
   async function deliverNotices() {
     if (isDeliveringNotices) return;
@@ -406,6 +416,7 @@ const server: Plugin = async (input, options) => {
     try {
       await deliverWorkNotices();
       await deliverExchangeNotices(runtime, exchangeClient(input.client));
+      await openNeededSessions(runtime, sessionClient(), (itemId, error) => console.warn('owner_session_failed', itemId, error));
     } finally {
       isDeliveringNotices = false;
     }
@@ -667,14 +678,29 @@ const server: Plugin = async (input, options) => {
           title: tool.schema.string(),
           summary: tool.schema.string().describe('What changed and why, for the reviewer and the PR'),
           repository: tool.schema.string().optional().describe('Only if you own several repositories: which desk to propose from (owner/name)'),
+          item: tool.schema.string().optional().describe('The approved plan these changes carry out (its work item id), when there is one'),
         },
         async execute(args, context) {
           const owner = requireOwner(context.agent);
           context.metadata({ title: `proposing: ${args.title}` });
-          const result = await proposeDeskChanges(runtime, owner.id, args.title, args.summary, args.repository, {
-            sessionID: context.sessionID, directory: context.directory,
-          });
+          const origin = { sessionID: context.sessionID, directory: context.directory };
+          const result = await proposeDeskChanges(runtime, owner.id, { ...args, origin });
           return `${result.outcome}: ${result.summary}`;
+        },
+      }),
+      onionsoup_submit_plan: tool({
+        description: 'Submit a plan for approval: host code records it as a work item and asks the person in this chat (delegated work waits in their inbox). Never approve your own plan. A rejection comes back with the person\'s note: revise and submit again with item. An approved plan runs in its own new session, which ends with onionsoup_propose_changes for the item.',
+        args: {
+          title: tool.schema.string(),
+          goal: tool.schema.string().describe('What the work achieves, in one or two sentences'),
+          plan: tool.schema.string().describe('The whole plan in markdown: tasks, files, tests and verification'),
+          repository: tool.schema.string().optional().describe('Only if you own several repositories: which one (owner/name)'),
+          item: tool.schema.string().optional().describe('The work item of a plan you are revising or were asked to plan'),
+        },
+        async execute(args, context) {
+          const owner = requireOwner(context.agent);
+          const item = await submitPlan(runtime, owner.id, PlanSubmission.parse(args), { sessionID: context.sessionID, directory: context.directory });
+          return requestPlanApproval(runtime, sessionClient(), item, context);
         },
       }),
       onionsoup_ship: tool({

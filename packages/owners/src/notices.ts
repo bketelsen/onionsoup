@@ -130,8 +130,12 @@ async function raiseNotice(runtime: Runtime, item: WorkItem, previous: string | 
   return notice;
 }
 
-/** Where the work was opened from: its recorded origin, or the owner's work-opened journal entry for older items. */
+/**
+ * Where the owner hears about the work: the session carrying out its plan, the chat it was opened from, or the
+ * owner's work-opened journal entry for older items.
+ */
 async function originOf(runtime: Runtime, item: WorkItem, chatDirectory: (ownerId: string) => Promise<string>) {
+  if (item.session) return item.session;
   if (item.origin) return item.origin;
   const sourceId = item.rebaseOf?.itemId ?? item.repairOf?.itemId;
   const source = sourceId ? await runtime.ledger.get(sourceId).catch(() => undefined) : undefined;

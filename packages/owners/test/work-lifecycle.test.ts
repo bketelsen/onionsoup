@@ -67,7 +67,7 @@ const handlers = {
   view() { const branch = state.branch || 'original'; const headRefOid = cp.execFileSync('git', ['-C', remote, 'rev-parse', branch]).toString().trim(); console.log(JSON.stringify({ url, state: state.state, mergeable: state.mergeable || 'MERGEABLE', headRefOid })); },
   checks() { console.log(JSON.stringify(state.failing === false ? [] : [{ name: 'test', bucket: 'fail', link: '' }])); },
   list() { console.log(JSON.stringify(state.created ? [{ url, state: state.state }] : [])); },
-  create() { if (state.failCreate) { state.failCreate = false; fs.writeFileSync(path, JSON.stringify(state)); process.exit(1); } state.created++; state.branch = args[args.indexOf('--head') + 1]; console.log(url); },
+  create() { if (state.failCreate) { state.failCreate = false; fs.writeFileSync(path, JSON.stringify(state)); process.exit(1); } state.created++; state.branch = args[args.indexOf('--head') + 1]; state.body = args[args.indexOf('--body') + 1]; console.log(url); },
   merge() { state.state = 'MERGED'; },
 };
 handlers[args[1]]();
@@ -209,11 +209,11 @@ test('a clean desk retries publication after commit and enrolls its PR in the le
   });
   await fakeGithub(root, remote, async () => {
     await writeFile(join(root, 'github.json'), JSON.stringify({ created: 0, failCreate: true, state: 'OPEN' }));
-    assert.equal((await proposeDeskChanges(runtime, 'clippy', 'Desk change', 'Update the desk')).outcome, 'publication-failed');
+    assert.equal((await proposeDeskChanges(runtime, 'clippy', { title: 'Desk change', summary: 'Update the desk' })).outcome, 'publication-failed');
     const [failed] = await runtime.ledger.list();
     assert.equal(failed?.deskPublication?.stage, 'open');
     assert.equal((await git(desk.path, ['status', '--porcelain'])).trim(), '');
-    assert.equal((await proposeDeskChanges(runtime, 'clippy', 'Retry', 'Retry')).outcome, 'opened');
+    assert.equal((await proposeDeskChanges(runtime, 'clippy', { title: 'Retry', summary: 'Retry' })).outcome, 'opened');
     const [published] = await runtime.ledger.list();
     assert.equal(published?.id, failed?.id);
     assert.equal(published?.publication?.state, 'open');
@@ -224,8 +224,37 @@ test('a clean desk retries publication after commit and enrolls its PR in the le
     await runtime.ledger.update(published!.id, current => ({
       ...current, status: 'failed', publication: undefined, deskPublication: { ...current.deskPublication!, stage: 'open' },
     }));
-    assert.equal((await proposeDeskChanges(runtime, 'clippy', 'Retry', 'Retry')).outcome, 'opened');
+    assert.equal((await proposeDeskChanges(runtime, 'clippy', { title: 'Retry', summary: 'Retry' })).outcome, 'opened');
     assert.equal(JSON.parse(await readFile(join(root, 'github.json'), 'utf8')).created, 1);
+  });
+});
+
+test('proposing desk changes for an approved plan publishes that plan item, and only while it is being worked on', async () => {
+  const { runtime, root, remote } = await fixture();
+  const planned = await runtime.ledger.create('clippy', 'owner-change', proposal, {
+    status: 'awaiting-plan-approval', planDocument: { markdown: '1. Write the change file', digest: 'd1' },
+  });
+  const desk = await ensureDesk(runtime.repositoryOwner('clippy'), runtime.desksRoot);
+  await writeFile(join(desk.path, 'change'), 'planned change');
+  scriptHires(runtime, async () => ({ decision: 'approve', summary: 'Does what the plan says', findings: [{ severity: 'nit', file: 'change', issue: 'Terse', suggestion: 'Fine' }] }));
+  const change = { title: 'Planned change', summary: 'Carry out the plan', item: planned.id };
+  await assert.rejects(proposeDeskChanges(runtime, 'clippy', change), /plan_item_not_working/);
+  await approvePlan(runtime, planned.id, 'person');
+  await assert.rejects(proposeDeskChanges(runtime, 'bellonda', change), /plan_item_not_yours/);
+  await fakeGithub(root, remote, async () => {
+    const result = await proposeDeskChanges(runtime, 'clippy', change);
+    assert.equal(result.outcome, 'opened', result.summary);
+    const items = await runtime.ledger.list();
+    assert.deepEqual(items.map(item => item.id), [planned.id], 'the plan item itself carries the publication');
+    const published = items[0]!;
+    assert.equal(published.status, 'landed');
+    assert.equal(published.publication?.state, 'open');
+    assert.equal(published.deskPublication?.stage, 'complete');
+    assert.equal(published.proposal.title, 'Planned change');
+    const github = JSON.parse(await readFile(join(root, 'github.json'), 'utf8'));
+    assert.match(github.body, /Approved plan<\/summary>\n\n1\. Write the change file/);
+    assert.match(github.body, /Plan approved by person\./);
+    assert.equal((await git(remote, ['show', `${published.branch}:change`])).trim(), 'planned change');
   });
 });
 
@@ -441,9 +470,9 @@ test('desk publication reports a competing runner and explains permanent failure
     status: 'landing', worktree: desk.path, activeRunner: process.pid,
     deskPublication: { stage: 'commit', reviewedHead: 'old', reviewedTree: 'tree', reviewer: 'reviewer' },
   });
-  assert.equal((await proposeDeskChanges(runtime, 'clippy', 'Retry', 'Retry')).outcome, 'in-progress');
+  assert.equal((await proposeDeskChanges(runtime, 'clippy', { title: 'Retry', summary: 'Retry' })).outcome, 'in-progress');
   await runtime.ledger.update(item.id, current => ({ ...current, activeRunner: undefined }));
-  const failed = await proposeDeskChanges(runtime, 'clippy', 'Retry', 'Retry');
+  const failed = await proposeDeskChanges(runtime, 'clippy', { title: 'Retry', summary: 'Retry' });
   assert.equal(failed.outcome, 'publication-failed');
   assert.match(failed.summary, /desk_head_changed/);
   assert.match(failed.summary, /Cancel .* before proposing/);
@@ -491,7 +520,7 @@ test('maintenance rebases a desk PR whose earlier desk commit was squash-merged'
     return verdict;
   });
   await fakeGithub(root, remote, async () => {
-    await proposeDeskChanges(runtime, 'clippy', 'Next desk change', 'New work');
+    await proposeDeskChanges(runtime, 'clippy', { title: 'Next desk change', summary: 'New work' });
     const [source] = await runtime.ledger.list();
     const github = JSON.parse(await readFile(join(root, 'github.json'), 'utf8'));
     await writeFile(join(root, 'github.json'), JSON.stringify({ ...github, failing: false, mergeable: 'CONFLICTING' }));
@@ -519,7 +548,7 @@ test('desk PR CI failures wake the owner once per observed head', async () => {
     return { decision: 'flaky', reason: 'External test failure' };
   });
   await fakeGithub(root, remote, async () => {
-    await proposeDeskChanges(runtime, 'clippy', 'Desk change', 'First change');
+    await proposeDeskChanges(runtime, 'clippy', { title: 'Desk change', summary: 'First change' });
     const [source] = await runtime.ledger.list();
     await maintainPullRequests(runtime, 'clippy');
     await maintainPullRequests(runtime, 'clippy');
@@ -548,7 +577,7 @@ test('desk PR merges and closes notify the original chat and remain visible in o
       await writeFile(join(desk.path, 'change'), 'desk change');
       scriptHires(runtime, async () => verdict);
       await fakeGithub(root, remote, async () => {
-        await proposeDeskChanges(runtime, 'clippy', 'Desk proposal', 'Update', undefined, origin);
+        await proposeDeskChanges(runtime, 'clippy', { title: 'Desk proposal', summary: 'Update', origin });
         const [source] = await runtime.ledger.list();
         assert.deepEqual(source!.origin, origin);
         for (let index = 0; index < 6; index++) {
@@ -600,7 +629,7 @@ test('a desk PR merged under its grant between ticks queues a merge notice for t
   const fallbackDirectory = async () => '/wrong-directory';
   await noticeWorkChanges(runtime, fallbackDirectory);
   await fakeGithub(root, remote, async () => {
-    const opened = await proposeDeskChanges(runtime, 'clippy', 'Merge desk change', 'Update', undefined, origin);
+    const opened = await proposeDeskChanges(runtime, 'clippy', { title: 'Merge desk change', summary: 'Update', origin });
     assert.equal(opened.outcome, 'merged');
     const [source] = await runtime.ledger.list();
     assert.equal(source!.publication!.state, 'merged');
@@ -648,10 +677,10 @@ test('a desk re-review checks the previous findings against what changed since, 
     return revise(`issue ${briefs.length}`);
   });
   await writeFile(join(desk.path, 'change'), 'first draft\n');
-  assert.equal((await proposeDeskChanges(runtime, 'clippy', 'Desk change', 'Update')).outcome, 'needs-work');
+  assert.equal((await proposeDeskChanges(runtime, 'clippy', { title: 'Desk change', summary: 'Update' })).outcome, 'needs-work');
   assert.doesNotMatch(briefs[0]!, /previous-review/, 'a first review has nothing to check against');
   await writeFile(join(desk.path, 'change'), 'second draft\n');
-  assert.equal((await proposeDeskChanges(runtime, 'clippy', 'Desk change', 'Update')).outcome, 'needs-work');
+  assert.equal((await proposeDeskChanges(runtime, 'clippy', { title: 'Desk change', summary: 'Update' })).outcome, 'needs-work');
   assert.match(briefs[1]!, /<previous-review round="1" reviewer="[^"]+" decision="revise">/);
   assert.match(briefs[1]!, /\[major\] change: issue 1 → Resolve issue 1/);
   assert.match(briefs[1]!, /<changes-since-previous-review>[\s\S]*-first draft\n\+second draft/);
@@ -674,20 +703,20 @@ test('after too many rounds the person decides; a reset starts afresh and an app
     return answer;
   });
   await writeFile(join(desk.path, 'change'), 'draft\n');
-  await proposeDeskChanges(runtime, 'clippy', 'Desk change', 'Update');
-  await proposeDeskChanges(runtime, 'clippy', 'Desk change', 'Update');
-  const waiting = await proposeDeskChanges(runtime, 'clippy', 'Desk change', 'Update');
+  await proposeDeskChanges(runtime, 'clippy', { title: 'Desk change', summary: 'Update' });
+  await proposeDeskChanges(runtime, 'clippy', { title: 'Desk change', summary: 'Update' });
+  const waiting = await proposeDeskChanges(runtime, 'clippy', { title: 'Desk change', summary: 'Update' });
   assert.equal(waiting.outcome, 'needs-person');
   assert.match(waiting.summary, /desk-review-reset clippy example\/clippy/);
   assert.equal(hires, 2, 'no reviewer is hired while the person decides');
-  await proposeDeskChanges(runtime, 'clippy', 'Desk change', 'Update');
+  await proposeDeskChanges(runtime, 'clippy', { title: 'Desk change', summary: 'Update' });
   assert.equal((await journalKinds(runtime, 'clippy')).filter(kind => kind === 'attention').length, 1, 'the person is asked once');
 
   assert.equal(await resetDeskReviews(runtime, 'clippy', undefined, 'person'), 2);
   assert.ok((await journalKinds(runtime, 'clippy')).includes('desk-review-reset'));
   answer = verdict;
   await fakeGithub(root, remote, async () => {
-    assert.equal((await proposeDeskChanges(runtime, 'clippy', 'Desk change', 'Update')).outcome, 'opened');
+    assert.equal((await proposeDeskChanges(runtime, 'clippy', { title: 'Desk change', summary: 'Update' })).outcome, 'opened');
   });
   assert.equal(hires, 3);
   assert.deepEqual(await deskReviewRounds(runtime, 'clippy', 'example/clippy'), [], 'an approved change leaves no history');

@@ -7,6 +7,7 @@ import {
   listFriction, frictionDetail, type FrictionRecord,
   approveInitiative, reviseInitiative, cancelInitiative, initiativeViews, managerOf, planGrantFor,
   type AssignmentView, type Initiative, type InitiativeView, type WorkItem,
+  isDelegated, OWNER_CHANGE_WORKFLOW, PLAN_APPROVAL_PERMISSION,
 } from '@onionsoup/owners';
 import type { OpencodeApi, PendingPermission, PendingQuestion } from './opencode.ts';
 import { readSessionMessages, readSessionsTitled } from './hire-store.ts';
@@ -21,7 +22,7 @@ import { InboxReadError } from './inbox-errors.ts';
  * so the running daemon carries on from whatever is decided here.
  */
 const DONE = new Set(['landed', 'failed', 'rejected', 'cancelled']);
-const RUNNING = new Set(['planning', 'implementing', 'reviewing', 'landing']);
+const RUNNING = new Set(['planning', 'working', 'implementing', 'reviewing', 'landing']);
 
 const RECOVERY_GUIDANCE: Partial<Record<ResourceRequest['status'], string>> = {
   'pending-owner': 'Owner decision retries exhausted; check the provider before retrying.',
@@ -35,6 +36,14 @@ function requestRecoveryDetail(request: ResourceRequest) {
     `operation ${request.operation?.id ?? 'unknown'} (${stage ?? 'unknown'})`,
     guidance ?? 'Inspect effects before retrying. Stopping an instance request retains its cleanup gate.',
   ].join('; ');
+}
+
+/** Gates asked in chat that only the person answers: auto-accept never approves a plan, a ship or an owner change. */
+const PERSON_GATES = new Set([PLAN_APPROVAL_PERMISSION, 'onionsoup_ship', 'onionsoup_owner_change']);
+
+/** A plan waits in the inbox unless it was asked in the owner's chat, where the person answers it instead. */
+function waitsInInbox(item: WorkItem) {
+  return item.status === 'awaiting-plan-approval' && (item.workflow !== OWNER_CHANGE_WORKFLOW || isDelegated(item));
 }
 
 /** A person's decision on an engine gate, parsed once at the HTTP edge. */
@@ -173,7 +182,7 @@ export class SurfaceState {
         detail: requestRecoveryDetail(request), at: request.updatedAt,
       })),
       ...initiatives.filter(initiative => initiative.status === 'awaiting-approval').map(initiative => this.initiativeEntry(initiative)),
-      ...items.filter(item => item.status === 'awaiting-plan-approval').map(item => this.planEntry(item, initiatives)),
+      ...items.filter(waitsInInbox).map(item => this.planEntry(item, initiatives)),
       ...items.filter(item => item.status === 'awaiting-push-approval').map(item => ({ kind: 'push' as const, id: item.id, owner: item.owner, title: item.proposal.title, detail: item.rebaseOf?.prUrl ?? '', at: item.updatedAt })),
       ...items.filter(awaitingPublish).map(item => ({ kind: 'publish' as const, id: item.id, owner: item.owner, title: item.proposal.title, detail: `Landed on ${item.branch}; publishing opens a draft PR.`, at: item.updatedAt })),
       ...requests.filter(request => request.status === 'awaiting-create-approval').map(request => ({ kind: 'create' as const, id: request.id, owner: request.to, title: `${request.from} asks: ${describeAsk(request.ask)}`, detail: request.ask.purpose, at: request.updatedAt })),
@@ -359,7 +368,7 @@ export class SurfaceState {
       return false;
     };
     let answered = 0;
-    for (const permission of pending.filter(entry => accepted(entry.sessionID))) {
+    for (const permission of pending.filter(entry => accepted(entry.sessionID) && !PERSON_GATES.has(entry.permission))) {
       await this.opencode.replyPermission(directory, permission.id, 'once');
       answered++;
     }

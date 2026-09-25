@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
 import { isDeepStrictEqual } from 'node:util';
 import { ManagerPlanVerdict, type Plan } from './artifacts.ts';
-import { managerPlanReviewBrief } from './briefs.ts';
+import { managerPlanReviewBrief, planText } from './briefs.ts';
 import type { ChatOrigin } from './chat-origin.ts';
 import { directReports, isDirectReport, planGrantFor, type Grant } from './declarations.ts';
 import { requestWork } from './delegation.ts';
@@ -357,6 +357,13 @@ export function planDigest(plan: Plan) {
   return createHash('sha256').update(JSON.stringify(plan)).digest('hex').slice(0, 16);
 }
 
+/** The plan a manager reviews, as text, with the digest her review names: an owner's plan, or a freelancer's. */
+export function planUnderReview(item: WorkItem) {
+  if (item.planDocument) return { text: item.planDocument.markdown, digest: item.planDocument.digest };
+  if (item.plan) return { text: planText(item.plan), digest: planDigest(item.plan) };
+  return undefined;
+}
+
 /** Work a manager's initiative assigned, with the initiative, or undefined when it is not hers. */
 async function assignedItem(runtime: Runtime, managerId: string, itemId: string) {
   const item = await runtime.ledger.get(itemId).catch(() => undefined);
@@ -400,9 +407,10 @@ export async function reviewReportPlan(runtime: Runtime, managerId: string, item
   if (!grant) throw new Error(`plan_review_no_grant: ${context.item.owner} has not granted ${managerId} approve-plans; the person approves this plan`);
   const escalation = openEscalation(context.initiative, context.assignmentId);
   if (escalation) throw new Error(`plan_review_escalation_open: ${escalation.id} (${escalation.kind}) on ${context.assignmentId} is unresolved`);
-  if (!context.item.plan || context.item.status !== 'awaiting-plan-approval') throw new Error(`not_awaiting_plan_approval: ${context.item.status}`);
+  const plan = planUnderReview(context.item);
+  if (!plan || context.item.status !== 'awaiting-plan-approval') throw new Error(`not_awaiting_plan_approval: ${context.item.status}`);
   const review: PlanReview = {
-    item: itemId, digest: planDigest(context.item.plan), verdict: verdict.decision, note: verdict.note, by: `owner:${managerId}`, at: new Date().toISOString(),
+    item: itemId, digest: plan.digest, verdict: verdict.decision, note: verdict.note, by: `owner:${managerId}`, at: new Date().toISOString(),
   };
   const reviewed = await PLAN_VERDICTS[verdict.decision]({ runtime, managerId, item: context.item, grant, note: verdict.note });
   await runtime.initiatives.update(context.initiative.id, current => ({ ...current, planReviews: [...current.planReviews, review] }));
@@ -415,19 +423,21 @@ function plansToReview(runtime: Runtime, view: InitiativeView) {
   if (!isSupervised(view)) return [];
   return view.assignments.flatMap(assignment => {
     const item = assignment.item;
-    if (assignment.state !== 'plan-waiting' || !item?.plan || item.activeRunner) return [];
+    const plan = item && planUnderReview(item);
+    if (assignment.state !== 'plan-waiting' || !item || !plan || item.activeRunner) return [];
     if (openEscalation(view, assignment.id) || !grantForItem(runtime, view.owner, item)) return [];
-    const digest = planDigest(item.plan);
+    const { digest } = plan;
     return view.planReviews.some(review => review.item === item.id && review.digest === digest) ? [] : [item];
   });
 }
 
 async function hirePlanVerdict(runtime: Runtime, managerId: string, itemId: string): Promise<ManagerPlanVerdict> {
   const context = await assignedItem(runtime, managerId, itemId);
-  if (!context?.item.plan) throw new Error(`plan_review_not_in_initiative: ${itemId}`);
+  const plan = context && planUnderReview(context.item);
+  if (!context || !plan) throw new Error(`plan_review_not_in_initiative: ${itemId}`);
   const manager = runtime.owner(managerId);
   await mkdir(manager.workspace, { recursive: true });
-  const brief = managerPlanReviewBrief(context.initiative, context.item, context.item.plan, await runtime.notebook(managerId).orientation());
+  const brief = managerPlanReviewBrief(context.initiative, context.item, plan.text, await runtime.notebook(managerId).orientation());
   const hired = await runtime.hire(managerId, {
     role: 'owner', model: manager.model, directory: manager.workspace, title: `${itemId}: manager plan review`, brief, schema: ManagerPlanVerdict,
   }, itemId);

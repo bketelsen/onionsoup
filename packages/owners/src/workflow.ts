@@ -6,6 +6,7 @@ import { pickModel } from './families.ts';
 import type { HumanNote, Implementation, WorkItem, WorkStatus } from './ledger.ts';
 import { answerQuestions, recordLearnings } from './owner.ts';
 import { advanceRebase, REBASE_WORKFLOW } from './rebase.ts';
+import { OWNER_CHANGE_WORKFLOW, tellOwner } from './plan-work.ts';
 import type { Runtime } from './runtime.ts';
 import {
   changesSince, commitWorktree, createWorktree, diffAgainstBase, git, refreshCheckout, removeIgnoredFiles, resetWorktree,
@@ -189,10 +190,31 @@ const STEPS: Partial<Record<WorkStatus, Step>> = {
 
 const TERMINAL: readonly WorkStatus[] = ['landed', 'failed'];
 
+/** An owner's plan is worked on in its session; the runtime only publishes what the session proposed. */
+async function advanceOwnerChange(runtime: Runtime, itemId: string) {
+  const item = await runtime.ledger.get(itemId);
+  return isRunnable(item) ? advanceDeskPublication(runtime, itemId) : item;
+}
+
 const SPECIAL_WORKFLOWS: Record<string, (runtime: Runtime, itemId: string, onProgress: (item: WorkItem) => void) => Promise<WorkItem>> = {
   [REBASE_WORKFLOW]: advanceRebase,
   [DESK_WORKFLOW]: advanceDeskPublication,
+  [OWNER_CHANGE_WORKFLOW]: advanceOwnerChange,
 };
+
+/** Statuses the runtime moves on its own; everything else waits for a person, an owner session, or is finished. */
+const RUNNABLE: readonly WorkStatus[] = ['proposed', 'planning', 'implementing', 'reviewing', 'landing'];
+
+const RUNNABLE_BY_WORKFLOW: Record<string, (item: WorkItem) => boolean> = {
+  [OWNER_CHANGE_WORKFLOW]: item => item.status === 'landing' && Boolean(item.deskPublication),
+};
+
+/** Whether the daemon advances this item now. */
+export function isRunnable(item: WorkItem) {
+  if (item.activeRunner) return false;
+  const runnable = RUNNABLE_BY_WORKFLOW[item.workflow] ?? (candidate => RUNNABLE.includes(candidate.status));
+  return runnable(item);
+}
 
 /** Advance a work item until it reaches a human gate or ends. */
 export async function advance(runtime: Runtime, itemId: string, onProgress: (item: WorkItem) => void = () => {}) {
@@ -237,15 +259,25 @@ function requireAwaitingApproval(item: WorkItem) {
   if (item.status !== 'awaiting-plan-approval' || item.activeRunner) throw new Error(`not_awaiting_plan_approval: ${item.status}`);
 }
 
+/** Where approved work goes next: freelancers implement a change plan; an owner's plan runs in its own session. */
+const APPROVED_STATUS: Record<string, WorkStatus> = { [OWNER_CHANGE_WORKFLOW]: 'working' };
+
 export async function approvePlan(runtime: Runtime, itemId: string, by: string, note?: string) {
   const approved = await runtime.ledger.update(itemId, item => {
     requireAwaitingApproval(item);
     const humanNotes = note ? [...item.humanNotes, humanNote('approval', by, note)] : item.humanNotes;
-    return { ...transition(item, 'implementing'), humanNotes, planApproval: { by, at: new Date().toISOString(), note } };
+    const status = APPROVED_STATUS[item.workflow] ?? 'implementing';
+    return { ...transition(item, status), humanNotes, planApproval: { by, at: new Date().toISOString(), note } };
   });
   await runtime.notebook(approved.owner).journal({ kind: 'plan-approved', workItem: itemId, note: `${by}${note ? `: ${note}` : ''}` });
   return approved;
 }
+
+/** The owner hears a sent-back plan in the session it planned in; freelancer planners read it from the item. */
+const PLAN_FEEDBACK: Record<string, (runtime: Runtime, item: WorkItem, by: string, feedback: string) => Promise<void>> = {
+  [OWNER_CHANGE_WORKFLOW]: (runtime, item, by, feedback) => tellOwner(runtime, item, 'plan-revise',
+    `${by} sent your plan ${item.id} "${item.proposal.title}" back: ${feedback}. Revise it and submit it again with onionsoup_submit_plan with item "${item.id}".`),
+};
 
 export async function revisePlan(runtime: Runtime, itemId: string, by: string, feedback: string) {
   const revised = await runtime.ledger.update(itemId, item => {
@@ -253,6 +285,7 @@ export async function revisePlan(runtime: Runtime, itemId: string, by: string, f
     return { ...transition(item, 'planning'), humanNotes: [...item.humanNotes, humanNote('plan-feedback', by, feedback)] };
   });
   await runtime.notebook(revised.owner).journal({ kind: 'plan-feedback', workItem: itemId, note: `${by}: ${feedback}` });
+  await PLAN_FEEDBACK[revised.workflow]?.(runtime, revised, by, feedback);
   return revised;
 }
 
@@ -318,7 +351,7 @@ export function retryItem(runtime: Runtime, itemId: string, by: string, note?: s
 }
 
 const CANCELLABLE = new Set<WorkStatus>([
-  'proposed', 'planning', 'awaiting-plan-approval', 'implementing', 'reviewing', 'landing',
+  'proposed', 'planning', 'awaiting-plan-approval', 'working', 'implementing', 'reviewing', 'landing',
   'awaiting-push-approval', 'interrupted', 'failed', 'landed',
 ]);
 

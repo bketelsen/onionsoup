@@ -8,12 +8,13 @@ import { drain, tick, type TickLog } from '../src/daemon.ts';
 import { INITIATIVE_LIMITS, type InitiativeDraft } from '../src/initiatives.ts';
 import { pendingNotices } from '../src/notices.ts';
 import {
-  approveInitiative, cancelAssignment, cancelInitiative, draftInitiative, initiativeView, planDigest, raiseToManager, resolveEscalation,
+  approveInitiative, cancelAssignment, cancelInitiative, draftInitiative, initiativeView, raiseToManager, resolveEscalation,
   reviewReportPlan, reviseInitiative, steerReportItem, submitInitiative, superviseInitiatives, updateInitiative,
 } from '../src/org-work.ts';
 import { Runtime } from '../src/runtime.ts';
 import { listAttention } from '../src/attention.ts';
 import type { ManagerPlanVerdict } from '../src/artifacts.ts';
+import { submitPlan } from '../src/plan-work.ts';
 import { withActiveHooks } from './active-hooks.ts';
 
 const origin = { sessionID: 'ses_odrade', directory: '/evidence/odrade' };
@@ -244,13 +245,11 @@ test('an initiative whose every assignment is cancelled ends cancelled, not comp
   assert.ok((await pendingNotices(runtime)).some(notice => notice.change === 'initiative-cancelled'));
 });
 
-function plan(summary: string) {
-  return { summary, steps: [{ description: 'Change it', files: ['main.go'] }], tests: ['go test'], risks: [], outOfScope: [], questionsForOwner: [] };
-}
-
-/** Stand in for the planner: the item now waits for approval of this plan. */
-function setPlan(runtime: Runtime, itemId: string, summary: string) {
-  return runtime.ledger.update(itemId, item => ({ ...item, status: 'awaiting-plan-approval', plan: plan(summary) }));
+/** The report submits its plan from the session it planned in: the item now waits for approval of this plan. */
+async function setPlan(runtime: Runtime, itemId: string, summary: string) {
+  const item = await runtime.ledger.get(itemId);
+  const submission = { title: item.proposal.title, goal: item.proposal.goal, plan: `# ${summary}\n\n1. Change it`, item: itemId };
+  return submitPlan(runtime, item.owner, submission, { sessionID: `ses_${item.owner}_plan`, directory: '/desk' });
 }
 
 /** Approve the initiative, dispatch a1 and let clippy accept it; returns clippy's item. */
@@ -300,13 +299,13 @@ test('a manager approves a report plan under its grant, journaled to both; witho
 
   assert.equal(await superviseWithReviews(runtime), 1);
   const approved = await runtime.ledger.get(itemId);
-  assert.equal(approved.status, 'implementing');
+  assert.equal(approved.status, 'working', 'an approved plan waits for its execution session');
   assert.equal(approved.planApproval?.by, 'owner:odrade (standing grant approve-plans in clippy)');
   for (const owner of ['odrade', 'clippy']) {
     assert.ok((await journalOf(runtime, owner)).some(entry => entry.kind === 'grant-used' && entry.note?.includes(itemId)), owner);
   }
   const reviews = (await runtime.initiatives.get(initiative.id)).planReviews;
-  assert.deepEqual(reviews.map(review => [review.item, review.verdict, review.digest]), [[itemId, 'approve', planDigest(waiting.plan!)]]);
+  assert.deepEqual(reviews.map(review => [review.item, review.verdict, review.digest]), [[itemId, 'approve', waiting.planDocument!.digest]]);
   assert.equal(await superviseWithReviews(runtime), 0);
   assert.deepEqual(hires, [`${itemId}: manager plan review`]);
 
@@ -376,8 +375,12 @@ test('a report escalation wakes the manager and blocks her approvals until resol
   await steerReportItem(runtime, 'odrade', itemId, 'note', 'Keep it small');
   assert.ok((await journalOf(runtime, 'clippy')).some(entry => entry.kind === 'manager-note' && entry.note?.includes('Keep it small')));
   assert.equal(await steerReportItem(runtime, 'odrade', itemId, 'revise-plan', 'Drop step 2'), 'planning');
+  const sentBack = (await pendingNotices(runtime)).find(notice => notice.change === 'plan-revise');
+  assert.equal(sentBack?.owner, 'clippy');
+  assert.deepEqual(sentBack?.origin, { sessionID: 'ses_clippy_plan', directory: '/desk' }, 'the report hears it where it planned');
+  assert.match(sentBack!.text, /Drop step 2/);
   await setPlan(runtime, itemId, 'Core plan, smaller');
-  assert.equal(await steerReportItem(runtime, 'odrade', itemId, 'approve-plan', ''), 'implementing');
+  assert.equal(await steerReportItem(runtime, 'odrade', itemId, 'approve-plan', ''), 'working');
   assert.equal((await runtime.ledger.get(itemId)).planApproval?.by, 'owner:odrade (standing grant approve-plans in clippy)');
 
   const peerWork = await runtime.ledger.create('homelab', 'change', proposal('Fleet change'));

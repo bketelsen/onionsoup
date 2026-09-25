@@ -32,7 +32,7 @@ function proposalText(proposal: ProposedWork, withRationale = true) {
   ].join('\n');
 }
 
-function planText(plan: Plan) {
+export function planText(plan: Plan) {
   const steps = plan.steps.map((step, index) => `${index + 1}. ${step.description} [${step.files.join(', ')}]`).join('\n');
   return [
     `Summary: ${plan.summary}`,
@@ -275,12 +275,12 @@ repository, swaps it in atomically, restarts the app and verifies it, rolling ba
 }
 
 /** A manager reviews a report's plan for one of its initiatives, under a standing grant from the person. */
-export function managerPlanReviewBrief(initiative: Initiative, item: WorkItem, plan: Plan, notebook: string) {
+export function managerPlanReviewBrief(initiative: Initiative, item: WorkItem, plan: string, notebook: string) {
   return [
     `You manage ${item.owner}, which planned work for your initiative "${initiative.title}". The person gave you a standing grant to approve its plans; the runtime journals every use. Review the plan as its manager. Read what you need; do not edit anything.`,
     block('initiative', `Goal: ${initiative.goal}\nWhy: ${initiative.rationale}`),
     block('assignment', proposalText(item.proposal)),
-    block('plan', planText(plan)),
+    block('plan', plan),
     block('earlier-plan-feedback', humanNotesText(item, 'plan-feedback') || '(none)'),
     block('your-notebook', notebook),
     `Approve if the plan does what the assignment asks, fits the initiative and stays in scope. Revise, with specific

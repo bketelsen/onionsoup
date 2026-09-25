@@ -246,6 +246,35 @@ test('auto-accept answers the prompts of that chat and no other, including ones 
   }
 });
 
+test('auto-accept never answers a plan approval, and only delegated plans wait in the inbox', async () => {
+  const { runtime, server, call, calls } = await start(api => {
+    api.permissions = async directory => directory.endsWith('bellonda') ? [
+      { id: 'per_plan', sessionID: 'ses_1', permission: 'onionsoup_plan_approval', patterns: ['w-plan'], metadata: {}, always: [] },
+      { id: 'per_edit', sessionID: 'ses_1', permission: 'edit', patterns: ['docs/x.md'], metadata: {}, always: [] },
+    ].filter(entry => !calls.some(call => call[0] === 'permission' && call[2] === entry.id)) : [];
+  });
+  try {
+    const enabled = await call('PUT', '/api/owners/bellonda/sessions/ses_1/auto-accept', { enabled: true });
+    assert.deepEqual(enabled.body, { enabled: true, answered: 1 });
+    assert.deepEqual(calls.filter(entry => entry[0] === 'permission').map(entry => entry[2]), ['per_edit'], 'the plan approval waits for the person');
+    await runtime.notebook('bellonda').ensure('# Charter\n');
+    const proposal = { title: 'Wiki page', goal: 'Write it', rationale: 'r', acceptance: ['a'], size: 'small' as const };
+    const planDocument = { markdown: '1. Write the page', digest: 'd' };
+    const inChat = await runtime.ledger.create('bellonda', 'owner-change', proposal, { status: 'awaiting-plan-approval', planDocument });
+    const delegated = await runtime.ledger.create('bellonda', 'owner-change', proposal, { status: 'awaiting-plan-approval', planDocument, request: 'r-1' });
+    const inbox = (await call('GET', '/api/state')).body.inbox as { kind: string; id: string }[];
+    assert.ok(inbox.some(entry => entry.kind === 'permission' && entry.id === 'per_plan'), 'the chat prompt is the in-chat plan\'s gate');
+    assert.deepEqual(inbox.filter(entry => entry.kind === 'plan').map(entry => entry.id), [delegated.id]);
+    assert.equal((await call('POST', '/api/decide', { action: 'approve-plan', id: delegated.id })).status, 200);
+    const approved = await runtime.ledger.get(delegated.id);
+    assert.equal(approved.status, 'working');
+    assert.equal(approved.planApproval?.by, 'tester');
+    assert.equal((await runtime.ledger.get(inChat.id)).status, 'awaiting-plan-approval');
+  } finally {
+    server.close();
+  }
+});
+
 test('a work item\'s hires are found by title in opencode\'s store, and read from it', async () => {
   const { runtime, server, call } = await start();
   try {
