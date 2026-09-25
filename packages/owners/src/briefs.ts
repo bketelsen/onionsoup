@@ -226,7 +226,7 @@ export function distillBrief(journal: readonly string[], notebook: string) {
     `Journal kinds from chats with the person: "chat-decision" lines are CANDIDATES (a watcher or you noted them, each with the
 person's exact words in "quote"); record only real decisions, preferences and pronouncements, in decisions.md or WISDOM, and
 cite the quote. "retracted" lines mean the person said something noted was not a decision: never record it. "chat-action"
-lines are things you did with the person's approval; record them in MAP only where they change what exists.`,
+lines are things you did with the person's approval, "subagent-action" lines what your subagents did; record them in MAP only where they change what exists.`,
     block('journal', journal.join('\n')),
     block('notebook', notebook),
     NOTEBOOK_RULES,

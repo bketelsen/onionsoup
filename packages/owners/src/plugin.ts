@@ -31,6 +31,8 @@ import { Runtime } from './runtime.ts';
 import { engineCommit, FrictionEvents, FrictionInput, reportFriction } from './friction.ts';
 import { REPOSITORY_WRITING } from './repository-writing.ts';
 import { prepareToolArguments } from './tool-arguments.ts';
+import { BOOTSTRAP_MARKER, bootstrapText, registerSkills, subagents, subagentsText, taskPermission } from './owner-agents.ts';
+import { SessionOwners } from './session-owners.ts';
 
 /**
  * onionsoup as an opencode plugin: every owner with a persona becomes an agent a person can chat with
@@ -126,6 +128,8 @@ function agentPrompt(owner: OwnerDeclaration, persona: Persona, charter: string,
 ${charter.trim()}
 </charter>
 
+${subagentsText(owner.id)}
+
 <roster>
 ${roster}
 </roster>
@@ -162,7 +166,7 @@ ${owner.manages ? `
 function conversationPermission(owner: OwnerDeclaration, verify: readonly string[]) {
   const mode = owner.conversation ?? { bash: { '*': 'ask' }, edit: 'ask', webfetch: 'ask' };
   const bash = { ...mode.bash, ...Object.fromEntries(verify.map(command => [`${command}*`, 'allow'])) };
-  return { edit: mode.edit, bash, webfetch: mode.webfetch, external_directory: 'ask', doom_loop: 'ask' };
+  return { edit: mode.edit, bash, webfetch: mode.webfetch, external_directory: 'ask', doom_loop: 'ask', task: taskPermission(owner.id) };
 }
 
 const STEWARD_TOOL = 'onionsoup_owners';
@@ -220,6 +224,7 @@ ${assistantText.slice(0, PLUGIN_LIMITS.exchangeChars)}
 }
 
 interface MessagePart { type: string; text?: string; synthetic?: boolean }
+interface ToolPart { id: string; sessionID: string; type: string; tool?: string; state?: { status: string; input?: any; output?: string } }
 interface SessionMessage { info: { id: string; role: string }; parts: MessagePart[] }
 
 function textOf(parts: readonly MessagePart[]) {
@@ -241,10 +246,23 @@ const server: Plugin = async (input, options) => {
     const charter = await runtime.text(`charters/${owner.id}.md`).catch(() => `# Charter: ${owner.id}\n`);
     await runtime.notebook(owner.id).ensure(charter).catch(() => undefined);
   }
-  const sessionOwner = new Map<string, OwnerDeclaration>();
+  const sessions = new SessionOwners(async id => (await input.client.session.get({ path: { id } })).data?.parentID);
   const journaledParts = new Set<string>();
   const watchedMessages = new Map<string, string>();
   const frictionEvents = new FrictionEvents();
+
+  /** A completed call that changed something (or ran a command the owner's rules do not allow) enters the journal. */
+  async function journalToolCall(owner: OwnerDeclaration, part: ToolPart, kind: 'chat-action' | 'subagent-action') {
+    const command = part.tool === 'bash' ? String(part.state?.input?.command ?? '') : '';
+    const rules = (owner.conversation?.bash ?? { '*': 'ask' }) as Record<string, string>;
+    const isAction = MUTATING_TOOLS.has(part.tool ?? '') || (part.tool === 'bash' && bashAction(rules, command) !== 'allow');
+    if (!isAction) return;
+    journaledParts.add(part.id);
+    const target = command || String(part.state?.input?.filePath ?? part.state?.input?.patchText?.split('\n')[1] ?? '');
+    const notebook = runtime.notebook(owner.id);
+    await notebook.journal({ kind, stage: part.tool, note: target.slice(0, 500), outcome: (part.state?.output ?? '').slice(0, 300), session: part.sessionID });
+    await commitQuietly(notebook, kind);
+  }
 
   /** Owners can be named by id or by persona name. */
   function resolveOwner(name: string) {
@@ -442,6 +460,8 @@ const server: Plugin = async (input, options) => {
       // Restricted tools (owner management, initiatives) are shown only to the owners they are for.
       for (const name of Object.keys(RESTRICTED_TOOLS)) hiddenFromEveryone[name] = 'deny';
       // Owner tool servers are denied to every agent; each owner's own rules re-allow its servers (last match wins).
+      Object.assign(agents, subagents(runtime.declarations, owners));
+      registerSkills(config as Parameters<typeof registerSkills>[0]);
       const current = config.permission;
       config.permission = { ...(typeof current === 'string' ? { '*': current } : current ?? {}), ...hiddenFromEveryone } as never;
       agents[WATCHER_AGENT] = {
@@ -455,11 +475,21 @@ const server: Plugin = async (input, options) => {
 
     async 'chat.message'(message) {
       const owner = message.agent ? ownerByAgent.get(message.agent) : undefined;
-      if (owner) sessionOwner.set(message.sessionID, owner);
+      if (owner) sessions.claim(message.sessionID, owner);
+    },
+
+    /** Owners' top-level sessions start with the skills bootstrap; subagents' child sessions never do. */
+    async 'experimental.chat.messages.transform'(_input, output) {
+      const firstUser = output.messages.find(message => message.info.role === 'user');
+      const part = firstUser?.parts[0];
+      if (!firstUser || !part || firstUser.info.role !== 'user' || !ownerByAgent.has(firstUser.info.agent)) return;
+      if (firstUser.parts.some(candidate => candidate.type === 'text' && candidate.text.includes(BOOTSTRAP_MARKER))) return;
+      if (await sessions.isChild(firstUser.info.sessionID)) return;
+      firstUser.parts.unshift({ ...part, type: 'text', text: bootstrapText(), synthetic: true } as typeof part);
     },
 
     async 'experimental.chat.system.transform'(context, output) {
-      const owner = context.sessionID ? sessionOwner.get(context.sessionID) : undefined;
+      const owner = context.sessionID ? sessions.ownerOf(context.sessionID) : undefined;
       if (!owner) return;
       const notebook = await runtime.notebook(owner.id).orientation().catch(() => '(notebook unavailable)');
       const work = await workSummary(owner.id);
@@ -473,23 +503,16 @@ const server: Plugin = async (input, options) => {
       const typed = event as { type: string; properties: Record<string, any> };
       const isIdle = typed.type === 'session.idle' || (typed.type === 'session.status' && typed.properties.status?.type === 'idle');
       if (isIdle) {
-        const owner = sessionOwner.get(typed.properties.sessionID);
+        const owner = sessions.ownerOf(typed.properties.sessionID);
         if (owner) await watch(typed.properties.sessionID, owner).catch(() => undefined);
         return;
       }
       if (typed.type !== 'message.part.updated') return;
-      const part = typed.properties.part as { id: string; sessionID: string; type: string; tool?: string; state?: { status: string; input?: any; output?: string } };
-      const owner = sessionOwner.get(part.sessionID);
-      if (!owner || part.type !== 'tool' || part.state?.status !== 'completed' || journaledParts.has(part.id)) return;
-      const command = part.tool === 'bash' ? String(part.state.input?.command ?? '') : '';
-      const rules = (owner.conversation?.bash ?? { '*': 'ask' }) as Record<string, string>;
-      const isAction = MUTATING_TOOLS.has(part.tool ?? '') || (part.tool === 'bash' && bashAction(rules, command) !== 'allow');
-      if (!isAction) return;
-      journaledParts.add(part.id);
-      const target = command || String(part.state.input?.filePath ?? part.state.input?.patchText?.split('\n')[1] ?? '');
-      const notebook = runtime.notebook(owner.id);
-      await notebook.journal({ kind: 'chat-action', stage: part.tool, note: target.slice(0, 500), outcome: (part.state.output ?? '').slice(0, 300), session: part.sessionID });
-      await commitQuietly(notebook, 'chat action');
+      const part = typed.properties.part as ToolPart;
+      if (part.type !== 'tool' || part.state?.status !== 'completed' || journaledParts.has(part.id)) return;
+      const topLevelOwner = sessions.ownerOf(part.sessionID);
+      const owner = topLevelOwner ?? await sessions.ownerOfChild(part.sessionID).catch(() => undefined);
+      if (owner) await journalToolCall(owner, part, topLevelOwner ? 'chat-action' : 'subagent-action');
     },
 
     tool: {

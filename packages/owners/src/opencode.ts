@@ -48,7 +48,7 @@ function log(message: string) {
  */
 export type Role = 'owner' | 'planner' | 'implementer' | 'reviewer';
 
-const READ_ONLY_BASH: Record<string, 'allow' | 'deny'> = {
+export const READ_ONLY_BASH: Record<string, 'allow' | 'deny'> = {
   '*': 'deny',
   'ls*': 'allow',
   'grep *': 'allow',
