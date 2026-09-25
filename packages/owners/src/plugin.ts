@@ -203,7 +203,8 @@ function conversationPermission(owner: OwnerDeclaration, verify: readonly string
   const bash = { ...mode.bash, ...Object.fromEntries(verify.map(command => [`${command}*`, 'allow'])) };
   return {
     edit: mode.edit, bash, webfetch: mode.webfetch, external_directory: 'ask', doom_loop: 'ask', task: taskPermission(owner.id),
-    [PLAN_APPROVAL_PERMISSION]: 'ask', ...NO_OPERATOR_SKILLS,
+    // opencode denies its question tool unless an agent allows it; answering is always the person's, so it grants nothing.
+    question: 'allow', [PLAN_APPROVAL_PERMISSION]: 'ask', ...NO_OPERATOR_SKILLS,
   };
 }
 

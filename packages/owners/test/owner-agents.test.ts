@@ -46,6 +46,12 @@ test('a persona may start only its own implementer and reviewer, and its prompt 
   assert.match(String((milesTeg as { prompt?: string }).prompt), new RegExp(`subagent_type "${reviewerAgent('homelab')}"`));
 });
 
+test('personas may put questions to the person with the question tool, which opencode denies by default; subagents may not', async () => {
+  const { agents } = await configured();
+  assert.equal(agents['Miles Teg']!.permission!.question, 'allow');
+  assert.notEqual(agents[IMPLEMENTER_AGENT]!.permission?.question, 'allow');
+});
+
 interface FakeMessage { info: { id: string; sessionID: string; role: string; agent: string }; parts: { id: string; type: string; text: string }[] }
 
 function chat(sessionID: string, agent: string): { messages: FakeMessage[] } {
