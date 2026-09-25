@@ -100,7 +100,7 @@ const NAS_CHAT_RULES: Record<string, string> = {
   ...Object.fromEntries(['dataset_create', 'dataset_delete', 'snapshot_delete', 'smb_create', 'smb_delete', 'nfs_create', 'nfs_delete', 'app_configure', 'app_update_all', 'alert_dismiss']
     .map(tool => [`${NAS_MCP}_truenas_${tool}`, 'deny'])),
 };
-const WATCHER_MODELS = ['openai/gpt-5.6-luna-fast', 'github-copilot/claude-haiku-4.5'];
+const WATCHER_MODELS = ['github-copilot/gpt-5.6-luna', 'github-copilot/claude-haiku-4.5'];
 
 /** Tools that change things; a completed call of one of these is always journaled. */
 const MUTATING_TOOLS = new Set(['edit', 'write', 'apply_patch', 'patch', 'multiedit']);
