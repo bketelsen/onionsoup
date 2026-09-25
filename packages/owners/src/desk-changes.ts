@@ -3,9 +3,9 @@ import { promisify } from 'node:util';
 import { z } from 'zod';
 import type { Verification, WorkItem } from './ledger.ts';
 import { OWNER_CHANGE_WORKFLOW } from './plan-work.ts';
-import { Verdict } from './artifacts.ts';
+import { effectiveDecision, Verdict } from './artifacts.ts';
 import { requestPublish } from './brokering.ts';
-import { findingsText, previousReviewText } from './briefs.ts';
+import { findingsSection, findingsText, previousReviewText } from './briefs.ts';
 import { clearDeskReviews, deskReviewRounds, recordDeskReview, type DeskReviewRound } from './desk-reviews.ts';
 import { requireFreelancer, type RepositoryOwner } from './declarations.ts';
 import { pickModel } from './families.ts';
@@ -38,7 +38,8 @@ function reviewBrief(owner: RepositoryOwner, title: string, summary: string, pat
     `<diff-against-${owner.domain.baseBranch}>\n${patch}\n</diff-against-${owner.domain.baseBranch}>`,
     previousReview,
     `Approve only if the diff does what the owner says and nothing else, is correct, and keeps to the repository's
-conventions. Revise, with specific findings, otherwise. Replan is not available here; use revise.`,
+conventions. Revise, with specific findings, otherwise. Replan is not available here; use revise. Only blocker
+findings send the change back to the owner; the others are listed in the PR for the person who merges it.`,
   ].filter(Boolean).join('\n\n');
 }
 
@@ -145,7 +146,7 @@ async function prepareDeskChanges(runtime: Runtime, ownerId: string, proposal: D
   const waiting = waitingForPerson(owner, await deskReviewRounds(runtime, owner.id, owner.domain.name));
   if (waiting) return waiting;
   const review = await reviewDesk(runtime, owner, desk.path, proposal);
-  if (review.verdict.decision !== 'approve') {
+  if (effectiveDecision(review.verdict) !== 'approve') {
     await recordNeedsWork(runtime, owner, proposal.title, { at: new Date().toISOString(), reviewer: review.reviewer, ...review.verdict, tree: review.tree });
     return { outcome: 'needs-work', summary: `${review.reviewer} asked for changes; nothing was committed.\n${review.verdict.summary}\n${findingsText(review.verdict.findings)}` };
   }
@@ -266,8 +267,8 @@ function planSection(item: WorkItem) {
 }
 
 function deskPrBody(item: WorkItem) {
-  const review = `Reviewed by ${item.deskPublication!.reviewer}: ${item.verdicts.at(-1)!.summary}`;
-  return [item.proposal.goal, review, planSection(item), `Work item: ${item.id}`].filter(Boolean).join('\n\n');
+  const review = `Reviewed by ${item.deskPublication!.reviewer}.`;
+  return [item.proposal.goal, review, findingsSection(item.verdicts), planSection(item), `Work item: ${item.id}`].filter(Boolean).join('\n\n');
 }
 
 const openDesk: DeskStep = async (runtime, item) => {

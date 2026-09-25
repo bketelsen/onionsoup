@@ -40,7 +40,7 @@ const TITLES: Record<string, string> = {
   codesearch: 'Code Search', todowrite: 'Update Todo List', todoread: 'Read Todo List', skill: 'Load Skill', question: 'Question', lsp: 'LSP',
   onionsoup_status: 'Status', onionsoup_notebook: 'Notebook', onionsoup_evidence: 'Evidence', onionsoup_ask: 'Ask Owner',
   onionsoup_open_work: 'Open Work', onionsoup_propose_changes: 'Propose Changes', onionsoup_ship: 'Ship', onionsoup_request_publish: 'Request Publish',
-  onionsoup_record_decision: 'Record Decision', onionsoup_retract: 'Retract', onionsoup_owners: 'Manage Owners',
+  onionsoup_record_decision: 'Record Decision', onionsoup_record_fact: 'Record Fact', onionsoup_submit_plan: 'Submit Plan', onionsoup_retract: 'Retract', onionsoup_owners: 'Manage Owners',
 };
 
 export function toolTitle(tool: string) {

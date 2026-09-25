@@ -1,4 +1,4 @@
-import type { Finding, Plan, ProposedWork, Verdict } from './artifacts.ts';
+import { effectiveDecision, type Finding, type Plan, type ProposedWork, type Verdict } from './artifacts.ts';
 import type { Initiative } from './initiatives.ts';
 import type { Duty } from './declarations.ts';
 import type { Verification, WorkItem } from './ledger.ts';
@@ -45,6 +45,18 @@ export function planText(plan: Plan) {
 
 export function findingsText(findings: readonly Finding[]) {
   return list(findings.map(finding => `[${finding.severity}] ${finding.file}: ${finding.issue} → ${finding.suggestion}`));
+}
+
+/**
+ * The review as the person who merges reads it in the PR: what the last round decided and every finding it raised,
+ * blocking or not. Findings that did not block are advice, and this is where the person sees them.
+ */
+export function findingsSection(verdicts: readonly Verdict[]) {
+  const last = verdicts.at(-1);
+  if (!last) return '';
+  const rounds = verdicts.length === 1 ? '1 round' : `${verdicts.length} rounds`;
+  const findings = last.findings.length ? `\n\nFindings from the last round:\n${findingsText(last.findings)}` : '';
+  return `### Review\n\n${effectiveDecision(last)} after ${rounds}: ${last.summary}${findings}\n`;
 }
 
 const CONVERGENCE = `This change has been reviewed before. Start by checking every previous finding against the diff,
@@ -226,7 +238,9 @@ export function distillBrief(journal: readonly string[], notebook: string) {
     `Journal kinds from chats with the person: "chat-decision" lines are CANDIDATES (a watcher or you noted them, each with the
 person's exact words in "quote"); record only real decisions, preferences and pronouncements, in decisions.md or WISDOM, and
 cite the quote. "retracted" lines mean the person said something noted was not a decision: never record it. "chat-action"
-lines are things you did with the person's approval, "subagent-action" lines what your subagents did; record them in MAP only where they change what exists.`,
+lines are things you did with the person's approval, "subagent-action" lines what your subagents did; record them in MAP only where they change what exists. "fact"
+lines are facts you observed, each with its source: keep every statement word for word in MAP (what exists) or WISDOM
+(what holds), citing its source, unless a later line shows it is no longer true.`,
     block('journal', journal.join('\n')),
     block('notebook', notebook),
     NOTEBOOK_RULES,

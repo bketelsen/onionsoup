@@ -5,12 +5,13 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { z } from 'zod';
 import type { NotebookEdit, NotebookRegister } from './artifacts.ts';
+import { parseJournalRecord, type JournalRecord } from './journal-record.ts';
 import type { JournalCursor, MemoryPolicy } from './memory-config.ts';
 import { withRecordLock } from './record-lock.ts';
 
 const run = promisify(execFile);
 
-export const NOTEBOOK_LIMITS = { orientationChars: 24_000 };
+export const NOTEBOOK_LIMITS = { orientationChars: 24_000, factChars: 6_000 };
 
 /** The last commit queued per notebooks repository; see Notebook.commit. */
 const COMMITS = new Map<string, Promise<void>>();
@@ -45,6 +46,14 @@ export interface JournalEntry {
   quote?: string;
   /** The chat session an entry came from. */
   session?: string;
+  /** For a recorded fact: where the owner observed it, and when. */
+  source?: string;
+  observedAt?: string;
+}
+
+/** A recorded fact as the owner reads it: its statement word for word, then where and when it was observed. */
+function factLine(entry: JournalRecord) {
+  return `- ${entry.note} (source: ${entry.source ?? 'unknown'}; observed ${entry.observedAt ?? entry.at})`;
 }
 
 export class Notebook {
@@ -99,6 +108,28 @@ export class Notebook {
   async apply(edits: readonly NotebookEdit[], message: string) {
     for (const edit of edits) await this.applyOne(edit);
     await this.commit(message);
+  }
+
+  /**
+   * The facts the owner recorded, newest first, word for word, within NOTEBOOK_LIMITS.factChars. The owner reads them
+   * in every turn without waiting for distill, and passes them on to the subagents it dispatches.
+   */
+  async facts() {
+    const directory = join(this.directory, 'journal');
+    const files = (await readdir(directory).catch(() => [] as string[])).filter(file => file.endsWith('.jsonl')).sort().reverse();
+    const lines: string[] = [];
+    let chars = 0;
+    for (const file of files) {
+      const records = (await readFile(join(directory, file), 'utf8')).split('\n').map(parseJournalRecord).reverse();
+      for (const record of records) {
+        if (record?.kind !== 'fact' || !record.note) continue;
+        const line = factLine(record);
+        if (chars + line.length > NOTEBOOK_LIMITS.factChars) return lines.join('\n');
+        lines.push(line);
+        chars += line.length + 1;
+      }
+    }
+    return lines.join('\n');
   }
 
   async journal(entry: JournalEntry) {

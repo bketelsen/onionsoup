@@ -67,4 +67,6 @@ test('implementation and review briefs apply the same rule without discarding th
   }
   assert.match(review, /flag violations as review findings/);
   assert.match(review, /Apply repository-specific attribution requirements where declared/);
+  assert.match(review, /- blocker: a correctness, safety or factual error[^\n]*Only blockers send the change back/);
+  assert.match(review, /- major, minor, nit: worth fixing, but not blocking/);
 });

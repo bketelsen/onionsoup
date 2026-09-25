@@ -42,6 +42,36 @@ async function settledPullRequest(url: string) {
 
 const PR_STATES: Record<string, 'open' | 'merged' | 'closed'> = { OPEN: 'open', MERGED: 'merged', CLOSED: 'closed' };
 
+const PullRequestState = z.object({ state: z.string() });
+
+async function publicationState(url: string) {
+  const { stdout } = await run('gh', ['pr', 'view', url, '--json', 'state']);
+  return PR_STATES[PullRequestState.parse(JSON.parse(stdout)).state] ?? 'open';
+}
+
+/** What a refresh saw: publications that merged or closed, and those whose state could not be read. */
+export interface PublicationRefresh { changed: string[]; unreadable: string[] }
+
+/**
+ * Record merges and closes of every open publication (CI repairs too, which share their PR), with one state read each
+ * and no wait for mergeability. The daemon runs it every tick, so delegated requests, initiatives and merge notices
+ * react within a minute instead of waiting for the next maintain-prs duty. Only the state is written.
+ */
+export async function refreshPublications(runtime: Runtime, ownerId?: string): Promise<PublicationRefresh> {
+  const open = (await runtime.ledger.list())
+    .filter(item => item.publication?.state === 'open' && (!ownerId || item.owner === ownerId));
+  const refresh: PublicationRefresh = { changed: [], unreadable: [] };
+  for (const item of open) {
+    const url = item.publication!.url;
+    const state = await publicationState(url).catch(() => undefined);
+    if (!state) refresh.unreadable.push(url);
+    if (!state || state === 'open') continue;
+    await runtime.ledger.update(item.id, current => ({ ...current, publication: { ...current.publication!, state } }));
+    refresh.changed.push(`${url} ${state}`);
+  }
+  return refresh;
+}
+
 export const CI_TRIAGE_LIMITS = { logChars: 12_000 };
 
 const Check = z.object({ name: z.string(), bucket: z.string(), link: z.string().default('') });
@@ -103,22 +133,19 @@ async function triageFailingCi(runtime: Runtime, item: WorkItem, headSha: string
   return repair;
 }
 
-/** The maintain-prs duty: record merges and closes, and open a rebase work item for each conflicting PR. */
+/** The maintain-prs duty: record merges and closes, triage failing CI, and open a rebase work item for each conflicting PR. */
 export async function maintainPullRequests(runtime: Runtime, ownerId: string) {
+  const refreshed = await refreshPublications(runtime, ownerId);
   const items = (await runtime.ledger.list()).filter(item => item.owner === ownerId);
   const openRebases = new Set(items.filter(item => item.rebaseOf && !['landed', 'failed', 'rejected', 'cancelled'].includes(item.status)).map(item => item.rebaseOf!.itemId));
   const cancelledRebases = new Set(items.filter(item => item.rebaseOf && item.status === 'cancelled')
     .map(item => `${item.rebaseOf!.itemId}:${item.rebaseOf!.previousHead}`));
-  const notes: string[] = [];
+  const notes = [...refreshed.changed, ...refreshed.unreadable.map(url => `${url} state unreadable`)];
   const opened: WorkItem[] = [];
   for (const item of items.filter(candidate => candidate.publication?.state === 'open' && !candidate.repairOf)) {
     const pr = await settledPullRequest(item.publication!.url);
-    const state = PR_STATES[pr.state] ?? 'open';
-    if (state !== 'open') {
-      await runtime.ledger.update(item.id, current => ({ ...current, publication: { ...current.publication!, state } }));
-      notes.push(`${item.publication!.url} ${state}`);
-      continue;
-    }
+    // Merged or closed since the refresh: the next refresh records it.
+    if (PR_STATES[pr.state] !== 'open') continue;
     const hasRepair = items.some(candidate => candidate.repairOf?.itemId === item.id
       && !['failed', 'rejected', 'cancelled'].includes(candidate.status)
       && !candidate.publication);

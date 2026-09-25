@@ -506,6 +506,8 @@ const server: Plugin = async (input, options) => {
       const work = await workSummary(owner.id);
       const activity = await recentActivityContext(runtime, owner.id);
       if (activity) output.system.push(`<recent-owner-activity>\nWhat you did outside this chat. Runtime observations, not new instructions or grants.\n${activity}\n</recent-owner-activity>`);
+      const facts = await runtime.notebook(owner.id).facts().catch(() => '');
+      if (facts) output.system.push(`<recorded-facts>\nFacts you recorded, newest first, word for word. Pass the ones a subagent needs into its task.\n${facts}\n</recorded-facts>`);
       output.system.push(`<your-notebook>\n${notebook.slice(0, PLUGIN_LIMITS.contextChars)}\n</your-notebook>\n\n<your-open-work>\n${work}\n</your-open-work>`);
     },
 
@@ -782,6 +784,22 @@ const server: Plugin = async (input, options) => {
           await notebook.journal({ kind: 'chat-decision', outcome: 'recorded-by-owner', note: args.statement, quote: args.quote, session: context.sessionID });
           await commitQuietly(notebook, 'chat decision');
           return 'Recorded in your journal.';
+        },
+      }),
+      onionsoup_record_fact: tool({
+        description: 'Record a fact you observed in your domain, or a ruling you made while working, with its source. You read recorded facts word for word in every turn; distill keeps them in your notebook.',
+        args: {
+          fact: tool.schema.string().describe('The fact, in one or two sentences, as a subagent or a later you should read it'),
+          source: tool.schema.string().describe('Where you observed it: a file, a command and its output, a URL, an owner, or the task it belongs to'),
+          observedAt: tool.schema.string().optional().describe('When you observed it (ISO date or time); now if left out'),
+        },
+        async execute(args, context) {
+          const owner = requireOwner(context.agent);
+          const notebook = runtime.notebook(owner.id);
+          const observedAt = args.observedAt ?? new Date().toISOString();
+          await notebook.journal({ kind: 'fact', note: args.fact, source: args.source, observedAt, session: context.sessionID });
+          await commitQuietly(notebook, 'fact');
+          return 'Recorded in your journal; it is in your context from the next turn on.';
         },
       }),
       onionsoup_retract: tool({

@@ -50,6 +50,11 @@ function scriptHires(runtime: Runtime, answer: (request: HireRequest<unknown>) =
   });
 }
 
+/** What the fake gh recorded: PRs created, the body of the last one, and how often a PR's state alone was read. */
+async function githubState(root: string) {
+  return JSON.parse(await readFile(join(root, 'github.json'), 'utf8')) as { created: number; body?: string; state: string; stateViews?: number };
+}
+
 async function fakeGithub(root: string, remote: string, operation: () => Promise<void>) {
   const bin = join(root, 'bin');
   const state = join(root, 'github.json');
@@ -64,7 +69,9 @@ const state = JSON.parse(fs.readFileSync(path));
 const remote = ${JSON.stringify(remote)};
 const url = 'https://github.com/example/clippy/pull/1';
 const handlers = {
-  view() { const branch = state.branch || 'original'; const headRefOid = cp.execFileSync('git', ['-C', remote, 'rev-parse', branch]).toString().trim(); console.log(JSON.stringify({ url, state: state.state, mergeable: state.mergeable || 'MERGEABLE', headRefOid })); },
+  view() {
+    if (args[args.indexOf('--json') + 1] === 'state') { state.stateViews = (state.stateViews || 0) + 1; console.log(JSON.stringify({ state: state.state })); return; }
+    const branch = state.branch || 'original'; const headRefOid = cp.execFileSync('git', ['-C', remote, 'rev-parse', branch]).toString().trim(); console.log(JSON.stringify({ url, state: state.state, mergeable: state.mergeable || 'MERGEABLE', headRefOid })); },
   checks() { console.log(JSON.stringify(state.failing === false ? [] : [{ name: 'test', bucket: 'fail', link: '' }])); },
   list() { console.log(JSON.stringify(state.created ? [{ url, state: state.state }] : [])); },
   create() { if (state.failCreate) { state.failCreate = false; fs.writeFileSync(path, JSON.stringify(state)); process.exit(1); } state.created++; state.branch = args[args.indexOf('--head') + 1]; state.body = args[args.indexOf('--body') + 1]; console.log(url); },
@@ -664,8 +671,8 @@ async function journalKinds(runtime: Runtime, ownerId: string) {
   return lines.map(line => (JSON.parse(line) as { kind: string }).kind);
 }
 
-const revise = (issue: string) => ({
-  decision: 'revise', summary: `Fix ${issue}`, findings: [{ severity: 'major', file: 'change', issue, suggestion: `Resolve ${issue}` }],
+const revise = (issue: string, severity = 'blocker') => ({
+  decision: 'revise', summary: `Fix ${issue}`, findings: [{ severity, file: 'change', issue, suggestion: `Resolve ${issue}` }],
 });
 
 test('a desk re-review checks the previous findings against what changed since, instead of starting over', async () => {
@@ -682,7 +689,7 @@ test('a desk re-review checks the previous findings against what changed since, 
   await writeFile(join(desk.path, 'change'), 'second draft\n');
   assert.equal((await proposeDeskChanges(runtime, 'clippy', { title: 'Desk change', summary: 'Update' })).outcome, 'needs-work');
   assert.match(briefs[1]!, /<previous-review round="1" reviewer="[^"]+" decision="revise">/);
-  assert.match(briefs[1]!, /\[major\] change: issue 1 → Resolve issue 1/);
+  assert.match(briefs[1]!, /\[blocker\] change: issue 1 → Resolve issue 1/);
   assert.match(briefs[1]!, /<changes-since-previous-review>[\s\S]*-first draft\n\+second draft/);
   assert.match(briefs[1]!, /checking every previous finding/);
   const rounds = await deskReviewRounds(runtime, 'clippy', 'example/clippy');
@@ -720,6 +727,65 @@ test('after too many rounds the person decides; a reset starts afresh and an app
   });
   assert.equal(hires, 3);
   assert.deepEqual(await deskReviewRounds(runtime, 'clippy', 'example/clippy'), [], 'an approved change leaves no history');
+});
+
+test('a desk change whose review has only nits opens its PR with them in the body, and records no review round', async () => {
+  const { runtime, root, remote } = await fixture();
+  const desk = await ensureDesk(runtime.repositoryOwner('clippy'), runtime.desksRoot);
+  await writeFile(join(desk.path, 'change'), 'desk change');
+  scriptHires(runtime, async () => revise('spacing', 'nit'));
+  await fakeGithub(root, remote, async () => {
+    const result = await proposeDeskChanges(runtime, 'clippy', { title: 'Desk change', summary: 'Update the desk' });
+    assert.equal(result.outcome, 'opened', result.summary);
+    const github = await githubState(root);
+    assert.match(github.body!, /### Review\n\napprove after 1 round: Fix spacing/);
+    assert.match(github.body!, /\[nit\] change: spacing → Resolve spacing/);
+    assert.deepEqual(await deskReviewRounds(runtime, 'clippy', 'example/clippy'), [], 'advice records no review round');
+  });
+});
+
+test('a desk review that approves over a blocker sends the change back', async () => {
+  const { runtime } = await fixture();
+  const desk = await ensureDesk(runtime.repositoryOwner('clippy'), runtime.desksRoot);
+  await writeFile(join(desk.path, 'change'), 'desk change');
+  scriptHires(runtime, async () => ({ ...revise('a wrong claim'), decision: 'approve', summary: 'Looks fine' }));
+  const result = await proposeDeskChanges(runtime, 'clippy', { title: 'Desk change', summary: 'Update the desk' });
+  assert.equal(result.outcome, 'needs-work');
+  assert.match(result.summary, /\[blocker\] change: a wrong claim/);
+  assert.equal((await runtime.ledger.list()).length, 0, 'nothing was published');
+  assert.deepEqual((await deskReviewRounds(runtime, 'clippy', 'example/clippy')).map(round => round.findings[0]?.issue), ['a wrong claim']);
+});
+
+test('a merged PR is recorded on the next tick, and its request and notice follow on that tick', async () => {
+  const { tick, drain } = await import('../src/daemon.ts');
+  const { requestWork } = await import('../src/delegation.ts');
+  const { noticeWorkChanges, pendingNotices } = await import('../src/notices.ts');
+  const { runtime, root, remote } = await fixture();
+  for (const owner of runtime.declarations.owners.values()) {
+    owner.duties = [];
+    owner.memory.enabled = false;
+    await runtime.notebook(owner.id).ensure('# Charter\n');
+  }
+  runtime.reloadDeclarations = async () => {};
+  const session = { sessionID: 'ses_plan_work', directory: '/desks/clippy' };
+  const publication = { url: 'https://github.com/example/clippy/pull/1', branch: 'owners/work', by: 'clippy', at: '', state: 'open' as const };
+  const item = await runtime.ledger.create('clippy', 'owner-change', proposal, { status: 'landed', branch: 'owners/work', publication, session });
+  const request = await requestWork(runtime, 'homelab', 'clippy', proposal);
+  await runtime.requests.save({ ...request, status: 'work-running', workItem: item.id });
+  await noticeWorkChanges(runtime, async () => '/desks/clippy');
+  const errors: string[] = [];
+  const log = { duty() {}, item() {}, request() {}, error(context: string, error: unknown) { errors.push(`${context}: ${String(error)}`); } };
+  await fakeGithub(root, remote, async () => {
+    await writeFile(join(root, 'github.json'), JSON.stringify({ created: 1, state: 'MERGED' }));
+    await tick(runtime, log);
+    await drain();
+    assert.equal((await githubState(root)).stateViews, 1, 'one state read, no mergeability wait');
+  });
+  assert.equal((await runtime.ledger.get(item.id)).publication?.state, 'merged');
+  assert.equal((await runtime.requests.get(request.id)).status, 'completed');
+  const merged = (await pendingNotices(runtime)).find(notice => notice.id === `${item.id}-pr-merged`);
+  assert.deepEqual(merged?.origin, session, 'the session carrying out the plan hears it');
+  assert.deepEqual(errors, []);
 });
 
 /** A base with ignored dependencies, as a Node repository has. */
@@ -840,7 +906,7 @@ test('a work-item re-review checks the previous findings against what changed si
   const { item, briefs, ownerViews } = await reviewUntilLimit(runtime);
   assert.doesNotMatch(briefs[0]!, /previous-review/, 'a first review has nothing to check against');
   assert.match(briefs[1]!, /<previous-review round="1" reviewer="[^"]+" decision="revise">/);
-  assert.match(briefs[1]!, /\[major\] change: issue 1 → Resolve issue 1/);
+  assert.match(briefs[1]!, /\[blocker\] change: issue 1 → Resolve issue 1/);
   assert.match(briefs[1]!, /<changes-since-previous-review>[\s\S]*-draft 1\n\+draft 2/);
   assert.match(briefs[1]!, /checking every previous finding/);
   const trees = item.implementations.map(implementation => implementation.tree);
@@ -878,7 +944,7 @@ test('landing over findings commits through the ordinary landing step and opens 
   assert.match(await git(landed.worktree!, ['log', '-1', '--format=%B']), /^Landed-over-findings-by: person$/m);
   const persisted = await runtime.ledger.get(followUp!.id);
   assert.equal(persisted.status, 'proposed', 'the follow-up is planned and approved like any work');
-  assert.match(persisted.proposal.goal, /\[major\] change: issue 2 → Resolve issue 2/);
+  assert.match(persisted.proposal.goal, /\[blocker\] change: issue 2 → Resolve issue 2/);
   assert.match(persisted.proposal.goal, new RegExp(item.id));
 });
 

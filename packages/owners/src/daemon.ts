@@ -10,6 +10,7 @@ import { superviseInitiatives } from './org-work.ts';
 import { distill, distillIsDue } from './memory.ts';
 import type { WorkItem } from './ledger.ts';
 import { wake } from './owner.ts';
+import { refreshPublications } from './rebase.ts';
 import { requestRunnerIsAlive, type ResourceRequest } from './requests.ts';
 import type { Runtime } from './runtime.ts';
 import { advance, isRunnable } from './workflow.ts';
@@ -215,7 +216,10 @@ async function reservedRequestOwners(runtime: Runtime) {
   return reserved;
 }
 
-/** One pass: configuration, requests (people may be waiting on an instance), initiatives, due duties, work items, notices. */
+/**
+ * One pass: configuration, merged or closed PRs, requests (people may be waiting on an instance), initiatives, due
+ * duties, work items, notices. PR states come first so everything after reacts to a merge on the same tick.
+ */
 export async function tick(runtime: Runtime, log: TickLog) {
   const stranded = await runtime.ledger.markInterrupted();
   if (stranded) log.error('recovery', new Error(`${stranded} work items lost their runner and await a person`));
@@ -223,6 +227,12 @@ export async function tick(runtime: Runtime, log: TickLog) {
     await runtime.reloadDeclarations();
   } catch (error) {
     log.error('configuration (keeping the last good one)', error);
+  }
+  try {
+    const { unreadable } = await refreshPublications(runtime);
+    if (unreadable.length) log.error('publications', new Error(`pr_state_unreadable: ${unreadable.join(', ')}`));
+  } catch (error) {
+    log.error('publications', error);
   }
   try {
     await runtime.requests.markInterrupted();

@@ -5,7 +5,7 @@ export const JournalRecord = z.object({
   at: z.string().datetime(), owner: z.string().optional(), kind: z.string(),
   note: z.string().optional(), quote: z.string().optional(), outcome: z.string().optional(),
   session: z.string().optional(), workItem: z.string().optional(), stage: z.string().optional(),
-  model: z.string().optional(),
+  model: z.string().optional(), source: z.string().optional(), observedAt: z.string().optional(),
 });
 export type JournalRecord = z.infer<typeof JournalRecord>;
 
