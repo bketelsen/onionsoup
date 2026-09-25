@@ -51,6 +51,10 @@ import { requestPlanApproval } from './plan-approval.ts';
 import { HOST_ONLY_VARIABLES } from './sandbox.ts';
 import { opencodeProviders, type DeclaredProviders } from './providers.ts';
 import { CHAT_EXTERNAL_DIRECTORIES, chatBash } from './chat-permissions.ts';
+import {
+  AssistantMessageEvent, assistantOutcome, recordProviderFailure, recordProviderSuccess, type AssistantMessageInfo, type ProviderError,
+  type ProviderUse,
+} from './provider-health.ts';
 
 /**
  * onionsoup as an opencode plugin: every owner with a persona becomes an agent a person can chat with
@@ -303,6 +307,8 @@ const server: Plugin = async (input, options) => {
   const operatorSessions = new SessionOwners<OperatorDeclaration>(parentOf);
   const journaledParts = new Set<string>();
   const watchedMessages = new Map<string, string>();
+  /** Decision watchers' sessions, while they run, with the owner whose chat each watches. */
+  const watcherSessions = new Map<string, string>();
   const frictionEvents = new FrictionEvents();
 
   /** Where a chat's actions are journaled, and the bash its rules allow outright (routine, not journaled). */
@@ -410,6 +416,7 @@ const server: Plugin = async (input, options) => {
     const child = await input.client.session.create({ body: { title: `${owner.persona!.name}: decision watcher`, parentID: sessionID } });
     const childID = child.data?.id;
     if (!childID) return;
+    watcherSessions.set(childID, owner.id);
     try {
       const reply = await input.client.session.prompt({
         path: { id: childID },
@@ -432,8 +439,47 @@ const server: Plugin = async (input, options) => {
       }
       await commitQuietly(notebook, 'chat decisions');
     } finally {
+      watcherSessions.delete(childID);
       await input.client.session.delete({ path: { id: childID } }).catch(() => undefined);
     }
+  }
+
+  /** Who was using a session's model, most specific first: a decision watcher, an owner's chat, the operator's. */
+  const providerUses: ((sessionID: string) => Promise<ProviderUse | undefined>)[] = [
+    async sessionID => {
+      const ownerId = watcherSessions.get(sessionID);
+      return ownerId === undefined ? undefined : { kind: 'watcher', what: ownerId };
+    },
+    async sessionID => {
+      const owner = sessions.ownerOf(sessionID) ?? await sessions.ownerOfChild(sessionID).catch(() => undefined);
+      return owner && { kind: 'chat', what: owner.id };
+    },
+    async sessionID => {
+      const operatorChat = operatorSessions.ownerOf(sessionID) ?? await operatorSessions.ownerOfChild(sessionID).catch(() => undefined);
+      return operatorChat && { kind: 'chat', what: OPERATOR_ID };
+    },
+  ];
+
+  async function providerUse(sessionID: string): Promise<ProviderUse> {
+    for (const resolve of providerUses) {
+      const use = await resolve(sessionID);
+      if (use) return use;
+    }
+    return { kind: 'chat', what: `session ${sessionID}` };
+  }
+
+  async function recordAssistantFailure(info: AssistantMessageInfo, provider: string, error: ProviderError) {
+    await recordProviderFailure(runtime, provider, await providerUse(info.sessionID), error);
+  }
+
+  /** Every assistant message tells provider health whether its provider took the credentials. */
+  async function observeProvider(event: unknown) {
+    const parsed = AssistantMessageEvent.safeParse(event);
+    const info = parsed.success ? parsed.data.properties.info : undefined;
+    const outcome = info && assistantOutcome(info);
+    if (!info?.providerID || !outcome) return;
+    if (outcome.outcome === 'failed') await recordAssistantFailure(info, info.providerID, outcome.error);
+    else await recordProviderSuccess(runtime, info.providerID);
   }
 
   /**
@@ -625,6 +671,7 @@ const server: Plugin = async (input, options) => {
 
     async event({ event }) {
       frictionEvents.observe(event);
+      await observeProvider(event).catch(error => console.warn('provider_health_failed', error instanceof Error ? error.message : String(error)));
       const typed = event as { type: string; properties: Record<string, any> };
       const isIdle = typed.type === 'session.idle' || (typed.type === 'session.status' && typed.properties.status?.type === 'idle');
       if (isIdle) {

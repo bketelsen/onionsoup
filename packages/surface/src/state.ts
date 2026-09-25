@@ -8,6 +8,7 @@ import {
   approveInitiative, reviseInitiative, cancelInitiative, initiativeViews, managerOf, planGrantFor, cancelReminder,
   type AssignmentView, type Initiative, type InitiativeView, type WorkItem,
   isDelegated, OWNER_CHANGE_WORKFLOW, PLAN_APPROVAL_PERMISSION, OPERATOR_ID, operatorChatDirectory,
+  providerHealthViews, type ProviderHealthView,
 } from '@onionsoup/owners';
 import type { OpencodeApi, PendingPermission, PendingQuestion } from './opencode.ts';
 import { planApprovalOf, type PlanApprovalRequest } from './plan-approval-request.ts';
@@ -70,7 +71,7 @@ export const Decision = z.object({
 export type Decision = z.infer<typeof Decision>;
 
 export interface InboxEntry {
-  kind: 'plan' | 'push' | 'create' | 'delete' | 'permission' | 'question' | 'request-recovery' | 'attention' | 'initiative';
+  kind: 'plan' | 'push' | 'create' | 'delete' | 'permission' | 'question' | 'request-recovery' | 'attention' | 'initiative' | 'provider-auth';
   id: string;
   owner: string;
   title: string;
@@ -88,6 +89,25 @@ function permissionEntry(ownerId: string, permission: PendingPermission): InboxE
   const planApproval = planApprovalOf(permission);
   const title = planApproval ? `Approve plan ${planApproval.item}: ${planApproval.title}` : `${permission.permission}: ${permission.patterns.join(', ')}`;
   return { kind: 'permission', id: permission.id, owner: ownerId, sessionID: permission.sessionID, title, detail: '', permission, planApproval };
+}
+
+/** Provider problems belong to the engine, not to one owner. */
+export const ENGINE_INBOX_OWNER = 'onionsoup';
+
+function affectedText(view: ProviderHealthView) {
+  const uses = [...new Set(view.affected.map(use => `${use.kind} ${use.what}`))];
+  return uses.join(', ') || 'none recorded';
+}
+
+/** A failing provider waits on the person: nothing works on it until they fix its credentials. */
+function providerAuthEntry(view: ProviderHealthView): InboxEntry {
+  const plural = view.failures === 1 ? '' : 's';
+  return {
+    kind: 'provider-auth', id: view.provider, owner: ENGINE_INBOX_OWNER, title: `${view.name} authentication failing`, at: view.lastFailureAt,
+    detail: `Failing since ${view.since}: ${view.failures} failure${plural}. Affected: ${affectedText(view)}.
+${view.fix}
+Last error: ${view.lastError}`,
+  };
 }
 
 export interface OwnerSummary {
@@ -221,7 +241,9 @@ export class SurfaceState {
     const requests = await this.runtime.requests.list();
     const attention = await listAttention(this.runtime);
     const initiatives = await this.runtime.initiatives.list();
+    const providerHealth = await providerHealthViews(this.runtime);
     const entries: InboxEntry[] = [
+      ...providerHealth.filter(view => view.status === 'failing').map(providerAuthEntry),
       ...attention.filter(entry => entry.status !== 'resolved').map(entry => ({
         kind: 'attention' as const, id: entry.id, owner: entry.owner, title: entry.note,
         detail: entry.decision ? `${entry.status}: ${entry.decision.reason} (${entry.decision.by})` : 'Needs attention',
@@ -238,7 +260,7 @@ export class SurfaceState {
       ...requests.filter(request => request.status === 'awaiting-delete-approval').map(request => ({ kind: 'delete' as const, id: request.id, owner: request.to, title: `Delete ${request.instance?.remote}:${request.instance?.name}`, detail: request.followUpResult?.summary ?? '', at: request.updatedAt })),
     ];
     const chats = await this.chatInbox();
-    return { inbox: [...entries, ...chats.entries], inboxErrors: chats.errors, busyChats: chats.busyChats };
+    return { inbox: [...entries, ...chats.entries], inboxErrors: chats.errors, busyChats: chats.busyChats, providerHealth };
   }
 
   /** Pending prompts and questions across every chat, and which chats have a session busy in opencode. */
@@ -544,6 +566,7 @@ export class SurfaceState {
       await memoryFingerprint(this.runtime),
       await listAttention(this.runtime),
       (await listFriction(this.runtime)).map(entry => [entry.id, entry.count, entry.lastSeen]),
+      (await this.runtime.providerHealth.list()).map(record => [record.provider, record.status, record.failures]),
     ]);
   }
 }

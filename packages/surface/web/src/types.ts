@@ -14,7 +14,7 @@ export type PendingQuestion = QuestionRequest;
 export type PendingPermission = PermissionRequest;
 
 export interface InboxEntry {
-  kind: 'plan' | 'push' | 'create' | 'delete' | 'permission' | 'question' | 'attention' | 'request-recovery' | 'initiative';
+  kind: 'plan' | 'push' | 'create' | 'delete' | 'permission' | 'question' | 'attention' | 'request-recovery' | 'initiative' | 'provider-auth';
   id: string; owner: string; title: string; detail: string; at?: string; sessionID?: string;
   attentionStatus?: string;
   permission?: PendingPermission; planApproval?: PlanApprovalRequest; question?: PendingQuestion;
@@ -30,6 +30,8 @@ export interface SurfaceState {
   inboxErrors?: InboxReadError[];
   frictionCount: number;
   opencode?: { ok: boolean; error?: string };
+  /** Model providers failing authentication, and those recently recovered. */
+  providerHealth?: ProviderHealthView[];
 }
 
 export type { PublicFrictionRecord as FrictionRecord } from '../../src/friction-public.ts';
@@ -48,8 +50,8 @@ export interface DeskState {
   reminders: ReminderSummary[];
 }
 
-import type { ReminderSummary } from '@onionsoup/owners';
-export type { ReminderSummary, WorkItem } from '@onionsoup/owners';
+import type { ProviderHealthView, ReminderSummary } from '@onionsoup/owners';
+export type { ProviderHealthView, ReminderSummary, WorkItem } from '@onionsoup/owners';
 
 // opencode's session and message shapes, trimmed to what the chat reads.
 export interface Session { id: string; title: string; directory: string; parentID?: string; time: { created: number; updated: number } }

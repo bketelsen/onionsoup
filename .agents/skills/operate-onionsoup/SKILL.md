@@ -47,6 +47,11 @@ cause, and the fix is either applied through the normal gates or reported to the
   of the rail, in its own directory (default `~/projects`). It is not an owner: no notebook, duties or work items.
   Its commands and edits are journaled to `state/notebooks/operator/journal/*.jsonl`; read them when asked what it
   did. As the operator yourself: approvals and ships through the CLI ask the person, and are theirs to decide.
+- **Provider health:** `state/provider-health/<provider>.json`, written when a hire or chat fails authentication
+  (`[provider] <id>: authentication failing` in the daemon's or the surface's log, a `provider-auth` inbox entry and a
+  red banner in the surface). It clears itself (`status: ok`, `recoveredAt`) on the next successful call to that
+  provider: fix the credentials (`opencode auth login`, or the key file named in `providers.yaml`), then send a chat
+  on one of its models to confirm. Deleting the file also clears it.
 - **Notebooks:** under state, one Git repo per owner. Read one with `npm run owners -- notebook <id>`.
 - **Plugin:** `packages/owners/src/plugin.ts`, loaded by the surface's opencode (`onionsoup-surface.service`,
   http://127.0.0.1:4747). A change takes effect only when the surface restarts. The plugin, not the daemon, posts

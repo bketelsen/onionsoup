@@ -119,6 +119,8 @@ const ACTIONS: Record<ActionKind, (props: DecisionActionProps) => ReactNode> = {
   'request-recovery': RecoveryActions,
   initiative: InitiativeActions,
   question: () => null,
+  /** Clears by itself once a call to the provider succeeds; the fix is in the entry's detail. */
+  'provider-auth': () => null,
 };
 
 export function DecisionActions(props: DecisionActionProps) {

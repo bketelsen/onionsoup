@@ -15,6 +15,8 @@ import { applyChatEvent, orderedMessages, type Messages } from '../web/src/chat/
 import { addedFile, languageOf, parseUnifiedDiff } from '../web/src/chat/diff.ts';
 import type { Message, OwnerActivity, OwnerSummary, Part } from '../web/src/types.ts';
 import { OwnerActivityIcon } from '../web/src/components/OwnerActivityIcon.tsx';
+import { ProviderHealthBanner } from '../web/src/components/ProviderHealthBanner.tsx';
+import type { ProviderHealthView } from '../web/src/types.ts';
 
 const SESSION = 'ses_1';
 
@@ -240,4 +242,24 @@ test('a pending plan approval gets the plan card: approve or send back with a no
   const html = renderToStaticMarkup(createElement(PendingCard, { entry: generic, onDone: () => {} }));
   assert.match(html, /Permission Required/);
   assert.match(html, /Always Allow/);
+});
+
+test('the provider banner shows failing providers with their fix, a recovered one in green, and nothing when all is well', () => {
+  const failing: ProviderHealthView = {
+    provider: 'openai', name: 'OpenAI', status: 'failing', since: new Date().toISOString(), lastFailureAt: new Date().toISOString(), failures: 3,
+    affected: [{ kind: 'hire', what: 'w-1: review', at: '' }, { kind: 'watcher', what: 'homelab', at: '' }, { kind: 'hire', what: 'w-2: review', at: '' }],
+    lastError: 'APIError: Incorrect API key provided: [masked].', fix: 'Run `opencode auth login` and choose OpenAI.',
+  };
+  const html = renderToStaticMarkup(createElement(ProviderHealthBanner, { providerHealth: [failing] }));
+  assert.match(html, /role="alert"/);
+  assert.match(html, /status-error/);
+  assert.match(html, /OpenAI authentication failing/);
+  assert.match(html, /3 failures/);
+  assert.match(html, /affected: hire, watcher/);
+  assert.match(html, /choose OpenAI/);
+  const recovered = renderToStaticMarkup(createElement(ProviderHealthBanner, { providerHealth: [{ ...failing, status: 'ok', recoveredAt: new Date().toISOString() }] }));
+  assert.doesNotMatch(recovered, /role="alert"/);
+  assert.match(recovered, /status-success/);
+  assert.match(recovered, /OpenAI authentication recovered/);
+  assert.equal(renderToStaticMarkup(createElement(ProviderHealthBanner, { providerHealth: [] })), '');
 });
