@@ -13,9 +13,25 @@ import { WorkItem } from '@onionsoup/owners';
 import type { FrictionRecord, PublicInitiative } from '../web/src/types.ts';
 import { applyChatEvent, orderedMessages, type Messages } from '../web/src/chat/chatState.ts';
 import { addedFile, languageOf, parseUnifiedDiff } from '../web/src/chat/diff.ts';
-import type { Message, Part } from '../web/src/types.ts';
+import type { Message, OwnerActivity, OwnerSummary, Part } from '../web/src/types.ts';
+import { OwnerActivityIcon } from '../web/src/components/OwnerActivityIcon.tsx';
 
 const SESSION = 'ses_1';
+
+test('the rail icon is tinted by what the owner\'s chats are doing, and says so', () => {
+  const owner: OwnerSummary = { id: 'leto', name: 'Leto', title: 't', source: '', icon: 'code', color: 'primary', model: 'm', domain: 'd',
+    chat: true, hasDesk: true, waiting: 0, running: 0, activity: 'idle' };
+  const render = (activity: OwnerActivity) => renderToStaticMarkup(createElement(OwnerActivityIcon, { owner: { ...owner, activity } }));
+  const working = render('working');
+  assert.match(working, /text-primary animate-pulse/);
+  assert.match(working, /aria-label="working"/);
+  const waiting = render('waiting');
+  assert.match(waiting, /text-status-warning/);
+  assert.match(waiting, /aria-label="waiting on you"/);
+  const idle = render('idle');
+  assert.doesNotMatch(idle, /text-primary|text-status-warning|aria-label/);
+  assert.match(idle, /data-activity="idle"/);
+});
 
 test('partial inbox failures name the affected owner and operation without hiding available gates', () => {
   const html = renderToStaticMarkup(createElement(InboxErrors, { errors: [

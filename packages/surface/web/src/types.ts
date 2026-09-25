@@ -2,8 +2,11 @@
 
 export interface OwnerSummary {
   id: string; name: string; title: string; source: string; icon: string; color: string; model: string; domain: string;
-  chat: boolean; hasDesk: boolean; waiting: number; running: number;
+  chat: boolean; hasDesk: boolean; waiting: number; running: number; activity: OwnerActivity;
 }
+
+import type { OwnerActivity } from '../../src/activity.ts';
+export type { OwnerActivity };
 
 import type { QuestionRequest, PermissionRequest } from '@opencode-ai/sdk/v2';
 export type { QuestionInfo } from '@opencode-ai/sdk/v2';

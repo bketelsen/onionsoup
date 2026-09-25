@@ -17,6 +17,7 @@ import type { PublicFrictionRecord } from './friction-public.ts';
 import type { InitiativeSummary, OrgEntry, PublicAssignment, PublicInitiative } from './initiative-public.ts';
 import { InboxReadError } from './inbox-errors.ts';
 import type { ItemSession } from './item-session-public.ts';
+import { hasBusySession, ownerActivity, type OwnerActivity } from './activity.ts';
 
 interface OpencodeSession { id: string; title: string; directory: string; parentID?: string; time: { created: number; updated: number } }
 
@@ -104,6 +105,19 @@ export interface OwnerSummary {
   hasDesk: boolean;
   waiting: number;
   running: number;
+  /** Whether its chats are working, stopped on the person, or idle. */
+  activity: OwnerActivity;
+}
+
+/** What the rail needs from one read of the inbox: the entries, and which chats have a busy session. */
+export interface ChatSnapshot { inbox: InboxEntry[]; busyChats: ReadonlySet<string> }
+
+/** Kinds of inbox entry that stop a chat session until the person answers. */
+const CHAT_WAIT_KINDS = new Set<InboxEntry['kind']>(['permission', 'question']);
+
+function chatActivity(chatId: string, { inbox, busyChats }: ChatSnapshot) {
+  const isWaiting = inbox.some(entry => entry.owner === chatId && CHAT_WAIT_KINDS.has(entry.kind));
+  return ownerActivity({ isWaiting, isWorking: busyChats.has(chatId) });
 }
 
 /** How deep an assignment sits in its initiative's dependency order: 0 needs nothing first. */
@@ -224,33 +238,42 @@ export class SurfaceState {
       ...requests.filter(request => request.status === 'awaiting-delete-approval').map(request => ({ kind: 'delete' as const, id: request.id, owner: request.to, title: `Delete ${request.instance?.remote}:${request.instance?.name}`, detail: request.followUpResult?.summary ?? '', at: request.updatedAt })),
     ];
     const chats = await this.chatInbox();
-    return { inbox: [...entries, ...chats.entries], inboxErrors: chats.errors };
+    return { inbox: [...entries, ...chats.entries], inboxErrors: chats.errors, busyChats: chats.busyChats };
   }
 
+  /** Pending prompts and questions across every chat, and which chats have a session busy in opencode. */
   private async chatInbox() {
     const entries: InboxEntry[] = [];
     const errors: InboxReadError[] = [];
+    const busyChats = new Set<string>();
     for (const chatId of this.chatIds()) {
       const unavailable = (code: InboxReadError['code']) => {
         errors.push(InboxReadError.parse({ owner: chatId, code }));
         return [];
       };
       const directories = await this.ownerDirectories(chatId).catch(() => unavailable('chat_directory_failed'));
-      for (const directory of directories) entries.push(...await this.directoryInbox(chatId, directory, unavailable));
+      const reads = await Promise.all(directories.map(directory => this.directoryInbox(chatId, directory, unavailable)));
+      entries.push(...reads.flatMap(read => read.entries));
+      if (reads.some(read => read.isBusy)) busyChats.add(chatId);
     }
-    return { entries, errors };
+    return { entries, errors, busyChats: busyChats as ReadonlySet<string> };
   }
 
-  /** The permission prompts and questions waiting in one of an owner's directories. */
+  /**
+   * The permission prompts and questions waiting in one of an owner's directories, and whether any session there
+   * (a chat, a plan's session, a subagent) is busy. A status that cannot be read counts as idle.
+   */
   private async directoryInbox(ownerId: string, directory: string, unavailable: (code: InboxReadError['code']) => never[]) {
-    const [permissions, questions] = await Promise.all([
+    const [permissions, questions, status] = await Promise.all([
       this.opencode.permissions(directory).catch(() => unavailable('permission_list_failed')),
       this.opencode.questions(directory).catch(() => unavailable('question_list_failed')),
+      this.opencode.status(directory).catch(() => ({})),
     ]);
-    return [
+    const entries = [
       ...permissions.map(permission => permissionEntry(ownerId, permission)),
       ...questions.map((question): InboxEntry => ({ kind: 'question', id: question.id, owner: ownerId, sessionID: question.sessionID, title: question.questions[0]?.question ?? 'A question', detail: '', question })),
     ];
+    return { entries, isBusy: hasBusySession(status) };
   }
 
   /**
@@ -347,8 +370,9 @@ export class SurfaceState {
     return publicInitiative(view);
   }
 
-  async owners(inbox?: InboxEntry[]): Promise<OwnerSummary[]> {
-    const waiting = inbox ?? await this.inbox();
+  async owners(snapshot?: ChatSnapshot): Promise<OwnerSummary[]> {
+    const chats = snapshot ?? await this.inboxSnapshot();
+    const waiting = chats.inbox;
     const items = await this.runtime.ledger.list();
     const { ownerOrder } = await this.settings.read();
     return ordered([...this.runtime.declarations.owners.values()], ownerOrder).map(owner => ({
@@ -364,6 +388,7 @@ export class SurfaceState {
       hasDesk: true,
       waiting: waiting.filter(entry => entry.owner === owner.id).length,
       running: items.filter(item => item.owner === owner.id && RUNNING.has(item.status)).length,
+      activity: chatActivity(owner.id, chats),
     }));
   }
 
@@ -372,13 +397,14 @@ export class SurfaceState {
   }
 
   /** The operator's entry in the surface, when the person declared one: a chat of its own, apart from the owners. */
-  async operator(inbox: InboxEntry[]): Promise<OwnerSummary | undefined> {
+  async operator(snapshot: ChatSnapshot): Promise<OwnerSummary | undefined> {
     const operator = this.runtime.declarations.operator;
     if (!operator) return undefined;
     return {
       id: OPERATOR_ID, name: operator.name, title: operator.title, source: '', icon: operator.icon, color: 'primary',
       model: operator.model, domain: operator.directory, chat: true, hasDesk: false,
-      waiting: inbox.filter(entry => entry.owner === OPERATOR_ID).length, running: 0,
+      waiting: snapshot.inbox.filter(entry => entry.owner === OPERATOR_ID).length, running: 0,
+      activity: chatActivity(OPERATOR_ID, snapshot),
     };
   }
 
