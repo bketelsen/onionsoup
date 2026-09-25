@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { RiChat3Line } from '@remixicon/react';
+import { PlanApprovalCard } from '../chat/cards.tsx';
 import { QuestionCard } from '../chat/QuestionCard.tsx';
 import { DecisionActions } from './DecisionActions.tsx';
 import { api, navigate } from '../api.ts';
@@ -59,7 +60,8 @@ export function Decision({ entry, owner, onDone, compact }: { entry: InboxEntry;
       </div>
       <div className="typography-ui-label font-medium text-foreground">{entry.title}</div>
       {entry.detail && <div className="typography-meta text-muted-foreground whitespace-pre-wrap line-clamp-6">{entry.detail}</div>}
-      {entry.kind === 'permission' && entry.permission && Object.keys(entry.permission.metadata ?? {}).length > 0 && (
+      {entry.planApproval && <PlanApprovalCard key={entry.id} entry={entry} onDone={onDone} />}
+      {entry.kind === 'permission' && !entry.planApproval && entry.permission && Object.keys(entry.permission.metadata ?? {}).length > 0 && (
         <pre className="typography-code bg-muted rounded-md p-2 overflow-x-auto max-h-40">{JSON.stringify(entry.permission.metadata, null, 2)}</pre>
       )}
       {entry.kind === 'question' && entry.question && <QuestionCard key={entry.id} entry={entry} onDone={onDone} />}

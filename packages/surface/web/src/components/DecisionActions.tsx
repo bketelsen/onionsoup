@@ -101,7 +101,15 @@ function ItemLink({ entry, label }: { entry: InboxEntry; label: string }) {
   </Button>;
 }
 
-const ACTIONS: Record<InboxEntry['kind'], (props: DecisionActionProps) => ReactNode> = {
+/** A plan approval carries its own buttons (approve, or send back with a note), like a question does. */
+type ActionKind = InboxEntry['kind'] | 'plan-approval';
+
+function actionKind(entry: InboxEntry): ActionKind {
+  return entry.planApproval ? 'plan-approval' : entry.kind;
+}
+
+const ACTIONS: Record<ActionKind, (props: DecisionActionProps) => ReactNode> = {
+  'plan-approval': () => null,
   plan: PlanActions,
   push: PushActions,
   create: CreateActions,
@@ -114,6 +122,6 @@ const ACTIONS: Record<InboxEntry['kind'], (props: DecisionActionProps) => ReactN
 };
 
 export function DecisionActions(props: DecisionActionProps) {
-  const Actions = ACTIONS[props.entry.kind];
+  const Actions = ACTIONS[actionKind(props.entry)];
   return <Actions {...props} />;
 }

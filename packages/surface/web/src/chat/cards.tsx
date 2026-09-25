@@ -1,7 +1,9 @@
 import { useState } from 'react';
-import { RiCheckLine, RiCloseLine, RiQuestionLine, RiTimeLine } from '@remixicon/react';
+import { RiArrowGoBackLine, RiCheckLine, RiCloseLine, RiFileList3Line, RiQuestionLine, RiTimeLine } from '@remixicon/react';
 import { api } from '../api.ts';
 import type { InboxEntry } from '../types.ts';
+import { Markdown } from './Markdown.tsx';
+import { QuestionCard } from './QuestionCard.tsx';
 import { ToolIcon } from './tools.tsx';
 
 // Permission and question cards as OpenChamber draws them (PermissionCard.tsx, QuestionCard.tsx; MIT, see
@@ -14,19 +16,8 @@ function Spinner() {
 const ACTION = 'flex items-center gap-1 px-2 py-1 typography-meta font-medium rounded transition-all disabled:opacity-50 disabled:cursor-not-allowed';
 
 export function PermissionCard({ entry, onDone }: { entry: InboxEntry; onDone: () => void }) {
-  const [responding, setResponding] = useState(false);
-  const [error, setError] = useState('');
+  const { responding, error, reply } = usePermissionReply(entry, onDone);
   const permission = entry.permission!;
-  const reply = async (answer: 'once' | 'always' | 'reject') => {
-    setResponding(true);
-    try {
-      await api(`/api/owners/${entry.owner}/permissions/${entry.id}`, { method: 'POST', body: { reply: answer } });
-      onDone();
-    } catch (failure) {
-      setError(failure instanceof Error ? failure.message : String(failure));
-      setResponding(false);
-    }
-  };
   const metadata = permission.metadata ?? {};
   const command = typeof metadata.command === 'string' ? metadata.command : undefined;
   const action = command ?? (Object.keys(metadata).length ? JSON.stringify(metadata, null, 2) : '');
@@ -76,4 +67,81 @@ export function PermissionCard({ entry, onDone }: { entry: InboxEntry; onDone: (
   );
 }
 
-export { QuestionCard } from './QuestionCard.tsx';
+
+/** Answer a pending permission; a note travels with a rejection so the owner hears why. */
+function usePermissionReply(entry: InboxEntry, onDone: () => void) {
+  const [responding, setResponding] = useState(false);
+  const [error, setError] = useState('');
+  const reply = async (answer: 'once' | 'always' | 'reject', message?: string) => {
+    setResponding(true);
+    try {
+      await api(`/api/owners/${entry.owner}/permissions/${entry.id}`, { method: 'POST', body: { reply: answer, message } });
+      onDone();
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : String(failure));
+      setResponding(false);
+    }
+  };
+  return { responding, error, reply };
+}
+
+/** Approve the plan, or send it back with a note saying what should change. Each plan is approved on its own. */
+export function PlanApprovalActions({ entry, onDone }: { entry: InboxEntry; onDone: () => void }) {
+  const { responding, error, reply } = usePermissionReply(entry, onDone);
+  const [note, setNote] = useState('');
+  return (
+    <div className="px-3 pb-2 pt-2 flex flex-col gap-2 border-t border-border/20">
+      <textarea value={note} onChange={event => setNote(event.target.value)} rows={2}
+        placeholder="What should change? (sent with Send back)"
+        className="w-full rounded-md border border-border bg-background px-2 py-1 typography-meta" />
+      <div className="flex flex-wrap items-center gap-1.5">
+        <button className={ACTION} style={{ color: 'var(--status-success)' }} disabled={responding} onClick={() => void reply('once')}>
+          <RiCheckLine className="h-3 w-3 flex-shrink-0" />Approve plan
+        </button>
+        <button className={ACTION} style={{ color: 'var(--status-error)' }} disabled={responding || !note.trim()} onClick={() => void reply('reject', note.trim())}>
+          <RiArrowGoBackLine className="h-3 w-3 flex-shrink-0" />Send back
+        </button>
+        {responding && <div className="ml-auto"><Spinner /></div>}
+        {error && <span className="typography-meta text-[var(--status-error)]">{error}</span>}
+      </div>
+    </div>
+  );
+}
+
+/** An owner's plan waiting for the person's approval: the plan itself, then the approve / send-back actions. */
+export function PlanApprovalCard({ entry, onDone }: { entry: InboxEntry; onDone: () => void }) {
+  const request = entry.planApproval!;
+  return (
+    <div className="group w-full pt-0 pb-2">
+      <div className="chat-column">
+        <div className="-mt-1 border border-border/30 rounded-xl bg-muted/10">
+          <div className="px-3 py-2 border-b border-border/20 bg-muted/5 flex items-center gap-2">
+            <RiFileList3Line className="h-4 w-4 text-[var(--status-warning)]" />
+            <span className="typography-ui-label font-medium text-foreground">Approve plan: {request.title}</span>
+            <span className="ml-auto font-mono text-[0.7rem] text-muted-foreground">{request.item}</span>
+          </div>
+          <div className="px-3 py-2 max-h-[60vh] overflow-y-auto"><Markdown text={request.plan} /></div>
+          <PlanApprovalActions entry={entry} onDone={onDone} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type PendingCardComponent = (props: { entry: InboxEntry; onDone: () => void }) => React.JSX.Element;
+const PENDING_CARDS: Record<'plan' | 'permission' | 'question', PendingCardComponent> = {
+  plan: PlanApprovalCard, permission: PermissionCard, question: QuestionCard,
+};
+
+export function pendingCardKind(entry: InboxEntry) {
+  if (entry.planApproval) return 'plan';
+  return entry.kind === 'question' ? 'question' : 'permission';
+}
+
+/** The card for something a chat is waiting on: a plan to approve, a permission, or a question. */
+export function PendingCard({ entry, onDone }: { entry: InboxEntry; onDone: () => void }) {
+  const Card = PENDING_CARDS[pendingCardKind(entry)];
+  return <Card entry={entry} onDone={onDone} />;
+}
+
+export { QuestionCard };

@@ -9,10 +9,9 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
   as the person, bounded only by permission rules, which [AGENTS.md](../AGENTS.md) rule 3 says are never the
   boundary. The follow-up is to run chat bash through bwrap from a `tool.execute.before` wrapper in the plugin, the
   same sandbox hires and verification already use.
-- **Plan approvals in chat are fragile.** A plan approval pending in a chat is lost if the surface restarts (the
+- **Plan approvals in chat do not survive a restart.** A plan approval pending in a chat is lost if the surface restarts (the
   permission prompt lives in its opencode); the item stays `awaiting-plan-approval` and the owner resubmits it with
-  `item`. The chat permission card has no note field, so a plan rejected in chat usually arrives without feedback, and
-  the owner has to ask the person what to change.
+  `item`.
 - **Desk changes need a first real run.** `onionsoup_propose_changes` (verify → cross-family review → commit →
   push → PR → merge under a `merge` grant → publish if the owner is a site source) is built, and Bellonda holds a
   merge grant for her wiki, but it has not yet run end to end. Her `minideb` page and `selfie` correction are
