@@ -10,15 +10,18 @@ been told if the surface needs a restart.
 
 ## Steps
 
-1. Propose. For work that needs planning, use `onionsoup_open_work`: it goes through the plan gate, the person
-   approves, and freelancers implement and review.
+1. Plan. For work that needs planning, brainstorm it with the person, write the plan, and submit it with
+   `onionsoup_submit_plan`. The person approves it in the chat, and it runs in its own session, where you carry it
+   out task by task with your implementer and reviewer subagents and end with `onionsoup_propose_changes` passing
+   the plan's `item`.
 2. Make small changes on your desk:
    - Edit on your desk (a worktree of onionsoup).
    - Run `npm run verify`, which covers the build, typecheck, tests and doc checks. Add a test in
      `packages/owners/test/` for new behaviour.
    - Update the docs the change touches: `docs/design/owners.md`, `docs/extending.md`, `docs/gaps.md`, `README.md`.
-3. Call `onionsoup_propose_changes`. It verifies, has another model family review, commits, pushes and opens a
-   PR. With your merge grant it merges once review passes.
+3. Call `onionsoup_propose_changes` (with `item` when it carries out an approved plan). It verifies, has another
+   model family review, commits, pushes and opens a PR. Only blocker findings send it back. With your merge grant it
+   merges once review passes.
 4. Call `onionsoup_ship`. It first refuses if any item across the ledger has an active runner, naming the
    items and stages; wait for or resolve them and retry. Otherwise it fast-forwards `~/projects/onionsoup` to
    `origin/main`, runs `npm ci` and `npm run verify` in the sandbox (rolling back on failure), then restarts

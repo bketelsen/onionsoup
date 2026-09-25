@@ -86,8 +86,11 @@ export async function matchHead(worktree: string) {
   await git(worktree, ['clean', '-q', '-f', '-d', '-x']);
 }
 
-/** An owner's desk: its own worktree on a desk branch, where chats with a person do their work. */
-export async function ensureDesk(owner: RepositoryOwner, desksRoot: string) {
+/**
+ * An owner's desk: its own worktree on a desk branch, where chats with a person do their work. With `start`, the desk
+ * branch is moved to that commit (a PR's head, to repair it); only a desk without uncommitted changes moves.
+ */
+export async function ensureDesk(owner: RepositoryOwner, desksRoot: string, start?: string) {
   const path = owner.desk ?? join(desksRoot, owner.id);
   const branch = `desk/${owner.id}`;
   // A new owner has no checkout yet: clone it first.
@@ -96,7 +99,14 @@ export async function ensureDesk(owner: RepositoryOwner, desksRoot: string) {
     await git(owner.workspace, ['fetch', '-q', 'origin']);
     await git(owner.workspace, ['worktree', 'add', '-q', '-B', branch, path, `origin/${owner.domain.baseBranch}`]);
   }
+  if (start) await moveDesk(path, branch, start);
   return { path, branch };
+}
+
+async function moveDesk(path: string, branch: string, start: string) {
+  if ((await git(path, ['status', '--porcelain'])).trim()) throw new Error('desk_not_clean: propose or discard the changes on your desk first');
+  await git(path, ['fetch', '-q', 'origin']);
+  await git(path, ['checkout', '-q', '-B', branch, start]);
 }
 
 export function verificationPassed(results: readonly Verification[]) {

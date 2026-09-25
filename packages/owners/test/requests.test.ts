@@ -156,7 +156,9 @@ test('delegation accepts into one linked work item, preserves plan gates, and re
   assert.equal(accepted.status, 'work-running');
   const item = await runtime.ledger.get(accepted.workItem!);
   assert.equal(item.owner, 'clippy');
-  assert.equal(item.status, 'proposed');
+  assert.equal(item.workflow, 'owner-change');
+  assert.equal(item.status, 'planning', 'the receiving owner plans it in a session of its own');
+  assert.equal(item.request, request.id);
   assert.equal(item.planApproval, undefined);
   await runtime.requests.save({ ...accepted, status: 'interrupted', workItem: undefined, operation: operation('pending-owner') });
   await reconcileRequest(runtime, request.id);
@@ -182,7 +184,7 @@ test('declined work and failed delegated work escalate to durable actionable att
   assert.equal((await listAttention(runtime)).find(candidate => candidate.id === entry.id)?.decision?.reason, 'Deferred until next month');
   await changeAttention(runtime, entry.id, 'open', 'person', 'Priority changed');
   assert.equal((await listAttention(runtime)).find(candidate => candidate.id === entry.id)?.status, 'open');
-  await assert.rejects(requestWork(runtime, 'homelab', 'moneo', proposal), /owner_has_no_workflow/);
+  await assert.rejects(requestWork(runtime, 'homelab', 'moneo', proposal), /owner_cannot_change: moneo/);
 });
 
 test('a completed recorded NAS job reconciles without an update; missing job evidence stays interrupted', async () => {
@@ -516,7 +518,7 @@ test('work from a declared manager is accepted without a hire, carries its assig
   assert.match(accepted.publishDecision!.reply, /odrade, clippy's manager; accepted automatically/);
   const item = await runtime.ledger.get(accepted.workItem!);
   assert.deepEqual(item.assignment, assignment);
-  assert.equal(item.status, 'proposed');
+  assert.equal(item.status, 'planning');
   for (const owner of ['odrade', 'clippy']) {
     assert.ok((await journalOf(runtime, owner)).some(entry => entry.kind === 'request-accepted' && entry.note?.includes('accepted automatically')));
   }

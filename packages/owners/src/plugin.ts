@@ -8,10 +8,10 @@ import { readdir, readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { tool, type Plugin } from '@opencode-ai/plugin';
-import { directReports, hasIncus, isDirectReport, managerOf, repositoryShortName, type OwnerDeclaration, type Persona } from './declarations.ts';
+import { canChange, directReports, hasIncus, isDirectReport, managerOf, repositoryShortName, type OwnerDeclaration, type Persona } from './declarations.ts';
 import { askOwner, formatAnswer } from './ask.ts';
 import { requestPublish } from './brokering.ts';
-import { proposeDeskChanges } from './desk-changes.ts';
+import { checkoutPullRequest, proposeDeskChanges } from './desk-changes.ts';
 import { initiativeSection, initiativesText, initiativeText, itemText, reportsWorkText, statusText } from './desk.ts';
 import { parseInitiativeDraft } from './initiatives.ts';
 import {
@@ -31,6 +31,11 @@ import { Runtime } from './runtime.ts';
 import { engineCommit, FrictionEvents, FrictionInput, reportFriction } from './friction.ts';
 import { REPOSITORY_WRITING } from './repository-writing.ts';
 import { prepareToolArguments } from './tool-arguments.ts';
+import { BOOTSTRAP_MARKER, bootstrapText, registerSkills, subagents, subagentsText, taskPermission } from './owner-agents.ts';
+import { SessionOwners } from './session-owners.ts';
+import { openNeededSessions, ownerSessionClient } from './owner-sessions.ts';
+import { PLAN_APPROVAL_PERMISSION, PlanSubmission, submitPlan } from './plan-work.ts';
+import { requestPlanApproval } from './plan-approval.ts';
 
 /**
  * onionsoup as an opencode plugin: every owner with a persona becomes an agent a person can chat with
@@ -92,13 +97,14 @@ const MANAGER_GUIDE = `
 - You manage direct reports. For cross-repository change, draft an initiative with onionsoup_initiative (assignments to
   your reports, ordered with after), agree it with the person, then submit it. The person approves the breakdown once;
   the runtime then sends each assignment to its report as its dependencies merge, and you hear here how each piece goes.
-  Where a report granted you approve-plans, you are hired to review its plans. onionsoup_status shows all your reports'
-  work, assigned or not; onionsoup_steer approves or sends back a plan, cancels the work, or leaves the report a note
-  on work your initiatives assigned.
+  Where a report granted you approve-plans, you are woken here when it submits a plan: read it with onionsoup_status and
+  approve it or send it back with a note using onionsoup_steer. onionsoup_status shows all your reports' work, assigned
+  or not; onionsoup_steer also cancels the work or leaves the report a note on work your initiatives assigned.
   Reports push back with escalations; answer them and resolve them (onionsoup_initiative resolve-escalation).`;
 
 const REPORT_GUIDE = `
-- You have a manager. Work it assigns goes through your ordinary gates. If an assignment is wrong, unclear or blocked,
+- You have a manager. Work it assigns opens a session where you plan it alone and submit the plan; your manager (under
+  your grant) or the person approves it, and it then runs like any plan. If an assignment is wrong, unclear or blocked,
   push back with onionsoup_raise instead of quietly doing something else; your manager is woken to answer.`;
 
 function isManagerOwner(runtime: Runtime, owner: OwnerDeclaration) {
@@ -119,12 +125,30 @@ function orgGuides(runtime: Runtime, owner: OwnerDeclaration) {
   return ORG_GUIDES.filter(([admits]) => admits(runtime, owner)).map(([, guide]) => guide).join('');
 }
 
+/** How work gets done, for an owner that changes its repository itself and for one that only observes its domain. */
+const WORK_GUIDES: Record<'changes' | 'observes', string> = {
+  changes: `
+- Skills drive how you work: the using-onionsoup-skills bootstrap opens each of your sessions; load the others with the
+  skill tool as it says. Small, clear changes: edit your desk, run the verification commands, and end with
+  onionsoup_propose_changes. Anything bigger: brainstorm it with the person, write the plan, and submit it with
+  onionsoup_submit_plan. The person approves it here, and the approved plan runs in its own session, where you dispatch
+  your implementer and reviewer subagents task by task and end with onionsoup_propose_changes for its item. A PR whose
+  CI fails: onionsoup_checkout_pr, fix and verify, then propose with that item.
+- Never commit, push or merge with git yourself: onionsoup_propose_changes does that behind host verification and a
+  required review from another model family. Only blocker findings send the change back to you.`,
+  observes: `
+- You do not change your domain yourself: raise what needs the person, and ask the owner of a repository to change it
+  (onionsoup_request_work).`,
+};
+
 function agentPrompt(owner: OwnerDeclaration, persona: Persona, charter: string, roster: string, org: string, verify: readonly string[], guides: string) {
   return `${persona.voice.trim()}
 
 <charter>
 ${charter.trim()}
 </charter>
+
+${subagentsText(owner.id)}
 
 <roster>
 ${roster}
@@ -135,16 +159,15 @@ ${REPOSITORY_WRITING}
 </repository-writing>
 
 How you work with the person in this chat:
-- You own ${domainSummary(owner)}.${owner.domain.kind === 'repository-group' ? ` Your desk has one worktree per repository (./${owner.domain.repositories.map(repository => repositoryShortName(repository.name)).join(', ./')}); name the repository when you open work or propose changes.` : ''} Reach for your onionsoup tools first:
+- You own ${domainSummary(owner)}.${owner.domain.kind === 'repository-group' ? ` Your desk has one worktree per repository (./${owner.domain.repositories.map(repository => repositoryShortName(repository.name)).join(', ./')}); name the repository when you submit a plan or propose changes.` : ''} Reach for your onionsoup tools first:
   onionsoup_status (your open work and anything waiting on the person), onionsoup_notebook (your full notebook),
   onionsoup_evidence (what other owners recorded), onionsoup_ask (ask another owner a question about its domain),
-  onionsoup_open_work (hand a change to freelancers with a plan the person approves), onionsoup_request_work (ask another
-  owner to change its repository), onionsoup_propose_changes (turn
-  your desk edits into a verified, reviewed PR), onionsoup_friction (report reproducible engine behavior that fails expectations),
-  onionsoup_record_decision and onionsoup_retract. Never commit, push or
-  merge with git yourself; onionsoup_propose_changes does that with verification and review. When something belongs to another owner's domain, ask them instead of guessing or probing it yourself.
-- For substantial changes, prefer opening work so freelancers plan, implement and review it with the person's gates. For
-  small, clearly requested actions you may act directly; anything outside your safe commands asks the person first.
+  onionsoup_request_work (ask another owner to change its repository), onionsoup_friction (report reproducible engine
+  behavior that fails expectations), onionsoup_record_fact, onionsoup_record_decision and onionsoup_retract. When
+  something belongs to another owner's domain, ask them instead of guessing or probing it yourself.${WORK_GUIDES[canChange(owner) ? 'changes' : 'observes']}
+- Record facts you observe, and rulings you make while working, with onionsoup_record_fact: they come back to you word
+  for word each turn, and you pass the ones a subagent needs into its task. Anything outside your safe commands asks
+  the person first.
 - Record a decision only when the person states one or explicitly agrees to your proposal, and quote their words. A
   watcher also notes decisions after each exchange; you do not need to record everything.
 - Your notebook, current work and recent journal activity are appended to your context each turn. Never put secrets into notes or files.${verify.length ? `
@@ -162,7 +185,10 @@ ${owner.manages ? `
 function conversationPermission(owner: OwnerDeclaration, verify: readonly string[]) {
   const mode = owner.conversation ?? { bash: { '*': 'ask' }, edit: 'ask', webfetch: 'ask' };
   const bash = { ...mode.bash, ...Object.fromEntries(verify.map(command => [`${command}*`, 'allow'])) };
-  return { edit: mode.edit, bash, webfetch: mode.webfetch, external_directory: 'ask', doom_loop: 'ask' };
+  return {
+    edit: mode.edit, bash, webfetch: mode.webfetch, external_directory: 'ask', doom_loop: 'ask', task: taskPermission(owner.id),
+    [PLAN_APPROVAL_PERMISSION]: 'ask',
+  };
 }
 
 const STEWARD_TOOL = 'onionsoup_owners';
@@ -220,6 +246,7 @@ ${assistantText.slice(0, PLUGIN_LIMITS.exchangeChars)}
 }
 
 interface MessagePart { type: string; text?: string; synthetic?: boolean }
+interface ToolPart { id: string; sessionID: string; type: string; tool?: string; state?: { status: string; input?: any; output?: string } }
 interface SessionMessage { info: { id: string; role: string }; parts: MessagePart[] }
 
 function textOf(parts: readonly MessagePart[]) {
@@ -241,10 +268,23 @@ const server: Plugin = async (input, options) => {
     const charter = await runtime.text(`charters/${owner.id}.md`).catch(() => `# Charter: ${owner.id}\n`);
     await runtime.notebook(owner.id).ensure(charter).catch(() => undefined);
   }
-  const sessionOwner = new Map<string, OwnerDeclaration>();
+  const sessions = new SessionOwners(async id => (await input.client.session.get({ path: { id } })).data?.parentID);
   const journaledParts = new Set<string>();
   const watchedMessages = new Map<string, string>();
   const frictionEvents = new FrictionEvents();
+
+  /** A completed call that changed something (or ran a command the owner's rules do not allow) enters the journal. */
+  async function journalToolCall(owner: OwnerDeclaration, part: ToolPart, kind: 'chat-action' | 'subagent-action') {
+    const command = part.tool === 'bash' ? String(part.state?.input?.command ?? '') : '';
+    const rules = (owner.conversation?.bash ?? { '*': 'ask' }) as Record<string, string>;
+    const isAction = MUTATING_TOOLS.has(part.tool ?? '') || (part.tool === 'bash' && bashAction(rules, command) !== 'allow');
+    if (!isAction) return;
+    journaledParts.add(part.id);
+    const target = command || String(part.state?.input?.filePath ?? part.state?.input?.patchText?.split('\n')[1] ?? '');
+    const notebook = runtime.notebook(owner.id);
+    await notebook.journal({ kind, stage: part.tool, note: target.slice(0, 500), outcome: (part.state?.output ?? '').slice(0, 300), session: part.sessionID });
+    await commitQuietly(notebook, kind);
+  }
 
   /** Owners can be named by id or by persona name. */
   function resolveOwner(name: string) {
@@ -381,6 +421,10 @@ const server: Plugin = async (input, options) => {
     },
   };
 
+  // Read when needed: tests and the config hook construct the plugin without an opencode client.
+  const sessionClient = () => ownerSessionClient(input.client);
+
+  /** Runtime work only this opencode can do: post notices into owners' chats and open the sessions plans need. */
   let isDeliveringNotices = false;
   async function deliverNotices() {
     if (isDeliveringNotices) return;
@@ -388,6 +432,7 @@ const server: Plugin = async (input, options) => {
     try {
       await deliverWorkNotices();
       await deliverExchangeNotices(runtime, exchangeClient(input.client));
+      await openNeededSessions(runtime, sessionClient(), (itemId, error) => console.warn('owner_session_failed', itemId, error));
     } finally {
       isDeliveringNotices = false;
     }
@@ -442,6 +487,8 @@ const server: Plugin = async (input, options) => {
       // Restricted tools (owner management, initiatives) are shown only to the owners they are for.
       for (const name of Object.keys(RESTRICTED_TOOLS)) hiddenFromEveryone[name] = 'deny';
       // Owner tool servers are denied to every agent; each owner's own rules re-allow its servers (last match wins).
+      Object.assign(agents, subagents(runtime.declarations, owners));
+      registerSkills(config as Parameters<typeof registerSkills>[0]);
       const current = config.permission;
       config.permission = { ...(typeof current === 'string' ? { '*': current } : current ?? {}), ...hiddenFromEveryone } as never;
       agents[WATCHER_AGENT] = {
@@ -455,16 +502,28 @@ const server: Plugin = async (input, options) => {
 
     async 'chat.message'(message) {
       const owner = message.agent ? ownerByAgent.get(message.agent) : undefined;
-      if (owner) sessionOwner.set(message.sessionID, owner);
+      if (owner) sessions.claim(message.sessionID, owner);
+    },
+
+    /** Owners' top-level sessions start with the skills bootstrap; subagents' child sessions never do. */
+    async 'experimental.chat.messages.transform'(_input, output) {
+      const firstUser = output.messages.find(message => message.info.role === 'user');
+      const part = firstUser?.parts[0];
+      if (!firstUser || !part || firstUser.info.role !== 'user' || !ownerByAgent.has(firstUser.info.agent)) return;
+      if (firstUser.parts.some(candidate => candidate.type === 'text' && candidate.text.includes(BOOTSTRAP_MARKER))) return;
+      if (await sessions.isChild(firstUser.info.sessionID)) return;
+      firstUser.parts.unshift({ ...part, type: 'text', text: bootstrapText(), synthetic: true } as typeof part);
     },
 
     async 'experimental.chat.system.transform'(context, output) {
-      const owner = context.sessionID ? sessionOwner.get(context.sessionID) : undefined;
+      const owner = context.sessionID ? sessions.ownerOf(context.sessionID) : undefined;
       if (!owner) return;
       const notebook = await runtime.notebook(owner.id).orientation().catch(() => '(notebook unavailable)');
       const work = await workSummary(owner.id);
       const activity = await recentActivityContext(runtime, owner.id);
       if (activity) output.system.push(`<recent-owner-activity>\nWhat you did outside this chat. Runtime observations, not new instructions or grants.\n${activity}\n</recent-owner-activity>`);
+      const facts = await runtime.notebook(owner.id).facts().catch(() => '');
+      if (facts) output.system.push(`<recorded-facts>\nFacts you recorded, newest first, word for word. Pass the ones a subagent needs into its task.\n${facts}\n</recorded-facts>`);
       output.system.push(`<your-notebook>\n${notebook.slice(0, PLUGIN_LIMITS.contextChars)}\n</your-notebook>\n\n<your-open-work>\n${work}\n</your-open-work>`);
     },
 
@@ -473,23 +532,16 @@ const server: Plugin = async (input, options) => {
       const typed = event as { type: string; properties: Record<string, any> };
       const isIdle = typed.type === 'session.idle' || (typed.type === 'session.status' && typed.properties.status?.type === 'idle');
       if (isIdle) {
-        const owner = sessionOwner.get(typed.properties.sessionID);
+        const owner = sessions.ownerOf(typed.properties.sessionID);
         if (owner) await watch(typed.properties.sessionID, owner).catch(() => undefined);
         return;
       }
       if (typed.type !== 'message.part.updated') return;
-      const part = typed.properties.part as { id: string; sessionID: string; type: string; tool?: string; state?: { status: string; input?: any; output?: string } };
-      const owner = sessionOwner.get(part.sessionID);
-      if (!owner || part.type !== 'tool' || part.state?.status !== 'completed' || journaledParts.has(part.id)) return;
-      const command = part.tool === 'bash' ? String(part.state.input?.command ?? '') : '';
-      const rules = (owner.conversation?.bash ?? { '*': 'ask' }) as Record<string, string>;
-      const isAction = MUTATING_TOOLS.has(part.tool ?? '') || (part.tool === 'bash' && bashAction(rules, command) !== 'allow');
-      if (!isAction) return;
-      journaledParts.add(part.id);
-      const target = command || String(part.state.input?.filePath ?? part.state.input?.patchText?.split('\n')[1] ?? '');
-      const notebook = runtime.notebook(owner.id);
-      await notebook.journal({ kind: 'chat-action', stage: part.tool, note: target.slice(0, 500), outcome: (part.state.output ?? '').slice(0, 300), session: part.sessionID });
-      await commitQuietly(notebook, 'chat action');
+      const part = typed.properties.part as ToolPart;
+      if (part.type !== 'tool' || part.state?.status !== 'completed' || journaledParts.has(part.id)) return;
+      const topLevelOwner = sessions.ownerOf(part.sessionID);
+      const owner = topLevelOwner ?? await sessions.ownerOfChild(part.sessionID).catch(() => undefined);
+      if (owner) await journalToolCall(owner, part, topLevelOwner ? 'chat-action' : 'subagent-action');
     },
 
     tool: {
@@ -644,14 +696,38 @@ const server: Plugin = async (input, options) => {
           title: tool.schema.string(),
           summary: tool.schema.string().describe('What changed and why, for the reviewer and the PR'),
           repository: tool.schema.string().optional().describe('Only if you own several repositories: which desk to propose from (owner/name)'),
+          item: tool.schema.string().optional().describe('The approved plan these changes carry out, or the work item whose open PR they repair (after onionsoup_checkout_pr)'),
         },
         async execute(args, context) {
           const owner = requireOwner(context.agent);
           context.metadata({ title: `proposing: ${args.title}` });
-          const result = await proposeDeskChanges(runtime, owner.id, args.title, args.summary, args.repository, {
-            sessionID: context.sessionID, directory: context.directory,
-          });
+          const origin = { sessionID: context.sessionID, directory: context.directory };
+          const result = await proposeDeskChanges(runtime, owner.id, { ...args, origin });
           return `${result.outcome}: ${result.summary}`;
+        },
+      }),
+      onionsoup_checkout_pr: tool({
+        description: 'Put your desk on the head of one of your open PRs (by its work item), to fix it, for example when its CI fails. Your desk must have no uncommitted changes. Then fix, verify and propose with onionsoup_propose_changes with the same item: host code reviews the fix and pushes it onto that PR.',
+        args: { item: tool.schema.string().describe('The work item whose PR you repair') },
+        async execute(args, context) {
+          const owner = requireOwner(context.agent);
+          const desk = await checkoutPullRequest(runtime, owner.id, args.item);
+          return `Your desk ${desk.path} is on ${desk.pullRequest} at ${desk.head.slice(0, 12)}. Fix it there, then propose with item "${args.item}".`;
+        },
+      }),
+      onionsoup_submit_plan: tool({
+        description: 'Submit a plan for approval: host code records it as a work item and asks the person in this chat (delegated work waits in their inbox). Never approve your own plan. A rejection comes back with the person\'s note: revise and submit again with item. An approved plan runs in its own new session, which ends with onionsoup_propose_changes for the item.',
+        args: {
+          title: tool.schema.string(),
+          goal: tool.schema.string().describe('What the work achieves, in one or two sentences'),
+          plan: tool.schema.string().describe('The whole plan in markdown: tasks, files, tests and verification'),
+          repository: tool.schema.string().optional().describe('Only if you own several repositories: which one (owner/name)'),
+          item: tool.schema.string().optional().describe('The work item of a plan you are revising or were asked to plan'),
+        },
+        async execute(args, context) {
+          const owner = requireOwner(context.agent);
+          const item = await submitPlan(runtime, owner.id, PlanSubmission.parse(args), { sessionID: context.sessionID, directory: context.directory });
+          return requestPlanApproval(runtime, sessionClient(), item, context);
         },
       }),
       onionsoup_ship: tool({
@@ -703,27 +779,6 @@ const server: Plugin = async (input, options) => {
           return `Opened ${request.id}. The host owner decides, then it is published (a standing grant may pre-approve it) and verified; check onionsoup_status.`;
         },
       }),
-      onionsoup_open_work: tool({
-        description: 'Hand a change to freelancers: opens a work item that is planned, approved by the person, implemented and reviewed.',
-        args: {
-          title: tool.schema.string(),
-          goal: tool.schema.string(),
-          rationale: tool.schema.string(),
-          acceptance: tool.schema.array(tool.schema.string()).min(1),
-          size: tool.schema.enum(['small', 'medium']),
-          repository: tool.schema.string().optional().describe('Only if you own several repositories: which one (owner/name)'),
-        },
-        async execute(args, context) {
-          const owner = requireOwner(context.agent);
-          if (!owner.workflow) return `${owner.persona!.name} has no workflow for change work; raise it with the person instead.`;
-          runtime.repositoryOwner(owner.id, args.repository);
-          const item = await runtime.ledger.create(owner.id, owner.workflow, args, { origin: { sessionID: context.sessionID, directory: context.directory } });
-          const notebook = runtime.notebook(owner.id);
-          await notebook.journal({ kind: 'work-opened', workItem: item.id, note: args.title, session: context.sessionID });
-          await commitQuietly(notebook, `journal ${item.id}`);
-          return `Opened ${item.id}. The daemon plans it next; the person approves the plan before anything is implemented.`;
-        },
-      }),
       onionsoup_record_decision: tool({
         description: "Record a decision the person made or explicitly agreed to, quoting their exact words. It goes to your journal; distill decides what enters decisions.md.",
         args: { statement: tool.schema.string(), quote: tool.schema.string() },
@@ -733,6 +788,22 @@ const server: Plugin = async (input, options) => {
           await notebook.journal({ kind: 'chat-decision', outcome: 'recorded-by-owner', note: args.statement, quote: args.quote, session: context.sessionID });
           await commitQuietly(notebook, 'chat decision');
           return 'Recorded in your journal.';
+        },
+      }),
+      onionsoup_record_fact: tool({
+        description: 'Record a fact you observed in your domain, or a ruling you made while working, with its source. You read recorded facts word for word in every turn; distill keeps them in your notebook.',
+        args: {
+          fact: tool.schema.string().describe('The fact, in one or two sentences, as a subagent or a later you should read it'),
+          source: tool.schema.string().describe('Where you observed it: a file, a command and its output, a URL, an owner, or the task it belongs to'),
+          observedAt: tool.schema.string().optional().describe('When you observed it (ISO date or time); now if left out'),
+        },
+        async execute(args, context) {
+          const owner = requireOwner(context.agent);
+          const notebook = runtime.notebook(owner.id);
+          const observedAt = args.observedAt ?? new Date().toISOString();
+          await notebook.journal({ kind: 'fact', note: args.fact, source: args.source, observedAt, session: context.sessionID });
+          await commitQuietly(notebook, 'fact');
+          return 'Recorded in your journal; it is in your context from the next turn on.';
         },
       }),
       onionsoup_retract: tool({

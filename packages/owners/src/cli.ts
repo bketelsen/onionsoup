@@ -11,7 +11,6 @@ import { Runtime } from './runtime.ts';
 import { askOwner, formatAnswer } from './ask.ts';
 import { approveCreate, approveDelete, denyRequest, processRequests, requestPublish } from './brokering.ts';
 import { DAEMON_LIMITS, daemon, drain, recordDutyRun, tick, type TickLog } from './daemon.ts';
-import { publish } from './publish.ts';
 import { approvePush } from './rebase.ts';
 import { describeAsk, type ResourceRequest } from './requests.ts';
 import { proposeDeskChanges, resetDeskReviews } from './desk-changes.ts';
@@ -21,7 +20,7 @@ import { approveInitiative, cancelInitiative, initiativeView, initiativeViews, r
 import { initConfig } from './init.ts';
 import { configDirectory, stateDirectory } from './paths.ts';
 import { ensureDesk } from './workspace.ts';
-import { advance, approvePlan, rejectPlan, resumeItem, retryItem, cancelItem, revisePlan, landOverFindings } from './workflow.ts';
+import { advance, approvePlan, resumeItem, retryItem, cancelItem, revisePlan } from './work-recovery.ts';
 
 const run = promisify(execFile);
 
@@ -52,11 +51,9 @@ function line(item: WorkItem) {
 function detail(item: WorkItem) {
   const out = [line(item), '', `Goal: ${item.proposal.goal}`, `Why: ${item.proposal.rationale}`, 'Acceptance:', ...item.proposal.acceptance.map(entry => `  - ${entry}`)];
   if (item.humanNotes.length) out.push('', 'Notes from people:', ...item.humanNotes.map(note => `  ${note.kind} by ${note.by}: ${note.note}`));
-  if (item.ownerAnswers) out.push('', 'Owner answered the planner:', ...item.ownerAnswers.answers.map(entry => `  Q: ${entry.question}\n  A: ${entry.answer}`));
-  if (item.plan) {
-    out.push('', `Plan: ${item.plan.summary}`, ...item.plan.steps.map((step, index) => `  ${index + 1}. ${step.description} [${step.files.join(', ')}]`));
-    out.push('Tests:', ...item.plan.tests.map(entry => `  - ${entry}`), 'Risks:', ...item.plan.risks.map(entry => `  - ${entry}`), 'Out of scope:', ...item.plan.outOfScope.map(entry => `  - ${entry}`));
-  }
+  if (item.planDocument) out.push('', `Plan (${item.planDocument.digest}):`, item.planDocument.markdown);
+  if (item.planApproval) out.push(`Plan approved by ${item.planApproval.by} at ${item.planApproval.at}`);
+  if (item.session) out.push(`Working in session ${item.session.sessionID}`);
   item.implementations.forEach((implementation, index) => {
     const verified = implementation.verification.map(result => `${result.command}=${result.exitCode}`).join(' ');
     out.push('', `Implementation ${index + 1}: ${implementation.report.summary}`, `  ${implementation.diffStat.split('\n').at(-1) ?? ''}`, `  verify: ${verified}`);
@@ -129,20 +126,11 @@ const COMMANDS: Record<string, Command> = {
   },
   async approve(runtime, [itemId]) {
     const item = await approvePlan(runtime, required(itemId, 'work item'), userInfo().username, options.note);
-    console.log(line(item));
-    await continueIfFree(runtime, item);
+    console.log(`${line(item)}\n  The surface opens the owner's session for it within a minute.`);
   },
   async 'revise-plan'(runtime, [itemId]) {
     const item = await revisePlan(runtime, required(itemId, 'work item'), userInfo().username, required(options.note, '--note'));
-    console.log(line(item));
-    await continueIfFree(runtime, item);
-  },
-  async publish(runtime, [itemId]) {
-    const item = await publish(runtime, required(itemId, 'work item'), userInfo().username);
-    console.log(`${line(item)}\n${item.publication?.url ?? ''}`);
-  },
-  async reject(runtime, [itemId]) {
-    console.log(line(await rejectPlan(runtime, required(itemId, 'work item'), userInfo().username, required(options.reason, '--reason'))));
+    console.log(`${line(item)}\n  The owner hears it in the session it planned in.`);
   },
   async run(runtime, [itemId]) {
     console.log(detail(await advance(runtime, required(itemId, 'work item'), progress)));
@@ -164,12 +152,6 @@ const COMMANDS: Record<string, Command> = {
   async retry(runtime, [itemId]) {
     const item = await retryItem(runtime, required(itemId, 'work item'), userInfo().username, options.note);
     console.log(line(item));
-    await continueIfFree(runtime, item);
-  },
-  async 'land-over-findings'(runtime, [itemId]) {
-    const { item, followUp } = await landOverFindings(runtime, required(itemId, 'work item'), userInfo().username, required(options.note, '--note'));
-    console.log(line(item));
-    if (followUp) console.log(`follow-up: ${line(followUp)}`);
     await continueIfFree(runtime, item);
   },
   async cancel(runtime, [itemId]) {
@@ -209,7 +191,8 @@ const COMMANDS: Record<string, Command> = {
     console.log(`${result.outcome}: ${result.summary}`);
   },
   async propose(runtime, [ownerId]) {
-    const result = await proposeDeskChanges(runtime, required(ownerId, 'owner'), required(options.note, '--note (title)'), options.reason ?? options.note!, options.repository);
+    const title = required(options.note, '--note (title)');
+    const result = await proposeDeskChanges(runtime, required(ownerId, 'owner'), { title, summary: options.reason ?? title, repository: options.repository });
     console.log(`${result.outcome}: ${result.summary}`);
   },
   async 'desk-state'(runtime) {
@@ -300,8 +283,8 @@ if (commandName === 'init') {
 const runtime = await Runtime.open({ declarations: options.declarations!, state: options.state! });
 /** Commands that only read, or only record a person's decision, never take the runtime lock. */
 const LOCK_FREE = [
-  'distill', 'items', 'show', 'notebook', 'requests', 'approve', 'publish', 'revise-plan', 'reject',
-  'resume', 'retry', 'land-over-findings', 'cancel', 'desk', 'desk-state', 'retract', 'ask', 'request-publish', 'propose',
+  'distill', 'items', 'show', 'notebook', 'requests', 'approve', 'revise-plan',
+  'resume', 'retry', 'cancel', 'desk', 'desk-state', 'retract', 'ask', 'request-publish', 'propose',
   'ship', 'approve-push', 'approve-create', 'approve-delete', 'deny-request',
   'desk-review-reset', 'initiatives', 'initiative', 'approve-initiative', 'revise-initiative', 'cancel-initiative',
 ];

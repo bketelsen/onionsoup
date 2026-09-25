@@ -1,10 +1,10 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { Learnings, OwnerAnswers, Survey } from './artifacts.ts';
+import { Survey, type ProposedWork } from './artifacts.ts';
 import { describeAsk, InstanceAsk } from './requests.ts';
 import { FOLLOW_UP_DESCRIPTIONS, requestInstance } from './brokering.ts';
-import { composeAskBrief, learningsBrief, ownerAnswerBrief, surveyBrief, workSoFarText } from './briefs.ts';
-import { hasIncus, repositoryNames, repositoryShortName, type Duty, type OwnerDeclaration, type ResolvedOwner } from './declarations.ts';
+import { composeAskBrief, surveyBrief, workSoFarText } from './briefs.ts';
+import { canChange, hasIncus, repositoryNames, repositoryShortName, type Duty, type OwnerDeclaration, type ResolvedOwner } from './declarations.ts';
 import { refreshIncusEvidence } from './incus.ts';
 import { refreshGithubOrgEvidence } from './github-org.ts';
 import { refreshTruenasEvidence } from './truenas.ts';
@@ -64,9 +64,15 @@ async function requestInstanceDuty(runtime: Runtime, owner: ResolvedOwner, duty:
   return { request, cost: result.cost };
 }
 
+/** How a survey's proposals reach the person: work an owner could plan with them, or things only they can act on. */
+const PROPOSAL_NOTES: Record<'work' | 'attention', (proposal: ProposedWork) => string> = {
+  work: proposal => `proposed work${proposal.repository ? ` in ${proposal.repository}` : ''}: ${proposal.title}: ${proposal.goal} (plan it with the owner in chat)`,
+  attention: proposal => `${proposal.title}: ${proposal.goal}`,
+};
+
 /**
- * A wake: the owner surveys its domain and updates its notebook. With a workflow it opens work items;
- * without one it raises attention items for a person, because it has no freelancers to hire.
+ * A wake: the owner surveys its domain and updates its notebook. What it proposes goes to the person as attention
+ * items: work an owner that can change its domain plans with them in chat, or things only the person can act on.
  */
 export async function wake(runtime: Runtime, ownerId: string, dutyId: string) {
   const { owner, notebook } = await prepare(runtime, ownerId);
@@ -87,7 +93,7 @@ export async function wake(runtime: Runtime, ownerId: string, dutyId: string) {
   }
   const snapshot = await refreshWorkspace(runtime, owner);
   const history = (await runtime.ledger.list()).filter(item => item.owner === ownerId).slice(-SURVEY_LIMITS.recentWork);
-  const mode = owner.workflow && duty.raises === 'work' ? 'work' : 'attention';
+  const mode = canChange(owner) && duty.raises === 'work' ? 'work' : 'attention';
   const evidence = await incusEvidenceText(runtime, owner);
   const brief = surveyBrief(duty, await notebook.orientation(), snapshot, owner.maxProposals, workSoFarText(history), mode, rosterText(runtime.declarations, ownerId))
     + (evidence ? `\n\n<your-incus-snapshot>\n${evidence}\n</your-incus-snapshot>` : '');
@@ -98,40 +104,8 @@ export async function wake(runtime: Runtime, ownerId: string, dutyId: string) {
   const survey = result.value;
   await notebook.apply(survey.notebook, `${dutyId} at ${snapshot}`);
   const proposals = survey.proposals.slice(0, owner.maxProposals);
-  const items: WorkItem[] = [];
-  if (mode === 'work') {
-    for (const proposal of proposals) {
-      // A proposal in a repository the owner does not own (or, for a group, in none) is noted, not opened.
-      try {
-        runtime.repositoryOwner(ownerId, proposal.repository);
-      } catch (error) {
-        await notebook.journal({ kind: 'attention', note: `${proposal.title}: not opened (${error instanceof Error ? error.message : error})` });
-        continue;
-      }
-      items.push(await runtime.ledger.create(ownerId, owner.workflow!, proposal));
-    }
-  } else {
-    for (const proposal of proposals) await notebook.journal({ kind: 'attention', note: `${proposal.title}: ${proposal.goal}` });
-  }
+  for (const proposal of proposals) await notebook.journal({ kind: 'attention', note: PROPOSAL_NOTES[mode](proposal) });
   await notebook.journal({ kind: 'wake', note: `${dutyId}: ${survey.summary}`, model: owner.model, outcome: `${proposals.length} ${mode} items; $${result.cost.toFixed(4)}` });
   await notebook.commit(`journal ${dutyId}`);
-  return { survey, items, attention: mode === 'attention' ? proposals : [], request: undefined, cost: result.cost };
-}
-
-/** The owner answers a planner's questions, as a project manager would. */
-export async function answerQuestions(runtime: Runtime, item: WorkItem, questions: readonly string[]) {
-  const { owner, notebook } = await prepare(runtime, item.owner);
-  const brief = ownerAnswerBrief(item, questions, await notebook.orientation());
-  return runtime.hireFor(item, 'plan', 'owner', { role: 'owner', model: owner.model, directory: owner.workspace, title: `${item.id}: owner answers`, brief, schema: OwnerAnswers });
-}
-
-/** After a work item ends, the owner writes down what it learned. */
-export async function recordLearnings(runtime: Runtime, item: WorkItem) {
-  const { owner, notebook } = await prepare(runtime, item.owner);
-  const brief = learningsBrief(item, await notebook.orientation());
-  const learnings = await runtime.hireFor(item, 'learn', 'owner', { role: 'owner', model: owner.model, directory: owner.workspace, title: `${item.id}: learnings`, brief, schema: Learnings });
-  await notebook.apply(learnings.notebook, `learnings from ${item.id}`);
-  await notebook.journal({ kind: 'work-ended', workItem: item.id, outcome: item.status, note: item.reason ?? item.proposal.title });
-  await notebook.commit(`journal ${item.id}`);
-  return learnings;
+  return { survey, items: [] as WorkItem[], attention: proposals, request: undefined, cost: result.cost };
 }

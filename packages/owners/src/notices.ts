@@ -57,22 +57,19 @@ export function describeChange(item: WorkItem, previous: string | undefined): De
   if (item.status !== before && NOTABLE.has(item.status)) {
     if (item.status === 'failed') {
       const timedOut = /Aborted/.test(item.reason ?? '') ? ' (a hire ran out its time limit or was stopped)' : '';
-      return { change: 'failed', text: `Your work item ${item.id} ${title} failed: ${item.reason ?? 'no reason recorded'}${timedOut}. Its full record: onionsoup_status with item ${item.id}. Decide what happens next: reopen it (changed, smaller, or split) with onionsoup_open_work, or tell the person what you need from them. Say what you decided.` };
+      return { change: 'failed', text: `Your work item ${item.id} ${title} failed: ${item.reason ?? 'no reason recorded'}${timedOut}. Its full record: onionsoup_status with item ${item.id}. Decide what happens next: retry what failed, plan it again (changed, smaller, or split) with the person, or tell the person what you need from them. Say what you decided.` };
     }
     if (item.status === 'rejected') {
       return { change: 'rejected', text: `The person rejected the plan for ${item.id} ${title}: ${item.reason ?? 'no reason given'}. Take that into account; do not reopen the same work unless the person asks.` };
     }
-    const where = item.rebaseOf ? `updated ${item.rebaseOf.prUrl}`
-      : pr ? `is published as ${pr.url}`
-      : item.repairOf ? `landed on ${item.branch}; publication will update ${item.repairOf.prUrl}`
-      : `landed on ${item.branch}; it becomes a PR when the person publishes it`;
+    const where = item.rebaseOf ? `updated ${item.rebaseOf.prUrl}` : `is published as ${pr?.url ?? item.branch}`;
     return { change: 'landed', text: `Your work item ${item.id} ${title} passed verification and review and ${where}. Tell the person if anything about it needs them.` };
   }
   return undefined;
 }
 
 const MANAGER_TEXT: Record<string, (item: WorkItem) => string> = {
-  landed: item => (item.publication ? `landed and is published as ${item.publication.url}` : `landed on ${item.branch}; it waits on the person to publish it`),
+  landed: item => `landed and is published as ${item.publication?.url ?? item.branch}`,
   failed: item => `failed: ${item.reason ?? 'no reason recorded'}`,
   rejected: item => `had its plan rejected by the person: ${item.reason ?? 'no reason given'}`,
   'pr-merged': item => `was merged (${item.publication?.url})`,
@@ -130,8 +127,12 @@ async function raiseNotice(runtime: Runtime, item: WorkItem, previous: string | 
   return notice;
 }
 
-/** Where the work was opened from: its recorded origin, or the owner's work-opened journal entry for older items. */
+/**
+ * Where the owner hears about the work: the session carrying out its plan, the chat it was opened from, or the
+ * owner's work-opened journal entry for older items.
+ */
 async function originOf(runtime: Runtime, item: WorkItem, chatDirectory: (ownerId: string) => Promise<string>) {
+  if (item.session) return item.session;
   if (item.origin) return item.origin;
   const sourceId = item.rebaseOf?.itemId ?? item.repairOf?.itemId;
   const source = sourceId ? await runtime.ledger.get(sourceId).catch(() => undefined) : undefined;

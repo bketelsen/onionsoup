@@ -39,8 +39,8 @@ const TITLES: Record<string, string> = {
   grep: 'Search Files', glob: 'Find Files', list: 'List Directory', task: 'Agent Task', webfetch: 'Fetch URL', websearch: 'Web Search',
   codesearch: 'Code Search', todowrite: 'Update Todo List', todoread: 'Read Todo List', skill: 'Load Skill', question: 'Question', lsp: 'LSP',
   onionsoup_status: 'Status', onionsoup_notebook: 'Notebook', onionsoup_evidence: 'Evidence', onionsoup_ask: 'Ask Owner',
-  onionsoup_open_work: 'Open Work', onionsoup_propose_changes: 'Propose Changes', onionsoup_ship: 'Ship', onionsoup_request_publish: 'Request Publish',
-  onionsoup_record_decision: 'Record Decision', onionsoup_retract: 'Retract', onionsoup_owners: 'Manage Owners',
+  onionsoup_checkout_pr: 'Check Out PR', onionsoup_propose_changes: 'Propose Changes', onionsoup_ship: 'Ship', onionsoup_request_publish: 'Request Publish',
+  onionsoup_record_decision: 'Record Decision', onionsoup_record_fact: 'Record Fact', onionsoup_submit_plan: 'Submit Plan', onionsoup_retract: 'Retract', onionsoup_owners: 'Manage Owners',
 };
 
 export function toolTitle(tool: string) {
@@ -59,24 +59,41 @@ function relativePath(path: string, directory: string) {
   return directory && path.startsWith(`${directory}/`) ? path.slice(directory.length + 1) : path;
 }
 
+interface ToolInput { text: (key: string) => string; path: string; directory: string; input: Record<string, unknown> }
+
+function filePath({ path, directory }: ToolInput) {
+  return path ? relativePath(path, directory) : '';
+}
+
+function searchPattern({ text, path, directory }: ToolInput) {
+  return `"${truncate(text('pattern'), 40)}"${path ? ` in ${relativePath(path, directory)}` : ''}`;
+}
+
+const titleOf = ({ text }: ToolInput) => text('title');
+
+/** How each tool describes one call; any other tool shows its description or title. */
+const DESCRIPTIONS: Record<string, (call: ToolInput) => string> = {
+  bash: ({ text }) => truncate(text('command').split('\n')[0] ?? '', 100),
+  edit: filePath, multiedit: filePath, read: filePath, write: filePath, lsp: filePath,
+  task: ({ text }) => truncate(text('description'), 80),
+  question: ({ input }) => `Asked ${(input.questions as unknown[] | undefined)?.length ?? 1} question(s)`,
+  grep: searchPattern, glob: searchPattern,
+  webfetch: ({ text }) => text('url'),
+  websearch: ({ text }) => truncate(text('query'), 50),
+  skill: ({ text }) => text('name'),
+  onionsoup_ask: ({ text }) => `${text('owner')}: ${truncate(text('question'), 80)}`,
+  onionsoup_propose_changes: titleOf, onionsoup_submit_plan: titleOf,
+  onionsoup_checkout_pr: ({ text }) => text('item'),
+  onionsoup_owners: ({ text }) => [text('action'), text('id')].filter(Boolean).join(' '),
+};
+
 /** The one-line description beside a tool's title. */
 export function toolDescription(part: Part, directory: string) {
-  const tool = part.tool ?? '';
   const input = (part.state?.input ?? {}) as Record<string, unknown>;
-  const string = (key: string) => (typeof input[key] === 'string' ? (input[key] as string) : '');
-  const path = string('filePath') || string('path') || string('file_path');
-  if (tool === 'bash') return truncate((string('command').split('\n')[0] ?? ''), 100);
-  if (['edit', 'multiedit', 'read', 'write', 'lsp'].includes(tool) && path) return relativePath(path, directory);
-  if (tool === 'task') return truncate(string('description'), 80);
-  if (tool === 'question') return `Asked ${(input.questions as unknown[] | undefined)?.length ?? 1} question(s)`;
-  if (tool === 'grep' || tool === 'glob') return `"${truncate(string('pattern'), 40)}"${path ? ` in ${relativePath(path, directory)}` : ''}`;
-  if (tool === 'webfetch') return string('url');
-  if (tool === 'websearch') return truncate(string('query'), 50);
-  if (tool === 'skill') return string('name');
-  if (tool === 'onionsoup_ask') return `${string('owner')}: ${truncate(string('question'), 80)}`;
-  if (tool === 'onionsoup_open_work' || tool === 'onionsoup_propose_changes') return string('title');
-  if (tool === 'onionsoup_owners') return [string('action'), string('id')].filter(Boolean).join(' ');
-  return string('description') || (part.state?.metadata?.description as string | undefined) || part.state?.title || '';
+  const text = (key: string) => (typeof input[key] === 'string' ? (input[key] as string) : '');
+  const call = { text, input, directory, path: text('filePath') || text('path') || text('file_path') };
+  const described = DESCRIPTIONS[part.tool ?? '']?.(call);
+  return described || text('description') || (part.state?.metadata?.description as string | undefined) || part.state?.title || '';
 }
 
 export function formatDuration(milliseconds: number) {

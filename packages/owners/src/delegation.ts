@@ -1,5 +1,6 @@
 import { ProposedWork } from './artifacts.ts';
-import { isDirectReport } from './declarations.ts';
+import { canChange, isDirectReport } from './declarations.ts';
+import { OWNER_CHANGE_WORKFLOW } from './plan-work.ts';
 import type { AssignmentRef } from './initiatives.ts';
 import { PublishDecision, requireStatus, type ResourceRequest, type WorkAsk } from './requests.ts';
 import type { Runtime } from './runtime.ts';
@@ -12,11 +13,11 @@ export async function journalRequest(runtime: Runtime, request: ResourceRequest,
   }
 }
 
-/** Delegation chooses an existing receiver and its existing workflow; it never grants new authority. */
+/** Delegation chooses an existing receiver that changes its own repository; it never grants new authority. */
 export async function requestWork(runtime: Runtime, from: string, to: string, proposal: ProposedWork, assignment?: AssignmentRef) {
   runtime.owner(from);
   const receiver = runtime.owner(to);
-  if (!receiver.workflow) throw new Error(`owner_has_no_workflow: ${to}`);
+  if (!canChange(receiver)) throw new Error(`owner_cannot_change: ${to} does not change its repository itself`);
   runtime.repositoryOwner(to, proposal.repository);
   const request = await runtime.requests.open(from, to, { kind: 'work', purpose: proposal.goal, proposal, assignment }, 'none');
   await journalRequest(runtime, request, 'request-opened', proposal.title);
@@ -35,7 +36,7 @@ const ACCEPTANCE: Record<'manager' | 'peer', Acceptance> = {
     const notebook = runtime.notebook(owner.id);
     return (await runtime.hire(owner.id, {
       role: 'owner', model: owner.model, directory: owner.workspace, title: `${request.id}: decide work`,
-      brief: `Owner ${request.from} requests this work in your declared domain. Accept if appropriate, or decline with a reason. Acceptance opens work at the normal plan gate.\n${JSON.stringify(ask.proposal)}\n${await notebook.orientation()}`,
+      brief: `Owner ${request.from} requests this work in your declared domain. Accept if appropriate, or decline with a reason. If you accept, you plan it yourself and the plan waits for approval like any other.\n${JSON.stringify(ask.proposal)}\n${await notebook.orientation()}`,
       schema: PublishDecision,
     })).value;
   },
@@ -63,10 +64,13 @@ export async function decideWork(runtime: Runtime, request: ResourceRequest) {
     await journalRequest(runtime, declined, 'attention', `delegation declined: ${decision.reply}; the person can resolve or redirect it`);
     return declined;
   }
-  if (!owner.workflow) throw new Error(`owner_has_no_workflow: ${owner.id}`);
+  if (!canChange(owner)) throw new Error(`owner_cannot_change: ${owner.id} does not change its repository itself`);
   runtime.repositoryOwner(owner.id, request.ask.proposal.repository);
-  // Deterministic identity closes the crash window between ledger creation and saving the request link.
-  await runtime.ledger.create(owner.id, owner.workflow, request.ask.proposal, { id: workItem, assignment: request.ask.assignment });
+  // Deterministic identity closes the crash window between ledger creation and saving the request link. The owner
+  // plans it in a session the plugin opens for it; its plan is approved in the inbox or under a manager's grant.
+  await runtime.ledger.create(owner.id, OWNER_CHANGE_WORKFLOW, request.ask.proposal, {
+    id: workItem, status: 'planning', request: request.id, assignment: request.ask.assignment,
+  });
   const accepted = await runtime.requests.save({ ...request, status: 'work-running', workItem, publishDecision: decision });
   await journalRequest(runtime, accepted, 'request-accepted', `${decision.reply}; linked work ${workItem}`);
   return accepted;

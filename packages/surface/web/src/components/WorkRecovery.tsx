@@ -4,7 +4,7 @@ import type { WorkItem } from '../types.ts';
 import { Button } from './ui.tsx';
 
 const CANCELLABLE = new Set([
-  'proposed', 'planning', 'awaiting-plan-approval', 'implementing', 'reviewing', 'landing',
+  'planning', 'awaiting-plan-approval', 'working', 'implementing', 'reviewing', 'landing',
   'awaiting-push-approval', 'failed', 'interrupted', 'landed',
 ]);
 
@@ -16,15 +16,9 @@ const RECOVERY: Record<string, RecoveryAction[]> = {
   failed: [{ action: 'retry-item', label: 'Retry failed stage', noteUse: 'note for the retry' }],
 };
 
-/** Decisions only some failures offer, by `<status>:<reason>`. */
-const REASON_RECOVERY: Record<string, RecoveryAction[]> = {
-  'failed:revision_limit_reached': [{
-    action: 'land-over-findings', label: 'Land over findings', noteUse: 'why to land over the findings', isNoteRequired: true,
-  }],
-};
-
+/** A retired pipeline's failed work cannot be retried: nothing runs it any more. */
 function recoveryActions(item: WorkItem) {
-  return [...RECOVERY[item.status] ?? [], ...REASON_RECOVERY[`${item.status}:${item.reason}`] ?? []];
+  return item.reason === 'pipeline_removed' ? [] : RECOVERY[item.status] ?? [];
 }
 
 function placeholder(actions: readonly RecoveryAction[]) {

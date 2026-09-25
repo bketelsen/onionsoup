@@ -69,12 +69,26 @@ export const Verdict = z.object({
 });
 export type Verdict = z.infer<typeof Verdict>;
 
-/** A manager's review of a report's plan, under the person's standing approve-plans grant. */
-export const ManagerPlanVerdict = z.object({
-  decision: z.enum(['approve', 'revise', 'escalate']),
-  note: z.string().describe('approve: anything worth keeping in mind (may be empty); revise: exactly what the planner must change; escalate: why the person should decide'),
-});
-export type ManagerPlanVerdict = z.infer<typeof ManagerPlanVerdict>;
+/** The only severities that send work back. Everything else is advice the PR carries for the person. */
+export const BLOCKING_SEVERITIES: readonly Finding['severity'][] = ['blocker'];
+
+export function blockingFindings(verdict: Pick<Verdict, 'findings'>) {
+  return verdict.findings.filter(finding => BLOCKING_SEVERITIES.includes(finding.severity));
+}
+
+export function hasBlockers(verdict: Pick<Verdict, 'findings'>) {
+  return blockingFindings(verdict).length > 0;
+}
+
+/**
+ * What the runtime does with a verdict, decided by the host from its severities: a replan stays a replan; otherwise
+ * any blocker sends the work back and anything less lands. A reviewer that says revise over minor points does not
+ * block, and one that says approve over a blocker does not pass.
+ */
+export function effectiveDecision(verdict: Pick<Verdict, 'decision' | 'findings'>): Verdict['decision'] {
+  if (verdict.decision === 'replan') return 'replan';
+  return hasBlockers(verdict) ? 'revise' : 'approve';
+}
 
 export const Learnings = z.object({
   notebook: z.array(NotebookEdit),

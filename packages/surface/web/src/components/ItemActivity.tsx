@@ -2,19 +2,17 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.ts';
 import { Markdown } from '../chat/Markdown.tsx';
 import { BusyDots } from '../chat/parts.tsx';
-import type { Message, WorkItem } from '../types.ts';
+import type { ItemSession, Message, WorkItem } from '../types.ts';
 import { AssistantMessage } from './ChatPane.tsx';
 import { Badge, cx, Empty } from './ui.tsx';
 
-interface ItemSession { id: string; title: string; directory: string; time: { created: number; updated: number } }
-
-const RUNNING = new Set(['planning', 'implementing', 'reviewing', 'landing']);
+const RUNNING = new Set(['planning', 'working', 'implementing', 'reviewing', 'landing']);
 export const ACTIVITY_LIMITS = { sessionsMs: 5_000, messagesMs: 2_000 };
 
 /**
- * A work item's hires as they happen: each session onionsoup ran for it (plan, implementation, review, …), and the
- * selected one's messages drawn like a chat, refreshed while it runs. It follows the newest hire until the person
- * picks one.
+ * A work item's sessions as they happen: the owner session carrying out its plan with its subagents, and any hire
+ * onionsoup ran for it (a review, a conflict resolution), with the selected one's messages drawn like a chat and
+ * refreshed while it runs. It follows the newest session until the person picks one.
  */
 export function ItemActivity({ item }: { item: WorkItem }) {
   const [sessions, setSessions] = useState<ItemSession[]>([]);
@@ -25,7 +23,7 @@ export function ItemActivity({ item }: { item: WorkItem }) {
   const selected = sessions.find(session => session.id === picked) ?? sessions.at(-1);
   const hires = useMemo(() => new Map(item.hires.map(hire => [hire.sessionID, hire])), [item.hires]);
   // A session is live while the item runs and its hire has not been recorded as finished.
-  const live = (session: ItemSession) => running && !hires.has(session.id) && session.id === sessions.at(-1)?.id;
+  const live = (session: ItemSession) => running && !hires.has(session.id) && (session.kind === 'owner' || session.id === sessions.at(-1)?.id);
 
   useEffect(() => {
     let stopped = false;
@@ -62,7 +60,7 @@ export function ItemActivity({ item }: { item: WorkItem }) {
     <aside className="w-[34rem] max-w-[50%] shrink-0 border-l border-border flex flex-col min-h-0">
       <div className="shrink-0 border-b border-border px-3 py-2 flex flex-col gap-1.5">
         <div className="typography-ui-label font-semibold text-muted-foreground uppercase tracking-wide text-[0.7rem]">Activity</div>
-        {!sessions.length && <Empty>{running ? 'Waiting for the first hire…' : 'No hires recorded for this item.'}</Empty>}
+        {!sessions.length && <Empty>{running ? 'Waiting for the first session…' : 'No sessions recorded for this item.'}</Empty>}
         <div className="flex flex-wrap gap-1">
           {sessions.map(session => {
             const hire = hires.get(session.id);
@@ -71,7 +69,7 @@ export function ItemActivity({ item }: { item: WorkItem }) {
               <button key={session.id} onClick={() => setPicked(session.id)} title={hire ? `${hire.model} · ${hire.outcome}${hire.error ? `: ${hire.error}` : ''}` : isLive ? 'running now' : ''}
                 className={cx('inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 typography-meta border',
                   session.id === selected?.id ? 'bg-interactive-active text-foreground border-border' : 'text-muted-foreground border-transparent hover:bg-interactive-hover hover:text-foreground')}>
-                {session.title.slice(item.id.length + 2)}
+                {session.label}
                 {isLive && <span className="size-1.5 rounded-full bg-status-info animate-pulse" />}
                 {hire?.outcome === 'failed' && <span className="size-1.5 rounded-full bg-status-error" />}
               </button>
@@ -83,7 +81,7 @@ export function ItemActivity({ item }: { item: WorkItem }) {
           return (
             <div className="flex items-center gap-2 typography-micro text-muted-foreground">
               {hire ? <><span className="font-mono">{hire.model}</span><Badge tone={hire.outcome === 'delivered' ? 'success' : 'error'}>{hire.outcome}</Badge>{hire.cost > 0 && <span>${hire.cost.toFixed(3)}</span>}</>
-                : selectedLive ? <span className="inline-flex items-center text-status-info">working<BusyDots /></span> : <span>not recorded as a hire</span>}
+                : selectedLive ? <span className="inline-flex items-center text-status-info">working<BusyDots /></span> : <span>{selected.kind === 'owner' ? 'owner session' : 'not recorded as a hire'}</span>}
               <span className="ml-auto">{replies.reduce((count, message) => count + message.parts.filter(part => part.type === 'tool').length, 0)} tool calls</span>
             </div>
           );
@@ -94,7 +92,7 @@ export function ItemActivity({ item }: { item: WorkItem }) {
         {error && <div className="typography-meta text-[var(--status-error)]">{error}</div>}
         {brief && (
           <details className="mb-2 rounded-lg border border-border/60 bg-muted/10">
-            <summary className="cursor-pointer px-2 py-1 typography-meta text-muted-foreground">The brief it was given</summary>
+            <summary className="cursor-pointer px-2 py-1 typography-meta text-muted-foreground">The first message it was given</summary>
             <div className="px-3 pb-2 max-h-80 overflow-y-auto">
               <Markdown text={brief.parts.filter(part => part.type === 'text').map(part => part.text ?? '').join('\n\n')} variant="tool" />
             </div>

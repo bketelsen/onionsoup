@@ -1,10 +1,7 @@
-import { createHash, randomUUID } from 'node:crypto';
-import { mkdir } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import { ManagerPlanVerdict, type Plan } from './artifacts.ts';
-import { managerPlanReviewBrief } from './briefs.ts';
 import type { ChatOrigin } from './chat-origin.ts';
-import { directReports, isDirectReport, planGrantFor, type Grant } from './declarations.ts';
+import { canChange, directReports, isDirectReport, planGrantFor } from './declarations.ts';
 import { requestWork } from './delegation.ts';
 import {
   INITIATIVE_LIMITS, type Assignment, type AssignmentState, type Escalation, type Initiative, type InitiativeDraft,
@@ -14,7 +11,7 @@ import type { WorkItem, WorkStatus } from './ledger.ts';
 import { queueNotice } from './notices.ts';
 import type { RequestStatus, ResourceRequest } from './requests.ts';
 import type { Runtime } from './runtime.ts';
-import { approvePlan, cancelItem, revisePlan } from './workflow.ts';
+import { approvePlan, cancelItem, revisePlan } from './work-recovery.ts';
 
 /**
  * A manager's initiatives: drafted in chat, approved once by the person, then supervised deterministically. Each
@@ -40,7 +37,7 @@ const ITEM_STATES: Partial<Record<WorkStatus, (item: WorkItem) => AssignmentStat
   'awaiting-plan-approval': () => 'plan-waiting',
   'awaiting-push-approval': () => 'awaiting-person',
   interrupted: () => 'blocked',
-  landed: item => (item.publication ? 'awaiting-merge' : 'awaiting-publish'),
+  landed: item => (item.publication ? 'awaiting-merge' : 'working'),
 };
 
 /** The one place an assignment's state comes from: its request, then its work item. */
@@ -80,7 +77,7 @@ const ASSIGNMENT_CHECKS: AssignmentCheck[] = [
     }
   },
   (runtime, _initiative, assignment) => {
-    if (!runtime.owner(assignment.to).workflow) throw new Error(`owner_has_no_workflow: ${assignment.id}: ${assignment.to}`);
+    if (!canChange(runtime.owner(assignment.to))) throw new Error(`owner_cannot_change: ${assignment.id}: ${assignment.to} does not change its repository itself`);
   },
   (runtime, _initiative, assignment) => {
     runtime.repositoryOwner(assignment.to, assignment.proposal.repository);
@@ -262,7 +259,7 @@ export async function cancelInitiative(runtime: Runtime, initiativeId: string, b
   return cancelled;
 }
 
-const LIVE_ITEM = new Set<WorkStatus>(['proposed', 'planning', 'awaiting-plan-approval', 'implementing', 'reviewing', 'landing', 'awaiting-push-approval', 'interrupted', 'failed']);
+const LIVE_ITEM = new Set<WorkStatus>(['planning', 'awaiting-plan-approval', 'working', 'landing', 'interrupted', 'failed']);
 
 /** The manager drops one assignment, cancelling its work if it is still open. Nothing may wait for it. */
 export async function cancelAssignment(runtime: Runtime, managerId: string, initiativeId: string, assignmentId: string, reason: string) {
@@ -324,17 +321,13 @@ async function rollUp(runtime: Runtime, view: InitiativeView) {
 
 export interface SupervisionOptions {
   onError: (context: string, error: unknown) => void;
-  /** Runs a manager's plan review beside the tick (the daemon's review pool); without it, plans wait for the person. */
-  startReview?: (key: string, review: () => Promise<void>) => void;
 }
 
 async function superviseOne(runtime: Runtime, initiative: Initiative, requests: readonly ResourceRequest[], items: readonly WorkItem[], options: SupervisionOptions) {
   for (const assignment of readyToDispatch(viewOf(initiative, requests, items))) await dispatch(runtime, initiative, assignment, requests);
   const latest = viewOf(await runtime.initiatives.get(initiative.id), await runtime.requests.list(), items);
   await rollUp(runtime, latest);
-  for (const item of plansToReview(runtime, latest)) {
-    options.startReview?.(`${latest.owner}/${item.id}`, () => runPlanReview(runtime, latest.owner, item.id).catch(error => options.onError(item.id, error)));
-  }
+  for (const item of plansToReview(runtime, latest)) await askManager(runtime, latest, item).catch(error => options.onError(item.id, error));
 }
 
 /** One deterministic pass over approved initiatives: dispatch what is ready, finish what is done. */
@@ -353,8 +346,9 @@ export async function superviseInitiatives(runtime: Runtime, options: Supervisio
 
 export const SUPERVISION_LIMITS = { revisionsPerItem: 2 };
 
-export function planDigest(plan: Plan) {
-  return createHash('sha256').update(JSON.stringify(plan)).digest('hex').slice(0, 16);
+/** The plan a manager reviews, as text, with the digest her review names. */
+export function planUnderReview(item: WorkItem) {
+  return item.planDocument ? { text: item.planDocument.markdown, digest: item.planDocument.digest } : undefined;
 }
 
 /** Work a manager's initiative assigned, with the initiative, or undefined when it is not hers. */
@@ -373,81 +367,78 @@ function grantForItem(runtime: Runtime, managerId: string, item: WorkItem) {
   return planGrantFor(runtime.owner(item.owner), managerId, runtime.repositoryFor(item).domain.name);
 }
 
-interface VerdictContext { runtime: Runtime; managerId: string; item: WorkItem; grant: Grant; note: string }
+/** What a manager decides about a report's plan. */
+export interface ManagerVerdict { decision: 'approve' | 'revise'; note: string }
 
-const PLAN_VERDICTS: Record<ManagerPlanVerdict['decision'], (context: VerdictContext) => Promise<WorkItem>> = {
-  approve: async ({ runtime, managerId, item, grant, note }) => {
+interface VerdictContext { runtime: Runtime; managerId: string; item: WorkItem; initiative: Initiative; assignmentId: string; note: string }
+
+/** Approving needs the person's grant and no open escalation; sending back needs only a note the report can act on. */
+const PLAN_VERDICTS: Record<ManagerVerdict['decision'], (context: VerdictContext) => Promise<WorkItem>> = {
+  approve: async ({ runtime, managerId, item, initiative, assignmentId, note }) => {
+    const grant = grantForItem(runtime, managerId, item);
+    if (!grant) throw new Error(`plan_review_no_grant: ${item.owner} has not granted ${managerId} approve-plans; the person approves this plan`);
+    const escalation = openEscalation(initiative, assignmentId);
+    if (escalation) throw new Error(`plan_review_escalation_open: ${escalation.id} (${escalation.kind}) on ${assignmentId} is unresolved`);
     const by = `owner:${managerId} (standing grant approve-plans in ${item.owner})`;
     const approved = await approvePlan(runtime, item.id, by, note.trim() || undefined);
     await journal(runtime, [managerId, item.owner], 'grant-used', `${item.id}: plan approved by ${managerId} under ${item.owner}'s approve-plans grant (${grant.target})`);
     return approved;
   },
   revise: async ({ runtime, managerId, item, note }) => {
-    if (!note.trim()) throw new Error('plan_review_note_required: say what the planner must change');
+    if (!note.trim()) throw new Error('plan_review_note_required: say what the plan must change');
     return revisePlan(runtime, item.id, `owner:${managerId}`, note);
-  },
-  escalate: async ({ runtime, managerId, item, note }) => {
-    await journal(runtime, [managerId], 'attention', `${item.id} (${item.owner}): plan left for the person: ${note}`);
-    return item;
   },
 };
 
-/** A manager's verdict on a report's plan, under the person's approve-plans grant. Recorded per plan digest. */
-export async function reviewReportPlan(runtime: Runtime, managerId: string, itemId: string, verdict: ManagerPlanVerdict) {
+async function recordPlanReview(runtime: Runtime, initiativeId: string, review: PlanReview) {
+  await runtime.initiatives.update(initiativeId, current => ({ ...current, planReviews: [...current.planReviews, review] }));
+}
+
+/** A manager's verdict on a report's plan, recorded against the plan's digest. */
+export async function reviewReportPlan(runtime: Runtime, managerId: string, itemId: string, verdict: ManagerVerdict) {
   const context = await assignedItem(runtime, managerId, itemId);
   if (!context || context.initiative.status !== 'approved') throw new Error(`plan_review_not_in_initiative: ${itemId} is not work in an approved initiative of ${managerId}`);
-  const grant = grantForItem(runtime, managerId, context.item);
-  if (!grant) throw new Error(`plan_review_no_grant: ${context.item.owner} has not granted ${managerId} approve-plans; the person approves this plan`);
-  const escalation = openEscalation(context.initiative, context.assignmentId);
-  if (escalation) throw new Error(`plan_review_escalation_open: ${escalation.id} (${escalation.kind}) on ${context.assignmentId} is unresolved`);
-  if (!context.item.plan || context.item.status !== 'awaiting-plan-approval') throw new Error(`not_awaiting_plan_approval: ${context.item.status}`);
-  const review: PlanReview = {
-    item: itemId, digest: planDigest(context.item.plan), verdict: verdict.decision, note: verdict.note, by: `owner:${managerId}`, at: new Date().toISOString(),
-  };
-  const reviewed = await PLAN_VERDICTS[verdict.decision]({ runtime, managerId, item: context.item, grant, note: verdict.note });
-  await runtime.initiatives.update(context.initiative.id, current => ({ ...current, planReviews: [...current.planReviews, review] }));
+  const plan = planUnderReview(context.item);
+  if (!plan || context.item.status !== 'awaiting-plan-approval') throw new Error(`not_awaiting_plan_approval: ${context.item.status}`);
+  const reviewed = await PLAN_VERDICTS[verdict.decision]({ runtime, managerId, ...context, note: verdict.note });
+  const at = new Date().toISOString();
+  await recordPlanReview(runtime, context.initiative.id, { item: itemId, digest: plan.digest, verdict: verdict.decision, note: verdict.note, by: `owner:${managerId}`, at });
   await journal(runtime, [managerId, context.item.owner], 'plan-review', `${itemId}: ${verdict.decision} by ${managerId}${verdict.note ? `: ${verdict.note}` : ''}`);
   return reviewed;
 }
 
-/** Plans waiting in a supervised initiative that the manager may review and has not reviewed in this form. */
+/** Plans waiting in a supervised initiative that the manager may approve and has not been asked about in this form. */
 function plansToReview(runtime: Runtime, view: InitiativeView) {
   if (!isSupervised(view)) return [];
   return view.assignments.flatMap(assignment => {
     const item = assignment.item;
-    if (assignment.state !== 'plan-waiting' || !item?.plan || item.activeRunner) return [];
+    const plan = item && planUnderReview(item);
+    if (assignment.state !== 'plan-waiting' || !item || !plan || item.activeRunner) return [];
     if (openEscalation(view, assignment.id) || !grantForItem(runtime, view.owner, item)) return [];
-    const digest = planDigest(item.plan);
-    return view.planReviews.some(review => review.item === item.id && review.digest === digest) ? [] : [item];
+    return view.planReviews.some(review => review.item === item.id && review.digest === plan.digest) ? [] : [item];
   });
 }
 
-async function hirePlanVerdict(runtime: Runtime, managerId: string, itemId: string): Promise<ManagerPlanVerdict> {
-  const context = await assignedItem(runtime, managerId, itemId);
-  if (!context?.item.plan) throw new Error(`plan_review_not_in_initiative: ${itemId}`);
-  const manager = runtime.owner(managerId);
-  await mkdir(manager.workspace, { recursive: true });
-  const brief = managerPlanReviewBrief(context.initiative, context.item, context.item.plan, await runtime.notebook(managerId).orientation());
-  const hired = await runtime.hire(managerId, {
-    role: 'owner', model: manager.model, directory: manager.workspace, title: `${itemId}: manager plan review`, brief, schema: ManagerPlanVerdict,
-  }, itemId);
-  return hired.value;
+function revisionsAsked(view: InitiativeView, itemId: string) {
+  return view.planReviews.filter(review => review.item === itemId && review.verdict === 'revise').length;
 }
 
-async function revisionsAsked(runtime: Runtime, managerId: string, itemId: string) {
-  const context = await assignedItem(runtime, managerId, itemId);
-  return context?.initiative.planReviews.filter(review => review.item === itemId && review.verdict === 'revise').length ?? 0;
-}
-
-/** The daemon's plan review: the manager is hired for a verdict, within a revision budget; a failed hire escalates. */
-export async function runPlanReview(runtime: Runtime, managerId: string, itemId: string) {
-  const revisions = await revisionsAsked(runtime, managerId, itemId);
-  const verdict: ManagerPlanVerdict = revisions >= SUPERVISION_LIMITS.revisionsPerItem
-    ? { decision: 'escalate', note: `revision_limit_reached: ${revisions} revisions asked for already; the person decides` }
-    : await hirePlanVerdict(runtime, managerId, itemId).catch(error => ({
-      decision: 'escalate' as const, note: `plan_review_hire_failed: ${error instanceof Error ? error.message : String(error)}`,
-    }));
-  await reviewReportPlan(runtime, managerId, itemId, verdict);
+/**
+ * Wake the manager, once per plan, to review it in her chat under the person's grant. After
+ * SUPERVISION_LIMITS.revisionsPerItem send-backs the plan is left for the person instead.
+ */
+async function askManager(runtime: Runtime, view: InitiativeView, item: WorkItem) {
+  const plan = planUnderReview(item)!;
+  const at = new Date().toISOString();
+  if (revisionsAsked(view, item.id) >= SUPERVISION_LIMITS.revisionsPerItem) {
+    const note = `revision_limit_reached: sent back ${SUPERVISION_LIMITS.revisionsPerItem} times already; the person decides`;
+    await recordPlanReview(runtime, view.id, { item: item.id, digest: plan.digest, verdict: 'escalate', note, by: 'runtime', at });
+    await journal(runtime, [view.owner], 'attention', `${item.id} (${item.owner}): plan left for the person: ${note}`);
+    return;
+  }
+  await recordPlanReview(runtime, view.id, { item: item.id, digest: plan.digest, verdict: 'asked', note: '', by: 'runtime', at });
+  await tellManager(runtime, view, 'plan-waiting', `${item.owner} submitted plan ${item.id} "${item.proposal.title}" for assignment ${item.assignment!.assignment}. `
+    + `Read it with onionsoup_status item ${item.id}, then approve it with onionsoup_steer approve-plan (the person granted you this) or send it back with revise-plan and a note. The person can also decide in their inbox.`);
 }
 
 type Steer = (runtime: Runtime, managerId: string, item: WorkItem, note: string) => Promise<string>;
@@ -455,7 +446,7 @@ type Steer = (runtime: Runtime, managerId: string, item: WorkItem, note: string)
 /** What a manager may do to her reports' assigned work from chat. Approving needs the grant; sending back does not. */
 const STEERS: Record<'approve-plan' | 'revise-plan' | 'cancel' | 'note', Steer> = {
   'approve-plan': async (runtime, managerId, item, note) => (await reviewReportPlan(runtime, managerId, item.id, { decision: 'approve', note })).status,
-  'revise-plan': async (runtime, managerId, item, note) => (await revisePlan(runtime, item.id, `owner:${managerId}`, note)).status,
+  'revise-plan': async (runtime, managerId, item, note) => (await reviewReportPlan(runtime, managerId, item.id, { decision: 'revise', note })).status,
   cancel: async (runtime, managerId, item, note) => (await cancelItem(runtime, item.id, `owner:${managerId}`, note)).status,
   note: async (runtime, managerId, item, note) => {
     await journal(runtime, [item.owner], 'manager-note', `${item.id}: from ${managerId}: ${note}`);

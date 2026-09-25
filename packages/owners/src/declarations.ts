@@ -20,7 +20,7 @@ export const Duty = z.object({
   instructions: z.string(),
   requestTo: z.string().optional(),
   followUp: z.string().optional(),
-  /** What a survey duty produces: work items for freelancers, or attention items for the person. */
+  /** What a survey duty raises for the person: work the owner could plan with them, or attention items only they can act on. */
   raises: z.enum(['work', 'attention']).default('work'),
 });
 export type Duty = z.infer<typeof Duty>;
@@ -165,8 +165,6 @@ export const OwnerDeclaration = z.object({
   model: ModelRef,
   /** Incus hosts a repository owner also holds (observe; create/delete behind approvals). */
   incus: IncusDomain.omit({ kind: true }).optional(),
-  /** Workflow for change work items; owners without one raise attention items instead. */
-  workflow: z.string().optional(),
   duties: z.array(Duty),
   maxProposals: z.number().int().min(0).default(3),
   chatContext: ChatContextPolicy.default(() => ChatContextPolicy.parse({})),
@@ -217,36 +215,31 @@ export function repositoryNames(owner: OwnerDeclaration) {
   return [];
 }
 
+/**
+ * Whether an owner changes its domain itself: it owns repositories, and has a persona to plan and work in sessions.
+ * Others raise attention items for the person instead.
+ */
+export function canChange(owner: OwnerDeclaration) {
+  return ownsRepositories(owner) && Boolean(owner.persona);
+}
+
 /** An owner holds incus either as its whole domain or as an incus section beside a repository. */
 export function hasIncus(owner: OwnerDeclaration) {
   return owner.domain.kind === 'incus' || owner.incus !== undefined;
 }
 
-export const Craft = z.enum(['planning', 'implementation', 'review']);
+/** Which models may implement (an owner's implementer subagent, conflict resolution) and review (another family). */
+export const Craft = z.enum(['implementation', 'review']);
 export type Craft = z.infer<typeof Craft>;
+
+/** Crafts of the retired freelancer pipeline: a person's config may still declare them, and they are skipped. */
+const RETIRED_CRAFTS = new Set(['planning']);
 
 export const FreelancerDeclaration = z.object({
   craft: Craft,
-  rubric: z.string(),
   models: z.array(ModelRef).min(1),
 });
 export type FreelancerDeclaration = z.infer<typeof FreelancerDeclaration>;
-
-export const StageId = z.enum(['plan', 'implement', 'review', 'land']);
-export type StageId = z.infer<typeof StageId>;
-
-export const WorkflowDeclaration = z.object({
-  id: z.string(),
-  plan: z.object({ craft: z.literal('planning'), gate: z.literal('human'), consultOwner: z.boolean() }),
-  implement: z.object({ craft: z.literal('implementation') }),
-  review: z.object({
-    craft: z.literal('review'),
-    familyDiffersFrom: z.array(z.enum(['plan', 'implement'])),
-    maxRevisions: z.number().int().min(0),
-    maxReplans: z.number().int().min(0),
-  }),
-});
-export type WorkflowDeclaration = z.infer<typeof WorkflowDeclaration>;
 
 export const FamilyTable = z.object({
   families: z.array(z.object({ family: z.string(), match: z.array(z.string()).min(1) })),
@@ -257,7 +250,6 @@ export interface Declarations {
   root: string;
   owners: Map<string, OwnerDeclaration>;
   freelancers: Map<Craft, FreelancerDeclaration>;
-  workflows: Map<string, WorkflowDeclaration>;
   families: FamilyTable;
 }
 
@@ -268,6 +260,15 @@ async function yamlFiles(directory: string) {
 
 async function loadAll<T>(directory: string, schema: z.ZodType<T>) {
   return (await yamlFiles(directory)).map(document => schema.parse(document));
+}
+
+function isRetiredCraft(document: unknown) {
+  const craft = (document as { craft?: unknown } | null)?.craft;
+  return typeof craft === 'string' && RETIRED_CRAFTS.has(craft);
+}
+
+async function loadFreelancers(directory: string) {
+  return (await yamlFiles(directory)).filter(document => !isRetiredCraft(document)).map(document => FreelancerDeclaration.parse(document));
 }
 
 /** The reporting line must name declared owners and never loop back on itself. */
@@ -318,8 +319,7 @@ export function isDirectReport(declarations: Declarations, managerId: string, re
 export async function loadDeclarations(root: string): Promise<Declarations> {
   const base = resolve(root);
   const owners = await loadAll(join(base, 'owners'), OwnerDeclaration);
-  const freelancers = await loadAll(join(base, 'freelancers'), FreelancerDeclaration);
-  const workflows = await loadAll(join(base, 'workflows'), WorkflowDeclaration);
+  const freelancers = await loadFreelancers(join(base, 'freelancers'));
   const families = FamilyTable.parse(parse(await readFile(join(base, 'families.yaml'), 'utf8')));
   const ownersById = new Map(owners.map(owner => [owner.id, owner]));
   checkOrgChart(ownersById);
@@ -327,7 +327,6 @@ export async function loadDeclarations(root: string): Promise<Declarations> {
     root: base,
     owners: ownersById,
     freelancers: new Map(freelancers.map(freelancer => [freelancer.craft, freelancer])),
-    workflows: new Map(workflows.map(workflow => [workflow.id, workflow])),
     families,
   };
 }
@@ -344,8 +343,3 @@ export function requireFreelancer(declarations: Declarations, craft: Craft) {
   return freelancer;
 }
 
-export function requireWorkflow(declarations: Declarations, workflowId: string) {
-  const workflow = declarations.workflows.get(workflowId);
-  if (!workflow) throw new Error(`unknown_workflow: ${workflowId}`);
-  return workflow;
-}

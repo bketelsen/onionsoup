@@ -32,6 +32,8 @@ export const WorkStatus = z.enum([
   'proposed',
   'planning',
   'awaiting-plan-approval',
+  /** An approved owner plan whose execution session is doing the work. */
+  'working',
   'implementing',
   'reviewing',
   'landing',
@@ -70,6 +72,10 @@ export const Implementation = z.object({
 });
 export type Implementation = z.infer<typeof Implementation>;
 
+/** An owner's plan as submitted: markdown the person approves, and its digest so a review names the exact text. */
+export const PlanDocument = z.object({ markdown: z.string(), digest: z.string() });
+export type PlanDocument = z.infer<typeof PlanDocument>;
+
 const PullRequestTarget = z.object({ itemId: z.string(), branch: z.string(), prUrl: z.string(), previousHead: z.string() });
 
 export const WorkItem = z.object({
@@ -80,6 +86,7 @@ export const WorkItem = z.object({
   status: WorkStatus,
   reason: z.string().optional(),
   plan: Plan.optional(),
+  planDocument: PlanDocument.optional(),
   ownerAnswers: OwnerAnswers.optional(),
   planApproval: z.object({ by: z.string(), at: z.string(), note: z.string().optional() }).optional(),
   implementations: z.array(Implementation).default([]),
@@ -109,6 +116,10 @@ export const WorkItem = z.object({
   }).optional(),
   /** The chat the work was opened from, so the owner hears there how it went. */
   origin: ChatOrigin.optional(),
+  /** The owner session that carries out an approved plan; later notices about the work go there. */
+  session: ChatOrigin.optional(),
+  /** The request another owner opened for this work, when it was delegated. */
+  request: z.string().optional(),
   /** Set on work a manager assigned through an initiative. */
   assignment: AssignmentRef.optional(),
   /** The pid working on a step right now; unset when the item is merely queued (approved, resumed). */

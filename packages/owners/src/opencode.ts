@@ -46,9 +46,9 @@ function log(message: string) {
  * opencode agents, one per role. Nothing asks: a headless "ask" waits forever. These rules are a
  * convenience layer only; the sandbox (read-only root, memory cap) is the boundary.
  */
-export type Role = 'owner' | 'planner' | 'implementer' | 'reviewer';
+export type Role = 'owner' | 'implementer' | 'reviewer';
 
-const READ_ONLY_BASH: Record<string, 'allow' | 'deny'> = {
+export const READ_ONLY_BASH: Record<string, 'allow' | 'deny'> = {
   '*': 'deny',
   'ls*': 'allow',
   'grep *': 'allow',
@@ -100,16 +100,12 @@ const ROLE_AGENTS: Record<Role, { prompt: string; permission: ReturnType<typeof 
     prompt: 'You are the owner of one software domain: its project manager. You know it through your notebook and by reading it. You never edit files.',
     permission: rolePermission(READ_ONLY_BASH, 'deny'),
   },
-  planner: {
-    prompt: 'You are a freelance planner hired for one piece of work. You read the code and write an implementation plan. You never edit files.',
-    permission: rolePermission(READ_ONLY_BASH, 'deny'),
-  },
   implementer: {
-    prompt: 'You are a freelance implementer hired to carry out one approved plan in this working tree. Stay inside the plan. You may run any command the repository needs (install dependencies, build, test) inside your sandbox; only this working tree and caches are writable. Do not commit, push, use gh or sudo: the runtime lands your work after review.',
+    prompt: 'You are a freelance implementer hired for one task in this working tree. Stay inside the task. You may run any command the repository needs (install dependencies, build, test) inside your sandbox; only this working tree and caches are writable. Do not commit, push, use gh or sudo: the runtime lands your work after review.',
     permission: rolePermission(IMPLEMENTER_BASH, 'allow'),
   },
   reviewer: {
-    prompt: 'You are a freelance code reviewer from a different model family than the implementer. Review the change against its plan. You never edit files.',
+    prompt: 'You are a freelance code reviewer from a different model family than the author. Review the change against what it claims to do. You never edit files.',
     permission: rolePermission(READ_ONLY_BASH, 'deny'),
   },
 };
@@ -145,7 +141,6 @@ interface AssistantInfo {
 /** Which paths a role may write inside its sandbox. Only the implementer writes its working tree. */
 const ROLE_WRITES: Record<Role, (directory: string) => string[]> = {
   owner: () => [],
-  planner: () => [],
   implementer: directory => [directory],
   reviewer: () => [],
 };

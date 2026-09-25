@@ -3,8 +3,9 @@ import { promisify } from 'node:util';
 import { z } from 'zod';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { ImplementationReport, ProposedWork, Verdict } from './artifacts.ts';
-import { requireFreelancer } from './declarations.ts';
+import { ImplementationReport, Verdict } from './artifacts.ts';
+import { canChange, requireFreelancer } from './declarations.ts';
+import { tellOwner } from './plan-work.ts';
 import { pickModel } from './families.ts';
 import type { WorkItem, WorkStatus } from './ledger.ts';
 import type { Runtime } from './runtime.ts';
@@ -42,6 +43,36 @@ async function settledPullRequest(url: string) {
 
 const PR_STATES: Record<string, 'open' | 'merged' | 'closed'> = { OPEN: 'open', MERGED: 'merged', CLOSED: 'closed' };
 
+const PullRequestState = z.object({ state: z.string() });
+
+async function publicationState(url: string) {
+  const { stdout } = await run('gh', ['pr', 'view', url, '--json', 'state']);
+  return PR_STATES[PullRequestState.parse(JSON.parse(stdout)).state] ?? 'open';
+}
+
+/** What a refresh saw: publications that merged or closed, and those whose state could not be read. */
+export interface PublicationRefresh { changed: string[]; unreadable: string[] }
+
+/**
+ * Record merges and closes of every open publication (CI repairs too, which share their PR), with one state read each
+ * and no wait for mergeability. The daemon runs it every tick, so delegated requests, initiatives and merge notices
+ * react within a minute instead of waiting for the next maintain-prs duty. Only the state is written.
+ */
+export async function refreshPublications(runtime: Runtime, ownerId?: string): Promise<PublicationRefresh> {
+  const open = (await runtime.ledger.list())
+    .filter(item => item.publication?.state === 'open' && (!ownerId || item.owner === ownerId));
+  const refresh: PublicationRefresh = { changed: [], unreadable: [] };
+  for (const item of open) {
+    const url = item.publication!.url;
+    const state = await publicationState(url).catch(() => undefined);
+    if (!state) refresh.unreadable.push(url);
+    if (!state || state === 'open') continue;
+    await runtime.ledger.update(item.id, current => ({ ...current, publication: { ...current.publication!, state } }));
+    refresh.changed.push(`${url} ${state}`);
+  }
+  return refresh;
+}
+
 export const CI_TRIAGE_LIMITS = { logChars: 12_000 };
 
 const Check = z.object({ name: z.string(), bucket: z.string(), link: z.string().default('') });
@@ -64,73 +95,81 @@ async function failedLogs(checks: readonly z.infer<typeof Check>[]) {
 export const CiTriage = z.object({
   decision: z.enum(['fix', 'flaky', 'person']),
   reason: z.string(),
-  fix: ProposedWork.optional().describe('Required for fix: the work item to plan'),
 });
+export type CiTriage = z.infer<typeof CiTriage>;
 
 async function readTriaged(runtime: Runtime, ownerId: string): Promise<Record<string, string>> {
   return JSON.parse(await readFile(join(runtime.stateDirectory, `ci-triage-${ownerId}.json`), 'utf8').catch(() => '{}')) as Record<string, string>;
 }
 
-/** CI failed on a published PR's head commit: wake the owner once for that commit to decide fix, flaky or person. */
+function fixNotice(item: WorkItem, headSha: string, reason: string) {
+  return `CI fails on your PR ${item.publication!.url} ("${item.proposal.title}") at ${headSha.slice(0, 12)}, and you decided to fix it: ${reason}. `
+    + `Put your desk on the PR with onionsoup_checkout_pr item "${item.id}", fix and verify it (systematic-debugging), then propose with onionsoup_propose_changes item "${item.id}": `
+    + 'host code reviews the fix and pushes it onto the same PR.';
+}
+
+type TriageOutcome = (runtime: Runtime, item: WorkItem, headSha: string, reason: string) => Promise<void>;
+
+/** What the owner's decision leads to: a fix is its own to make on its desk; anything it cannot do goes to the person. */
+const TRIAGE_OUTCOMES: Record<CiTriage['decision'], TriageOutcome> = {
+  fix: async (runtime, item, headSha, reason) => {
+    if (!canChange(runtime.owner(item.owner))) return TRIAGE_OUTCOMES.person(runtime, item, headSha, `owner_cannot_change: ${reason}`);
+    await runtime.notebook(item.owner).journal({ kind: 'ci-triage', workItem: item.id, outcome: 'fix', note: `CI on ${item.publication!.url}: ${reason}` });
+    await tellOwner(runtime, item, `ci-fix-${headSha.slice(0, 8)}`, fixNotice(item, headSha, reason));
+  },
+  flaky: async (runtime, item, _headSha, reason) => {
+    await runtime.notebook(item.owner).journal({ kind: 'ci-triage', workItem: item.id, outcome: 'flaky', note: `CI on ${item.publication!.url}: ${reason}` });
+  },
+  person: async (runtime, item, _headSha, reason) => {
+    await runtime.notebook(item.owner).journal({ kind: 'attention', workItem: item.id, outcome: 'person', note: `CI on ${item.publication!.url}: ${reason}` });
+  },
+};
+
+/** CI failed on a published PR's head commit: the owner decides once for that commit whether to fix it, call it flaky, or ask the person. */
 async function triageFailingCi(runtime: Runtime, item: WorkItem, headSha: string) {
   const triaged = await readTriaged(runtime, item.owner);
   if (triaged[item.publication!.url] === headSha) return undefined;
   const failing = await failingChecks(item.publication!.url);
   if (!failing.length) return undefined;
   const owner = runtime.owner(item.owner);
-  const notebook = runtime.notebook(owner.id);
   const brief = [
     `CI failed on your published PR ${item.publication!.url} ("${item.proposal.title}") at ${headSha.slice(0, 12)}.`,
     `<failing-checks>\n${failing.map(check => `- ${check.name}: ${check.link}`).join('\n')}\n</failing-checks>`,
     `<failed-logs>\n${await failedLogs(failing)}\n</failed-logs>`,
-    `<notebook>\n${await notebook.orientation()}\n</notebook>`,
-    'Decide as the owner: fix (describe the work to plan; the person approves the plan), flaky (not caused by the change; say why), or person (needs the person: secrets, infrastructure, policy).',
+    `<notebook>\n${await runtime.notebook(owner.id).orientation()}\n</notebook>`,
+    'Decide as the owner: fix (you will fix it on your desk and push onto this PR; say what is wrong), flaky (not caused by the change; say why), or person (needs the person: secrets, infrastructure, policy).',
   ].join('\n\n');
   const decision = (await runtime.hire(owner.id, { role: 'owner', model: owner.model, directory: owner.workspace, title: `${owner.id}: CI triage`, brief, schema: CiTriage })).value;
-  const invalidFix = decision.decision === 'fix' && (!decision.fix || !owner.workflow);
-  const kind = decision.decision === 'person' || invalidFix ? 'attention' : 'ci-triage';
-  await notebook.journal({ kind, workItem: item.id, outcome: decision.decision, note: invalidFix ? `ci_fix_missing_workflow_or_proposal: ${item.publication!.url}; a person must provide a proposal or configure a workflow.` : `CI on ${item.publication!.url}: ${decision.reason}` });
-  let repair: WorkItem | undefined;
-  if (decision.decision === 'fix' && decision.fix && owner.workflow) {
-    repair = await runtime.ledger.create(owner.id, owner.workflow, {
-      ...decision.fix, repository: item.proposal.repository,
-    }, {
-      repairOf: { itemId: item.id, branch: item.publication!.branch, prUrl: item.publication!.url, previousHead: headSha },
-    });
-  }
+  await TRIAGE_OUTCOMES[decision.decision](runtime, item, headSha, decision.reason);
   triaged[item.publication!.url] = headSha;
   await writeFile(join(runtime.stateDirectory, `ci-triage-${owner.id}.json`), JSON.stringify(triaged, null, 2) + '\n');
-  return repair;
+  return decision.decision;
 }
 
-/** The maintain-prs duty: record merges and closes, and open a rebase work item for each conflicting PR. */
+/** The maintain-prs duty: record merges and closes, triage failing CI, and open a rebase work item for each conflicting PR. */
 export async function maintainPullRequests(runtime: Runtime, ownerId: string) {
+  const refreshed = await refreshPublications(runtime, ownerId);
   const items = (await runtime.ledger.list()).filter(item => item.owner === ownerId);
   const openRebases = new Set(items.filter(item => item.rebaseOf && !['landed', 'failed', 'rejected', 'cancelled'].includes(item.status)).map(item => item.rebaseOf!.itemId));
   const cancelledRebases = new Set(items.filter(item => item.rebaseOf && item.status === 'cancelled')
     .map(item => `${item.rebaseOf!.itemId}:${item.rebaseOf!.previousHead}`));
-  const notes: string[] = [];
+  const notes = [...refreshed.changed, ...refreshed.unreadable.map(url => `${url} state unreadable`)];
   const opened: WorkItem[] = [];
   for (const item of items.filter(candidate => candidate.publication?.state === 'open' && !candidate.repairOf)) {
     const pr = await settledPullRequest(item.publication!.url);
-    const state = PR_STATES[pr.state] ?? 'open';
-    if (state !== 'open') {
-      await runtime.ledger.update(item.id, current => ({ ...current, publication: { ...current.publication!, state } }));
-      notes.push(`${item.publication!.url} ${state}`);
-      continue;
-    }
+    // Merged or closed since the refresh: the next refresh records it.
+    if (PR_STATES[pr.state] !== 'open') continue;
     const hasRepair = items.some(candidate => candidate.repairOf?.itemId === item.id
       && !['failed', 'rejected', 'cancelled'].includes(candidate.status)
       && !candidate.publication);
     if (hasRepair) continue;
     if (openRebases.has(item.id)) continue;
-    const fix = await triageFailingCi(runtime, item, pr.headRefOid).catch(error => {
+    const triage = await triageFailingCi(runtime, item, pr.headRefOid).catch(error => {
       notes.push(`${item.publication!.url} CI triage failed: ${error instanceof Error ? error.message : error}`);
       return undefined;
     });
-    if (fix) {
-      opened.push(fix);
-      notes.push(`${item.publication!.url} CI failing → ${fix.id}`);
+    if (triage) {
+      notes.push(`${item.publication!.url} CI failing: ${triage}`);
       continue;
     }
     if (pr.mergeable !== 'CONFLICTING' || cancelledRebases.has(`${item.id}:${pr.headRefOid}`)) continue;

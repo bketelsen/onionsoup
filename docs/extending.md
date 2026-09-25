@@ -31,6 +31,27 @@ Requirements: Node 24, opencode (logged in to the providers your owners use), `b
    the new agent.
 4. Talk to it. Run its duties with `npm run owners -- wake <id> <duty>`, or leave it to the daemon.
 
+A repository owner needs a persona to change its repository: it plans with you in chat, runs approved plans in
+their own sessions and proposes its desk changes. Without one it only observes.
+
+### Pick the models
+
+`freelancers/*.yaml` name the models, never the process:
+
+```yaml
+# freelancers/implementer.yaml: every owner's implementer subagent, and conflict resolution in rebases
+craft: implementation
+models: [github-copilot/claude-sonnet-5, openai/gpt-5.6-sol]
+# freelancers/reviewer.yaml: each owner's reviewer subagent and the required review of proposed changes
+craft: review
+models: [openai/gpt-5.6-sol, github-copilot/claude-sonnet-5]
+```
+
+An owner's reviewer is the first `review` model outside the family of the owner's own `model`, as `families.yaml`
+decides, so list models from at least two families. Files from older configurations (`craft: planning`,
+`workflows/`, `rubrics/`, and `workflow:` lines on owners) are ignored and can be deleted. The process an owner
+follows lives in the skills in `packages/owners/skills`; changing it is engine code.
+
 ### Own several repositories together
 
 Related repositories can share one owner. Each repository keeps its own verification; work items, proposals and
@@ -107,9 +128,10 @@ assignments such as `{ id: core-doc, to: taraza, proposal: {...} }` and `{ id: s
 proposal: {...} }`. You approve the breakdown once (the surface inbox, or `npm run owners -- approve-initiative <id>`;
 `revise-initiative <id> --note` and `cancel-initiative <id> --reason` send it back or stop it), and `owners
 initiatives` / `owners initiative <id>` read them. The daemon dispatches each assignment when its dependencies have
-merged; the report accepts it automatically and can push back with `onionsoup_raise`. Without an `approve-plans`
-grant, every plan still waits for you. `INITIATIVE_LIMITS` (`maxAssignments`, `maxOpenPerManager`),
-`SUPERVISION_LIMITS.revisionsPerItem` and `DAEMON_LIMITS.parallelReviews` bound the work. A steward may put owners
+merged; the report accepts it automatically, plans it in a session of its own, and can push back with
+`onionsoup_raise`. With an `approve-plans` grant the manager is woken in the initiative's chat to approve or send back
+each plan (`onionsoup_steer`); without one, every plan waits for you in the inbox. `INITIATIVE_LIMITS`
+(`maxAssignments`, `maxOpenPerManager`) and `SUPERVISION_LIMITS.revisionsPerItem` bound the work. A steward may put owners
 in its scope under itself, but only you set any other reporting line or grant.
 
 ## Run it always on
@@ -256,16 +278,20 @@ from a person decision, a background task, or a publication checkpoint: it reloa
 lock shared by all runtime processes. Keep the mutation synchronous and perform external effects outside the
 lock. Learning records, publication state, and human notes must not be replaced from an old snapshot.
 
-Custom workflows should record `resumeStatus` before claiming an active stage and clear `activeRunner` when
-it finishes. Person decisions use `resumeItem`, `retryItem`, and `cancelItem`; cancellation of active work is
-refused. Desk publication uses the `desk-publication` workflow and its persisted stage to reconcile retries
-against the local commit and existing GitHub PR before repeating effects.
+What host code still advances is a lookup table in `packages/owners/src/work-recovery.ts`: each workflow
+(`owner-change`, `desk-publication`, `rebase`) names its `advance` step and when it is runnable, and `FIRST_STEP` says
+where stopped work continues. A new kind of host-run work adds an entry there; the dispatcher does not change. It
+should record `resumeStatus` before claiming an active stage and clear `activeRunner` when it finishes. Person
+decisions use `approvePlan`, `revisePlan`, `resumeItem`, `retryItem` and `cancelItem`; cancellation of active work is
+refused. Desk publication (also used by approved plans and CI repairs) keeps its persisted stage to reconcile
+retries against the local commit and existing GitHub PR before repeating effects.
 
 ## Delegation, attention and recovery
 
 An owner can call `onionsoup_request_work` with a declared receiver, title, goal, rationale, acceptance criteria,
-size, and (for repository groups) repository. Receivers need a declared workflow; unsupported domains are refused
-before a request is opened. Accepting creates ordinary proposed work and never bypasses the person's plan approval.
+size, and (for repository groups) repository. Receivers must be able to change their repository (a repository owner
+with a persona); others are refused before a request is opened. Accepting creates a work item the receiver plans in a
+session of its own, and its plan waits for your approval in the inbox (or a manager's `approve-plans` grant).
 The request keeps its linked work id and outcome; declines, failed work and closed unmerged PRs raise attention for both owners.
 
 Use `onionsoup_attention` to list an owner's attention, acknowledge it, resolve it with an outcome, or reopen it.

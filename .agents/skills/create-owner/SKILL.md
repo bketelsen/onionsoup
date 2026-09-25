@@ -19,7 +19,8 @@ is the reference; the schema is `packages/owners/src/declarations.ts`.
 
 1. Settle with the person: the domain, what the owner is for, and what it may do. Ask; don't assume authority.
 2. Pick the domain kind:
-   - `git-repository`: verify commands, change workflow, `maintain-prs` duty.
+   - `git-repository`: verify commands, a persona (without one the owner cannot change its repository), a
+     `maintain-prs` duty.
    - `repository-group`: several related repositories under one owner, each with its own verify commands
      (see docs/extending.md). Group by topic and coupling; keep a critical repository on its own.
    - `incus`: instances, create/delete behind `allow` and gates.
@@ -30,9 +31,11 @@ is the reference; the schema is `packages/owners/src/declarations.ts`.
 3. Name it. Owners are Dune characters from Heretics, Chapterhouse and God Emperor. Important domains get main
    characters; small repos get tertiary names or the repo's own name. Read `owners/*.yaml` first so you don't
    reuse a name.
-4. Pick the model and check families. Look up the model's family in `families.yaml`. The reviewer freelancer must
-   be from a different family than the implementer, and the owner's model is usually fine from either.
-5. Write `owners/<id>.yaml`. Copy the closest existing owner, not the starter example.
+4. Pick the model and check families. Look up the model's family in `families.yaml`. The owner's reviewer subagent
+   and the required review of its changes use the first `review` freelancer model outside the owner's family, so the
+   review freelancer must list a model from another family than the owner's model.
+5. Write `owners/<id>.yaml`. Copy the closest existing owner, not the starter example. There is no `workflow:` line:
+   a repository owner with a persona changes its repository itself.
    - Keep `conversation:` narrow: allow reads and the domain's verify commands, and `ask` for everything else.
    - Add `mcp:` servers with per-tool rules when a tool already exists.
    - Duties: add `every:` only when the person wants the owner always on.

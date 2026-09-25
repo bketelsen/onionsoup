@@ -15,10 +15,10 @@ const REGISTERS = ['MAP', 'WISDOM', 'decisions', 'open-questions', 'FAILURES'] a
 const NOTE_KINDS = new Set([
   'delete-approved', 'request-denied', 'create-failed', 'delete-failed',
   'attention-decision', 'request-recovery', 'request-recovered', 'request-completed', 'create-approved', 'request-opened',
-  'chat-decision', 'chat-action', 'retracted', 'work-opened', 'plan-approved', 'plan-rejected', 'published', 'publish-failed',
+  'chat-decision', 'chat-action', 'subagent-action', 'retracted', 'work-opened', 'plan-approved', 'plan-rejected', 'published', 'publish-failed',
   'rebase-pushed', 'attention', 'app-held', 'app-update-proposed', 'app-updated', 'request-accepted', 'request-declined',
   'request-refused', 'instance-created', 'instance-deleted', 'follow-up', 'asked', 'answered', 'ci-triage', 'owner-created',
-  'owner-updated', 'owner-retired', 'ship-started', 'shipped', 'work-status', 'friction',
+  'owner-updated', 'owner-retired', 'ship-started', 'shipped', 'work-status', 'friction', 'fact',
   ...INITIATIVE_JOURNAL_KINDS,
 ]);
 const DONE = new Set(['landed', 'failed', 'rejected', 'cancelled']);
@@ -26,13 +26,6 @@ const DONE = new Set(['landed', 'failed', 'rejected', 'cancelled']);
 function isOpenWork(item: WorkItem) {
   return !DONE.has(item.status) || item.publication?.state === 'open';
 }
-
-/** Landed on a local branch but not yet a PR: the person publishes it. Rebases update an existing PR instead. */
-export function awaitingPublish(item: WorkItem) {
-  return item.status === 'landed' && !item.publication && !item.rebaseOf;
-}
-
-
 
 async function journal(directory: string) {
   const files = (await readdir(join(directory, 'journal')).catch(() => [])).filter(name => name.endsWith('.jsonl')).sort();
@@ -81,7 +74,6 @@ export async function deskState(runtime: Runtime, query: DeskQuery) {
   const requests = (await runtime.requests.list()).filter(request => request.from === owner.id || request.to === owner.id);
   const pending = [
     ...items.filter(item => item.status === 'awaiting-plan-approval').map(item => ({ kind: 'plan', id: item.id, title: item.proposal.title, detail: item.plan?.summary ?? item.proposal.goal })),
-    ...items.filter(awaitingPublish).map(item => ({ kind: 'publish', id: item.id, title: item.proposal.title, detail: `Landed on ${item.branch}; publishing opens a draft PR.` })),
     ...items.filter(item => item.status === 'awaiting-push-approval').map(item => ({ kind: 'push', id: item.id, title: item.proposal.title, detail: item.rebaseOf?.prUrl ?? '' })),
     ...requests.filter(request => request.status === 'awaiting-create-approval').map(request => ({
       kind: 'create', id: request.id, detail: request.ask.purpose,
@@ -115,7 +107,7 @@ function outcome(item: WorkItem) {
   if (item.status === 'landed') {
     if (item.publication) return `landed; PR ${item.publication.url} (${item.publication.state})`;
     if (item.rebaseOf) return `landed; updated ${item.rebaseOf.prUrl}`;
-    return `landed on ${item.branch} (${item.landedCommit?.slice(0, 12)}); not yet a PR: waiting on the person to publish it`;
+    return `landed on ${item.branch} (${item.landedCommit?.slice(0, 12)}); no PR`;
   }
   return `${item.status}${item.reason ? `: ${item.reason}` : ''}`;
 }
@@ -139,7 +131,9 @@ export function statusText(items: readonly WorkItem[], requests: readonly Resour
 export function itemText(item: WorkItem) {
   const lines = [`${item.id}: ${item.proposal.title}`, `Status: ${DONE.has(item.status) ? outcome(item) : item.status}`, `Opened ${item.createdAt}; updated ${item.updatedAt}`, `Goal: ${item.proposal.goal}`];
   if (item.plan) lines.push(`Plan: ${item.plan.summary}`, ...item.plan.steps.map((step, index) => `  ${index + 1}. ${step.description}`));
+  if (item.planDocument) lines.push(`Plan (${item.planDocument.digest}):`, item.planDocument.markdown);
   if (item.planApproval) lines.push(`Plan approved by ${item.planApproval.by} at ${item.planApproval.at}`);
+  if (item.session) lines.push(`Working in session ${item.session.sessionID}`);
   item.implementations.forEach((implementation, index) => lines.push(`Implementation ${index + 1}: ${implementation.report.summary}`, `  verify: ${implementation.verification.map(result => `${result.command.slice(0, 60)}=${result.exitCode}`).join(', ')}`));
   item.verdicts.forEach((verdict, index) => lines.push(`Review ${index + 1}: ${verdict.decision}: ${verdict.summary}`));
   lines.push(`Hires: ${item.hires.map(hire => `${hire.stage} ${hire.model} ${hire.outcome}${hire.error ? ` (${hire.error.slice(0, 120)})` : ''}`).join('; ') || 'none'}`);
@@ -149,7 +143,6 @@ export function itemText(item: WorkItem) {
 const ASSIGNMENT_WORDS: Partial<Record<AssignmentState, string>> = {
   'not-dispatched': 'not dispatched yet',
   'plan-waiting': 'plan waiting for approval',
-  'awaiting-publish': 'landed; waiting on the person to publish it',
   'awaiting-merge': 'PR open; waiting on the person to merge it',
   'awaiting-person': 'waiting on the person',
   blocked: 'interrupted; waiting on the person',

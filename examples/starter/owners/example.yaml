@@ -18,7 +18,6 @@ domain:
     - [npm, test]
 # workspace defaults to <home>/checkouts/<id>; set it only to use an existing clone.
 model: github-copilot/claude-sonnet-5           # provider/model as opencode knows it
-workflow: change                                # plan -> your approval -> implement -> cross-family review -> land
 maxProposals: 3
 conversation:                                   # rules for chats with you: allow, ask (you approve in chat), deny
   edit: ask

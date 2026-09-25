@@ -11,9 +11,9 @@ cause, and the fix is either applied through the normal gates or reported to the
 ## Where things are
 
 - **Engine:** `~/projects/onionsoup`, run as the user unit `onionsoup-owners.service`, which ticks every 60s:
-  re-read the configuration, process requests, supervise initiatives, run due duties, advance work items, raise
-  work notices. Duties, work items and managers' plan reviews run in the background, so the tick itself stays
-  short; `owners tick` waits for what it started.
+  re-read the configuration, refresh the state of open PRs, process requests, supervise initiatives, run due
+  duties, advance runnable work items (publications and rebases), raise work notices. Duties, requests and work
+  items run in the background, so the tick itself stays short; `owners tick` waits for what it started.
 - **Config:** `~/.config/onionsoup` (`ONIONSOUP_CONFIG`).
 - **State:** `~/.local/share/onionsoup` (`ONIONSOUP_HOME`). It holds `state/` (ledger, requests, initiatives,
   locks, ci-triage, ship), `desks/<owner>`, `checkouts/`, `evidence/<owner>` and `tools/`.
@@ -23,11 +23,13 @@ cause, and the fix is either applied through the normal gates or reported to the
 - **Desk review rounds:** `state/desk-reviews/<owner>--<repo>.json` holds the rounds of a desk change that asked
   for changes. At the limit, `propose_changes` returns `needs-person` and hires no reviewer; after reading the diff,
   `npm run owners -- desk-review-reset <owner> [repository]` clears it.
-  A step that seems stuck is usually waiting on the person to publish or merge the previous PR, or on an open
-  escalation from the report.
+  A step that seems stuck is usually waiting on the person to merge the previous PR, on a plan approval, or on an
+  open escalation from the report.
 - **Notebooks:** under state, one Git repo per owner. Read one with `npm run owners -- notebook <id>`.
 - **Plugin:** `packages/owners/src/plugin.ts`, loaded by the surface's opencode (`onionsoup-surface.service`,
-  http://127.0.0.1:4747). A change takes effect only when the surface restarts.
+  http://127.0.0.1:4747). A change takes effect only when the surface restarts. The plugin, not the daemon, posts
+  notices into chats and opens owner sessions (`openNeededSessions`, every 15 seconds), so both wait while the
+  surface is down.
 
 ## Steps
 
@@ -39,11 +41,19 @@ cause, and the fix is either applied through the normal gates or reported to the
    - `npm run owners -- desk-state <owner>` gives the same view as the Owner's Desk.
 2. A stuck item: check its status in `show`.
    - Items waiting on the person (plan approval, push, create/delete) are not stuck; tell the person.
+   - An owner's plan (`owner-change`) moves `planning` → `awaiting-plan-approval` → `working` → `landing` →
+     `landed`. In `planning` a delegated item needs its planning session (`origin`, "Request <id>: ..."); in
+     `awaiting-plan-approval` it waits on the person in the chat it was submitted from, or in the inbox for delegated
+     work; in `working` it needs its work session (`session`, "Plan <id>: ..."), where the owner works until it
+     proposes with the item; `landing` is host code publishing it. An item missing its session means the surface is
+     down or the open failed: look for `owner_session_failed` in the surface's log. A chat approval lost to a surface
+     restart leaves the item `awaiting-plan-approval`; ask the owner to resubmit with `item`.
+   - Notices about the work go to the work session first, then the chat it came from. A `failed` item with
+     `pipeline_removed` was open work of the retired freelancer pipeline; the owner plans it again if it is still
+     wanted.
    - An `interrupted` item resumes with `npm run owners -- resume <item>`.
-   - A `failed` item retries its stage with `npm run owners -- retry <item> [--note ...]`. One failed with
-     `revision_limit_reached` whose verification passed can also land over the reviewer's findings, if the person
-     decides so: `npm run owners -- land-over-findings <item> --note "<why>"`. That opens a proposed follow-up
-     listing the findings.
+   - A `failed` item retries its stage with `npm run owners -- retry <item> [--note ...]`, or is cancelled with
+     `npm run owners -- cancel <item> --reason "..."`.
    - After a crash, `recover` marks items whose runner died as interrupted so they can be resumed.
 3. A runtime lock (`runtime_locked`): the daemon holds it during ticks. A stale lock is taken over
    automatically when its holder pid is gone. Never delete lock files while a daemon runs.

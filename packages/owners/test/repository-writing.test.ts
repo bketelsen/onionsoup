@@ -3,9 +3,7 @@ import { mkdtemp } from 'node:fs/promises';
 import { test } from 'node:test';
 import type { Config, PluginInput } from '@opencode-ai/plugin';
 import { withActiveHooks } from './active-hooks.ts';
-import { Runtime } from '../src/runtime.ts';
-import { Plan } from '../src/artifacts.ts';
-import { implementBrief, reviewBrief } from '../src/briefs.ts';
+import { REPOSITORY_REVIEW } from '../src/repository-writing.ts';
 
 function assertWritingRule(prompt: string) {
   assert.match(prompt, /read as the project's own record/);
@@ -31,7 +29,7 @@ test('configured owner prompts carry repository writing guidance alongside each 
   assert.ok(owners.length > 1);
   for (const owner of owners) {
     assertWritingRule(owner.prompt!);
-    assert.match(owner.prompt!, /onionsoup_friction \(report reproducible engine behavior/);
+    assert.match(owner.prompt!, /onionsoup_friction \(report reproducible engine\s+behavior/);
     assert.match(owner.prompt!, /onionsoup_request_work \(ask another\s+owner/);
   }
   assert.match(config.agent!.Odrade!.prompt!, /<org>\nYour direct reports: Bellonda/);
@@ -44,27 +42,23 @@ test('configured owner prompts carry repository writing guidance alongside each 
   assert.equal(permissions('Odrade').onionsoup_initiative, 'allow', 'shown to owners with direct reports');
   assert.equal(permissions('Bellonda').onionsoup_initiative, undefined);
   assert.match(config.agent!.Bellonda!.prompt!, /Exact\./, 'the persona remains available for conversation');
+  const milesTeg = config.agent!['Miles Teg']!.prompt!;
+  assert.match(milesTeg, /Skills drive how you work/);
+  assert.match(milesTeg, /Small, clear changes: edit your desk, run the verification commands, and end with\s+onionsoup_propose_changes/);
+  assert.match(milesTeg, /submit it with\s+onionsoup_submit_plan\. The person approves it here/);
+  assert.match(milesTeg, /onionsoup_checkout_pr/);
+  assert.match(milesTeg, /onionsoup_record_fact: they come back to you word\s+for word/);
+  assert.doesNotMatch(milesTeg, /freelancer|onionsoup_open_work/);
+  assert.doesNotMatch(config.agent!.Moneo!.prompt!, /onionsoup_submit_plan/, 'an owner that only observes is not told to plan changes');
+  assert.match(config.agent!.Moneo!.prompt!, /You do not change your domain yourself/);
+  assert.match(config.agent!.Odrade!.prompt!, /you are woken here when it submits a plan/);
+  assert.match(config.agent!.Bellonda!.prompt!, /Work it assigns opens a session where you plan it alone/);
 });
 
-test('implementation and review briefs apply the same rule without discarding the project rubric', async () => {
-  const runtime = await Runtime.open({
-    declarations: 'packages/owners/test/fixtures/owners', state: await mkdtemp('/tmp/onionsoup-writing-brief-'),
-  });
-  const item = await runtime.ledger.create('clippy', 'change', {
-    title: 'Record the retention decision', goal: 'Update the ADR', rationale: 'Approved policy',
-    acceptance: ['Follow the ADR template'], size: 'small',
-  });
-  const plan = Plan.parse({
-    summary: 'Revise the ADR', steps: [{ description: 'Update the record', files: ['docs/decision.md'] }],
-    tests: ['Check the template'], risks: [], outOfScope: [], questionsForOwner: [],
-  });
-  const rubric = 'The project ADR template requires a Decision owner attribution field.';
-  const implementation = implementBrief(item, plan, 'Use docs/decisions/TEMPLATE.md.', rubric);
-  const review = reviewBrief(item, plan, 'ADR changes', [], '', rubric);
-  for (const brief of [implementation, review]) {
-    assertWritingRule(brief);
-    assert.ok(brief.includes(rubric));
-  }
-  assert.match(review, /flag violations as review findings/);
-  assert.match(review, /Apply repository-specific attribution requirements where declared/);
+test('the host review brief applies the same rule and says which severities send a change back', () => {
+  assertWritingRule(REPOSITORY_REVIEW);
+  assert.match(REPOSITORY_REVIEW, /flag violations as review findings/);
+  assert.match(REPOSITORY_REVIEW, /Apply repository-specific attribution requirements where declared/);
+  assert.match(REPOSITORY_REVIEW, /- blocker: a correctness, safety or factual error[^\n]*Only blockers send the change back/);
+  assert.match(REPOSITORY_REVIEW, /- major, minor, nit: worth fixing, but not blocking/);
 });

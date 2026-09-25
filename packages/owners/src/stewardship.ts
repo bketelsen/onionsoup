@@ -67,7 +67,6 @@ export function checkOwnerWrite(declarations: Declarations, stewardId: string, c
     if (taken.length) throw new Error(`refused: ${owner.id} already owns ${taken.join(', ')}; change or retire that owner first`);
   }
   familyOf(declarations.families, candidate.model);
-  if (candidate.workflow && !declarations.workflows.has(candidate.workflow)) throw new Error(`refused: unknown workflow ${candidate.workflow}`);
 }
 
 /**
@@ -174,8 +173,7 @@ export async function stewardGuide(runtime: Runtime, stewardId: string) {
     `Your scope: owners whose domain matches ${steward.manages!.owners.join(', ')}.`,
     `Authority stays with the person: never set ${AUTHORITY_FIELDS.join(', ')}; the tool refuses them.`,
     `Owners now:\n${owners.join('\n')}`,
-    `Model families (the reviewer must come from another family than the implementer):\n${families.join('\n')}`,
-    `Workflows: ${[...runtime.declarations.workflows.keys()].join(', ')}`,
+    `Model families (an owner's reviewers come from another family than its own model):\n${families.join('\n')}`,
     `Procedure (written for Leto; with this tool you skip the manual validate/commit/sync steps):\n\n${procedure}`,
   ].join('\n\n');
 }

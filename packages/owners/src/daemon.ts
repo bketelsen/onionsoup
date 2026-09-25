@@ -8,15 +8,15 @@ import { requestParticipants } from './delegation.ts';
 import { noticeWorkChanges } from './notices.ts';
 import { superviseInitiatives } from './org-work.ts';
 import { distill, distillIsDue } from './memory.ts';
-import type { WorkItem, WorkStatus } from './ledger.ts';
+import type { WorkItem } from './ledger.ts';
 import { wake } from './owner.ts';
+import { refreshPublications } from './rebase.ts';
 import { requestRunnerIsAlive, type ResourceRequest } from './requests.ts';
 import type { Runtime } from './runtime.ts';
-import { advance } from './workflow.ts';
+import { advance, isRunnable, retirePipelineItems } from './work-recovery.ts';
 
 export const DAEMON_LIMITS = {
   tickMs: 60_000, shutdownGraceMs: 5_000, parallelItems: 4, parallelDuties: 2, parallelMemory: 1, parallelRequests: 2,
-  parallelReviews: 1,
 };
 
 /**
@@ -61,12 +61,10 @@ const requestOwners = new Set<string>();
 const items = new Background(DAEMON_LIMITS.parallelItems);
 const duties = new Background(DAEMON_LIMITS.parallelDuties);
 const memories = new Background(DAEMON_LIMITS.parallelMemory);
-/** Managers' plan reviews under approve-plans grants. */
-const reviews = new Background(DAEMON_LIMITS.parallelReviews);
 
 /** Wait for background work the ticks started. */
 export async function drain() {
-  await Promise.all([items.drain(), duties.drain(), memories.drain(), requests.drain(), reviews.drain()]);
+  await Promise.all([items.drain(), duties.drain(), memories.drain(), requests.drain()]);
 }
 
 const UNIT_MS: Record<string, number> = { m: 60_000, h: 3_600_000, d: 86_400_000 };
@@ -75,9 +73,6 @@ export function everyMs(every: string) {
   const unit = every.at(-1)!;
   return Number(every.slice(0, -1)) * UNIT_MS[unit]!;
 }
-
-/** Statuses the runtime moves on its own; everything else waits for a person or is finished. */
-const RUNNABLE: readonly WorkStatus[] = ['proposed', 'planning', 'implementing', 'reviewing', 'landing'];
 
 export interface TickLog {
   duty(ownerId: string, dutyId: string, summary: string): void;
@@ -218,7 +213,10 @@ async function reservedRequestOwners(runtime: Runtime) {
   return reserved;
 }
 
-/** One pass: configuration, requests (people may be waiting on an instance), initiatives, due duties, work items, notices. */
+/**
+ * One pass: configuration, merged or closed PRs, requests (people may be waiting on an instance), initiatives, due
+ * duties, work items, notices. PR states come first so everything after reacts to a merge on the same tick.
+ */
 export async function tick(runtime: Runtime, log: TickLog) {
   const stranded = await runtime.ledger.markInterrupted();
   if (stranded) log.error('recovery', new Error(`${stranded} work items lost their runner and await a person`));
@@ -228,13 +226,19 @@ export async function tick(runtime: Runtime, log: TickLog) {
     log.error('configuration (keeping the last good one)', error);
   }
   try {
+    const { unreadable } = await refreshPublications(runtime);
+    if (unreadable.length) log.error('publications', new Error(`pr_state_unreadable: ${unreadable.join(', ')}`));
+  } catch (error) {
+    log.error('publications', error);
+  }
+  try {
     await runtime.requests.markInterrupted();
     await runRequests(runtime, log);
   } catch (error) {
     log.error('requests', error);
   }
   try {
-    await superviseInitiatives(runtime, { onError: log.error, startReview: (key, review) => reviews.start(key, review) });
+    await superviseInitiatives(runtime, { onError: log.error });
   } catch (error) {
     log.error('initiatives', error);
   }
@@ -246,7 +250,7 @@ export async function tick(runtime: Runtime, log: TickLog) {
     return; // Retry next tick when the owner reservations can be read safely.
   }
   await runDueDuties(runtime, log, reserved);
-  const runnable = (await runtime.ledger.list()).filter(candidate => RUNNABLE.includes(candidate.status) && !candidate.activeRunner);
+  const runnable = (await runtime.ledger.list()).filter(isRunnable);
   advanceRunnable(runnable, runtime, log, reserved);
   await scheduleMemory(runtime, log, reserved);
   try {
@@ -260,6 +264,8 @@ export async function tick(runtime: Runtime, log: TickLog) {
 export async function daemon(runtime: Runtime, log: TickLog, signal: AbortSignal) {
   const stranded = await runtime.ledger.markInterrupted();
   if (stranded) log.error('startup', new Error(`${stranded} work items were interrupted by the last stop`));
+  const retired = await retirePipelineItems(runtime);
+  if (retired.length) log.error('startup', new Error(`pipeline_removed: ${retired.join(', ')} failed; plan them again if they are still wanted`));
   while (!signal.aborted) {
     await tick(runtime, log);
     await sleep(DAEMON_LIMITS.tickMs, undefined, { signal }).catch(() => {});

@@ -4,6 +4,15 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
 
 ## Owners and their authority
 
+- **Owner sessions' bash is not sandboxed yet.** Owner chats and the sessions that carry out approved plans run in
+  the surface's opencode on the host, and so do the implementer and reviewer subagents they start. Their bash runs
+  as the person, bounded only by permission rules, which [AGENTS.md](../AGENTS.md) rule 3 says are never the
+  boundary. The follow-up is to run chat bash through bwrap from a `tool.execute.before` wrapper in the plugin, the
+  same sandbox hires and verification already use.
+- **Plan approvals in chat are fragile.** A plan approval pending in a chat is lost if the surface restarts (the
+  permission prompt lives in its opencode); the item stays `awaiting-plan-approval` and the owner resubmits it with
+  `item`. The chat permission card has no note field, so a plan rejected in chat usually arrives without feedback, and
+  the owner has to ask the person what to change.
 - **Desk changes need a first real run.** `onionsoup_propose_changes` (verify → cross-family review → commit →
   push → PR → merge under a `merge` grant → publish if the owner is a site source) is built, and Bellonda holds a
   merge grant for her wiki, but it has not yet run end to end. Her `minideb` page and `selfie` correction are
@@ -19,17 +28,17 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
 - **No budgets.** Per-owner cost caps and wake-rate limits are designed but not enforced, and cost is only tracked
   for providers that report it (Copilot); ChatGPT OAuth reports $0.
 
-- **Initiative chains stall on the person's publish and merge.** An assignment completes only when its PR merges,
-  so each step waits wherever a landed item waits to be published or a PR waits to be merged (the initiative view
-  says so). A report with a `merge` grant merges only desk changes, not work items.
+- **Initiative chains stall on the person's merge.** An assignment completes only when its PR merges, so each step
+  waits wherever a PR waits to be merged (the initiative view says so), unless the report holds a `merge` grant for
+  its repository.
 - **No initiatives between peers.** Only a manager plans across owners, through its direct reports; peers still
   delegate one request at a time, and the receiver may decline.
 - **Waking a manager needs the surface running.** Manager notices are posted by the plugin in the surface's
   opencode; with the surface down they stay queued. If the initiative's chat was deleted, the notice stays pending:
   there is no fallback to the manager's latest chat yet. Tool lists are built when the plugin starts, so a
   `reportsTo` change shows new tools only after a surface restart (engine checks apply at once).
-- **A failed plan-review hire escalates for good.** A transient provider failure leaves that plan for the person
-  rather than retrying the manager's review.
+- **Owner sessions need the surface running.** The plugin opens the sessions that plan delegated work and carry out
+  approved plans, so a plan approved from the inbox or the CLI waits for a running surface before any work starts.
 
 ## Surfaces
 
@@ -73,10 +82,11 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
   delivers to an existing owner chat and records completion, but there is no built-in calendar scheduler,
   OpenChamber task import, or scheduling UI. Retiring OpenChamber stops its scheduled tasks even if their stored
   configuration still says enabled. Briefing failures are visible in systemd and run records, not the inbox.
-- **Hires can loop until their time limit.** An implementer sometimes degenerates (hundreds of trivial commands such
-  as `echo`), and nothing notices before the 20-minute limit ends the hire. The owner now hears about the failure,
-  but a progress watchdog (stop a hire whose recent tool calls change nothing) or a retry with the other model family
-  would save the twenty minutes. Work opened by duties (not from a chat) is journaled but has no chat to be told in.
+- **Hires can loop until their time limit.** The hires that remain (desk reviews, CI triage, conflict decisions and
+  resolutions) can degenerate (hundreds of trivial commands such as `echo`), and nothing notices before the time limit
+  ends the hire. A progress watchdog (stop a hire whose recent tool calls change nothing) or a retry with the other
+  model family would save the wait. Work with no chat or session of its own is journaled but has no chat to be told
+  in.
 
 ## Workarounds to revisit
 
