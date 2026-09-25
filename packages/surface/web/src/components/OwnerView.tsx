@@ -38,7 +38,10 @@ export function OwnerView({ owner, inbox, sessionId, refresh }: { owner: OwnerSu
   const [title, setTitle] = useState('');
   const [seen, setSeen] = useState<Record<string, number>>(() => readSeen());
 
-  const loadDesk = useCallback(() => api<DeskState>(`/api/owners/${owner.id}`).then(setDesk, () => undefined), [owner.id]);
+  const loadDesk = useCallback(() => {
+    if (!owner.hasDesk) return Promise.resolve();
+    return api<DeskState>(`/api/owners/${owner.id}`).then(setDesk, () => undefined);
+  }, [owner.id, owner.hasDesk]);
   const loadSessions = useCallback(() => {
     if (!owner.chat) return Promise.resolve();
     return api<{ directory: string; directories: string[]; sessions: Session[]; status: Record<string, { type: string }>; autoAccept: Record<string, boolean> }>(`/api/owners/${owner.id}/sessions`).then(result => {
@@ -165,7 +168,7 @@ export function OwnerView({ owner, inbox, sessionId, refresh }: { owner: OwnerSu
               {desk.reminders.map(reminder => <ReminderCard key={reminder.id} reminder={reminder} onDone={() => void loadDesk()} />)}
             </Section>
           )}
-          <Section title="Work">
+          {owner.hasDesk && <Section title="Work">
             {desk && !desk.work.length && !desk.recent.length && <Empty>No work yet.</Empty>}
             {desk?.work.map(item => (
               <button key={item.id} onClick={() => navigate('item', item.id)} className="flex flex-col items-start gap-0.5 rounded-md border border-border p-2 text-left hover:bg-interactive-hover">
@@ -180,8 +183,8 @@ export function OwnerView({ owner, inbox, sessionId, refresh }: { owner: OwnerSu
                 {item.url && <a href={item.url} target="_blank" rel="noreferrer" onClick={event => event.stopPropagation()}><RiExternalLinkLine className="size-3.5 text-muted-foreground" /></a>}
               </button>
             ))}
-          </Section>
-          <Section title="Activity" action={<Button variant="ghost" onClick={() => setNotebookOpen(true)}><RiBookOpenLine className="size-3.5" />Notebook</Button>}>
+          </Section>}
+          {owner.hasDesk && <Section title="Activity" action={<Button variant="ghost" onClick={() => setNotebookOpen(true)}><RiBookOpenLine className="size-3.5" />Notebook</Button>}>
             {desk && !desk.notes.length && <Empty>Nothing yet.</Empty>}
             <ol className="flex flex-col gap-2">
               {desk?.notes.slice(0, 25).map((note, index) => (
@@ -200,7 +203,7 @@ export function OwnerView({ owner, inbox, sessionId, refresh }: { owner: OwnerSu
                 </li>
               ))}
             </ol>
-          </Section>
+          </Section>}
         </aside>
       </div>
       {notebookOpen && desk && <Notebook desk={desk} onClose={() => setNotebookOpen(false)} />}

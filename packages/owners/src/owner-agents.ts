@@ -12,6 +12,12 @@ import { IMPLEMENTER_BASH, READ_ONLY_BASH } from './opencode.ts';
  */
 export const SKILLS_DIRECTORY = fileURLToPath(new URL('../skills/', import.meta.url));
 export const BOOTSTRAP_SKILL = 'using-onionsoup-skills';
+/** The person's skills for running onionsoup itself (this repository's .agents/skills), registered for the operator. */
+export const OPERATOR_SKILLS_DIRECTORY = fileURLToPath(new URL('../../../.agents/skills/', import.meta.url));
+export const OPERATOR_SKILLS = ['operate-onionsoup', 'ship-onionsoup', 'create-owner'] as const;
+
+/** Owners and their subagents never load the person's operating skills: those act on onionsoup, not on a domain. */
+export const NO_OPERATOR_SKILLS = { skill: Object.fromEntries(OPERATOR_SKILLS.map(name => [name, 'deny'])) } as const;
 export const IMPLEMENTER_AGENT = 'onionsoup-implementer';
 
 /** Each owner has its own reviewer, so the reviewer's family can differ from that owner's. */
@@ -20,16 +26,16 @@ export function reviewerAgent(ownerId: string) {
 }
 
 /** Subagents never reach onionsoup tools: effects and records belong to the owner (and host code). */
-const NO_ONIONSOUP_TOOLS = { 'onionsoup_*': 'deny' } as const;
+export const NO_ONIONSOUP_TOOLS = { 'onionsoup_*': 'deny' } as const;
 
 const IMPLEMENTER_PERMISSION = {
   edit: 'allow', bash: IMPLEMENTER_BASH, webfetch: 'deny', websearch: 'deny', task: 'deny', question: 'deny',
-  external_directory: 'ask', doom_loop: 'ask', ...NO_ONIONSOUP_TOOLS,
+  external_directory: 'ask', doom_loop: 'ask', ...NO_ONIONSOUP_TOOLS, ...NO_OPERATOR_SKILLS,
 };
 
 const REVIEWER_PERMISSION = {
   edit: 'deny', bash: READ_ONLY_BASH, webfetch: 'deny', websearch: 'deny', task: 'deny', question: 'deny',
-  external_directory: 'deny', doom_loop: 'deny', ...NO_ONIONSOUP_TOOLS,
+  external_directory: 'deny', doom_loop: 'deny', ...NO_ONIONSOUP_TOOLS, ...NO_OPERATOR_SKILLS,
 };
 
 const IMPLEMENTER_PROMPT = `You are an implementer an onionsoup owner dispatched for one small task on its desk (a git worktree).
@@ -95,12 +101,12 @@ Implementer: task with subagent_type "${IMPLEMENTER_AGENT}". Reviewer (another m
 
 interface SkillsConfig { skills?: { paths?: string[] } | unknown[] }
 
-/** opencode discovers the skills from this directory. */
-export function registerSkills(config: SkillsConfig) {
+/** opencode discovers skills from these directories: the owners' own, and any others (the operator's). */
+export function registerSkills(config: SkillsConfig, directories: readonly string[] = [SKILLS_DIRECTORY]) {
   if (Array.isArray(config.skills)) return;
   const skills = (config.skills ??= {}) as { paths?: string[] };
   const paths = (skills.paths ??= []);
-  if (!paths.includes(SKILLS_DIRECTORY)) paths.push(SKILLS_DIRECTORY);
+  for (const directory of directories) if (!paths.includes(directory)) paths.push(directory);
 }
 
 function withoutFrontmatter(text: string) {

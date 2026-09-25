@@ -2,7 +2,7 @@
 
 export interface OwnerSummary {
   id: string; name: string; title: string; source: string; icon: string; color: string; model: string; domain: string;
-  chat: boolean; waiting: number; running: number;
+  chat: boolean; hasDesk: boolean; waiting: number; running: number;
 }
 
 import type { QuestionRequest, PermissionRequest } from '@opencode-ai/sdk/v2';
@@ -21,6 +21,8 @@ import type { InboxReadError } from '../../src/inbox-errors.ts';
 import type { PlanApprovalRequest } from '../../src/plan-approval-request.ts';
 export interface SurfaceState {
   owners: OwnerSummary[];
+  /** The person's operator, when declared: a chat of its own, apart from the owners. */
+  operator?: OwnerSummary;
   inbox: InboxEntry[];
   inboxErrors?: InboxReadError[];
   frictionCount: number;

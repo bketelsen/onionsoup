@@ -88,16 +88,21 @@ export class Notebook {
   }
 
   async ensure(charter: string) {
-    if (!existsSync(join(this.root, '.git'))) {
-      await mkdir(this.root, { recursive: true });
-      await git(this.root, ['init', '-q', '-b', 'main']);
-    }
-    await mkdir(join(this.directory, 'journal'), { recursive: true });
+    await this.ensureJournal();
     const created = [await this.writeIfChanged('CHARTER.md', charter)];
     for (const [register, title] of Object.entries(REGISTER_TITLES)) {
       created.push(await this.writeIfMissing(`${register}.md`, `# ${title}\n`));
     }
     await this.commit(created.some(Boolean) ? 'Scaffold notebook' : 'journal');
+  }
+
+  /** The notebooks repository and this notebook's journal, without registers: all a journal-only notebook needs. */
+  async ensureJournal() {
+    if (!existsSync(join(this.root, '.git'))) {
+      await mkdir(this.root, { recursive: true });
+      await git(this.root, ['init', '-q', '-b', 'main']);
+    }
+    await mkdir(join(this.directory, 'journal'), { recursive: true });
   }
 
   /** Everything an owner reads about itself: the charter and every register. */

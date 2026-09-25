@@ -6,7 +6,7 @@ import { promisify } from 'node:util';
 import type { RepositoryOwner } from './declarations.ts';
 import type { Runtime } from './runtime.ts';
 import { runSandboxed, sandboxCommand, privateXdgRoots, SANDBOX_LIMITS } from './sandbox.ts';
-import { expandHome } from './truenas.ts';
+import { expandHome } from './paths.ts';
 import { git } from './workspace.ts';
 
 const run = promisify(execFile);

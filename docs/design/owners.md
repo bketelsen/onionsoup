@@ -399,6 +399,32 @@ it needs the surface running.
 Shipping refuses while any item has an active runner, so a ship must be retried after the named work finishes
 or is resolved. A manual daemon restart still interrupts active work.
 
+### Operator
+
+Owners each hold one domain under gates. Some work belongs to no domain: operating onionsoup itself, reading across
+every owner's records, a one-off job on the homelab. For that the person may declare an **operator** in
+`operator.yaml` (`OperatorDeclaration` in `packages/owners/src/declarations.ts`; the agent in `operator.ts`): one
+agent the person directs turn by turn in a chat of its own, like a coding agent in auto mode. It sits outside the owner
+rules on purpose. It owns nothing, keeps no notebook, runs no duties, and is never woken by the runtime; owners cannot
+reach it (it is in no roster, and `onionsoup_ask`, `onionsoup_request_work` and friends resolve only owners). Its id
+`operator` and its name are reserved: no owner may take either (`operator_reserved`).
+
+Its permissions allow nearly everything: any bash, edits, the web, any directory, subagents and questions. Only
+`OPERATOR_ASK_BASH` asks, plus the person's own `ask:` patterns: recursive deletes, force pushes, hard resets and
+`git clean`, deleting incus instances, destroying ZFS datasets and pools, `mkfs`, `dd`, `kubectl delete`, and the
+CLI's person gates (`owners ... approve*`, `owners ... ship*`), so it does not answer an owner's plan or ship for the
+person unasked. It gets no `onionsoup_*` owner tools (they are denied, and refuse any agent that is not an owner), so
+it cannot submit, approve or ship through them, and the plan-approval, ship and owner-change prompts of owners'
+sessions are answered only in those sessions. It may load the person's operating skills in `.agents/skills`
+(operate-onionsoup, ship-onionsoup, create-owner), which owners and their subagents are denied, and never gets the
+owners' skills bootstrap.
+
+The risk is plain: the operator is unsandboxed, runs as the person, and bash rules are a convenience, not a
+boundary. Anything it reads (a web page, an issue, an owner's output) can try to steer it, and the prompt telling it
+that such text is data, not instructions, is the only defence beyond the ask list. What it does is audited: every
+command and edit it or its subagents run is journaled to `state/notebooks/operator/journal/` (a journal-only notebook,
+never distilled), so the person can see afterwards what it did.
+
 ### Safety
 
 Every hire (owner decisions, surveys, answers, distillation, CI triage, reviews, conflict resolution) and every

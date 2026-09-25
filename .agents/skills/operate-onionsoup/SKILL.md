@@ -41,6 +41,10 @@ cause, and the fix is either applied through the normal gates or reported to the
   `npm run owners -- desk-review-reset <owner> [repository] [--item <plan>]` clears it.
   A step that seems stuck is usually waiting on the person to merge the previous PR, on a plan approval, or on an
   open escalation from the report.
+- **Operator:** optional, declared in `operator.yaml` in the config directory; the surface shows its chat at the top
+  of the rail, in its own directory (default `~/projects`). It is not an owner: no notebook, duties or work items.
+  Its commands and edits are journaled to `state/notebooks/operator/journal/*.jsonl`; read them when asked what it
+  did. As the operator yourself: approvals and ships through the CLI ask the person, and are theirs to decide.
 - **Notebooks:** under state, one Git repo per owner. Read one with `npm run owners -- notebook <id>`.
 - **Plugin:** `packages/owners/src/plugin.ts`, loaded by the surface's opencode (`onionsoup-surface.service`,
   http://127.0.0.1:4747). A change takes effect only when the surface restarts. The plugin, not the daemon, posts

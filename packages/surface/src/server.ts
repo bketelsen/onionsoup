@@ -94,27 +94,36 @@ export function surfaceServer(state: SurfaceState, options: { webRoot: string; b
     return ownerId;
   };
 
+  /** Chat routes serve owners and the operator alike. */
+  const requireKnownChat = (chatId: string) => {
+    if (!state.isKnownChat(chatId)) throw new HttpError(404, `unknown chat: ${chatId}`);
+    return chatId;
+  };
+
   const owned = async (ownerId: string) => {
-    requireKnownOwner(ownerId);
+    requireKnownChat(ownerId);
     return { directory: await state.directory(ownerId), agent: () => state.agentOf(ownerId) };
   };
 
   /** One of an owner's sessions, addressed where it runs: a plan's session in the plan's worktree. */
   const ownedSession = async (ownerId: string, sessionID: string) => {
-    requireKnownOwner(ownerId);
+    requireKnownChat(ownerId);
     return { directory: await state.sessionDirectory(ownerId, sessionID), agent: () => state.agentOf(ownerId) };
   };
 
   /** A waiting prompt or question of an owner's, addressed in the directory it waits in. */
   const ownedPending = async (ownerId: string, kind: 'permission' | 'question', requestID: string) => {
-    requireKnownOwner(ownerId);
+    requireKnownChat(ownerId);
     return state.pendingDirectory(ownerId, kind, requestID);
   };
 
   const routes: Route[] = [
     route('GET', '/api/state', async () => {
       const [{ inbox, inboxErrors }, opencode] = await Promise.all([state.inboxSnapshot(), state.opencode.health()]);
-      return { owners: await state.owners(inbox), inbox, inboxErrors, opencode, frictionCount: (await state.friction()).length };
+      return {
+        owners: await state.owners(inbox), operator: await state.operator(inbox), inbox, inboxErrors, opencode,
+        frictionCount: (await state.friction()).length,
+      };
     }),
     route('GET', '/api/friction', async () => codedRoute(FRICTION_HTTP_STATUS, () => state.friction())),
     route('GET', '/api/friction/:id', async params => codedRoute(FRICTION_HTTP_STATUS, () => state.frictionRecord(params.id!))),
@@ -155,7 +164,7 @@ export function surfaceServer(state: SurfaceState, options: { webRoot: string; b
       return { outcome: 'retracted' };
     }),
     route('GET', '/api/owners/:owner/sessions', async params => {
-      requireKnownOwner(params.owner!);
+      requireKnownChat(params.owner!);
       const [chats, settings] = await Promise.all([state.chatSessions(params.owner!), state.settings.read()]);
       return { ...chats, autoAccept: settings.autoAccept };
     }),

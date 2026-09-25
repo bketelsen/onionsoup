@@ -17,3 +17,8 @@ export function homeDirectory() {
 export function stateDirectory() {
   return join(homeDirectory(), 'state');
 }
+
+/** A path in a declaration may start with ~/. */
+export function expandHome(path: string) {
+  return path.startsWith('~/') ? join(homedir(), path.slice(2)) : path;
+}

@@ -6,9 +6,12 @@ import { requestWork } from './delegation.ts';
 import { ProposedWork } from './artifacts.ts';
 import { readdir, readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { tool, type Plugin } from '@opencode-ai/plugin';
-import { canChange, directReports, hasIncus, isDirectReport, managerOf, repositoryShortName, type OwnerDeclaration, type Persona } from './declarations.ts';
+import {
+  canChange, directReports, hasIncus, isDirectReport, managerOf, OPERATOR_ID, repositoryShortName, type OperatorDeclaration, type OwnerDeclaration,
+  type Persona,
+} from './declarations.ts';
 import { askOwner, formatAnswer } from './ask.ts';
 import { requestPublish } from './brokering.ts';
 import { checkoutPullRequest, proposeDeskChanges } from './desk-changes.ts';
@@ -24,16 +27,21 @@ import type { ChatOrigin } from './chat-origin.ts';
 import { claimNotice, isRuntimeNotice, NOTICE_PREFIX, pendingNotices, releaseNotice } from './notices.ts';
 import { hasShipGrant, shipEngine } from './ship.ts';
 import { ownerFiles, prepareOwnerWrite, prepareRetire, retireOwner, stewardGuide, writeOwner } from './stewardship.ts';
-import { expandHome, readEnvFile, truenasMcpEnvironment } from './truenas.ts';
+import { readEnvFile, truenasMcpEnvironment } from './truenas.ts';
 import { pickModel } from './families.ts';
 import type { Notebook } from './notebook.ts';
-import { configDirectory, stateDirectory } from './paths.ts';
+import { configDirectory, expandHome, stateDirectory } from './paths.ts';
 import { domainSummary, orgText, rosterText } from './roster.ts';
 import { Runtime } from './runtime.ts';
 import { engineCommit, FrictionEvents, FrictionInput, reportFriction } from './friction.ts';
 import { REPOSITORY_WRITING } from './repository-writing.ts';
 import { prepareToolArguments } from './tool-arguments.ts';
-import { BOOTSTRAP_MARKER, bootstrapText, registerSkills, subagents, subagentsText, taskPermission } from './owner-agents.ts';
+import {
+  BOOTSTRAP_MARKER, bootstrapText, NO_OPERATOR_SKILLS, OPERATOR_SKILLS_DIRECTORY, registerSkills, SKILLS_DIRECTORY, subagents, subagentsText,
+  taskPermission,
+} from './owner-agents.ts';
+import { operatorAgent } from './operator.ts';
+import { bashAction } from './bash-rules.ts';
 import { SessionOwners } from './session-owners.ts';
 import { openNeededSessions, ownerSessionClient } from './owner-sessions.ts';
 import { cancelReminder, openDueReminders, setReminder } from './reminder-work.ts';
@@ -73,18 +81,6 @@ const WATCHER_MODELS = ['openai/gpt-5.6-luna-fast', 'github-copilot/claude-haiku
 
 /** Tools that change things; a completed call of one of these is always journaled. */
 const MUTATING_TOOLS = new Set(['edit', 'write', 'apply_patch', 'patch', 'multiedit']);
-
-function globMatches(pattern: string, value: string) {
-  const expression = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replaceAll('*', '.*').replaceAll('?', '.');
-  return new RegExp(`^${expression}$`, 's').test(value);
-}
-
-/** opencode semantics: the last matching rule wins. */
-function bashAction(rules: Record<string, string>, command: string) {
-  let action = 'ask';
-  for (const [pattern, value] of Object.entries(rules)) if (globMatches(pattern, command.trim())) action = value;
-  return action;
-}
 
 /** The owner's own verification commands, with {tools} resolved; chats may run these without asking. */
 function verifyCommands(owner: OwnerDeclaration, toolsDirectory: string) {
@@ -194,7 +190,7 @@ function conversationPermission(owner: OwnerDeclaration, verify: readonly string
   const bash = { ...mode.bash, ...Object.fromEntries(verify.map(command => [`${command}*`, 'allow'])) };
   return {
     edit: mode.edit, bash, webfetch: mode.webfetch, external_directory: 'ask', doom_loop: 'ask', task: taskPermission(owner.id),
-    [PLAN_APPROVAL_PERMISSION]: 'ask',
+    [PLAN_APPROVAL_PERMISSION]: 'ask', ...NO_OPERATOR_SKILLS,
   };
 }
 
@@ -275,20 +271,61 @@ const server: Plugin = async (input, options) => {
     const charter = await runtime.text(`charters/${owner.id}.md`).catch(() => `# Charter: ${owner.id}\n`);
     await runtime.notebook(owner.id).ensure(charter).catch(() => undefined);
   }
-  const sessions = new SessionOwners(async id => (await input.client.session.get({ path: { id } })).data?.parentID);
+  const operator = runtime.declarations.operator;
+  // The operator journals what it does, like an owner, to a journal-only notebook of its own (never distilled).
+  if (operator) await runtime.notebook(OPERATOR_ID).ensureJournal().catch(() => undefined);
+  const parentOf = async (id: string) => (await input.client.session.get({ path: { id } })).data?.parentID;
+  const sessions = new SessionOwners<OwnerDeclaration>(parentOf);
+  const operatorSessions = new SessionOwners<OperatorDeclaration>(parentOf);
   const journaledParts = new Set<string>();
   const watchedMessages = new Map<string, string>();
   const frictionEvents = new FrictionEvents();
 
-  /** A completed call that changed something (or ran a command the owner's rules do not allow) enters the journal. */
-  async function journalToolCall(owner: OwnerDeclaration, part: ToolPart, kind: 'chat-action' | 'subagent-action') {
+  /** Where a chat's actions are journaled, and the bash its rules allow outright (routine, not journaled). */
+  interface ChatJournal { notebook: Notebook; routineBash: Record<string, string> }
+
+  const ownerJournal = (owner: OwnerDeclaration): ChatJournal => ({
+    notebook: runtime.notebook(owner.id), routineBash: (owner.conversation?.bash ?? { '*': 'ask' }) as Record<string, string>,
+  });
+  // The operator's commands run unsandboxed and mostly unasked: every one of them is journaled.
+  const operatorJournal = (): ChatJournal => ({ notebook: runtime.notebook(OPERATOR_ID), routineBash: {} });
+
+  type ActionKind = 'chat-action' | 'subagent-action';
+
+  function journalSource<Holder>(holders: SessionOwners<Holder>, journalOf: (holder: Holder) => ChatJournal) {
+    return {
+      topLevel: (sessionID: string) => {
+        const holder = holders.ownerOf(sessionID);
+        return holder && journalOf(holder);
+      },
+      child: async (sessionID: string) => {
+        const holder = await holders.ownerOfChild(sessionID).catch(() => undefined);
+        return holder && journalOf(holder);
+      },
+    };
+  }
+  const journalSources = [journalSource(sessions, ownerJournal), journalSource(operatorSessions, operatorJournal)];
+
+  /** The journal a session's tool calls go to: its owner's or the operator's, directly or through a subagent's parent. */
+  async function chatJournalOf(sessionID: string): Promise<{ journal: ChatJournal; kind: ActionKind } | undefined> {
+    for (const source of journalSources) {
+      const journal = source.topLevel(sessionID);
+      if (journal) return { journal, kind: 'chat-action' };
+    }
+    for (const source of journalSources) {
+      const journal = await source.child(sessionID);
+      if (journal) return { journal, kind: 'subagent-action' };
+    }
+    return undefined;
+  }
+
+  /** A completed call that changed something (or ran a command the chat's rules do not allow) enters the journal. */
+  async function journalToolCall({ notebook, routineBash }: ChatJournal, part: ToolPart, kind: ActionKind) {
     const command = part.tool === 'bash' ? String(part.state?.input?.command ?? '') : '';
-    const rules = (owner.conversation?.bash ?? { '*': 'ask' }) as Record<string, string>;
-    const isAction = MUTATING_TOOLS.has(part.tool ?? '') || (part.tool === 'bash' && bashAction(rules, command) !== 'allow');
+    const isAction = MUTATING_TOOLS.has(part.tool ?? '') || (part.tool === 'bash' && bashAction(routineBash, command) !== 'allow');
     if (!isAction) return;
     journaledParts.add(part.id);
     const target = command || String(part.state?.input?.filePath ?? part.state?.input?.patchText?.split('\n')[1] ?? '');
-    const notebook = runtime.notebook(owner.id);
     await notebook.journal({ kind, stage: part.tool, note: target.slice(0, 500), outcome: (part.state?.output ?? '').slice(0, 300), session: part.sessionID });
     await commitQuietly(notebook, kind);
   }
@@ -515,7 +552,8 @@ const server: Plugin = async (input, options) => {
       for (const name of Object.keys(RESTRICTED_TOOLS)) hiddenFromEveryone[name] = 'deny';
       // Owner tool servers are denied to every agent; each owner's own rules re-allow its servers (last match wins).
       Object.assign(agents, subagents(runtime.declarations, owners));
-      registerSkills(config as Parameters<typeof registerSkills>[0]);
+      if (operator) agents[operator.name] = operatorAgent(operator, { config: runtime.declarations.root, home: dirname(runtime.stateDirectory) });
+      registerSkills(config as Parameters<typeof registerSkills>[0], operator ? [SKILLS_DIRECTORY, OPERATOR_SKILLS_DIRECTORY] : [SKILLS_DIRECTORY]);
       const current = config.permission;
       config.permission = { ...(typeof current === 'string' ? { '*': current } : current ?? {}), ...hiddenFromEveryone } as never;
       agents[WATCHER_AGENT] = {
@@ -530,6 +568,7 @@ const server: Plugin = async (input, options) => {
     async 'chat.message'(message) {
       const owner = message.agent ? ownerByAgent.get(message.agent) : undefined;
       if (owner) sessions.claim(message.sessionID, owner);
+      if (operator && message.agent === operator.name) operatorSessions.claim(message.sessionID, operator);
     },
 
     /** Owners' top-level sessions start with the skills bootstrap; subagents' child sessions never do. */
@@ -566,9 +605,8 @@ const server: Plugin = async (input, options) => {
       if (typed.type !== 'message.part.updated') return;
       const part = typed.properties.part as ToolPart;
       if (part.type !== 'tool' || part.state?.status !== 'completed' || journaledParts.has(part.id)) return;
-      const topLevelOwner = sessions.ownerOf(part.sessionID);
-      const owner = topLevelOwner ?? await sessions.ownerOfChild(part.sessionID).catch(() => undefined);
-      if (owner) await journalToolCall(owner, part, topLevelOwner ? 'chat-action' : 'subagent-action');
+      const chat = await chatJournalOf(part.sessionID);
+      if (chat) await journalToolCall(chat.journal, part, chat.kind);
     },
 
     tool: {

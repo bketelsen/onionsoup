@@ -6,15 +6,11 @@ import { promisify } from 'node:util';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import type { TruenasDomain } from './declarations.ts';
+import { expandHome } from './paths.ts';
 
 const run = promisify(execFile);
 
 export const TRUENAS_LIMITS = { toolTimeoutMs: 120_000, sshTimeoutMs: 5 * 60_000, restartWaitMs: 90_000, pollMs: 3_000 };
-
-/** A path in a declaration may start with ~/. */
-export function expandHome(path: string) {
-  return path.startsWith('~/') ? join(homedir(), path.slice(2)) : path;
-}
 
 /** Read KEY=VALUE lines (with optional `export`) from the owner's env file; values are never logged. */
 export async function readEnvFile(path: string) {
