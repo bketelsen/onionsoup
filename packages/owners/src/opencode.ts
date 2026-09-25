@@ -5,6 +5,7 @@ import { createOpencodeClient } from '@opencode-ai/sdk/v2/client';
 import { Agent } from 'undici';
 import { z } from 'zod';
 import type { ModelRef } from './declarations.ts';
+import { AssistantError, maskKeyLike, providerErrorOf, type ProviderError } from './provider-health.ts';
 import { lacksStructuredOutput, opencodeProviders, redactApiKeys, type DeclaredProviders } from './providers.ts';
 import { freePort, spawnSandboxed, stopSandboxed } from './sandbox.ts';
 
@@ -135,7 +136,7 @@ export interface HireResult<T> {
 interface AssistantInfo {
   role: string;
   structured?: unknown;
-  error?: { name?: string; data?: { message?: string } };
+  error?: AssistantError;
   cost?: number;
 }
 
@@ -249,24 +250,38 @@ export async function rejectPendingPermissions(client: Pick<HireClient, 'permiss
   }
 }
 
-export class Freelancers {
-  /** Read at every hire, so providers declared since start take effect after the runtime reloads declarations. */
-  private constructor(private readonly providers: () => DeclaredProviders) {}
+/** A client for one hire's opencode, and how to let it go. */
+export interface HireConnection {
+  client: HireSessionClient;
+  close: () => void;
+}
 
-  static async start(providers: () => DeclaredProviders = () => ({})) {
-    return new Freelancers(providers);
+export type ConnectHire = <T>(request: HireRequest<T>, providers: DeclaredProviders) => Promise<HireConnection>;
+
+/** The real connection: a sandboxed opencode server for this hire alone. */
+export const sandboxedHire: ConnectHire = async (request, providers) => {
+  const server = await startServer(request, providers);
+  const client = createOpencodeClient({ baseUrl: server.url, directory: request.directory, fetch: untimedFetch });
+  return { client, close: server.close };
+};
+
+export class Freelancers {
+  /** Providers are read at every hire, so providers declared since start take effect after the runtime reloads. */
+  private constructor(private readonly providers: () => DeclaredProviders, private readonly connect: ConnectHire) {}
+
+  static async start(providers: () => DeclaredProviders = () => ({}), connect: ConnectHire = sandboxedHire) {
+    return new Freelancers(providers, connect);
   }
 
   close() {}
 
   async hire<T>(request: HireRequest<T>): Promise<HireResult<T>> {
     const providers = this.providers();
-    const server = await startServer(request, providers);
+    const connection = await this.connect(request, providers);
     try {
-      const client = createOpencodeClient({ baseUrl: server.url, directory: request.directory, fetch: untimedFetch });
-      return await hireWithFallback(client, request, providers);
+      return await hireWithFallback(connection.client, request, providers);
     } finally {
-      server.close();
+      connection.close();
     }
   }
 }
@@ -382,7 +397,7 @@ export async function runHire<T>(client: HireSessionClient, request: HireRequest
       const data = reply.data as ReplyData | undefined;
       const info = data?.info;
       if (!info) throw new HireError(`no_assistant_reply: ${describeReplyError(reply.error)}`, sessionID);
-      if (info.error) throw new HireError(`${info.error.name ?? 'error'}: ${info.error.data?.message ?? ''}`.trim(), sessionID);
+      if (info.error) throw assistantFailure(info.error, sessionID);
       return { info, deliverable: spec.deliverable(data) };
     };
     const brief = request.notesFile ? `${request.brief}\n\n${notesInstruction(request.notesFile)}` : request.brief;
@@ -406,9 +421,16 @@ export async function runHire<T>(client: HireSessionClient, request: HireRequest
 }
 
 export class HireError extends Error {
-  constructor(message: string, readonly sessionID: string, readonly deliverable?: unknown) {
+  constructor(message: string, readonly sessionID: string, readonly deliverable?: unknown, readonly providerError?: ProviderError) {
     super(message);
   }
+}
+
+/** The model call failed: its error, key-like text masked (it reaches the ledger), with what provider health needs. */
+function assistantFailure(error: AssistantError, sessionID: string) {
+  const providerError = providerErrorOf(error);
+  const message = maskKeyLike(`${error.name ?? 'error'}: ${providerError.message}`.trim());
+  return new HireError(message, sessionID, undefined, { ...providerError, message: maskKeyLike(providerError.message) });
 }
 
 /**

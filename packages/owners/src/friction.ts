@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { mkdir, readFile, readdir, rename, unlink, writeFile } from 'node:fs/promises';
 import { z } from 'zod';
+import { AssistantMessageEvent } from './provider-health.ts';
 import { withRecordLock } from './record-lock.ts';
 import type { Runtime } from './runtime.ts';
 
@@ -25,10 +26,6 @@ const ToolEvent = z.object({ type: z.literal('message.part.updated'), properties
   part: z.object({ id: z.string().optional(), callID: z.string().optional(), sessionID: z.string(), type: z.literal('tool'), tool: z.string(),
     state: z.object({ status: z.literal('error'), error: z.unknown() }),
   }),
-}) });
-const ModelEvent = z.object({ type: z.literal('message.updated'), properties: z.object({
-  info: z.object({ sessionID: z.string(), role: z.literal('assistant'),
-    providerID: z.string().optional(), modelID: z.string().optional() }),
 }) });
 const Origin = z.object({ sessionID: z.string().min(1).max(200), directory: z.string().min(1).max(1000) }).strict();
 export const FrictionRecord = z.object({
@@ -73,7 +70,7 @@ export class FrictionEvents {
   private readonly sessions = new Map<string, { failures: { key?: string; failure: Failure }[]; model: string }>();
 
   observe(event: unknown) {
-    const model = ModelEvent.safeParse(event);
+    const model = AssistantMessageEvent.safeParse(event);
     if (model.success) {
       const { sessionID, providerID, modelID } = model.data.properties.info;
       if (!providerID || !modelID) return;

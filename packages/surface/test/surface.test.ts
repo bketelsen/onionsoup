@@ -4,7 +4,10 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { OPERATOR_ID, OperatorDeclaration, Runtime, approveInitiative, draftInitiative, reportFriction, setReminder, submitInitiative } from '@onionsoup/owners';
+import {
+  OPERATOR_ID, OperatorDeclaration, Runtime, approveInitiative, draftInitiative, recordProviderFailure, recordProviderSuccess, reportFriction, setReminder,
+  submitInitiative,
+} from '@onionsoup/owners';
 import { SurfaceState, surfaceServer, type OpencodeApi } from '@onionsoup/surface';
 
 function fakeOpencode() {
@@ -611,6 +614,33 @@ test('a report plan under its manager grant says so in the inbox; without a gran
     const inbox = (await call('GET', '/api/state')).body.inbox as { kind: string; id: string; detail: string }[];
     assert.equal(inbox.find(entry => entry.id === clippyItem.id)?.detail, 'Odrade reviews under standing grant. Change core');
     assert.equal(inbox.find(entry => entry.id === bellondaItem.id)?.detail, 'Change core');
+  } finally {
+    server.close();
+  }
+});
+
+test('a provider failing authentication is in /api/state and the inbox with its fix, until a call succeeds', async () => {
+  const { runtime, server, call } = await start();
+  try {
+    const refused = { name: 'APIError', statusCode: 401, message: 'Incorrect API key provided: sk-svcac****************ab12. See the docs.' };
+    await recordProviderFailure(runtime, 'openai', { kind: 'hire', what: 'w-1: review' }, refused);
+    await recordProviderFailure(runtime, 'openai', { kind: 'watcher', what: 'homelab' }, refused);
+    const failing = (await call('GET', '/api/state')).body;
+    const [health] = failing.providerHealth as { provider: string; status: string; failures: number; fix: string; lastError: string }[];
+    assert.equal(health?.provider, 'openai');
+    assert.equal(health?.status, 'failing');
+    assert.equal(health?.failures, 2);
+    assert.match(health!.fix, /opencode auth login` and choose OpenAI/);
+    assert.doesNotMatch(health!.lastError, /svcac/);
+    const entry = (failing.inbox as { kind: string; id: string; title: string; detail: string }[]).find(candidate => candidate.kind === 'provider-auth');
+    assert.equal(entry?.id, 'openai');
+    assert.equal(entry?.title, 'OpenAI authentication failing');
+    assert.match(entry!.detail, /2 failures\. Affected: hire w-1: review, watcher homelab\.\nRun `opencode auth login` and choose OpenAI/);
+
+    await recordProviderSuccess(runtime, 'openai');
+    const recovered = (await call('GET', '/api/state')).body;
+    assert.deepEqual((recovered.providerHealth as { status: string }[]).map(view => view.status), ['ok'], 'shown a while as recovered');
+    assert.equal((recovered.inbox as { kind: string }[]).some(candidate => candidate.kind === 'provider-auth'), false);
   } finally {
     server.close();
   }

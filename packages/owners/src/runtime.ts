@@ -10,9 +10,17 @@ import { Notebook } from './notebook.ts';
 import { Requests } from './requests.ts';
 import { Initiatives } from './initiatives.ts';
 import { Reminders } from './reminders.ts';
-import { Freelancers, HireError, type HireRequest } from './opencode.ts';
+import { Freelancers, HireError, sandboxedHire, type ConnectHire, type HireRequest } from './opencode.ts';
+import { ProviderHealthStore, providerOf, recordProviderFailure, recordProviderSuccess, type ProviderError } from './provider-health.ts';
 
 export const RUNTIME_LIMITS = { findingChars: 2_000 };
+
+/** What provider health reads from a failed hire: the model call's own error when there was one. */
+function hireFailure(error: unknown): ProviderError {
+  if (error instanceof HireError && error.providerError) return error.providerError;
+  if (error instanceof Error) return { name: error.name, message: error.message };
+  return { message: String(error) };
+}
 
 function isAlive(pid: number) {
   try {
@@ -42,6 +50,9 @@ export class Runtime {
   readonly requests: Requests;
   readonly initiatives: Initiatives;
   readonly reminders: Reminders;
+  readonly providerHealth: ProviderHealthStore;
+  /** Replaceable so tests script a hire's opencode instead of starting a sandbox. */
+  connectHire: ConnectHire = sandboxedHire;
   /** Replaceable so tests never touch real incus. */
   incus: IncusClient = cliIncus;
   /** Replaceable transport so request tests never touch a real NAS. */
@@ -60,6 +71,7 @@ export class Runtime {
     this.requests = new Requests(join(stateDirectory, 'requests'));
     this.initiatives = new Initiatives(join(stateDirectory, 'initiatives'));
     this.reminders = new Reminders(join(stateDirectory, 'reminders'));
+    this.providerHealth = new ProviderHealthStore(join(stateDirectory, 'provider-health'));
   }
 
   static async open(paths: RuntimePaths) {
@@ -178,7 +190,7 @@ export class Runtime {
   }
 
   async freelancers() {
-    this.pool ??= await Freelancers.start(() => this.declarations.providers);
+    this.pool ??= await Freelancers.start(() => this.declarations.providers, (request, providers) => this.connectHire(request, providers));
     return this.pool;
   }
 
@@ -196,8 +208,14 @@ export class Runtime {
     await mkdir(notesDirectory, { recursive: true });
     const notesFile = join(notesDirectory, 'findings.md');
     await writeFile(notesFile, '');
+    const provider = providerOf(request.model);
     try {
-      return await pool.hire({ ...request, notesFile });
+      const result = await pool.hire({ ...request, notesFile });
+      await recordProviderSuccess(this, provider);
+      return result;
+    } catch (error) {
+      await recordProviderFailure(this, provider, { kind: 'hire', what: request.title }, hireFailure(error));
+      throw error;
     } finally {
       await this.ingestFindings(ownerId, notesFile, request.title, workItem);
     }

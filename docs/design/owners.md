@@ -446,6 +446,27 @@ environment, and server output quoted in a hire error is redacted. A provider th
 (`structuredOutput: false`) starts its hires in text mode. Built-in provider ids are refused (`provider_reserved`),
 and `families.yaml` decides a declared model's family like any other.
 
+### Provider health
+
+A provider that stops taking onionsoup's credentials (an expired OpenAI key, a Copilot login that needs
+re-authorising) fails every hire and chat on it the same way; on 2026-09-25 an OpenAI key stopped working and the
+person learned only when an owner could not open a PR. Host code now says so. Every failed model call is classified
+against `FAILURE_SIGNATURES` in `packages/owners/src/provider-health.ts` (HTTP 401/403, opencode's
+`ProviderAuthError`, "Incorrect API key", `invalid_api_key`, "Unauthorized", "authentication failed", an expired
+token, "Bad credentials"); rate limits and timeouts are not authentication. An authentication failure marks its
+provider failing in `state/provider-health/<provider>.json`: since when, how many failures, the last few uses it broke
+(hires by title, chats and decision watchers by owner) and the last error, masked (declared keys, `sk-…`, GitHub
+tokens, bearer values and long base64 or hex runs) and clipped. The first failure of a spell logs one `[provider]`
+line. The next successful call to that provider marks it `ok` with `recoveredAt`.
+
+Hires report through `Runtime.hire` (the request's model names the provider); chats, plan sessions, subagents and
+the watcher report through the plugin's event hook, from each assistant message's `providerID` and `error` (a
+finished message without one is a success). The surface puts each failing provider in the inbox (`provider-auth`,
+with a fix from `PROVIDER_FIX_HINTS`: `opencode auth login` for opencode's providers, `providers.yaml` for declared
+ones) and in a red banner on every page; `/api/state` carries `providerHealth`, which also keeps a recovered provider
+for `PROVIDER_HEALTH_LIMITS.recoveredShownMs` as a green confirmation. Detection is reactive: nothing probes a
+provider that nothing is using.
+
 ### Safety
 
 Every hire (owner decisions, surveys, answers, distillation, CI triage, reviews, conflict resolution) and every

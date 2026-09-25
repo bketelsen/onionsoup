@@ -8,7 +8,15 @@ import { FrictionView } from './components/FrictionView.tsx';
 import { InitiativePage } from './components/InitiativeView.tsx';
 import { OrgView } from './components/OrgView.tsx';
 import { InboxErrors } from './components/InboxErrors.tsx';
-import type { SurfaceState } from './types.ts';
+import { ProviderHealthBanner } from './components/ProviderHealthBanner.tsx';
+import type { InboxEntry, SurfaceState } from './types.ts';
+
+/** What a notification says about a new inbox entry, by kind; other kinds say they are waiting. */
+const NOTIFICATION_TITLES: Partial<Record<InboxEntry['kind'], string>> = {
+  permission: 'permission needed',
+  question: 'a question for you',
+  'provider-auth': 'model provider authentication failing',
+};
 
 const REFRESH_TYPES = new Set(['permission.asked', 'permission.replied', 'question.asked', 'question.replied', 'question.rejected', 'session.status', 'session.idle']);
 
@@ -41,7 +49,8 @@ export function App() {
     if (!previous || !document.hidden || typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
     for (const entry of state.inbox.filter(candidate => !previous.has(`${candidate.kind}:${candidate.id}`))) {
       const name = [state.operator, ...state.owners].find(candidate => candidate?.id === entry.owner)?.name ?? entry.owner;
-      const notification = new Notification(`${name}: ${entry.kind === 'permission' ? 'permission needed' : entry.kind === 'question' ? 'a question for you' : `${entry.kind} waiting`}`, { body: entry.title, tag: `${entry.kind}:${entry.id}` });
+      const title = NOTIFICATION_TITLES[entry.kind] ?? `${entry.kind} waiting`;
+      const notification = new Notification(`${name}: ${title}`, { body: entry.title, tag: `${entry.kind}:${entry.id}` });
       notification.onclick = () => {
         window.focus();
         if (entry.sessionID) navigate('owner', entry.owner, 'chat', entry.sessionID);
@@ -76,6 +85,7 @@ export function App() {
   const owner = route[0] === 'owner' ? chats.find(candidate => candidate.id === route[1]) : undefined;
   return (
     <div className="h-full flex flex-col bg-background text-foreground">
+      <ProviderHealthBanner providerHealth={state?.providerHealth ?? []} />
       <InboxErrors errors={state?.inboxErrors ?? []} refreshError={refreshError} />
       {state?.opencode && !state.opencode.ok && (
         <div role="alert" className="shrink-0 px-4 py-2 typography-meta border-b border-[var(--status-error-border)] bg-[var(--status-error-background)] text-[var(--status-error)]">

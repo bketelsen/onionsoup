@@ -89,6 +89,10 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
 - **Declared provider keys reach the sandbox's environment.** A `providers.yaml` API key is written into each
   hire's `OPENCODE_CONFIG_CONTENT`, so anything the hire runs can read it, like `auth.json`; the credential proxy
   would cover these keys too. The surface opencode also holds them in its config, which its API can return.
+- **Provider health is reactive.** A provider is marked failing only when a hire or chat on it fails, and cleared
+  only when a call to it succeeds: nothing probes providers, so a key that expires overnight shows at the next use,
+  and a failing provider nobody uses stays failing until the next call. Copilot's token refresh is opencode's; a
+  refresh that fails shows here as that provider's authentication failure.
 - **Sandbox: no network isolation.** After the credential proxy, outbound network access from a sandboxed process
   is still unrestricted; an allowlist or a proxy is the follow-up.
 - **App updates cannot roll back:** truenas-mcp exposes no rollback, so a failed update is raised for the person.

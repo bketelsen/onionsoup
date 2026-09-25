@@ -120,9 +120,9 @@ export function surfaceServer(state: SurfaceState, options: { webRoot: string; b
   const routes: Route[] = [
     route('GET', '/api/state', async () => {
       const [snapshot, opencode] = await Promise.all([state.inboxSnapshot(), state.opencode.health()]);
-      const { inbox, inboxErrors } = snapshot;
+      const { inbox, inboxErrors, providerHealth } = snapshot;
       return {
-        owners: await state.owners(snapshot), operator: await state.operator(snapshot), inbox, inboxErrors, opencode,
+        owners: await state.owners(snapshot), operator: await state.operator(snapshot), inbox, inboxErrors, opencode, providerHealth,
         frictionCount: (await state.friction()).length,
       };
     }),
