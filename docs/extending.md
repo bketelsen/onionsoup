@@ -89,7 +89,7 @@ mcp:
       delete_repository: deny      # hidden from the owner entirely
 ```
 
-Everything else follows the owner's `conversation:` rules: `allow`, `ask` (approve in the chat) or `deny`.
+Everything else follows the owner's `conversation:` rules: `allow`, `ask` (approve in the chat) or `deny`. Every owner also gets a read-only baseline (`READ_ONLY_CHAT_BASH` in `chat-permissions.ts`: `grep`, `rg`, `sed -n`, `cat`, `head`, `tail`, `ls`, `find`, `jq`, git and `gh` queries) between its catch-all and its own rules, so it reads without asking; an owner's own specific rule still wins. Its opencode scratch space and the skills directory need no approval either.
 
 `onionsoup_friction({ summary, expected, actual, evidence? })` captures unexpected engine behavior from an
 owner chat. The host adds the originating session, running engine checkout commit, observed model and bounded
