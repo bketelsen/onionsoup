@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { RiDraggable, RiInbox2Line, RiNotification3Line, RiErrorWarningLine, RiOrganizationChart } from '@remixicon/react';
 import { navigate, useConnected } from '../api.ts';
-import type { SurfaceState } from '../types.ts';
+import type { OwnerSummary, SurfaceState } from '../types.ts';
 import { BusyDots, cx, OwnerIcon } from './ui.tsx';
 
 /** The owners down the left, each with what waits on the person and whether it is working. */
@@ -78,6 +78,7 @@ export function Rail({ state, route, onReorder }: { state?: SurfaceState; route:
           className={cx('flex items-center gap-2 rounded-md px-2 py-1.5 typography-ui-label', route[0] === 'org' || route[0] === 'initiative' ? 'bg-interactive-active text-foreground' : 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground')}>
           <RiOrganizationChart className="size-4" />Org
         </button>
+        {state?.operator && <OperatorEntry operator={state.operator} isActive={active === state.operator.id} />}
         <div className="mt-3 mb-1 px-2 typography-micro uppercase tracking-wide text-muted-foreground text-[0.68rem]">Owners</div>
         {state?.owners.map(owner => (
           <button key={owner.id} onClick={() => navigate('owner', owner.id)} title={`${owner.title}\n${owner.domain}\n(drag to re-order)`}
@@ -108,5 +109,23 @@ export function Rail({ state, route, onReorder }: { state?: SurfaceState; route:
         <div className="px-2 typography-micro text-muted-foreground/60 text-[0.68rem]">Alt+↑↓ owners · Alt+I inbox · / message</div>
       </div>
     </nav>
+  );
+}
+
+/** The person's operator, apart from the owners: its own chat, at the top of the rail. */
+function OperatorEntry({ operator, isActive }: { operator: OwnerSummary; isActive: boolean }) {
+  return (
+    <>
+      <div className="mt-3 mb-1 px-2 typography-micro uppercase tracking-wide text-muted-foreground text-[0.68rem]">Operator</div>
+      <button onClick={() => navigate('owner', operator.id)} title={`${operator.title}\nworks in ${operator.domain}`}
+        className={cx('flex items-center gap-2 rounded-md px-2 py-1.5 text-left', isActive ? 'bg-interactive-active text-foreground' : 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground')}>
+        <OwnerIcon icon={operator.icon} />
+        <span className="flex flex-col min-w-0 flex-1">
+          <span className="typography-ui-label truncate">{operator.name}</span>
+          <span className="typography-micro text-muted-foreground truncate text-[0.7rem]">{operator.title}</span>
+        </span>
+        {operator.waiting > 0 && <span className="rounded-full bg-primary text-primary-foreground px-1.5 typography-micro font-semibold">{operator.waiting}</span>}
+      </button>
+    </>
   );
 }

@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { Runtime, approveInitiative, draftInitiative, reportFriction, setReminder, submitInitiative } from '@onionsoup/owners';
+import { OPERATOR_ID, OperatorDeclaration, Runtime, approveInitiative, draftInitiative, reportFriction, setReminder, submitInitiative } from '@onionsoup/owners';
 import { SurfaceState, surfaceServer, type OpencodeApi } from '@onionsoup/surface';
 
 function fakeOpencode() {
@@ -205,6 +205,36 @@ test('chats go to the owner\'s directory with its persona as the agent; bad inpu
     assert.match(String((await call('POST', '/api/owners/clippy/sessions', {})).body.error), /no_chat: clippy/);
     assert.equal((await call('GET', '/api/owners/nobody/sessions')).status, 404);
     assert.match(String((await call('POST', '/api/decide', { action: 'launch', id: 'x' })).body.error), /unknown_decision|not found|ENOENT/);
+  } finally {
+    server.close();
+  }
+});
+
+test('the operator has a chat of its own in its directory, apart from the owners, with its prompts in the inbox', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'surface-operator-'));
+  const { server, call, calls, runtime } = await start(api => {
+    api.permissions = async candidate => candidate === directory
+      ? [{ id: 'per_op', sessionID: 'ses_op', permission: 'bash', patterns: ['git push --force'], metadata: {}, always: [] }]
+      : [];
+  });
+  try {
+    assert.equal((await call('POST', '/api/owners/operator/sessions', {})).status, 404, 'no operator.yaml, no operator chat');
+    assert.equal((await call('GET', '/api/state')).body.operator, undefined);
+    runtime.declarations.operator = OperatorDeclaration.parse({ name: 'Operator', title: 'Acts for you', model: 'github-copilot/gpt-6-sol', directory });
+    const state = (await call('GET', '/api/state')).body as { operator: Record<string, unknown>; owners: { id: string }[]; inbox: { id: string; owner: string }[] };
+    assert.deepEqual(state.operator, {
+      id: OPERATOR_ID, name: 'Operator', title: 'Acts for you', source: '', icon: 'terminal', color: 'primary', model: 'github-copilot/gpt-6-sol',
+      domain: directory, chat: true, hasDesk: false, waiting: 1, running: 0,
+    });
+    assert.ok(!state.owners.some(owner => owner.id === OPERATOR_ID), 'the operator is not an owner');
+    assert.ok(state.inbox.some(entry => entry.id === 'per_op' && entry.owner === OPERATOR_ID));
+    await call('POST', '/api/owners/operator/sessions', {});
+    assert.deepEqual(calls.at(-1), ['create', directory, undefined, 'Operator']);
+    await call('POST', '/api/owners/operator/sessions/ses_op/prompt', { text: 'check the daemon' });
+    assert.deepEqual(calls.at(-1), ['prompt', directory, 'ses_op', 'Operator', 'check the daemon']);
+    assert.equal((await call('GET', '/api/owners/operator/sessions')).body.directory, directory);
+    await call('POST', '/api/owners/operator/permissions/per_op', { reply: 'reject' });
+    assert.deepEqual(calls.at(-1), ['permission', directory, 'per_op', 'reject']);
   } finally {
     server.close();
   }

@@ -14,6 +14,7 @@ export { approvePush } from './rebase.ts';
 export { approveCreate, approveDelete, denyRequest } from './brokering.ts';
 export { deskState, itemText, statusText } from './desk.ts';
 export { chatDirectory } from './chats.ts';
+export { operatorChatDirectory } from './operator.ts';
 export { configDirectory, stateDirectory } from './paths.ts';
 export { describeAsk, type ResourceRequest } from './requests.ts';
 export { domainSummary } from './roster.ts';

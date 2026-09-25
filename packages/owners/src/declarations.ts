@@ -5,6 +5,7 @@ import { join, resolve } from 'node:path';
 import { parse } from 'yaml';
 import { z } from 'zod';
 import { MemoryPolicy } from './memory-config.ts';
+import { expandHome } from './paths.ts';
 
 export const ModelRef = z.string().regex(/^[^/\s]+\/\S+$/, 'model must be provider/model');
 export type ModelRef = z.infer<typeof ModelRef>;
@@ -72,6 +73,12 @@ export type IncusDomain = z.infer<typeof IncusDomain>;
 
 export const PermissionAction = z.enum(['allow', 'ask', 'deny']);
 
+/** The icons the surface draws for owners and the operator. */
+export const PersonaIcon = z.enum([
+  'code', 'terminal', 'rocket', 'flask', 'gamepad', 'briefcase', 'home', 'globe', 'leaf', 'shield', 'palette', 'server', 'phone', 'database',
+  'lightbulb', 'music', 'camera', 'book', 'heart',
+]);
+
 /** Who the owner is in conversation: a name, a title and a voice. Identity, not authority. */
 export const Persona = z.object({
   name: z.string().regex(/^[A-Z][A-Za-z-]+( [A-Z][A-Za-z-]+)?$/),
@@ -79,7 +86,7 @@ export const Persona = z.object({
   source: z.string(),
   voice: z.string(),
   /** Icon and color keys for the owner in the surface. */
-  icon: z.enum(['code', 'terminal', 'rocket', 'flask', 'gamepad', 'briefcase', 'home', 'globe', 'leaf', 'shield', 'palette', 'server', 'phone', 'database', 'lightbulb', 'music', 'camera', 'book', 'heart']).default('briefcase'),
+  icon: PersonaIcon.default('briefcase'),
   color: z.string().default('primary'),
 });
 export type Persona = z.infer<typeof Persona>;
@@ -247,11 +254,33 @@ export const FamilyTable = z.object({
 });
 export type FamilyTable = z.infer<typeof FamilyTable>;
 
+/** The id the operator's chat and journal go by; no owner may take it. */
+export const OPERATOR_ID = 'operator';
+export const OPERATOR_FILE = 'operator.yaml';
+
+/**
+ * The person's operator (operator.yaml): one nearly unrestricted agent the person directs in a chat of its own,
+ * outside the owners' rules. Absent file, no operator.
+ */
+export const OperatorDeclaration = z.object({
+  /** Its agent name in opencode and the surface, with the title and icon the surface shows. */
+  name: Persona.shape.name.default('Operator'),
+  title: z.string().min(1).default('Acts for you'),
+  icon: PersonaIcon.default('terminal'),
+  model: ModelRef,
+  /** Where its chats run; ~/ is expanded. */
+  directory: z.string().min(1).default('~/projects').transform(expandHome),
+  /** Bash patterns that ask the person, on top of the built-in irreversible ones. */
+  ask: z.array(z.string().min(1)).default([]),
+});
+export type OperatorDeclaration = z.infer<typeof OperatorDeclaration>;
+
 export interface Declarations {
   root: string;
   owners: Map<string, OwnerDeclaration>;
   freelancers: Map<Craft, FreelancerDeclaration>;
   families: FamilyTable;
+  operator?: OperatorDeclaration;
 }
 
 async function yamlFiles(directory: string) {
@@ -317,18 +346,45 @@ export function isDirectReport(declarations: Declarations, managerId: string, re
   return managerOf(declarations, reportId)?.id === managerId;
 }
 
+/** operator.yaml, if the person wrote one. */
+async function loadOperator(base: string) {
+  const text = await readFile(join(base, OPERATOR_FILE), 'utf8').catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return undefined;
+    throw error;
+  });
+  if (text === undefined) return undefined;
+  const parsed = OperatorDeclaration.safeParse(parse(text));
+  if (!parsed.success) {
+    const issues = parsed.error.issues.map(issue => `${issue.path.join('.') || '(root)'}: ${issue.message}`).join('; ');
+    throw new Error(`operator_invalid: ${OPERATOR_FILE}: ${issues}`);
+  }
+  return parsed.data;
+}
+
+/** The operator's id is never an owner's, and its name is never an owner persona's: both name one agent each. */
+export function checkOperatorReserved(owners: ReadonlyMap<string, OwnerDeclaration>, operator: OperatorDeclaration | undefined) {
+  if (owners.has(OPERATOR_ID)) throw new Error(`operator_reserved: no owner may have the id ${OPERATOR_ID}`);
+  if (!operator) return;
+  const name = operator.name.toLowerCase();
+  const namesake = [...owners.values()].find(owner => owner.persona?.name.toLowerCase() === name);
+  if (namesake) throw new Error(`operator_reserved: ${namesake.id} is called ${namesake.persona!.name}, the operator's name`);
+}
+
 export async function loadDeclarations(root: string): Promise<Declarations> {
   const base = resolve(root);
   const owners = await loadAll(join(base, 'owners'), OwnerDeclaration);
   const freelancers = await loadFreelancers(join(base, 'freelancers'));
   const families = FamilyTable.parse(parse(await readFile(join(base, 'families.yaml'), 'utf8')));
+  const operator = await loadOperator(base);
   const ownersById = new Map(owners.map(owner => [owner.id, owner]));
   checkOrgChart(ownersById);
+  checkOperatorReserved(ownersById, operator);
   return {
     root: base,
     owners: ownersById,
     freelancers: new Map(freelancers.map(freelancer => [freelancer.craft, freelancer])),
     families,
+    operator,
   };
 }
 

@@ -140,6 +140,28 @@ each plan (`onionsoup_steer`); without one, every plan waits for you in the inbo
 (`maxAssignments`, `maxOpenPerManager`) and `SUPERVISION_LIMITS.revisionsPerItem` bound the work. A steward may put owners
 in its scope under itself, but only you set any other reporting line or grant.
 
+## Your operator
+
+An operator is one agent you direct yourself, outside the owners: it runs with nearly every permission, like a
+coding agent in auto mode, and irreversible commands ask you first. Declare it in `operator.yaml` at the top of your
+config directory; without the file there is none.
+
+```yaml
+# operator.yaml
+name: Operator                   # its agent name; no owner may use it (default Operator)
+title: Acts for you              # shown under its name in the surface (default "Acts for you")
+icon: terminal                   # an owner persona icon (default terminal)
+model: github-copilot/gpt-6-sol
+directory: ~/projects            # where its chats run (default ~/projects)
+ask:                             # more bash patterns that ask you, on top of the built-in irreversible ones
+  - "systemctl --user stop*"
+```
+
+Restart the surface; the operator appears at the top of the rail. It may use the onionsoup CLI and the skills in
+`.agents/skills` like you would, but approvals and ships through the CLI ask you, and it has no owner tools. What it
+runs is journaled to `state/notebooks/operator/journal/`. See [Operator](design/owners.md#operator) for why it sits
+outside the owner rules and what it risks.
+
 ## Run it always on
 
 ```bash

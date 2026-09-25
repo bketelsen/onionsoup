@@ -1,23 +1,22 @@
-import type { OwnerDeclaration } from './declarations.ts';
-
 export const SESSION_LIMITS = { parentDepth: 4, cachedSessions: 512 };
 
 /** Reads a session's parent; the plugin passes the opencode client's `session.get`. */
 export type ParentLookup = (sessionID: string) => Promise<string | undefined>;
 
 /**
- * Which owner a session belongs to. A person's chat with an owner (and an execution session) is a top-level session
- * of the owner's persona agent; subagents run in child sessions, which belong to their parent's owner so their tool
- * calls are journaled there. A failed lookup is not cached, so a transient error recovers on the next event.
+ * Which owner (or the operator) a session belongs to. A person's chat with an owner (and an execution session) is a
+ * top-level session of the owner's persona agent; subagents run in child sessions, which belong to their parent's
+ * owner so their tool calls are journaled there. A failed lookup is not cached, so a transient error recovers on the
+ * next event.
  */
-export class SessionOwners {
-  private readonly topLevel = new Map<string, OwnerDeclaration>();
+export class SessionOwners<Holder> {
+  private readonly topLevel = new Map<string, Holder>();
   private readonly parents = new Map<string, string | null>();
 
   constructor(private readonly parentOf: ParentLookup) {}
 
   /** A message from an owner's persona marks its session as that owner's top-level session. */
-  claim(sessionID: string, owner: OwnerDeclaration) {
+  claim(sessionID: string, owner: Holder) {
     this.topLevel.set(sessionID, owner);
   }
 

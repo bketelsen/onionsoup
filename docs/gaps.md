@@ -9,6 +9,12 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
   as the person, bounded only by permission rules, which [AGENTS.md](../AGENTS.md) rule 3 says are never the
   boundary. The follow-up is to run chat bash through bwrap from a `tool.execute.before` wrapper in the plugin, the
   same sandbox hires and verification already use.
+- **The operator is unsandboxed and trusted.** It runs as the person with nearly every permission; its only brakes
+  are `OPERATOR_ASK_BASH`, its prompt and the audit journal. Chat shells get the surface opencode's own credentials
+  blanked (`hideHostCredentials`, the `shell.env` hook), so a command cannot answer other sessions' prompts through the
+  API, but a prompt injection can still do anything the person's account and the CLI can. Its journal has no view in
+  the surface yet: read
+  `state/notebooks/operator/journal/*.jsonl`.
 - **Plan approvals in chat do not survive a restart.** A plan approval pending in a chat is lost if the surface restarts (the
   permission prompt lives in its opencode); the item stays `awaiting-plan-approval` and the owner resubmits it with
   `item`.

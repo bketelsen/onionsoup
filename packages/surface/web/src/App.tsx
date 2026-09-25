@@ -40,7 +40,7 @@ export function App() {
     known.current = keys;
     if (!previous || !document.hidden || typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
     for (const entry of state.inbox.filter(candidate => !previous.has(`${candidate.kind}:${candidate.id}`))) {
-      const name = state.owners.find(candidate => candidate.id === entry.owner)?.name ?? entry.owner;
+      const name = [state.operator, ...state.owners].find(candidate => candidate?.id === entry.owner)?.name ?? entry.owner;
       const notification = new Notification(`${name}: ${entry.kind === 'permission' ? 'permission needed' : entry.kind === 'question' ? 'a question for you' : `${entry.kind} waiting`}`, { body: entry.title, tag: `${entry.kind}:${entry.id}` });
       notification.onclick = () => {
         window.focus();
@@ -72,7 +72,8 @@ export function App() {
     return () => removeEventListener('keydown', onKey);
   }, [state, route]);
 
-  const owner = route[0] === 'owner' ? state?.owners.find(candidate => candidate.id === route[1]) : undefined;
+  const chats = state ? [...(state.operator ? [state.operator] : []), ...state.owners] : [];
+  const owner = route[0] === 'owner' ? chats.find(candidate => candidate.id === route[1]) : undefined;
   return (
     <div className="h-full flex flex-col bg-background text-foreground">
       <InboxErrors errors={state?.inboxErrors ?? []} refreshError={refreshError} />

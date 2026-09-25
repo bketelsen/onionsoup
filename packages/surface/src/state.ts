@@ -7,7 +7,7 @@ import {
   listFriction, frictionDetail, type FrictionRecord,
   approveInitiative, reviseInitiative, cancelInitiative, initiativeViews, managerOf, planGrantFor, cancelReminder,
   type AssignmentView, type Initiative, type InitiativeView, type WorkItem,
-  isDelegated, OWNER_CHANGE_WORKFLOW, PLAN_APPROVAL_PERMISSION,
+  isDelegated, OWNER_CHANGE_WORKFLOW, PLAN_APPROVAL_PERMISSION, OPERATOR_ID, operatorChatDirectory,
 } from '@onionsoup/owners';
 import type { OpencodeApi, PendingPermission, PendingQuestion } from './opencode.ts';
 import { planApprovalOf, type PlanApprovalRequest } from './plan-approval-request.ts';
@@ -100,6 +100,8 @@ export interface OwnerSummary {
   domain: string;
   /** Owners without a persona have no chat agent. */
   chat: boolean;
+  /** The operator has chats but no desk: no work, notebook or activity. */
+  hasDesk: boolean;
   waiting: number;
   running: number;
 }
@@ -161,23 +163,38 @@ export class SurfaceState {
     this.settings = new SettingsStore(settingsFile);
   }
 
-  /** The owner's chat directory (desk or evidence folder), resolved once. */
-  async directory(ownerId: string) {
-    const known = this.directories.get(ownerId);
+  /** The operator, when the person declared one and this chat id is its. */
+  private operatorOf(chatId: string) {
+    return chatId === OPERATOR_ID ? this.runtime.declarations.operator : undefined;
+  }
+
+  /** Chats are an owner's, or the operator's: the only other chat the surface opens. */
+  isKnownChat(chatId: string) {
+    return this.runtime.declarations.owners.has(chatId) || Boolean(this.operatorOf(chatId));
+  }
+
+  /** An owner's chat directory (desk or evidence folder), or the operator's declared one, resolved once. */
+  async directory(chatId: string) {
+    const known = this.directories.get(chatId);
     if (known) return known;
-    const path = await this.resolveDirectory(this.runtime, ownerId);
-    this.directories.set(ownerId, path);
+    const operator = this.operatorOf(chatId);
+    const path = operator ? await operatorChatDirectory(operator) : await this.resolveDirectory(this.runtime, chatId);
+    this.directories.set(chatId, path);
     return path;
   }
 
-  agentOf(ownerId: string) {
-    const owner = this.runtime.owner(ownerId);
-    if (!owner.persona) throw new Error(`no_chat: ${ownerId} has no persona, so no chat agent`);
+  agentOf(chatId: string) {
+    const operator = this.operatorOf(chatId);
+    if (operator) return operator.name;
+    const owner = this.runtime.owner(chatId);
+    if (!owner.persona) throw new Error(`no_chat: ${chatId} has no persona, so no chat agent`);
     return owner.persona.name;
   }
 
-  private chatOwners() {
-    return [...this.runtime.declarations.owners.values()].filter(owner => owner.persona);
+  /** Every chat the person can have: owners with a persona, then the operator if declared. */
+  private chatIds() {
+    const owners = [...this.runtime.declarations.owners.values()].filter(owner => owner.persona).map(owner => owner.id);
+    return this.runtime.declarations.operator ? [...owners, OPERATOR_ID] : owners;
   }
 
   /** Everything waiting on the person, across owners: engine gates, then chat permissions and questions. */
@@ -213,13 +230,13 @@ export class SurfaceState {
   private async chatInbox() {
     const entries: InboxEntry[] = [];
     const errors: InboxReadError[] = [];
-    for (const owner of this.chatOwners()) {
+    for (const chatId of this.chatIds()) {
       const unavailable = (code: InboxReadError['code']) => {
-        errors.push(InboxReadError.parse({ owner: owner.id, code }));
+        errors.push(InboxReadError.parse({ owner: chatId, code }));
         return [];
       };
-      const directories = await this.ownerDirectories(owner.id).catch(() => unavailable('chat_directory_failed'));
-      for (const directory of directories) entries.push(...await this.directoryInbox(owner.id, directory, unavailable));
+      const directories = await this.ownerDirectories(chatId).catch(() => unavailable('chat_directory_failed'));
+      for (const directory of directories) entries.push(...await this.directoryInbox(chatId, directory, unavailable));
     }
     return { entries, errors };
   }
@@ -344,6 +361,7 @@ export class SurfaceState {
       model: owner.model,
       domain: domainSummary(owner),
       chat: Boolean(owner.persona),
+      hasDesk: true,
       waiting: waiting.filter(entry => entry.owner === owner.id).length,
       running: items.filter(item => item.owner === owner.id && RUNNING.has(item.status)).length,
     }));
@@ -351,6 +369,17 @@ export class SurfaceState {
 
   async owner(ownerId: string) {
     return deskState(this.runtime, { owner: ownerId });
+  }
+
+  /** The operator's entry in the surface, when the person declared one: a chat of its own, apart from the owners. */
+  async operator(inbox: InboxEntry[]): Promise<OwnerSummary | undefined> {
+    const operator = this.runtime.declarations.operator;
+    if (!operator) return undefined;
+    return {
+      id: OPERATOR_ID, name: operator.name, title: operator.title, source: '', icon: operator.icon, color: 'primary',
+      model: operator.model, domain: operator.directory, chat: true, hasDesk: false,
+      waiting: inbox.filter(entry => entry.owner === OPERATOR_ID).length, running: 0,
+    };
   }
 
   /** A work item, with the decision it waits on in the inbox's terms, so its page can take it with the same card. */
@@ -472,8 +501,8 @@ export class SurfaceState {
   async autoAnswerAll() {
     const { autoAccept } = await this.settings.read();
     if (!Object.keys(autoAccept).length) return;
-    for (const owner of this.chatOwners()) {
-      const directories = await this.ownerDirectories(owner.id).catch(() => []);
+    for (const chatId of this.chatIds()) {
+      const directories = await this.ownerDirectories(chatId).catch(() => []);
       for (const directory of directories) await this.autoAnswer(directory);
     }
   }
