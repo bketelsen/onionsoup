@@ -178,7 +178,7 @@ export class Runtime {
   }
 
   async freelancers() {
-    this.pool ??= await Freelancers.start();
+    this.pool ??= await Freelancers.start(() => this.declarations.providers);
     return this.pool;
   }
 

@@ -7,7 +7,7 @@ import { ProposedWork } from './artifacts.ts';
 import { readdir, readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
-import { tool, type Plugin } from '@opencode-ai/plugin';
+import { tool, type Config, type Plugin } from '@opencode-ai/plugin';
 import {
   canChange, directReports, hasIncus, isDirectReport, managerOf, OPERATOR_ID, repositoryShortName, type OperatorDeclaration, type OwnerDeclaration,
   type Persona,
@@ -49,6 +49,7 @@ import { parseReminderRequest } from './reminders.ts';
 import { PLAN_APPROVAL_PERMISSION, PlanSubmission, submitPlan } from './plan-work.ts';
 import { requestPlanApproval } from './plan-approval.ts';
 import { HOST_ONLY_VARIABLES } from './sandbox.ts';
+import { opencodeProviders, type DeclaredProviders } from './providers.ts';
 import { CHAT_EXTERNAL_DIRECTORIES, chatBash } from './chat-permissions.ts';
 
 /**
@@ -71,6 +72,14 @@ export async function hideHostCredentials(_input: unknown, output: { env: Record
   for (const name of HOST_ONLY_VARIABLES) {
     if (process.env[name] !== undefined) output.env[name] = '';
   }
+}
+
+/**
+ * The person's declared providers (providers.yaml) join opencode's own, so owners and the operator can chat on them.
+ * The person's opencode providers stay; a declared provider replaces one of theirs with the same id.
+ */
+function addDeclaredProviders(config: Pick<Config, 'provider'>, providers: DeclaredProviders) {
+  config.provider = { ...config.provider, ...opencodeProviders(providers) };
 }
 
 export const PLUGIN_LIMITS = { exchangeChars: 8_000, contextChars: 28_000, noticeMs: 15_000 };
@@ -574,6 +583,7 @@ const server: Plugin = async (input, options) => {
       Object.assign(agents, subagents(runtime.declarations, owners));
       if (operator) agents[operator.name] = operatorAgent(operator, { config: runtime.declarations.root, home: dirname(runtime.stateDirectory) });
       registerSkills(config as Parameters<typeof registerSkills>[0], operator ? [SKILLS_DIRECTORY, OPERATOR_SKILLS_DIRECTORY] : [SKILLS_DIRECTORY]);
+      addDeclaredProviders(config, runtime.declarations.providers);
       const current = config.permission;
       config.permission = { ...(typeof current === 'string' ? { '*': current } : current ?? {}), ...hiddenFromEveryone } as never;
       agents[WATCHER_AGENT] = {

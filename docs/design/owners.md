@@ -72,7 +72,7 @@ Onionsoup is the engine. A person's owners are configuration that lives outside 
 | What | Where | Default |
 | --- | --- | --- |
 | Engine: runtime, CLI, opencode plugin, Owner's Desk | this repository | |
-| Your owners: declarations, charters, freelancer models, model families | `ONIONSOUP_CONFIG` | `~/.config/onionsoup` |
+| Your owners: declarations, charters, freelancer models, model families, model providers | `ONIONSOUP_CONFIG` | `~/.config/onionsoup` |
 | Runtime state: notebooks, ledger, requests, checkouts, desks, plan worktrees, evidence, tools | `ONIONSOUP_HOME` | `~/.local/share/onionsoup` |
 
 `npm run owners -- init` creates a config directory from [`examples/starter`](../../examples/starter) as its
@@ -433,6 +433,18 @@ command and edit it or its subagents run is journaled to `state/notebooks/operat
 never distilled), so the person can see afterwards what it did. Every chat shell, the operator's and the owners',
 gets the surface opencode's own server credentials blanked (the plugin's `shell.env` hook sets each of
 `HOST_ONLY_VARIABLES` to empty), so no command can use them to answer another session's prompt through the API.
+
+### Model providers
+
+Models come from opencode's providers. A person adds OpenAI-compatible endpoints (a local Qwen server, say) once, in
+`providers.yaml` (`ProviderDeclaration` in `packages/owners/src/providers.ts`), and they reach every agent through
+one conversion, `opencodeProviders`: the plugin's config hook merges them into the surface opencode's `provider`
+config for owner chats and the operator, and `agentConfig` puts them into each sandboxed hire's
+`OPENCODE_CONFIG_CONTENT`, since the sandbox masks the host's opencode config. An API key comes from a file under the
+config directory's `secrets/`, read at load; it prints and serialises as `[redacted]`, travels only in the hire's
+environment, and server output quoted in a hire error is redacted. A provider that cannot force a tool call
+(`structuredOutput: false`) starts its hires in text mode. Built-in provider ids are refused (`provider_reserved`),
+and `families.yaml` decides a declared model's family like any other.
 
 ### Safety
 
