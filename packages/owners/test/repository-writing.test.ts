@@ -1,3 +1,5 @@
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import assert from 'node:assert/strict';
 import { mkdtemp } from 'node:fs/promises';
 import { test } from 'node:test';
@@ -13,7 +15,7 @@ function assertWritingRule(prompt: string) {
 }
 
 test('configured owner prompts carry repository writing guidance alongside each persona', async () => {
-  const state = await mkdtemp('/tmp/onionsoup-writing-plugin-');
+  const state = await mkdtemp(join(tmpdir(), 'onionsoup-writing-plugin-'));
   // The config hook is local: fail if prompt generation tries to contact an opencode client.
   const input = new Proxy({} as PluginInput, {
     get(_target, key) { throw new Error(`unexpected_plugin_input: ${String(key)}`); },

@@ -1,3 +1,5 @@
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import assert from 'node:assert/strict';
 import { mkdtemp, rename, unlink, writeFile } from 'node:fs/promises';
 import { test } from 'node:test';
@@ -13,7 +15,7 @@ function latch() {
 
 async function setup() {
   const runtime = await Runtime.open({
-    declarations: 'packages/owners/test/fixtures/owners', state: await mkdtemp('/tmp/onionsoup-coordination-'),
+    declarations: 'packages/owners/test/fixtures/owners', state: await mkdtemp(join(tmpdir(), 'onionsoup-coordination-')),
   });
   runtime.reloadDeclarations = async () => {};
   for (const owner of runtime.declarations.owners.values()) {

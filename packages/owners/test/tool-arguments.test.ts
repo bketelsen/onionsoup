@@ -1,3 +1,5 @@
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import assert from 'node:assert/strict';
 import { mkdtemp } from 'node:fs/promises';
 import { test } from 'node:test';
@@ -6,7 +8,7 @@ import { z } from 'zod';
 import { withActiveHooks } from './active-hooks.ts';
 
 test('the active plugin makes omitted webfetch defaults encodable without changing approval rules', async () => {
-  const state = await mkdtemp('/tmp/onionsoup-webfetch-');
+  const state = await mkdtemp(join(tmpdir(), 'onionsoup-webfetch-'));
   const hooks = await withActiveHooks({} as PluginInput, {
     declarations: 'packages/owners/test/fixtures/owners', state,
   });

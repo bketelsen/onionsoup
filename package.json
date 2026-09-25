@@ -11,7 +11,7 @@
     "owners": "node --conditions=onionsoup-source --import tsx packages/owners/src/cli.ts",
     "build": "node scripts/build-workspaces.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "node --conditions=onionsoup-source --import tsx --test packages/*/test/*.test.ts scripts/*.test.mjs",
+    "test": "node scripts/test.mjs packages/*/test/*.test.ts scripts/*.test.mjs",
     "check:packages": "node scripts/check-packages.mjs",
     "check:docs": "node scripts/check-docs.mjs",
     "verify": "npm run build && npm run check:packages && npm run check:docs && npm run typecheck && npm run surface:typecheck && npm run surface:build && npm test",

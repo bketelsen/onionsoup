@@ -1,3 +1,4 @@
+import { tmpdir } from 'node:os';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, readdir, writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -14,7 +15,7 @@ import { Notebook } from '../src/notebook.ts';
 
 const declarations = 'packages/owners/test/fixtures/owners';
 async function fixture() {
-  const state = await mkdtemp('/tmp/onionsoup-friction-');
+  const state = await mkdtemp(join(tmpdir(), 'onionsoup-friction-'));
   const runtime = await Runtime.open({ declarations, state });
   await runtime.notebook('homelab').ensure('# Test');
   return { runtime, state };

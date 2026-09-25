@@ -1,3 +1,4 @@
+import { tmpdir } from 'node:os';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, readdir, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -8,7 +9,7 @@ import { drain, scheduleMemory, type TickLog } from '../src/daemon.ts';
 import type { HireRequest } from '../src/opencode.ts';
 
 async function fixture() {
-  const state = await mkdtemp('/tmp/onionsoup-memory-test-');
+  const state = await mkdtemp(join(tmpdir(), 'onionsoup-memory-test-'));
   const runtime = await Runtime.open({ declarations: 'packages/owners/test/fixtures/owners', state });
   const notebook = runtime.notebook('clippy');
   await notebook.ensure('# Charter\nMemory test\n');
