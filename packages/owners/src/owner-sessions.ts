@@ -1,6 +1,7 @@
 import type { Plugin } from '@opencode-ai/plugin';
 import type { ChatOrigin } from './chat-origin.ts';
 import { chatDirectory } from './chats.ts';
+import { deskSyncText, syncOwnerDesk } from './desk-sync.ts';
 import type { WorkItem } from './ledger.ts';
 import { executionPrompt, OWNER_CHANGE_WORKFLOW, planningPrompt } from './plan-work.ts';
 import type { Runtime } from './runtime.ts';
@@ -26,6 +27,15 @@ interface SessionKind {
   recorded: (origin: ChatOrigin | undefined) => Partial<WorkItem>;
   /** Session-level rules on top of the owner's agent: the execution session edits the desk without asking. */
   permission: readonly PermissionRule[];
+}
+
+/** Planning and carrying out a plan start from the base branch as it is now, not from where the desk was left. */
+async function syncBeforeSession(runtime: Runtime, item: WorkItem) {
+  const sync = await syncOwnerDesk(runtime, item.owner, item.proposal.repository).catch((error: unknown) => {
+    console.warn('owner_session_desk_sync_failed', item.id, error);
+    return undefined;
+  });
+  return sync ? `\n\n${deskSyncText(sync)}` : '';
 }
 
 function isOwnerPlan(item: WorkItem) {
@@ -87,7 +97,7 @@ export async function openOwnerSession(runtime: Runtime, client: OwnerSessionCli
     return undefined;
   }
   try {
-    await client.prompt(origin, persona.name, kind.prompt(claimed));
+    await client.prompt(origin, persona.name, `${kind.prompt(claimed)}${await syncBeforeSession(runtime, claimed)}`);
   } catch (error) {
     await unclaim(runtime, claimed, kind);
     await client.remove(origin).catch(() => undefined);

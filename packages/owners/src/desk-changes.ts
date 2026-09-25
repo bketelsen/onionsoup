@@ -115,8 +115,14 @@ async function deskTarget(deskPath: string, item: WorkItem | undefined): Promise
   return { kind: 'plan', item };
 }
 
-function reviewBase(owner: RepositoryOwner, target: DeskTarget) {
-  return target.kind === 'repair' ? target.head : `origin/${owner.domain.baseBranch}`;
+/**
+ * What the reviewer diffs against. A repair is reviewed against its PR head. Other changes are reviewed against where
+ * the desk meets the base branch, so a desk that fell behind shows only the owner's change, not the base's newer
+ * commits as reversions.
+ */
+async function reviewBase(owner: RepositoryOwner, deskPath: string, target: DeskTarget) {
+  if (target.kind === 'repair') return target.head;
+  return (await git(deskPath, ['merge-base', 'HEAD', `origin/${owner.domain.baseBranch}`])).trim();
 }
 
 /** What the owner reads when host verification fails: each failing command with the end of its output. */
@@ -197,7 +203,7 @@ async function prepareDeskChanges(runtime: Runtime, ownerId: string, proposal: D
   if (failure) return failure;
   const waiting = waitingForPerson(owner, await deskReviewRounds(runtime, owner.id, owner.domain.name));
   if (waiting) return waiting;
-  const review = await reviewDesk(runtime, owner, desk.path, proposal, reviewBase(owner, target));
+  const review = await reviewDesk(runtime, owner, desk.path, proposal, await reviewBase(owner, desk.path, target));
   if (effectiveDecision(review.verdict) !== 'approve') {
     await recordNeedsWork(runtime, owner, proposal.title, { at: new Date().toISOString(), reviewer: review.reviewer, ...review.verdict, tree: review.tree });
     return { outcome: 'needs-work', summary: `${review.reviewer} asked for changes; nothing was committed.\n${review.verdict.summary}\n${findingsText(review.verdict.findings)}` };

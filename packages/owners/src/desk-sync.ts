@@ -1,0 +1,90 @@
+import type { Runtime } from './runtime.ts';
+import { ensureDesk, git } from './workspace.ts';
+
+/**
+ * Bringing a desk up to date with its base branch, in host code. A desk is made from `origin/<base>` and reset only
+ * after its own change lands, so other merges leave it behind; a change built there then reads to the reviewer as
+ * reverting them. Owners may not run history-changing git, so this does it for them: uncommitted work is set aside
+ * under a unique stash, the desk moves to the base, and the work comes back. A conflict keeps the stash and names the
+ * files; nothing is ever discarded.
+ */
+export type DeskSyncOutcome = 'current' | 'updated' | 'conflicts';
+
+export interface DeskSync {
+  outcome: DeskSyncOutcome;
+  from: string;
+  to: string;
+  conflicts: string[];
+  stash?: string;
+}
+
+async function isAncestor(deskPath: string, ancestor: string, descendant: string) {
+  return git(deskPath, ['merge-base', '--is-ancestor', ancestor, descendant]).then(() => true, () => false);
+}
+
+/** Commits on the desk that no remote branch holds (e.g. never pushed) would be lost by moving the desk. */
+async function requireNothingUnpublished(deskPath: string, base: string) {
+  const unpublished = (await git(deskPath, ['rev-list', 'HEAD', '--not', base, '--remotes'])).trim();
+  if (unpublished) throw new Error(`desk_has_unpublished_commits: ${unpublished.split('\n').length} commit(s) on the desk are in no remote branch; propose them first`);
+}
+
+async function stashWork(deskPath: string) {
+  const tag = `onionsoup-desk-sync-${Date.now()}`;
+  // Intent-to-add entries (left by propose_changes) make `git stash` refuse; clearing the index keeps every file.
+  await git(deskPath, ['reset', '-q']);
+  await git(deskPath, ['stash', 'push', '-q', '-u', '-m', tag]);
+  const entry = (await git(deskPath, ['stash', 'list', '--format=%H %gs'])).split('\n').find(line => line.endsWith(tag));
+  if (!entry) throw new Error('desk_sync_stash_missing: the work was not set aside; nothing was moved');
+  return entry.split(' ')[0]!;
+}
+
+/** Drop exactly the stash this sync made; stashes are shared by every worktree of the checkout. */
+async function dropStash(deskPath: string, sha: string) {
+  const entry = (await git(deskPath, ['stash', 'list', '--format=%H %gd'])).split('\n').find(line => line.startsWith(`${sha} `));
+  if (entry) await git(deskPath, ['stash', 'drop', '-q', entry.split(' ')[1]!]);
+}
+
+async function restoreWork(deskPath: string, sha: string) {
+  const applied = await git(deskPath, ['stash', 'apply', sha]).then(() => true, () => false);
+  const conflicts = (await git(deskPath, ['diff', '--name-only', '--diff-filter=U'])).split('\n').filter(Boolean);
+  if (!applied && !conflicts.length) throw new Error(`desk_sync_restore_failed: the work is kept in stash ${sha}; restore it with the person`);
+  if (applied && !conflicts.length) await dropStash(deskPath, sha);
+  return conflicts;
+}
+
+export async function syncDesk(deskPath: string, baseBranch: string): Promise<DeskSync> {
+  await git(deskPath, ['fetch', '-q', 'origin']);
+  const base = `origin/${baseBranch}`;
+  const from = (await git(deskPath, ['rev-parse', 'HEAD'])).trim();
+  const to = (await git(deskPath, ['rev-parse', base])).trim();
+  if (await isAncestor(deskPath, to, from)) return { outcome: 'current', from, to, conflicts: [] };
+  await requireNothingUnpublished(deskPath, base);
+  const isDirty = Boolean((await git(deskPath, ['status', '--porcelain'])).trim());
+  const stash = isDirty ? await stashWork(deskPath) : undefined;
+  await git(deskPath, ['reset', '-q', '--hard', to]);
+  const conflicts = stash ? await restoreWork(deskPath, stash) : [];
+  return { outcome: conflicts.length ? 'conflicts' : 'updated', from, to, conflicts, stash: conflicts.length ? stash : undefined };
+}
+
+/** An owner's desk for one of its repositories, synced; a desk on a PR (a repair) is left where it is. */
+export async function syncOwnerDesk(runtime: Runtime, ownerId: string, repository?: string) {
+  const owner = runtime.repositoryOwner(ownerId, repository);
+  const desk = await ensureDesk(owner, runtime.desksRoot);
+  const branch = (await git(desk.path, ['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
+  if (branch !== desk.branch) throw new Error(`desk_on_pull_request: the desk is on ${branch}; propose or finish that repair first`);
+  const sync = await syncDesk(desk.path, owner.domain.baseBranch);
+  const notebook = runtime.notebook(ownerId);
+  await notebook.journal({ kind: 'desk-synced', outcome: sync.outcome, note: `${owner.domain.name}: ${sync.from.slice(0, 12)} → ${sync.to.slice(0, 12)}${sync.conflicts.length ? `; conflicts in ${sync.conflicts.join(', ')}` : ''}` });
+  await notebook.commit('journal desk-synced').catch(() => undefined);
+  return { ...sync, desk: desk.path, repository: owner.domain.name };
+}
+
+const SYNC_TEXT: Record<DeskSyncOutcome, (sync: DeskSync & { desk: string; repository: string }) => string> = {
+  current: sync => `Your desk for ${sync.repository} already includes origin at ${sync.to.slice(0, 12)}; nothing to do.`,
+  updated: sync => `Your desk for ${sync.repository} moved from ${sync.from.slice(0, 12)} to ${sync.to.slice(0, 12)}, with your uncommitted work restored. Re-run your checks before proposing.`,
+  conflicts: sync => `Your desk for ${sync.repository} moved to ${sync.to.slice(0, 12)}, but restoring your work conflicted in: ${sync.conflicts.join(', ')}. Resolve the conflict markers in those files (your work is also kept in stash ${sync.stash?.slice(0, 12)}), then re-run your checks.`,
+};
+
+export function deskSyncText(sync: DeskSync & { desk: string; repository: string }) {
+  return SYNC_TEXT[sync.outcome](sync);
+}
