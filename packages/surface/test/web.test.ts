@@ -192,3 +192,23 @@ test('an owner plan\'s page shows the plan, its approval, the session doing it, 
   assert.match(html, /\[nit\] logrotate\.conf: Terse/);
   assert.doesNotMatch(html, /Hires/, 'no hire table for work the owner did itself');
 });
+
+test('a pending plan approval gets the plan card: approve or send back with a note, never an "always" answer', async () => {
+  const { PendingCard, PlanApprovalActions, pendingCardKind } = await import('../web/src/chat/cards.tsx');
+  const permission = { id: 'per_plan', sessionID: SESSION, permission: 'onionsoup_plan_approval', patterns: ['w-7'], metadata: {}, always: [] };
+  const entry = {
+    kind: 'permission' as const, id: 'per_plan', owner: 'homelab', title: 'Approve plan w-7: Coder package', detail: '', sessionID: SESSION,
+    permission, planApproval: { item: 'w-7', title: 'Coder package', plan: '1. Pin the deb' },
+  };
+  assert.equal(pendingCardKind(entry), 'plan');
+  const actions = renderToStaticMarkup(createElement(PlanApprovalActions, { entry, onDone: () => {} }));
+  assert.match(actions, /Approve plan<\/button>/);
+  assert.match(actions, /Send back<\/button>/);
+  assert.match(actions, /What should change\?/);
+  assert.doesNotMatch(actions, /Always/);
+  const generic = { ...entry, planApproval: undefined, permission: { ...permission, permission: 'bash', metadata: { command: 'ls' } } };
+  assert.equal(pendingCardKind(generic), 'permission');
+  const html = renderToStaticMarkup(createElement(PendingCard, { entry: generic, onDone: () => {} }));
+  assert.match(html, /Permission Required/);
+  assert.match(html, /Always Allow/);
+});

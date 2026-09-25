@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { InboxEntry, Message, OwnerSummary } from '../types.ts';
-import { PermissionCard, QuestionCard } from '../chat/cards.tsx';
+import { PendingCard } from '../chat/cards.tsx';
 import { Composer } from '../chat/Composer.tsx';
 import { AssistantText, BusyDots, MessageError, ReasoningPart, SessionErrorNotice, ToolPart, TurnFooter, UserBubble } from '../chat/parts.tsx';
 import { useChat } from '../chat/useChat.ts';
@@ -102,9 +102,7 @@ export function ChatPane({ owner, sessionId, directory, pending, onPendingDone, 
                 </section>
               );
             })}
-            {pending.map(entry => entry.kind === 'permission'
-              ? <PermissionCard key={entry.id} entry={entry} onDone={onPendingDone} />
-              : <QuestionCard key={entry.id} entry={entry} onDone={onPendingDone} />)}
+            {pending.map(entry => <PendingCard key={entry.id} entry={entry} onDone={onPendingDone} />)}
             {chat.error && <SessionErrorNotice error={chat.error} />}
             <div style={{ height: '10vh' }} />
           </div>

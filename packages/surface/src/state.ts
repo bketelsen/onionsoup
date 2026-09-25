@@ -10,6 +10,7 @@ import {
   isDelegated, OWNER_CHANGE_WORKFLOW, PLAN_APPROVAL_PERMISSION,
 } from '@onionsoup/owners';
 import type { OpencodeApi, PendingPermission, PendingQuestion } from './opencode.ts';
+import { planApprovalOf, type PlanApprovalRequest } from './plan-approval-request.ts';
 import { readSessionMessages, readSessionsTitled } from './hire-store.ts';
 import { ordered, SettingsStore } from './settings.ts';
 import type { PublicFrictionRecord } from './friction-public.ts';
@@ -78,7 +79,14 @@ export interface InboxEntry {
   /** For permission and question entries: the chat they came from. */
   sessionID?: string;
   permission?: PendingPermission;
+  planApproval?: PlanApprovalRequest;
   question?: PendingQuestion;
+}
+
+function permissionEntry(ownerId: string, permission: PendingPermission): InboxEntry {
+  const planApproval = planApprovalOf(permission);
+  const title = planApproval ? `Approve plan ${planApproval.item}: ${planApproval.title}` : `${permission.permission}: ${permission.patterns.join(', ')}`;
+  return { kind: 'permission', id: permission.id, owner: ownerId, sessionID: permission.sessionID, title, detail: '', permission, planApproval };
 }
 
 export interface OwnerSummary {
@@ -219,7 +227,7 @@ export class SurfaceState {
         this.opencode.permissions(directory).catch(() => unavailable('permission_list_failed')),
         this.opencode.questions(directory).catch(() => unavailable('question_list_failed')),
       ]);
-      for (const permission of permissions) entries.push({ kind: 'permission', id: permission.id, owner: owner.id, sessionID: permission.sessionID, title: `${permission.permission}: ${permission.patterns.join(', ')}`, detail: '', permission });
+      for (const permission of permissions) entries.push(permissionEntry(owner.id, permission));
       for (const question of questions) entries.push({ kind: 'question', id: question.id, owner: owner.id, sessionID: question.sessionID, title: question.questions[0]?.question ?? 'A question', detail: '', question });
     }
     return { entries, errors };

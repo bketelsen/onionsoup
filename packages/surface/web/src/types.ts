@@ -14,10 +14,11 @@ export interface InboxEntry {
   kind: 'plan' | 'push' | 'create' | 'delete' | 'permission' | 'question' | 'attention' | 'request-recovery' | 'initiative';
   id: string; owner: string; title: string; detail: string; at?: string; sessionID?: string;
   attentionStatus?: string;
-  permission?: PendingPermission; question?: PendingQuestion;
+  permission?: PendingPermission; planApproval?: PlanApprovalRequest; question?: PendingQuestion;
 }
 
 import type { InboxReadError } from '../../src/inbox-errors.ts';
+import type { PlanApprovalRequest } from '../../src/plan-approval-request.ts';
 export interface SurfaceState {
   owners: OwnerSummary[];
   inbox: InboxEntry[];
