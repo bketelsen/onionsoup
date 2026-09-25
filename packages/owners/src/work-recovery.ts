@@ -1,6 +1,7 @@
 import { advanceDeskPublication, DESK_WORKFLOW } from './desk-changes.ts';
 import type { HumanNote, WorkItem, WorkStatus } from './ledger.ts';
 import { OWNER_CHANGE_WORKFLOW, tellOwner } from './plan-work.ts';
+import { removePlanWorktree } from './plan-worktrees.ts';
 import { advanceRebase, REBASE_WORKFLOW } from './rebase.ts';
 import type { Runtime } from './runtime.ts';
 
@@ -134,7 +135,10 @@ const CANCELLABLE = new Set<WorkStatus>([
   'awaiting-push-approval', 'interrupted', 'failed', 'landed',
 ]);
 
-/** Queued work and waiting gates can be cancelled; an active effect must finish first. */
+/**
+ * Queued work and waiting gates can be cancelled; an active effect must finish first. A cancelled plan's worktree is
+ * removed unless that would lose work (then it stays, and the person hears of it).
+ */
 export async function cancelItem(runtime: Runtime, itemId: string, by: string, reason: string) {
   const cancelled = await runtime.ledger.update(itemId, item => {
     if (item.activeRunner) throw new Error('work_item_active');
@@ -143,5 +147,6 @@ export async function cancelItem(runtime: Runtime, itemId: string, by: string, r
     return { ...item, status: 'cancelled', reason, humanNotes: [...item.humanNotes, humanNote('cancellation', by, reason)] };
   });
   await runtime.notebook(cancelled.owner).journal({ kind: 'work-cancelled', workItem: itemId, note: `${by}: ${reason}` });
-  return cancelled;
+  await removePlanWorktree(runtime, cancelled);
+  return runtime.ledger.get(itemId);
 }

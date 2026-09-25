@@ -3,12 +3,14 @@ import { z } from 'zod';
 import type { ChatOrigin } from './chat-origin.ts';
 import type { PlanDocument, WorkItem, WorkStatus } from './ledger.ts';
 import { NOTICE_PREFIX, queueNotice } from './notices.ts';
+import { planBranch } from './plan-worktrees.ts';
 import type { Runtime } from './runtime.ts';
 
 /**
  * An owner's plan as a work item. The owner brainstorms and writes the plan itself, submits it, and the person (or,
  * for delegated work, a manager under a standing grant) approves it; host code records who. An approved plan runs in
- * a new owner session, which ends by proposing its desk changes for this item: verification, the required
+ * a new owner session, in the plan's own worktree (see plan-worktrees.ts), which ends by proposing that worktree's
+ * changes for this item: verification, the required
  * cross-family review and publication then happen in host code, as for any desk change.
  */
 export const OWNER_CHANGE_WORKFLOW = 'owner-change';
@@ -105,12 +107,20 @@ function repositoryLine(item: WorkItem) {
   return item.proposal.repository ? `, repository "${item.proposal.repository}"` : '';
 }
 
+function worktreeLine(item: WorkItem) {
+  const where = item.planWorktree ? `${item.planWorktree} (branch ${planBranch(item.id)})` : 'this session\'s directory';
+  return `This plan works in its own git worktree, ${where}, made from the current base branch: parallel plans never
+share files, and your desk stays for chat and small direct changes. Edit only here; onionsoup_sync_desk with item
+"${item.id}" brings it up to date.`;
+}
+
 /** The first message of the session that carries out an approved plan. */
 export function executionPrompt(item: WorkItem) {
   const conditions = notesOf(item, 'approval');
   return [
     `${NOTICE_PREFIX} ${item.planApproval?.by ?? 'The person'} approved your plan ${item.id} "${item.proposal.title}". This session carries it out.`,
-    `Run it with the subagent-driven-development skill on your desk: one small task at a time, an implementer subagent
+    worktreeLine(item),
+    `Run it with the subagent-driven-development skill: one small task at a time, an implementer subagent
 for each and your reviewer subagent after each. Make the rulings the plan leaves open yourself and record them with
 onionsoup_record_fact or onionsoup_record_decision; stop for the person only for what only they can decide. When every
 task is done and verified, end with onionsoup_propose_changes with item "${item.id}"${repositoryLine(item)}: host code

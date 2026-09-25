@@ -107,6 +107,7 @@ test('a submitted plan asks the person in chat; a denial keeps it waiting with t
   assert.equal(opencode.created[0]!.title, `Plan ${item!.id}: Rotate logs`);
   assert.deepEqual(opencode.created[0]!.permission, [{ permission: 'edit', pattern: '*', action: 'allow' }]);
   assert.deepEqual(working.session, { sessionID: 'ses_opened_1', directory: opencode.created[0]!.directory });
+  assert.equal(opencode.created[0]!.directory, working.planWorktree, 'the plan works in its own worktree, not the desk');
   const [prompt] = opencode.prompts;
   assert.equal(prompt?.agent, 'Miles Teg');
   assert.match(prompt!.text, /subagent-driven-development/);

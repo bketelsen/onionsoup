@@ -38,6 +38,13 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
   `reportsTo` change shows new tools only after a surface restart (engine checks apply at once).
 - **Owner sessions need the surface running.** The plugin opens the sessions that plan delegated work and carry out
   approved plans, so a plan approved from the inbox or the CLI waits for a running surface before any work starts.
+- **Plans approved before plan worktrees still share the desk.** A plan item already `working` when plan worktrees
+  shipped has no `planWorktree`; it proposes from the desk as before, so two such plans in one repository still
+  bundle each other's changes. The person untangles them (cancel one, or move its changes by hand); new plans each
+  get their own worktree.
+- **A finished plan's work session drops out of the lists.** opencode lists sessions by the directory they were
+  made in. Once a merged or cancelled plan's worktree is removed, the ledger points its session at the desk (so
+  notices still arrive), but the owner's chat list and the item page no longer list it; the item page still links it.
 
 ## Surfaces
 

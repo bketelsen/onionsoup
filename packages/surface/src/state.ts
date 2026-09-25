@@ -218,19 +218,68 @@ export class SurfaceState {
         errors.push(InboxReadError.parse({ owner: owner.id, code }));
         return [];
       };
-      const directory = await this.directory(owner.id).catch(() => {
-        unavailable('chat_directory_failed');
-        return undefined;
-      });
-      if (!directory) continue;
-      const [permissions, questions] = await Promise.all([
-        this.opencode.permissions(directory).catch(() => unavailable('permission_list_failed')),
-        this.opencode.questions(directory).catch(() => unavailable('question_list_failed')),
-      ]);
-      for (const permission of permissions) entries.push(permissionEntry(owner.id, permission));
-      for (const question of questions) entries.push({ kind: 'question', id: question.id, owner: owner.id, sessionID: question.sessionID, title: question.questions[0]?.question ?? 'A question', detail: '', question });
+      const directories = await this.ownerDirectories(owner.id).catch(() => unavailable('chat_directory_failed'));
+      for (const directory of directories) entries.push(...await this.directoryInbox(owner.id, directory, unavailable));
     }
     return { entries, errors };
+  }
+
+  /** The permission prompts and questions waiting in one of an owner's directories. */
+  private async directoryInbox(ownerId: string, directory: string, unavailable: (code: InboxReadError['code']) => never[]) {
+    const [permissions, questions] = await Promise.all([
+      this.opencode.permissions(directory).catch(() => unavailable('permission_list_failed')),
+      this.opencode.questions(directory).catch(() => unavailable('question_list_failed')),
+    ]);
+    return [
+      ...permissions.map(permission => permissionEntry(ownerId, permission)),
+      ...questions.map((question): InboxEntry => ({ kind: 'question', id: question.id, owner: ownerId, sessionID: question.sessionID, title: question.questions[0]?.question ?? 'A question', detail: '', question })),
+    ];
+  }
+
+  /**
+   * Every directory an owner's sessions run in: its chat directory, and the worktree of each approved plan it is
+   * carrying out, where that plan's session runs (its prompts, questions and events come from there).
+   */
+  async ownerDirectories(ownerId: string) {
+    const plans = (await this.runtime.ledger.list()).filter(item => item.owner === ownerId && item.planWorktree);
+    return [...new Set([await this.directory(ownerId), ...plans.map(item => item.planWorktree!)])];
+  }
+
+  /** Where one of an owner's sessions runs: a plan's session where the item records it, any other in the chat directory. */
+  async sessionDirectory(ownerId: string, sessionID: string) {
+    const item = (await this.runtime.ledger.list()).find(candidate => candidate.owner === ownerId && candidate.session?.sessionID === sessionID);
+    return item?.session?.directory ?? this.directory(ownerId);
+  }
+
+  /** The owner's directory a prompt or question waits in; the chat directory when none lists it. */
+  async pendingDirectory(ownerId: string, kind: 'permission' | 'question', requestID: string) {
+    const listers: Record<typeof kind, (directory: string) => Promise<{ id: string }[]>> = {
+      permission: directory => this.opencode.permissions(directory),
+      question: directory => this.opencode.questions(directory),
+    };
+    for (const directory of await this.ownerDirectories(ownerId)) {
+      const pending = await listers[kind](directory).catch(() => []);
+      if (pending.some(entry => entry.id === requestID)) return directory;
+    }
+    return this.directory(ownerId);
+  }
+
+  /** An owner's chats across its directories, root sessions and subagents alike, with each directory's session status. */
+  async chatSessions(ownerId: string) {
+    const [directory, ...planDirectories] = await this.ownerDirectories(ownerId);
+    const listed = await Promise.all([
+      this.directorySessions(directory!),
+      ...planDirectories.map(planDirectory => this.directorySessions(planDirectory).catch(() => ({ sessions: [], status: {} }))),
+    ]);
+    return {
+      directory: directory!, directories: [directory!, ...planDirectories],
+      sessions: listed.flatMap(entry => entry.sessions), status: Object.assign({}, ...listed.map(entry => entry.status)) as Record<string, unknown>,
+    };
+  }
+
+  private async directorySessions(directory: string) {
+    const [sessions, status] = await Promise.all([this.opencode.listSessions(directory), this.opencode.status(directory).catch(() => ({}))]);
+    return { sessions, status };
   }
 
   private nameOf(ownerId: string) {
@@ -423,8 +472,8 @@ export class SurfaceState {
     const { autoAccept } = await this.settings.read();
     if (!Object.keys(autoAccept).length) return;
     for (const owner of this.chatOwners()) {
-      const directory = await this.directory(owner.id).catch(() => undefined);
-      if (directory) await this.autoAnswer(directory);
+      const directories = await this.ownerDirectories(owner.id).catch(() => []);
+      for (const directory of directories) await this.autoAnswer(directory);
     }
   }
 

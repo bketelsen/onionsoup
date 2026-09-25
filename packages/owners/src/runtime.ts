@@ -33,6 +33,8 @@ export class Runtime {
   readonly notebooksRoot: string;
   readonly worktreesRoot: string;
   readonly desksRoot: string;
+  /** One worktree per approved plan, at `<plansRoot>/<owner>/<item>`, so parallel plans never share files. */
+  readonly plansRoot: string;
   /** Owner-scoped tools (e.g. the mkdocs venv), referenced as {tools} in declarations. */
   readonly toolsDirectory: string;
   readonly managed: ManagedInstances;
@@ -50,6 +52,7 @@ export class Runtime {
     this.notebooksRoot = join(stateDirectory, 'notebooks');
     this.worktreesRoot = join(stateDirectory, 'worktrees');
     this.desksRoot = join(stateDirectory, '..', 'desks');
+    this.plansRoot = join(stateDirectory, '..', 'plans');
     this.toolsDirectory = join(stateDirectory, '..', 'tools');
     this.managed = new ManagedInstances(join(stateDirectory, 'managed'));
     this.requests = new Requests(join(stateDirectory, 'requests'));

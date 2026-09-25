@@ -6,7 +6,10 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { Runtime, advance, approvePlan, cancelItem, resumeItem, retryItem } from '@onionsoup/owners';
 import { git, refreshCheckout, ensureDesk, createWorktree } from '../src/workspace.ts';
-import { REBASE_WORKFLOW, maintainPullRequests } from '../src/rebase.ts';
+import { REBASE_WORKFLOW, maintainPullRequests, refreshPublications } from '../src/rebase.ts';
+import { deskSyncText } from '../src/desk-sync.ts';
+import { openOwnerSession, type OwnerSessionClient } from '../src/owner-sessions.ts';
+import { syncPlanWorktree } from '../src/plan-worktrees.ts';
 import { checkoutPullRequest, DESK_CHANGE_LIMITS, proposeDeskChanges, resetDeskReviews } from '../src/desk-changes.ts';
 import { deskReviewRounds } from '../src/desk-reviews.ts';
 import type { HireRequest } from '../src/opencode.ts';
@@ -775,4 +778,155 @@ test("a desk behind its base is reviewed against where it meets the base, so new
   assert.equal((await proposeDeskChanges(runtime, 'clippy', { title: 'Desk change', summary: 'Update' })).outcome, 'needs-work');
   assert.match(briefs[0]!, /\+my change/);
   assert.doesNotMatch(briefs[0]!, /upstream\.txt/, 'the base\'s newer commit is not shown as removed');
+});
+
+interface OpenedSession { directory: string; title: string; text?: string }
+
+/** opencode as the session opener sees it: sessions are recorded with their directory and first message; nothing runs. */
+function scriptedSessions() {
+  const opened: OpenedSession[] = [];
+  const client: OwnerSessionClient = {
+    create: async (directory, title) => {
+      opened.push({ directory, title });
+      return `ses_plan_${opened.length}`;
+    },
+    prompt: async (target, _agent, text) => {
+      opened[Number(target.sessionID.split('_').at(-1)) - 1]!.text = text;
+    },
+    remove: async () => {},
+  };
+  return { client, opened };
+}
+
+/** Approved plans for clippy, each with its execution session opened the way the plugin opens it. */
+async function openPlans(runtime: Runtime, titles: readonly string[]) {
+  const sessions = scriptedSessions();
+  const items = [];
+  for (const title of titles) {
+    const submitted = await runtime.ledger.create('clippy', 'owner-change', { ...proposal, title }, {
+      status: 'awaiting-plan-approval', planDocument: { markdown: `1. ${title}`, digest: title },
+    });
+    await approvePlan(runtime, submitted.id, 'person');
+    await openOwnerSession(runtime, sessions.client, submitted.id);
+    items.push(await runtime.ledger.get(submitted.id));
+  }
+  return { items, opened: sessions.opened };
+}
+
+async function pushedFiles(remote: string, branch: string) {
+  return (await git(remote, ['ls-tree', '-r', '--name-only', branch])).split('\n').filter(Boolean).sort();
+}
+
+test('each approved plan gets its own worktree at the current base, and its execution session opens there', async () => {
+  const { runtime, seed } = await fixture();
+  const desk = await ensureDesk(runtime.repositoryOwner('clippy'), runtime.desksRoot);
+  const upstream = await landUpstream(seed, 'upstream.txt', 'newer base\n');
+  const { items: [first, second], opened } = await openPlans(runtime, ['First plan', 'Second plan']);
+  assert.ok(first!.planWorktree && second!.planWorktree);
+  assert.notEqual(first!.planWorktree, second!.planWorktree);
+  assert.equal(first!.planWorktree, join(runtime.plansRoot, 'clippy', first!.id));
+  assert.deepEqual(opened.map(session => session.directory), [first!.planWorktree, second!.planWorktree]);
+  assert.deepEqual(first!.session, { sessionID: 'ses_plan_1', directory: first!.planWorktree });
+  assert.ok(opened[0]!.text!.includes(first!.planWorktree!), 'the first message names the worktree');
+  for (const item of [first!, second!]) {
+    assert.equal((await git(item.planWorktree!, ['rev-parse', 'HEAD'])).trim(), upstream, 'made from origin/main as it is now');
+    assert.equal((await git(item.planWorktree!, ['rev-parse', '--abbrev-ref', 'HEAD'])).trim(), `plan/${item.id}`);
+  }
+  await writeFile(join(first!.planWorktree!, 'first.txt'), 'first\n');
+  assert.equal(existsSync(join(second!.planWorktree!, 'first.txt')), false);
+  assert.equal(existsSync(join(desk.path, 'first.txt')), false);
+  assert.equal((await git(desk.path, ['status', '--porcelain'])).trim(), '', 'the desk is untouched');
+});
+
+test('proposing one plan publishes only its worktree; the other plan and the desk propose on their own', async () => {
+  const { runtime, root, remote } = await fixture();
+  const { items: [first, second] } = await openPlans(runtime, ['First plan', 'Second plan']);
+  await writeFile(join(first!.planWorktree!, 'first.txt'), 'first\n');
+  await writeFile(join(second!.planWorktree!, 'second.txt'), 'second\n');
+  const briefs: string[] = [];
+  scriptHires(runtime, async request => {
+    briefs.push(request.brief);
+    return verdict;
+  });
+  const resetGithub = () => writeFile(join(root, 'github.json'), JSON.stringify({ created: 0, state: 'OPEN' }));
+  await fakeGithub(root, remote, async () => {
+    const firstResult = await proposeDeskChanges(runtime, 'clippy', { title: 'First', summary: 'First plan', item: first!.id });
+    assert.equal(firstResult.outcome, 'opened', firstResult.summary);
+    assert.match(briefs[0]!, /\+first/);
+    assert.doesNotMatch(briefs[0]!, /second\.txt/, 'the other plan is not in the review');
+    const firstPublished = await runtime.ledger.get(first!.id);
+    assert.equal(firstPublished.worktree, first!.planWorktree);
+    assert.deepEqual(await pushedFiles(remote, firstPublished.branch!), ['base', 'first.txt']);
+    assert.equal((await git(second!.planWorktree!, ['status', '--porcelain'])).trim(), '?? second.txt', 'the other plan is untouched');
+
+    const desk = await ensureDesk(runtime.repositoryOwner('clippy'), runtime.desksRoot);
+    await writeFile(join(desk.path, 'direct.txt'), 'direct\n');
+    await resetGithub();
+    assert.equal((await proposeDeskChanges(runtime, 'clippy', { title: 'Direct', summary: 'A small direct change' })).outcome, 'opened');
+    const direct = (await runtime.ledger.list()).find(item => item.workflow === 'desk-publication')!;
+    assert.deepEqual(await pushedFiles(remote, direct.branch!), ['base', 'direct.txt']);
+
+    await resetGithub();
+    const secondResult = await proposeDeskChanges(runtime, 'clippy', { title: 'Second', summary: 'Second plan', item: second!.id });
+    assert.equal(secondResult.outcome, 'opened', secondResult.summary);
+    assert.deepEqual(await pushedFiles(remote, (await runtime.ledger.get(second!.id)).branch!), ['base', 'second.txt']);
+  });
+});
+
+test('a merged plan\'s worktree is removed; a cancelled one only when nothing in it would be lost', async () => {
+  const { runtime, root, remote } = await fixture();
+  runtime.declarations.owners.get('clippy')!.grants.push({ to: 'clippy', action: 'merge', target: 'example/clippy' });
+  const { items: [merged, dirty, clean] } = await openPlans(runtime, ['Merged plan', 'Dirty plan', 'Clean plan']);
+  await writeFile(join(merged!.planWorktree!, 'merged.txt'), 'merged\n');
+  await writeFile(join(dirty!.planWorktree!, 'dirty.txt'), 'unfinished\n');
+  scriptHires(runtime, async () => verdict);
+  await fakeGithub(root, remote, async () => {
+    const result = await proposeDeskChanges(runtime, 'clippy', { title: 'Merged', summary: 'Merge it', item: merged!.id });
+    assert.equal(result.outcome, 'merged', result.summary);
+  });
+  const landed = await runtime.ledger.get(merged!.id);
+  const desk = await ensureDesk(runtime.repositoryOwner('clippy'), runtime.desksRoot);
+  assert.equal(landed.planWorktree, undefined);
+  assert.equal(existsSync(merged!.planWorktree!), false);
+  assert.equal((await git(desk.path, ['branch', '--list', `plan/${merged!.id}`])).trim(), '', 'its branch goes with it');
+  assert.deepEqual(landed.session, { sessionID: 'ses_plan_1', directory: desk.path }, 'later notices reach a directory that exists');
+
+  await cancelItem(runtime, dirty!.id, 'person', 'Not now');
+  assert.equal(await readFile(join(dirty!.planWorktree!, 'dirty.txt'), 'utf8'), 'unfinished\n');
+  assert.equal((await runtime.ledger.get(dirty!.id)).planWorktree, dirty!.planWorktree);
+  await cancelItem(runtime, clean!.id, 'person', 'Not needed');
+  assert.equal(existsSync(clean!.planWorktree!), false);
+  const kinds = await journalKinds(runtime, 'clippy');
+  assert.equal(kinds.filter(kind => kind === 'plan-worktree-removed').length, 2);
+  assert.ok(kinds.includes('attention'), 'the kept worktree is raised to the person');
+});
+
+test('a plan merged by the person is noticed on refresh, and its worktree removed', async () => {
+  const { runtime, root, remote } = await fixture();
+  const { items: [plan] } = await openPlans(runtime, ['Person merges']);
+  await writeFile(join(plan!.planWorktree!, 'change'), 'planned\n');
+  scriptHires(runtime, async () => verdict);
+  await fakeGithub(root, remote, async () => {
+    assert.equal((await proposeDeskChanges(runtime, 'clippy', { title: 'Plan', summary: 'Plan', item: plan!.id })).outcome, 'opened');
+    assert.ok(existsSync(plan!.planWorktree!), 'an open PR keeps its worktree');
+    await writeFile(join(root, 'github.json'), JSON.stringify({ created: 1, state: 'MERGED' }));
+    await refreshPublications(runtime, 'clippy');
+  });
+  assert.equal((await runtime.ledger.get(plan!.id)).publication?.state, 'merged');
+  assert.equal(existsSync(plan!.planWorktree!), false);
+});
+
+test('a plan\'s worktree syncs with its base on its own, keeping its uncommitted work', async () => {
+  const { runtime, seed } = await fixture();
+  const desk = await ensureDesk(runtime.repositoryOwner('clippy'), runtime.desksRoot);
+  const { items: [plan] } = await openPlans(runtime, ['Sync me']);
+  await writeFile(join(plan!.planWorktree!, 'mine.txt'), 'mine\n');
+  const upstream = await landUpstream(seed, 'upstream.txt', 'newer\n');
+  await assert.rejects(syncPlanWorktree(runtime, 'bellonda', plan!.id), /item_not_yours/);
+  const synced = await syncPlanWorktree(runtime, 'clippy', plan!.id);
+  assert.equal(synced.outcome, 'updated');
+  assert.match(deskSyncText(synced), new RegExp(`worktree for plan ${plan!.id} moved`));
+  assert.equal((await git(plan!.planWorktree!, ['rev-parse', 'HEAD'])).trim(), upstream);
+  assert.equal(await readFile(join(plan!.planWorktree!, 'mine.txt'), 'utf8'), 'mine\n');
+  assert.notEqual((await git(desk.path, ['rev-parse', 'HEAD'])).trim(), upstream, 'the desk is not moved');
 });

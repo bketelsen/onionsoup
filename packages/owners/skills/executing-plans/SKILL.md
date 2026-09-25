@@ -5,7 +5,7 @@ description: Use when a plan is one or two tiny tasks not worth a subagent dispa
 
 # Executing Plans
 
-Run the plan yourself, task by task, on the desk: no implementer per task, no reviewer per task. One review of the whole change at the end from your reviewer subagent.
+Run the plan yourself, task by task, on the desk: no implementer per task, no reviewer per task. One review of the whole change at the end from your reviewer subagent. In an approved plan's execution session, "the desk" means the plan's own git worktree, the session's directory.
 
 **Why inline:** subagent-driven-development pays for a fresh implementer and reviewer on every task. For a tiny plan that is overhead. Inline execution keeps what those bought by other means: the task text is the spec, your notebook is your memory, TDD is the per-task gate, and the final reviewer is the second pair of eyes.
 

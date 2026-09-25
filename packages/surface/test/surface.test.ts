@@ -210,6 +210,38 @@ test('chats go to the owner\'s directory with its persona as the agent; bad inpu
   }
 });
 
+test('a plan\'s work session is listed, prompted and answered in the plan\'s own worktree', async () => {
+  const planWorktree = '/plans/bellonda/w-plan';
+  const { server, call, calls, runtime } = await start(api => {
+    const listSessions = api.listSessions;
+    api.listSessions = async directory => directory === planWorktree
+      ? [{ id: 'ses_work', title: 'Plan w-plan: Wiki page', directory, time: { created: 5, updated: 6 } }]
+      : listSessions(directory);
+    api.permissions = async directory => directory === planWorktree
+      ? [{ id: 'per_work', sessionID: 'ses_work', permission: 'bash', patterns: ['make test'], metadata: {}, always: [] }]
+      : [];
+  });
+  try {
+    await runtime.ledger.create('bellonda', 'owner-change', { title: 'Wiki page', goal: 'g', rationale: 'r', acceptance: ['a'], size: 'small' }, {
+      status: 'working', planWorktree, session: { sessionID: 'ses_work', directory: planWorktree },
+    });
+    const listed = (await call('GET', '/api/owners/bellonda/sessions')).body as { directory: string; directories: string[]; sessions: { id: string; directory: string }[] };
+    assert.equal(listed.directory, '/desks/bellonda');
+    assert.deepEqual(listed.directories, ['/desks/bellonda', planWorktree]);
+    assert.deepEqual(listed.sessions.find(session => session.id === 'ses_work')?.directory, planWorktree);
+    const inbox = (await call('GET', '/api/state')).body.inbox as { id: string; owner: string }[];
+    assert.ok(inbox.some(entry => entry.id === 'per_work' && entry.owner === 'bellonda'), 'its prompts wait in the inbox');
+    await call('POST', '/api/owners/bellonda/sessions/ses_work/prompt', { text: 'use the wiki template' });
+    assert.deepEqual(calls.at(-1), ['prompt', planWorktree, 'ses_work', 'Bellonda', 'use the wiki template']);
+    await call('POST', '/api/owners/bellonda/permissions/per_work', { reply: 'once' });
+    assert.deepEqual(calls.at(-1), ['permission', planWorktree, 'per_work', 'once']);
+    await call('POST', '/api/owners/bellonda/sessions/ses_1/prompt', { text: 'hello' });
+    assert.deepEqual(calls.at(-1), ['prompt', '/desks/bellonda', 'ses_1', 'Bellonda', 'hello'], 'other chats stay on the desk');
+  } finally {
+    server.close();
+  }
+});
+
 test('the person\'s owner order is kept by the server and new owners follow it', async () => {
   const { ordered } = await import('@onionsoup/surface');
   assert.deepEqual(ordered([{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }], ['c', 'a']).map(owner => owner.id), ['c', 'a', 'b', 'd']);

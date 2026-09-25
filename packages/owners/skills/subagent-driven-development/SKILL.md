@@ -7,6 +7,8 @@ description: Use in the execution session that starts after the person approves 
 
 Run an approved plan by dispatching a fresh `onionsoup-implementer` subagent per task and your reviewer subagent after each task (spec compliance and code quality), then verify the whole desk and end with `onionsoup_propose_changes`.
 
+**Where:** an approved plan's execution session runs in the plan's own git worktree (its path is in the session's first message), not in your chat desk. In such a session, "the desk" below means that worktree: every subagent works there, and `onionsoup_propose_changes` with the plan's `item` proposes it.
+
 **Why subagents:** each subagent gets exactly the context you construct for it and nothing from your session. That keeps it focused and keeps your own context free for coordination. You are the controller: you hold the plan, your notebook and the cross-task picture; they hold one task.
 
 **Core principle:** fresh implementer per task + task review after each + host verification and cross-family review at the end = high quality, fast iteration.

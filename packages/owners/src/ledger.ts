@@ -99,6 +99,8 @@ export const WorkItem = z.object({
   /** Exact stage to continue after a failure or interruption. */
   resumeStatus: WorkStatus.optional(),
   worktree: z.string().optional(),
+  /** An approved plan's own worktree while it exists; unset once host code removes it (merged or cancelled). */
+  planWorktree: z.string().optional(),
   branch: z.string().optional(),
   landedCommit: z.string().optional(),
   hires: z.array(HireRecord).default([]),

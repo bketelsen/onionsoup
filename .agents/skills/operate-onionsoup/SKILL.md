@@ -16,13 +16,23 @@ cause, and the fix is either applied through the normal gates or reported to the
   items run in the background, so the tick itself stays short; `owners tick` waits for what it started.
 - **Config:** `~/.config/onionsoup` (`ONIONSOUP_CONFIG`).
 - **State:** `~/.local/share/onionsoup` (`ONIONSOUP_HOME`). It holds `state/` (ledger, requests, initiatives,
-  locks, ci-triage, ship), `desks/<owner>`, `checkouts/`, `evidence/<owner>` and `tools/`.
+  locks, ci-triage, ship), `desks/<owner>`, `plans/<owner>/<item>`, `checkouts/`, `evidence/<owner>` and `tools/`.
+- **Plan worktrees:** each approved plan (`owner-change` in `working`) has its own git worktree at
+  `plans/<owner>/<item>` on branch `plan/<item>`, made from the repository's checkout at `origin/<base>` when its
+  work session opens; `npm run owners -- show <item>` prints it (`Plan worktree:`), and its session runs there.
+  Inspect it with `git -C <path> status` and `git -C <path> diff`, and list them all with
+  `git -C <checkout> worktree list`. Proposing with the item publishes that worktree only; the owner's desk is for
+  chat and direct changes. Host code removes it (and its branch) once the PR merges or the item is cancelled; one with
+  uncommitted changes or unpushed commits is kept and raises an attention item: look at it, then remove it with
+  `git -C <checkout> worktree remove <path>`. A plan approved before plan worktrees existed has no `planWorktree` and
+  still works on the desk.
 - **Initiatives:** `state/initiatives/<id>.json`, a manager's assignments to its reports. Read them with
   `npm run owners -- initiatives` and `npm run owners -- initiative <id>`; assignment state there is derived from
   the linked request and item. Only an `approved` initiative whose approval names its current `revision` dispatches.
 - **Desk review rounds:** `state/desk-reviews/<owner>--<repo>.json` holds the rounds of a desk change that asked
-  for changes. At the limit, `propose_changes` returns `needs-person` and hires no reviewer; after reading the diff,
-  `npm run owners -- desk-review-reset <owner> [repository]` clears it.
+  for changes (`<owner>--<repo>--plans--<item>.json` for a plan's worktree). At the limit, `propose_changes` returns
+  `needs-person` and hires no reviewer; after reading the diff,
+  `npm run owners -- desk-review-reset <owner> [repository] [--item <plan>]` clears it.
   A step that seems stuck is usually waiting on the person to merge the previous PR, on a plan approval, or on an
   open escalation from the report.
 - **Notebooks:** under state, one Git repo per owner. Read one with `npm run owners -- notebook <id>`.
@@ -44,8 +54,9 @@ cause, and the fix is either applied through the normal gates or reported to the
    - An owner's plan (`owner-change`) moves `planning` → `awaiting-plan-approval` → `working` → `landing` →
      `landed`. In `planning` a delegated item needs its planning session (`origin`, "Request <id>: ..."); in
      `awaiting-plan-approval` it waits on the person in the chat it was submitted from, or in the inbox for delegated
-     work; in `working` it needs its work session (`session`, "Plan <id>: ..."), where the owner works until it
-     proposes with the item; `landing` is host code publishing it. An item missing its session means the surface is
+     work; in `working` it needs its work session (`session`, "Plan <id>: ...") and its plan worktree, where the
+     owner works until it proposes with the item (an open that fails creating the worktree logs
+     `owner_session_failed` with the git error); `landing` is host code publishing it. An item missing its session means the surface is
      down or the open failed: look for `owner_session_failed` in the surface's log. A chat approval lost to a surface
      restart leaves the item `awaiting-plan-approval`; ask the owner to resubmit with `item`.
    - Notices about the work go to the work session first, then the chat it came from. A `failed` item with
