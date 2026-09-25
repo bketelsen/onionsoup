@@ -40,9 +40,11 @@ export interface DeskState {
   activity: { id: string; status: string; title: string; from: string; to: string; detail: string; at: string }[];
   notes: JournalNote[];
   registers: Record<string, string>;
+  reminders: ReminderSummary[];
 }
 
-export type { WorkItem } from '@onionsoup/owners';
+import type { ReminderSummary } from '@onionsoup/owners';
+export type { ReminderSummary, WorkItem } from '@onionsoup/owners';
 
 // opencode's session and message shapes, trimmed to what the chat reads.
 export interface Session { id: string; title: string; directory: string; parentID?: string; time: { created: number; updated: number } }

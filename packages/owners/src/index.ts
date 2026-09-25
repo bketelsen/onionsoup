@@ -30,3 +30,5 @@ export { initiativeText, initiativesText } from './desk.ts';
 export { planGrantFor } from './declarations.ts';
 export { recoverRequest, reconcileRequest } from './request-recovery.ts';
 export { listFriction, frictionDetail, reportFriction, type FrictionRecord, type FrictionSubmission } from './friction.ts';
+export { Reminder, ReminderStatus, REMINDER_LIMITS, type ReminderSummary } from './reminders.ts';
+export { cancelReminder, setReminder } from './reminder-work.ts';

@@ -106,7 +106,9 @@ person's exact words in "quote"); record only real decisions, preferences and pr
 cite the quote. "retracted" lines mean the person said something noted was not a decision: never record it. "chat-action"
 lines are things you did with the person's approval, "subagent-action" lines what your subagents did; record them in MAP only where they change what exists. "fact"
 lines are facts you observed, each with its source: keep every statement word for word in MAP (what exists) or WISDOM
-(what holds), citing its source, unless a later line shows it is no longer true.`,
+(what holds), citing its source, unless a later line shows it is no longer true. "reminder-set", "reminder-fired" and
+"reminder-cancelled" lines are scheduling, not knowledge: never record them. What a fired reminder found arrives as
+"fact" or "chat-decision" lines.`,
     block('journal', journal.join('\n')),
     block('notebook', notebook),
     NOTEBOOK_RULES,

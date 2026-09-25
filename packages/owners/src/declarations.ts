@@ -1,4 +1,5 @@
 import { ChatContextPolicy } from './chat-context.ts';
+import { Span } from './span.ts';
 import { readdir, readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { parse } from 'yaml';
@@ -15,7 +16,7 @@ export const Duty = z.object({
    * maintain-prs: keep the owner's published PRs mergeable (record merges, rebase conflicts).
    */
   kind: z.enum(['survey', 'request-instance', 'maintain-prs', 'app-updates']).default('survey'),
-  every: z.string().regex(/^\d+[mhd]$/).optional(),
+  every: Span.optional(),
   on: z.string().optional(),
   instructions: z.string(),
   requestTo: z.string().optional(),

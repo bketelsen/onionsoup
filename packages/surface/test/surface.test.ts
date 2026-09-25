@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { Runtime, approveInitiative, draftInitiative, reportFriction, submitInitiative } from '@onionsoup/owners';
+import { Runtime, approveInitiative, draftInitiative, reportFriction, setReminder, submitInitiative } from '@onionsoup/owners';
 import { SurfaceState, surfaceServer, type OpencodeApi } from '@onionsoup/surface';
 
 function fakeOpencode() {
@@ -377,6 +377,27 @@ test('person recovery decisions resume the exact stage, retry failures and cance
     assert.equal(cancelled.status, 'cancelled');
     assert.equal(cancelled.humanNotes.at(-1)?.by, 'tester');
     assert.equal(cancelled.reason, 'Keep the existing head');
+  } finally {
+    server.close();
+  }
+});
+
+test('an owner\'s page lists its pending reminders, and the person cancels one with a note', async () => {
+  const { runtime, server, call } = await start();
+  try {
+    await runtime.notebook('homelab').ensure('# Charter\n');
+    const prompt = 'Verify Coder backups on minideb keep exactly 14 days.';
+    const reminder = await setReminder(runtime, 'homelab', { after: '15d', prompt });
+    const page = (await call('GET', '/api/owners/homelab')).body;
+    assert.deepEqual(page.reminders, [{ id: reminder.id, prompt, dueAt: reminder.dueAt, createdAt: reminder.createdAt }]);
+    assert.ok(!((await call('GET', '/api/state')).body.inbox as { id: string }[]).some(entry => entry.id === reminder.id), 'a reminder waits on no one');
+    const decided = await call('POST', '/api/decide', { action: 'cancel-reminder', id: reminder.id, reason: 'Checked it by hand' });
+    assert.equal(decided.body.outcome, 'cancelled');
+    const cancelled = await runtime.reminders.get(reminder.id);
+    assert.deepEqual(cancelled.cancelled && [cancelled.cancelled.by, cancelled.cancelled.note], ['tester', 'Checked it by hand']);
+    assert.deepEqual((await call('GET', '/api/owners/homelab')).body.reminders, []);
+    const again = await call('POST', '/api/decide', { action: 'cancel-reminder', id: reminder.id });
+    assert.match(String(again.body.error), /reminder_not_pending/);
   } finally {
     server.close();
   }

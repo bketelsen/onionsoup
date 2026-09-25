@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { processRequest, requestCanRun } from './brokering.ts';
 import { chatDirectory } from './chats.ts';
+import { spanMs } from './span.ts';
 import { requestParticipants } from './delegation.ts';
 import { noticeWorkChanges } from './notices.ts';
 import { superviseInitiatives } from './org-work.ts';
@@ -67,13 +68,6 @@ export async function drain() {
   await Promise.all([items.drain(), duties.drain(), memories.drain(), requests.drain()]);
 }
 
-const UNIT_MS: Record<string, number> = { m: 60_000, h: 3_600_000, d: 86_400_000 };
-
-export function everyMs(every: string) {
-  const unit = every.at(-1)!;
-  return Number(every.slice(0, -1)) * UNIT_MS[unit]!;
-}
-
 export interface TickLog {
   duty(ownerId: string, dutyId: string, summary: string): void;
   item(item: WorkItem): void;
@@ -102,7 +96,7 @@ async function runDueDuties(runtime: Runtime, log: TickLog, reserved: ReadonlySe
       const key = `${owner.id}/${duty.id}`;
       const previous = lastRun[key] ? Date.parse(lastRun[key]) : 0;
       if (reserved.has(owner.id)) continue;
-      if (Date.now() - previous < everyMs(duty.every!) || duties.has(key)) continue;
+      if (Date.now() - previous < spanMs(duty.every!) || duties.has(key)) continue;
       const started = duties.start(key, async () => {
         try {
           const result = await wake(runtime, owner.id, duty.id);

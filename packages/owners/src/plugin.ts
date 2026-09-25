@@ -14,7 +14,7 @@ import { requestPublish } from './brokering.ts';
 import { checkoutPullRequest, proposeDeskChanges } from './desk-changes.ts';
 import { deskSyncText, syncOwnerDesk } from './desk-sync.ts';
 import { syncPlanWorktree } from './plan-worktrees.ts';
-import { initiativeSection, initiativesText, initiativeText, itemText, reportsWorkText, statusText } from './desk.ts';
+import { initiativeSection, initiativesText, initiativeText, itemText, reminderSection, reportsWorkText, statusText } from './desk.ts';
 import { parseInitiativeDraft } from './initiatives.ts';
 import {
   cancelAssignment, draftInitiative, initiativeView, initiativeViews, raiseToManager, resolveEscalation, STEER_ACTIONS,
@@ -36,6 +36,8 @@ import { prepareToolArguments } from './tool-arguments.ts';
 import { BOOTSTRAP_MARKER, bootstrapText, registerSkills, subagents, subagentsText, taskPermission } from './owner-agents.ts';
 import { SessionOwners } from './session-owners.ts';
 import { openNeededSessions, ownerSessionClient } from './owner-sessions.ts';
+import { cancelReminder, openDueReminders, setReminder } from './reminder-work.ts';
+import { parseReminderRequest } from './reminders.ts';
 import { PLAN_APPROVAL_PERMISSION, PlanSubmission, submitPlan } from './plan-work.ts';
 import { requestPlanApproval } from './plan-approval.ts';
 
@@ -167,7 +169,8 @@ How you work with the person in this chat:
   onionsoup_status (your open work and anything waiting on the person), onionsoup_notebook (your full notebook),
   onionsoup_evidence (what other owners recorded), onionsoup_ask (ask another owner a question about its domain),
   onionsoup_request_work (ask another owner to change its repository), onionsoup_friction (report reproducible engine
-  behavior that fails expectations), onionsoup_record_fact, onionsoup_record_decision and onionsoup_retract. When
+  behavior that fails expectations), onionsoup_remind (wake yourself later for a one-off check),
+  onionsoup_record_fact, onionsoup_record_decision and onionsoup_retract. When
   something belongs to another owner's domain, ask them instead of guessing or probing it yourself.${WORK_GUIDES[canChange(owner) ? 'changes' : 'observes']}
 - Record facts you observe, and rulings you make while working, with onionsoup_record_fact: they come back to you word
   for word each turn, and you pass the ones a subagent needs into its task. Anything outside your safe commands asks
@@ -314,7 +317,8 @@ const server: Plugin = async (input, options) => {
     const requests = (await runtime.requests.list()).filter(request => request.from === ownerId || request.to === ownerId);
     const initiatives = initiativeSection(await initiativeViews(runtime), ownerId);
     const reports = reportsWorkText(allItems, directReports(runtime.declarations, ownerId).map(report => report.id));
-    return [statusText(items, requests), initiatives, reports].filter(Boolean).join('\n\n');
+    const reminders = reminderSection(await runtime.reminders.list(), ownerId);
+    return [statusText(items, requests), initiatives, reports, reminders].filter(Boolean).join('\n\n');
   }
 
   /** Quotes already noted as decisions in this chat, by the owner or an earlier watch. */
@@ -425,6 +429,24 @@ const server: Plugin = async (input, options) => {
     },
   };
 
+  interface RemindArgs { after?: string; at?: string; prompt?: string; item?: string; id?: string; reason?: string }
+  type RemindAction = (ownerId: string, args: RemindArgs, origin: ChatOrigin) => Promise<string>;
+
+  const remindActions: Record<string, RemindAction> = {
+    set: async (ownerId, args, origin) => {
+      const reminder = await setReminder(runtime, ownerId, parseReminderRequest(args), origin);
+      return `Set ${reminder.id}: due ${reminder.dueAt}. A new session opens with your prompt then; cancel it with onionsoup_remind cancel.`;
+    },
+    list: async ownerId => reminderSection(await runtime.reminders.list(), ownerId) || 'You have no pending reminders.',
+    cancel: async (ownerId, args) => {
+      const id = required(args.id, 'id');
+      const reminder = await runtime.reminders.get(id);
+      if (reminder.owner !== ownerId) throw new Error(`reminder_not_yours: ${id} belongs to ${reminder.owner}`);
+      await cancelReminder(runtime, id, `owner:${ownerId}`, args.reason ?? '');
+      return `Cancelled ${id}.`;
+    },
+  };
+
   // Read when needed: tests and the config hook construct the plugin without an opencode client.
   const sessionClient = () => ownerSessionClient(input.client);
 
@@ -437,6 +459,7 @@ const server: Plugin = async (input, options) => {
       await deliverWorkNotices();
       await deliverExchangeNotices(runtime, exchangeClient(input.client));
       await openNeededSessions(runtime, sessionClient(), (itemId, error) => console.warn('owner_session_failed', itemId, error));
+      await openDueReminders(runtime, sessionClient(), (reminderId, error) => console.warn('reminder_session_failed', reminderId, error));
     } finally {
       isDeliveringNotices = false;
     }
@@ -603,6 +626,22 @@ const server: Plugin = async (input, options) => {
         async execute(args, context) {
           const manager = requireOwner(context.agent);
           return initiativeActions[args.action](manager.id, args, { sessionID: context.sessionID, directory: context.directory });
+        },
+      }),
+      onionsoup_remind: tool({
+        description: 'Set a one-off reminder for yourself: when it is due, the runtime opens a new session of yours with your prompt (and the work item, if you name one). Use it when finished work needs a later check (retention, a rollout settling, a date) instead of promising to check back. "set" takes after (e.g. 30m, 6h, 15d) or at (an ISO date or time), a prompt written for your later self, and optionally an item; "list" shows your pending reminders; "cancel" drops one by id with an optional reason. Recurring checks are duties, not reminders.',
+        args: {
+          action: tool.schema.enum(['set', 'list', 'cancel']),
+          after: tool.schema.string().optional().describe('For set: how long from now, e.g. 30m, 6h or 15d'),
+          at: tool.schema.string().optional().describe('For set, instead of after: when, as an ISO date or time'),
+          prompt: tool.schema.string().optional().describe('For set: what to check and why, for the session that opens then'),
+          item: tool.schema.string().optional().describe('For set: the work item it is about (yours or a direct report\'s)'),
+          id: tool.schema.string().optional().describe('For cancel: the reminder id, e.g. m-20260925-1a2b3c'),
+          reason: tool.schema.string().optional().describe('For cancel: why'),
+        },
+        async execute(args, context) {
+          const owner = requireOwner(context.agent);
+          return remindActions[args.action](owner.id, args, { sessionID: context.sessionID, directory: context.directory });
         },
       }),
       [STEER_TOOL]: tool({
