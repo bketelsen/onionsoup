@@ -7,6 +7,7 @@ import { InitiativeView } from '../web/src/components/InitiativeView.tsx';
 import { OrgTree } from '../web/src/components/OrgView.tsx';
 import { InboxErrors } from '../web/src/components/InboxErrors.tsx';
 import { WorkRecovery } from '../web/src/components/WorkRecovery.tsx';
+import { ReminderCard } from '../web/src/components/ReminderCard.tsx';
 import { ITEM_SECTIONS } from '../web/src/components/ItemSections.tsx';
 import { WorkItem } from '@onionsoup/owners';
 import type { FrictionRecord, PublicInitiative } from '../web/src/types.ts';
@@ -169,6 +170,18 @@ test('failed work offers a retry, except work of the retired pipeline, which can
   assert.doesNotMatch(render('pipeline_removed'), /Retry failed stage/);
   assert.match(render('pipeline_removed'), /Cancel work/);
   assert.doesNotMatch(render('desk_pr_closed'), /Land over findings/);
+});
+
+test('a reminder card shows the prompt as inert text, its work item and a cancel with an optional note', () => {
+  const reminder = { id: 'm-20260925-1a2b3c', prompt: 'Verify <b>backups</b> keep 14 days', item: 'w-20260925-f8b59e', dueAt: '2026-10-10T12:00:00.000Z', createdAt: '2026-09-25T12:00:00.000Z' };
+  const html = renderToStaticMarkup(createElement(ReminderCard, { reminder, onDone: () => {} }));
+  assert.match(html, /Verify &lt;b&gt;backups&lt;\/b&gt; keep 14 days/);
+  assert.match(html, /w-20260925-f8b59e/);
+  assert.match(html, /placeholder="Note \(optional\)"/);
+  assert.match(html, /<button[^>]*>Cancel<\/button>/);
+  assert.doesNotMatch(html, /<button[^>]*disabled=""[^>]*>Cancel/, 'the note is optional');
+  const withoutItem = renderToStaticMarkup(createElement(ReminderCard, { reminder: { ...reminder, item: undefined }, onDone: () => {} }));
+  assert.doesNotMatch(withoutItem, /w-20260925/);
 });
 
 test('an owner plan\'s page shows the plan, its approval, the session doing it, then how it was verified, reviewed and published', () => {

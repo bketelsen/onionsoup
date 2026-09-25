@@ -16,7 +16,8 @@ cause, and the fix is either applied through the normal gates or reported to the
   items run in the background, so the tick itself stays short; `owners tick` waits for what it started.
 - **Config:** `~/.config/onionsoup` (`ONIONSOUP_CONFIG`).
 - **State:** `~/.local/share/onionsoup` (`ONIONSOUP_HOME`). It holds `state/` (ledger, requests, initiatives,
-  locks, ci-triage, ship), `desks/<owner>`, `plans/<owner>/<item>`, `checkouts/`, `evidence/<owner>` and `tools/`.
+  reminders, locks, ci-triage, ship), `desks/<owner>`, `plans/<owner>/<item>`, `checkouts/`, `evidence/<owner>`
+  and `tools/`.
 - **Plan worktrees:** each approved plan (`owner-change` in `working`) has its own git worktree at
   `plans/<owner>/<item>` on branch `plan/<item>`, made from the repository's checkout at `origin/<base>` when its
   work session opens; `npm run owners -- show <item>` prints it (`Plan worktree:`), and its session runs there.
@@ -29,6 +30,11 @@ cause, and the fix is either applied through the normal gates or reported to the
 - **Initiatives:** `state/initiatives/<id>.json`, a manager's assignments to its reports. Read them with
   `npm run owners -- initiatives` and `npm run owners -- initiative <id>`; assignment state there is derived from
   the linked request and item. Only an `approved` initiative whose approval names its current `revision` dispatches.
+- **Reminders:** `state/reminders/<id>.json` (`m-YYYYMMDD-xxxxxx`), one-off wake-ups owners set with
+  `onionsoup_remind`: `pending` until `dueAt`, then `fired` with the `session` it opened (the plugin's notice timer
+  opens it, so the surface must run), or `cancelled` with who and why. A pending reminder past its `dueAt` means the
+  plugin is not running or its sessions fail (`reminder_session_failed` in the surface's log). Owners list and cancel
+  their own; the person cancels any from the owner's page in the surface.
 - **Desk review rounds:** `state/desk-reviews/<owner>--<repo>.json` holds the rounds of a desk change that asked
   for changes (`<owner>--<repo>--plans--<item>.json` for a plan's worktree). At the limit, `propose_changes` returns
   `needs-person` and hires no reviewer; after reading the diff,

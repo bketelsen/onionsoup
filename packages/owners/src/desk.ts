@@ -7,7 +7,9 @@ import { INITIATIVE_JOURNAL_KINDS, type AssignmentState, type Escalation, type P
 import type { AssignmentView, InitiativeView } from './org-work.ts';
 import type { WorkItem } from './ledger.ts';
 import { describeAsk, type ResourceRequest } from './requests.ts';
+import { pendingReminders, REMINDER_JOURNAL_KINDS, REMINDER_LIMITS, reminderSummary, type Reminder } from './reminders.ts';
 import type { Runtime } from './runtime.ts';
+import { clipped } from './chat-context.ts';
 
 export const DESK_LIMITS = { notes: 40, registerChars: 20_000, requests: 15 };
 
@@ -19,7 +21,7 @@ const NOTE_KINDS = new Set([
   'rebase-pushed', 'attention', 'app-held', 'app-update-proposed', 'app-updated', 'request-accepted', 'request-declined',
   'request-refused', 'instance-created', 'instance-deleted', 'follow-up', 'asked', 'answered', 'ci-triage', 'owner-created',
   'owner-updated', 'owner-retired', 'ship-started', 'shipped', 'work-status', 'friction', 'fact',
-  ...INITIATIVE_JOURNAL_KINDS,
+  ...INITIATIVE_JOURNAL_KINDS, ...REMINDER_JOURNAL_KINDS,
 ]);
 const DONE = new Set(['landed', 'failed', 'rejected', 'cancelled']);
 
@@ -97,6 +99,7 @@ export async function deskState(runtime: Runtime, query: DeskQuery) {
     notes,
     registers,
     attention: (await listAttention(runtime)).filter(entry => entry.owner === owner.id),
+    reminders: (await pendingReminders(runtime, owner.id)).map(reminderSummary),
   };
 }
 
@@ -215,4 +218,15 @@ export function initiativeSection(views: readonly InitiativeView[], ownerId: str
   const shown = views.filter(view => view.owner === ownerId && (!FINISHED_INITIATIVES.has(view.status) || Date.parse(view.updatedAt) >= since));
   if (!shown.length) return '';
   return `Your initiatives (onionsoup_initiative show <id> for detail):\n${initiativesText(shown)}`;
+}
+
+/** An owner's pending reminders, soonest first, for its status. Empty when there are none. */
+export function reminderSection(reminders: readonly Reminder[], ownerId: string) {
+  const pending = reminders.filter(reminder => reminder.owner === ownerId && reminder.status === 'pending');
+  if (!pending.length) return '';
+  const lines = pending.map(reminder => {
+    const about = reminder.item ? ` (${reminder.item})` : '';
+    return `- ${reminder.id} due ${reminder.dueAt}${about}: ${clipped(reminder.prompt.replace(/\s+/g, ' '), REMINDER_LIMITS.lineChars)}`;
+  });
+  return `Your reminders (onionsoup_remind cancel <id>):\n${lines.join('\n')}`;
 }

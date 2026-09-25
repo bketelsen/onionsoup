@@ -5,7 +5,7 @@ import {
   domainSummary, itemText, revisePlan, resumeItem, retryItem, cancelItem, memoryFingerprint, type ResourceRequest, type Runtime,
   listAttention, changeAttention, recoverRequest, reconcileRequest,
   listFriction, frictionDetail, type FrictionRecord,
-  approveInitiative, reviseInitiative, cancelInitiative, initiativeViews, managerOf, planGrantFor,
+  approveInitiative, reviseInitiative, cancelInitiative, initiativeViews, managerOf, planGrantFor, cancelReminder,
   type AssignmentView, type Initiative, type InitiativeView, type WorkItem,
   isDelegated, OWNER_CHANGE_WORKFLOW, PLAN_APPROVAL_PERMISSION,
 } from '@onionsoup/owners';
@@ -431,6 +431,7 @@ export class SurfaceState {
       'approve-initiative': async () => (await approveInitiative(this.runtime, decision.id, by, decision.note)).status,
       'revise-initiative': async () => (await reviseInitiative(this.runtime, decision.id, by, required(decision.note, 'note'))).status,
       'cancel-initiative': async () => (await cancelInitiative(this.runtime, decision.id, by, required(reason, 'reason'))).status,
+      'cancel-reminder': async () => (await cancelReminder(this.runtime, decision.id, by, reason ?? '')).status,
     };
     const action = actions[decision.action];
     if (!action) throw new Error(`unknown_decision: ${decision.action}`);

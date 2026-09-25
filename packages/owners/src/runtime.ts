@@ -9,6 +9,7 @@ import { ssh, withTruenas } from './truenas.ts';
 import { Notebook } from './notebook.ts';
 import { Requests } from './requests.ts';
 import { Initiatives } from './initiatives.ts';
+import { Reminders } from './reminders.ts';
 import { Freelancers, HireError, type HireRequest } from './opencode.ts';
 
 export const RUNTIME_LIMITS = { findingChars: 2_000 };
@@ -40,6 +41,7 @@ export class Runtime {
   readonly managed: ManagedInstances;
   readonly requests: Requests;
   readonly initiatives: Initiatives;
+  readonly reminders: Reminders;
   /** Replaceable so tests never touch real incus. */
   incus: IncusClient = cliIncus;
   /** Replaceable transport so request tests never touch a real NAS. */
@@ -57,6 +59,7 @@ export class Runtime {
     this.managed = new ManagedInstances(join(stateDirectory, 'managed'));
     this.requests = new Requests(join(stateDirectory, 'requests'));
     this.initiatives = new Initiatives(join(stateDirectory, 'initiatives'));
+    this.reminders = new Reminders(join(stateDirectory, 'reminders'));
   }
 
   static async open(paths: RuntimePaths) {

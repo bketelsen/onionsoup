@@ -21,7 +21,7 @@ export interface OwnerSessionClient {
 }
 
 /** Where a session runs, and what its first message adds about that place (how a sync went, if it said anything). */
-interface SessionPlace { directory: string; note: string }
+export interface SessionPlace { directory: string; note: string }
 
 interface SessionKind {
   isNeeded: (item: WorkItem) => boolean;
@@ -40,15 +40,20 @@ function syncNote(sync: DeskSyncReport | undefined) {
 }
 
 /**
- * Planning reads the repository in the owner's chat directory, so the desk is synced first: the plan is made against
- * the base branch as it is now, not where the desk was left.
+ * A session in the owner's chat directory reads its desks, so they are synced first: the session starts from the
+ * base branch as it is now, not where a desk was left. A failed sync is logged and does not stop the session.
  */
-async function planningPlace(runtime: Runtime, item: WorkItem): Promise<SessionPlace> {
-  const sync = await syncOwnerDesk(runtime, item.owner, item.proposal.repository).catch((error: unknown) => {
-    console.warn('owner_session_desk_sync_failed', item.id, error);
+export async function syncedChatPlace(runtime: Runtime, ownerId: string, repositories: readonly (string | undefined)[], label: string): Promise<SessionPlace> {
+  const syncs = await Promise.all(repositories.map(repository => syncOwnerDesk(runtime, ownerId, repository).catch((error: unknown) => {
+    console.warn('owner_session_desk_sync_failed', label, error);
     return undefined;
-  });
-  return { directory: await chatDirectory(runtime, item.owner), note: syncNote(sync) };
+  })));
+  return { directory: await chatDirectory(runtime, ownerId), note: syncs.map(syncNote).join('') };
+}
+
+/** Planning reads the item's repository in the owner's chat directory, synced so the plan is made against the base. */
+async function planningPlace(runtime: Runtime, item: WorkItem) {
+  return syncedChatPlace(runtime, item.owner, [item.proposal.repository], item.id);
 }
 
 /**

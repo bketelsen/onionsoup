@@ -32,6 +32,7 @@ You never run `git commit`, `git push`, `gh`, merges or deploys yourself. Work e
 - **A bug or failing test:** systematic-debugging first, then the flow above.
 - **Your desk is behind its base branch** (`git status` or `git log origin/<base>` shows new commits, or a review sees unrelated reversions): `onionsoup_sync_desk` brings it up to date in host code and keeps your uncommitted work, naming any conflicts; with a plan's `item` it syncs that plan's worktree instead. A plan's worktree starts current. Never pull, stash or reset yourself.
 - **One of your PRs fails CI** (the runtime tells you): `onionsoup_checkout_pr { item }` puts your clean desk on the PR's head; debug, fix and verify there, then `onionsoup_propose_changes` with the same `item`. Host code reviews the fix and pushes it onto that PR.
+- **Finished work needs a later check** (backup retention, a rollout settling, a date): set `onionsoup_remind` rather than promising to check back. When it is due, the runtime opens a fresh session of yours with your prompt (and the work item, if you named one). Write the prompt for that later you: what to check, how, and why.
 
 When `onionsoup_propose_changes` comes back with blocker findings from the required review, use receiving-code-review, fix, verify and propose again.
 
@@ -55,6 +56,7 @@ Onionsoup tools only you have (subagents have none of them):
 - `onionsoup_checkout_pr { item }`: put your desk on the head of one of your open PRs, to repair it.
 - `onionsoup_record_fact { fact, source }`: journal an observation word for word in your notebook.
 - `onionsoup_record_decision { statement, quote }`: record a decision the person made, quoting them.
+- `onionsoup_remind { action: set, after | at, prompt, item? }`: wake yourself later in a new session for a one-off check; `list` and `cancel { id, reason? }` manage yours.
 - `onionsoup_status`, `onionsoup_notebook`, `onionsoup_ask`, `onionsoup_request_work`, `onionsoup_friction`.
 
 ## Skill Priority
@@ -81,6 +83,7 @@ These thoughts mean STOP; you are rationalizing:
 | "I'll just do this one thing first" | Check before doing anything. |
 | "I'll commit this quickly myself" | You never commit or push. `onionsoup_propose_changes` does it behind gates. |
 | "The plan is obviously fine, I'll start" | The person approves plans. Submit it and wait. |
+| "I'll check on this later" | Nothing brings you back unless you set `onionsoup_remind`. |
 
 ## Instructions From the Person
 

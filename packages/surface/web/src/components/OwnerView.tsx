@@ -5,6 +5,7 @@ import type { DeskState, InboxEntry, OwnerSummary, Session } from '../types.ts';
 import { ChatPane } from './ChatPane.tsx';
 import { Decision } from './Decision.tsx';
 import { MemoryMaintenance } from './MemoryMaintenance.tsx';
+import { ReminderCard } from './ReminderCard.tsx';
 import { Badge, BusyDots, Button, cx, Empty, OwnerIcon, Section, statusTone, timeAgo } from './ui.tsx';
 
 /** Sessions onionsoup itself ran in this directory (hires, reviews) are not the person's chats. */
@@ -19,6 +20,7 @@ const NOTE_LABELS: Record<string, string> = {
   'chat-decision': 'Noted', 'chat-action': 'Did', 'work-opened': 'Opened work', 'plan-approved': 'Plan approved', 'plan-rejected': 'Plan rejected',
   published: 'Published', 'publish-failed': 'Publish failed', asked: 'Asked', answered: 'Answered', attention: 'Needs you', 'ci-triage': 'CI triage',
   'work-status': 'Work update', friction: 'Friction report', 'owner-created': 'Created owner', 'owner-updated': 'Updated owner', 'owner-retired': 'Retired owner', 'ship-started': 'Shipping', shipped: 'Shipped',
+  'reminder-set': 'Set a reminder', 'reminder-fired': 'Reminder due', 'reminder-cancelled': 'Reminder cancelled',
 };
 
 /** An owner's page: its chat in the middle, and beside it what waits, its threads, its work and what it has been doing. */
@@ -156,6 +158,11 @@ export function OwnerView({ owner, inbox, sessionId, refresh }: { owner: OwnerSu
                   <span className="truncate flex-1">{session.title}</span><span className="shrink-0">{timeAgo(session.time.updated)}</span>
                 </button>
               ))}
+            </Section>
+          )}
+          {desk && desk.reminders.length > 0 && (
+            <Section title={`Reminders (${desk.reminders.length})`}>
+              {desk.reminders.map(reminder => <ReminderCard key={reminder.id} reminder={reminder} onDone={() => void loadDesk()} />)}
             </Section>
           )}
           <Section title="Work">

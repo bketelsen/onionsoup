@@ -364,6 +364,25 @@ is open she cannot approve that assignment's plans; she resolves it with `onions
 The surface shows the tree under **Org**, each initiative's assignments by dependency step with their state, work,
 PRs, escalations and plan reviews, and initiatives awaiting approval in the inbox.
 
+### Reminders
+
+Some checks only make sense later: Miles Teg staged Coder with backups kept for 14 days, and whether retention works
+can be confirmed only once 14 days of backups exist. Duties are recurring and declared in configuration, notices fire
+only on events, and distill only reorganises the notebook, so an owner sets itself a one-off reminder with
+`onionsoup_remind` (`set` with `after`, like a duty's `every`, or an ISO `at`; a prompt for its later self;
+optionally a work item of its own or a direct report's). Host code keeps the time instead of a model reading a
+heartbeat checklist on a schedule, and wakes the owner only when a reminder is due. Reminders live in
+`state/reminders/<id>.json` (the record in `packages/owners/src/reminders.ts`; setting, cancelling and firing in
+`reminder-work.ts`), and every set, firing and cancellation is journaled.
+
+A reminder grants nothing: firing it gives the owner a prompt, and whatever it then does goes through the usual gates.
+So owners set their own, within `REMINDER_LIMITS` (pending per owner, the shortest and longest delay, prompt length),
+and each refusal names its code (`reminder_too_soon`, `reminder_item_not_yours`, ...). On its notice timer the
+plugin opens each due reminder in a fresh owner session titled "Reminder: ...", in the owner's chat directory with its
+desks synced, whose first message is a runtime notice with the prompt and the item's record. A claim under the
+reminder's lock makes exactly one server open it, once; a reminder missed while the surface was down fires late. Pending reminders show in the owner's status and on its
+page in the surface, where the person can cancel any of them. They are not in the inbox, since they wait on no one.
+
 ### Always on
 
 `npm run owners -- daemon` (installed as `deploy/onionsoup-owners.service`) ticks every minute: it re-reads the
