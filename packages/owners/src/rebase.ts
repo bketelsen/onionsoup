@@ -250,7 +250,9 @@ function resolveBrief(item: WorkItem, source: WorkItem, files: readonly string[]
     `<conflicted-files>\n${files.join('\n')}\n</conflicted-files>`,
     `<original-change>\n${originalPatch}\n</original-change>`,
     `Resolve every conflict so the result is the original change applied on top of the new base: keep everything the base
-added, and re-apply the original change's intent. Remove all conflict markers. Run the tests. Do not commit, do not stage (the index is read-only here) and do not
+added, and re-apply the original change's intent. Remove all conflict markers. Do not run the repository's test suite or its
+verification commands: host code verifies the result before anything is pushed. When a conflicted file is code, a fast
+check of just that file (a syntax check, or the one test file that covers it) is enough. Do not commit, do not stage (the index is read-only here) and do not
 run git commands that change history; the runtime stages your resolution and continues the cherry-pick after you.
 Anything you install or generate is discarded before host verification.`,
   ].join('\n\n');
