@@ -976,7 +976,7 @@ const server: Plugin = async (input, options) => {
         },
       }),
       onionsoup_checkout_pr: tool({
-        description: 'Put your desk on the head of one of your open PRs (by its work item), to fix it, for example when its CI fails. Your desk must have no uncommitted changes. Then fix, verify and propose with onionsoup_propose_changes with the same item: host code reviews the fix and pushes it onto that PR.',
+        description: 'Put your desk on the head of one of your open PRs (by its work item), to change its content, for example when its CI fails or review asks for a fix. Conflicts with the base branch are not yours to resolve: your maintain-prs duty rebases the PR, and onionsoup_sync_desk refuses while the desk is on a PR. Your desk must have no uncommitted changes. Then fix, verify and propose with onionsoup_propose_changes with the same item: host code reviews the fix and pushes it onto that PR.',
         args: { item: tool.schema.string().describe('The work item whose PR you repair') },
         async execute(args, context) {
           const owner = requireOwner(context.agent);

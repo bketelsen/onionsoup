@@ -7,6 +7,7 @@ import { isDeepStrictEqual, promisify } from 'node:util';
 import { parse } from 'yaml';
 import { loadDeclarations, OwnerDeclaration, repositoryNames, type Declarations } from './declarations.ts';
 import { familyOf } from './families.ts';
+import { isFinished } from './ledger.ts';
 import type { Runtime } from './runtime.ts';
 
 const run = promisify(execFile);
@@ -19,7 +20,6 @@ const run = promisify(execFile);
  */
 export const AUTHORITY_FIELDS = ['grants', 'deploy', 'incus', 'mcp', 'manages'] as const;
 
-const DONE = new Set(['landed', 'failed', 'rejected', 'cancelled']);
 
 /** What a steward's scope patterns match: the repository or org name, incus:<remotes> or truenas:<host>. */
 export function domainKey(domain: OwnerDeclaration['domain']) {
@@ -142,7 +142,7 @@ export async function prepareRetire(runtime: Runtime, stewardId: string, ownerId
   if (!owner) throw new Error(`unknown owner: ${ownerId}`);
   if (owner.id === steward.id) throw new Error('refused: a steward does not retire itself');
   if (!inScope(steward, owner.domain)) throw new Error(`refused: ${owner.id} owns ${domainKey(owner.domain)}, outside ${steward.id}'s scope`);
-  const open = (await runtime.ledger.list()).filter(item => item.owner === owner.id && !DONE.has(item.status));
+  const open = (await runtime.ledger.list()).filter(item => item.owner === owner.id && !isFinished(item));
   if (open.length) throw new Error(`refused: ${owner.id} has open work (${open.map(item => item.id).join(', ')}); finish or reject it first`);
   await validateWith(runtime.declarations.root, { [`owners/${owner.id}.yaml`]: null });
   return owner;

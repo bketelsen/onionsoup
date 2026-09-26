@@ -7,7 +7,7 @@ import { ImplementationReport, Verdict } from './artifacts.ts';
 import { canChange, requireFreelancer } from './declarations.ts';
 import { tellOwner } from './plan-work.ts';
 import { pickModel } from './families.ts';
-import type { WorkItem, WorkStatus } from './ledger.ts';
+import { isFinished, type WorkItem, type WorkStatus } from './ledger.ts';
 import type { Runtime } from './runtime.ts';
 import { REPOSITORY_REVIEW, REPOSITORY_WRITING } from './repository-writing.ts';
 import { createWorktree, diffAgainstBase, git, gitWithLiteralPathspecs, matchHead, verificationPassed, verify } from './workspace.ts';
@@ -151,7 +151,7 @@ async function triageFailingCi(runtime: Runtime, item: WorkItem, headSha: string
 export async function maintainPullRequests(runtime: Runtime, ownerId: string) {
   const refreshed = await refreshPublications(runtime, ownerId);
   const items = (await runtime.ledger.list()).filter(item => item.owner === ownerId);
-  const openRebases = new Set(items.filter(item => item.rebaseOf && !['landed', 'failed', 'rejected', 'cancelled'].includes(item.status)).map(item => item.rebaseOf!.itemId));
+  const openRebases = new Set(items.filter(item => item.rebaseOf && !isFinished(item)).map(item => item.rebaseOf!.itemId));
   const cancelledRebases = new Set(items.filter(item => item.rebaseOf && item.status === 'cancelled')
     .map(item => `${item.rebaseOf!.itemId}:${item.rebaseOf!.previousHead}`));
   const notes = [...refreshed.changed, ...refreshed.unreadable.map(url => `${url} state unreadable`)];
