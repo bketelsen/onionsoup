@@ -1,9 +1,11 @@
 import type { ProviderHealthView } from '../types.ts';
 import { timeAgo } from './ui.tsx';
 
-const ERROR_STYLE = 'shrink-0 px-4 py-2 typography-meta border-b border-[var(--status-error-border)] '
+/** On a phone a banner keeps to a few lines and scrolls, so the page under it stays usable. */
+const NARROW_CAP = 'max-lg:max-h-32 max-lg:overflow-y-auto ';
+const ERROR_STYLE = NARROW_CAP + 'shrink-0 px-4 py-2 typography-meta border-b border-[var(--status-error-border)] '
   + 'bg-[var(--status-error-background)] text-[var(--status-error)]';
-const RECOVERED_STYLE = 'shrink-0 px-4 py-2 typography-meta border-b border-[var(--status-success-border)] '
+const RECOVERED_STYLE = NARROW_CAP + 'shrink-0 px-4 py-2 typography-meta border-b border-[var(--status-success-border)] '
   + 'bg-[var(--status-success-background)] text-[var(--status-success)]';
 
 function affectedKinds(view: ProviderHealthView) {

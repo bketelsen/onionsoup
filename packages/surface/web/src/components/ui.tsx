@@ -21,7 +21,8 @@ export function Button({ children, variant = 'secondary', onClick, disabled, tit
 }) {
   return (
     <button type={type} title={title} disabled={disabled} onClick={onClick}
-      className={cx('inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 typography-ui-label font-medium transition-colors', VARIANTS[variant], className)}>
+      className={cx('inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 pointer-coarse:min-h-11 pointer-coarse:px-3 typography-ui-label font-medium transition-colors',
+        VARIANTS[variant], className)}>
       {children}
     </button>
   );

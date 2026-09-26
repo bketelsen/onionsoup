@@ -48,18 +48,18 @@ export function Decision({ entry, owner, onDone, compact }: { entry: InboxEntry;
 
   return (
     <div className={cx('rounded-lg border border-border bg-card flex flex-col gap-2', compact ? 'p-2.5' : 'p-3.5')}>
-      <div className="flex items-center gap-2 typography-meta text-muted-foreground">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 typography-meta text-muted-foreground">
         {!compact && owner && (
-          <button className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => navigate('owner', owner.id)}>
+          <button className="inline-flex items-center gap-1 pointer-coarse:min-h-11 hover:text-foreground" onClick={() => navigate('owner', owner.id)}>
             <OwnerIcon icon={owner.icon} className="size-3.5" />{owner.name}
           </button>
         )}
         <Badge tone={entry.kind === 'permission' || entry.kind === 'question' ? 'info' : 'warning'}>{KIND_LABELS[entry.kind]}</Badge>
         {entry.at && <span>{timeAgo(entry.at)}</span>}
-        <span className="ml-auto font-mono text-[0.7rem]">{entry.id}</span>
+        <span className="ml-auto font-mono text-[0.7rem] break-all">{entry.id}</span>
       </div>
-      <div className="typography-ui-label font-medium text-foreground">{entry.title}</div>
-      {entry.detail && <div className="typography-meta text-muted-foreground whitespace-pre-wrap line-clamp-6">{entry.detail}</div>}
+      <div className="typography-ui-label font-medium text-foreground [overflow-wrap:anywhere]">{entry.title}</div>
+      {entry.detail && <div className="typography-meta text-muted-foreground whitespace-pre-wrap [overflow-wrap:anywhere] line-clamp-6">{entry.detail}</div>}
       {entry.planApproval && <PlanApprovalCard key={entry.id} entry={entry} onDone={onDone} />}
       {entry.kind === 'permission' && !entry.planApproval && entry.permission && Object.keys(entry.permission.metadata ?? {}).length > 0 && (
         <pre className="typography-code bg-muted rounded-md p-2 overflow-x-auto max-h-40">{JSON.stringify(entry.permission.metadata, null, 2)}</pre>
@@ -72,7 +72,7 @@ export function Decision({ entry, owner, onDone, compact }: { entry: InboxEntry;
       </div>
       {NOTE_PLACEHOLDERS[entry.kind] && (
         <input value={text} onChange={event => setText(event.target.value)} disabled={busy} aria-label={NOTE_PLACEHOLDERS[entry.kind]} placeholder={NOTE_PLACEHOLDERS[entry.kind]}
-          className="rounded-md border border-border bg-background px-2 py-1 typography-meta outline-none focus:border-interactive-border-focus" />
+          className="rounded-md border border-border bg-background px-2 py-1 pointer-coarse:min-h-11 typography-meta outline-none focus:border-interactive-border-focus" />
       )}
       {error && <div className="typography-meta text-status-error">{error}</div>}
     </div>

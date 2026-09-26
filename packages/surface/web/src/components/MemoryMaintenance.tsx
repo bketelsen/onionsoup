@@ -28,7 +28,7 @@ export function MemoryMaintenance({ ownerId }: { ownerId: string }) {
   };
   return (
     <div className="border-b border-border px-4 py-2 typography-meta flex flex-col gap-1">
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <Button disabled={!status || status.status === 'running' || (status.queued && status.status !== 'failed')}
           onClick={() => void queue()}>
           {status?.status === 'failed' ? 'Retry notebook update'

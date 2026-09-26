@@ -7,7 +7,7 @@ function OrgNode({ entry, entries }: { entry: OrgEntry; entries: OrgEntry[] }) {
   const reports = entries.filter(candidate => candidate.manager === entry.id);
   return (
     <li className="flex flex-col gap-1">
-      <button className="self-start inline-flex items-center gap-2 rounded-md px-2 py-1 hover:bg-interactive-hover" onClick={() => navigate('owner', entry.id)} title={entry.domain}>
+      <button className="self-start max-w-full inline-flex flex-wrap items-center gap-x-2 rounded-md px-2 py-1 pointer-coarse:min-h-11 text-left hover:bg-interactive-hover" onClick={() => navigate('owner', entry.id)} title={entry.domain}>
         <OwnerIcon icon={entry.icon} />
         <span className="typography-ui-label">{entry.name}</span>
         {entry.title && <span className="typography-meta text-muted-foreground">{entry.title}</span>}
@@ -29,9 +29,9 @@ export function OrgTree({ entries }: { entries: OrgEntry[] }) {
 
 function InitiativeRow({ initiative }: { initiative: InitiativeSummary }) {
   return (
-    <button className="flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-left hover:bg-interactive-hover" onClick={() => navigate('initiative', initiative.id)}>
+    <button className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-border bg-card px-3 py-2 text-left hover:bg-interactive-hover" onClick={() => navigate('initiative', initiative.id)}>
       <Badge tone={statusTone(initiative.status)}>{initiative.status}</Badge>
-      <span className="typography-ui-label flex-1 truncate">{initiative.title}</span>
+      <span className="typography-ui-label flex-1 truncate max-lg:basis-full max-lg:order-first max-lg:whitespace-normal">{initiative.title}</span>
       <span className="typography-meta text-muted-foreground">{initiative.owner} · {initiative.merged}/{initiative.total} merged</span>
       {initiative.openEscalations > 0 && <Badge tone="warning">{initiative.openEscalations} escalated</Badge>}
       <span className="typography-meta text-muted-foreground">{timeAgo(initiative.updatedAt)}</span>
@@ -53,7 +53,7 @@ export function OrgView() {
   useEvents(event => { if (event.type === 'onionsoup') void load(); }, []);
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="max-w-3xl mx-auto p-6 flex flex-col gap-5">
+      <div className="max-w-3xl mx-auto p-4 lg:p-6 flex flex-col gap-5">
         <h1 className="typography-h text-xl font-semibold">Org</h1>
         {error && <div className="typography-meta text-status-error">{error}</div>}
         <Section title="Reporting lines">{org ? <OrgTree entries={org} /> : <Empty>Loading…</Empty>}</Section>

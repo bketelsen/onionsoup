@@ -35,7 +35,7 @@ function PushActions(props: DecisionActionProps) {
 function CreateActions(props: DecisionActionProps) {
   const { busy, text, withDelete, setWithDelete, decide } = props;
   return <>
-    <label className="inline-flex items-center gap-1 typography-meta text-muted-foreground">
+    <label className="inline-flex items-center gap-1 pointer-coarse:min-h-11 typography-meta text-muted-foreground">
       <input type="checkbox" checked={withDelete} disabled={busy} onChange={event => setWithDelete(event.target.checked)} />
       also delete when done
     </label>

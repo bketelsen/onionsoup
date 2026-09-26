@@ -25,7 +25,7 @@ function AssignmentRow({ assignment }: { assignment: PublicAssignment }) {
   const { item } = assignment;
   return (
     <div className="rounded-md border border-border bg-card px-3 py-2 flex flex-col gap-1">
-      <div className="flex items-center gap-2 typography-meta text-muted-foreground">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 typography-meta text-muted-foreground">
         <span className="font-mono">{assignment.id}</span>
         <span>→ {assignment.to}</span>
         <Badge tone={chip.tone}>{chip.label}</Badge>
@@ -33,7 +33,7 @@ function AssignmentRow({ assignment }: { assignment: PublicAssignment }) {
       </div>
       <div className="typography-ui-label">{assignment.title}</div>
       {item && (
-        <div className="flex items-center gap-3 typography-meta">
+        <div className="flex flex-wrap items-center gap-x-3 typography-meta">
           <button className="text-primary hover:underline font-mono" onClick={() => navigate('item', item.id)}>{item.id}</button>
           <span className="text-muted-foreground">{item.status}</span>
           {item.url && (
@@ -63,19 +63,19 @@ export function InitiativeView({ initiative, onDone }: { initiative: PublicIniti
   const { assignments, escalations, planReviews, feedback } = initiative;
   const decision = { kind: 'initiative' as const, id: initiative.id, owner: initiative.owner, title: `Approve the breakdown (revision ${initiative.revision})`, detail: '' };
   return (
-    <div className="max-w-3xl mx-auto p-6 flex flex-col gap-5">
-      <button className="self-start inline-flex items-center gap-1 typography-meta text-muted-foreground hover:text-foreground" onClick={() => navigate('org')}>
+    <div className="max-w-3xl mx-auto p-4 lg:p-6 flex flex-col gap-5">
+      <button className="self-start inline-flex items-center gap-1 pointer-coarse:min-h-11 typography-meta text-muted-foreground hover:text-foreground" onClick={() => navigate('org')}>
         <RiArrowLeftLine className="size-3.5" />Org
       </button>
       <div className="flex flex-col gap-1.5">
-        <div className="flex items-center gap-2 typography-meta text-muted-foreground">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 typography-meta text-muted-foreground">
           <Badge tone={statusTone(initiative.status)}>{initiative.status}</Badge>
           <span className="font-mono">{initiative.id}</span>
           <span>revision {initiative.revision}</span>
           <button className="hover:text-foreground" onClick={() => navigate('owner', initiative.owner)}>{initiative.owner}</button>
           <span>updated {timeAgo(initiative.updatedAt)}</span>
         </div>
-        <h1 className="typography-h text-xl font-semibold">{initiative.title}</h1>
+        <h1 className="typography-h text-xl font-semibold [overflow-wrap:anywhere]">{initiative.title}</h1>
         {initiative.outcome && <div className="typography-meta text-muted-foreground">{initiative.outcome}</div>}
       </div>
       {initiative.status === 'awaiting-approval' && <Decision entry={decision} compact onDone={() => onDone?.()} />}
@@ -91,7 +91,7 @@ export function InitiativeView({ initiative, onDone }: { initiative: PublicIniti
         <Section title="Escalations">
           {escalations.map(escalation => (
             <div key={escalation.id} className="typography-meta flex flex-col gap-0.5">
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-x-2">
                 <Badge tone={escalation.resolution ? 'muted' : 'warning'}>{escalation.kind}</Badge>
                 <span>{escalation.from} on {escalation.assignment}</span>
                 <span className="text-muted-foreground">{timeAgo(escalation.at)}</span>
@@ -105,7 +105,7 @@ export function InitiativeView({ initiative, onDone }: { initiative: PublicIniti
       {planReviews.length > 0 && (
         <Section title="Plan reviews">
           {planReviews.map(review => (
-            <div key={`${review.item}-${review.digest}-${review.at}`} className="typography-meta flex items-center gap-2">
+            <div key={`${review.item}-${review.digest}-${review.at}`} className="typography-meta flex flex-wrap items-center gap-x-2">
               <Badge tone={review.verdict === 'approve' ? 'success' : 'warning'}>{review.verdict}</Badge>
               <button className="text-primary hover:underline font-mono" onClick={() => navigate('item', review.item)}>{review.item}</button>
               <span>{review.by}{review.note ? `: ${review.note}` : ''}</span>
@@ -128,7 +128,7 @@ export function InitiativePage({ initiativeId }: { initiativeId: string }) {
   const load = () => api<PublicInitiative>(`/api/initiatives/${encodeURIComponent(initiativeId)}`).then(setInitiative, failure => setError(String(failure.message ?? failure)));
   useEffect(() => { void load(); }, [initiativeId]); // eslint-disable-line react-hooks/exhaustive-deps
   useEvents(event => { if (event.type === 'onionsoup') void load(); }, [initiativeId]);
-  if (error) return <div className="p-6 text-status-error">{error}</div>;
-  if (!initiative) return <div className="p-6"><Empty>Loading…</Empty></div>;
+  if (error) return <div className="p-4 lg:p-6 text-status-error">{error}</div>;
+  if (!initiative) return <div className="p-4 lg:p-6"><Empty>Loading…</Empty></div>;
   return <div className="flex-1 overflow-y-auto"><InitiativeView initiative={initiative} onDone={() => void load()} /></div>;
 }

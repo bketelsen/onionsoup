@@ -46,7 +46,7 @@ export function WorkRecovery({ item, onDone }: { item: WorkItem; onDone: () => v
     }
   };
   return <div className="rounded-lg border border-border p-3 flex flex-col gap-2">
-    <div className="flex items-center gap-2">
+    <div className="flex flex-wrap items-center gap-2">
       {actions.map(recovery => <Button key={recovery.action} disabled={busy || (recovery.isNoteRequired && !hasNote)}
         onClick={() => void decide(recovery.action)}>{recovery.label}</Button>)}
       <Button variant="destructive" disabled={busy || !hasNote} onClick={() => void decide('cancel-item')}>Cancel work</Button>
