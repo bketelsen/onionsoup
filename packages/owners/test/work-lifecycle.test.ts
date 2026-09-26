@@ -682,6 +682,7 @@ test('a conflict resolution is verified as its commit, without what the resolver
     if (request.role === 'owner') return { decision: 'resolve', guidance: 'Keep both lines', reason: 'Both sides matter' };
     if (request.role === 'implementer') {
       assert.match(request.brief, /the runtime stages your resolution/);
+      assert.match(request.brief, /Do not run the repository's test suite or its\nverification commands: host code verifies the result/);
       await writeFile(join(request.directory, 'doc'), 'base moved on\noriginal change\n');
       await installDependencies(request.directory);
       await writeFile(join(request.directory, 'scratch.txt'), 'notes');
