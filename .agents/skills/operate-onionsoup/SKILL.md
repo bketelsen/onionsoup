@@ -44,9 +44,12 @@ cause, and the fix is either applied through the normal gates or reported to the
   A step that seems stuck is usually waiting on the person to merge the previous PR, on a plan approval, or on an
   open escalation from the report.
 - **Operator:** optional, declared in `operator.yaml` in the config directory; the surface shows its chat at the top
-  of the rail, in its own directory (default `~/projects`). It is not an owner: no notebook, duties or work items.
-  Its commands and edits are journaled to `state/notebooks/operator/journal/*.jsonl`; read them when asked what it
-  did. As the operator yourself: approvals and ships through the CLI ask the person, and are theirs to decide.
+  of the rail, in its own directory (default `~/projects`). It is not an owner: no owner notebook, duties or work
+  items. Its commands and edits are journaled to `state/notebooks/operator/journal/*.jsonl`; read them when asked what
+  it did. Its memory is `state/notebooks/operator/memory/` (`INDEX.md` plus one topic file per subject), in its
+  context each turn and committed to the notebooks repo (`operator: memory: <files>`) when its chat goes idle; its
+  history is `git -C state/notebooks log -- operator/memory`. As the operator yourself: approvals and ships through
+  the CLI ask the person, and are theirs to decide.
 - **Provider health:** `state/provider-health/<provider>.json`, written when a hire or chat fails authentication
   (`[provider] <id>: authentication failing` in the daemon's or the surface's log, a `provider-auth` inbox entry and a
   red banner in the surface). It clears itself (`status: ok`, `recoveredAt`) on the next successful call to that

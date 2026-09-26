@@ -27,11 +27,16 @@ export class SessionOwners<Holder> {
 
   /** The owner of a subagent's child session, found through its parents. */
   async ownerOfChild(sessionID: string) {
+    const topLevel = await this.topLevelOf(sessionID);
+    return topLevel === undefined ? undefined : this.topLevel.get(topLevel);
+  }
+
+  /** The claimed top-level session a subagent's child session descends from. */
+  async topLevelOf(sessionID: string) {
     let current: string | undefined = sessionID;
     for (let depth = 0; current && depth < SESSION_LIMITS.parentDepth; depth += 1) {
       current = await this.parent(current);
-      const owner = current ? this.topLevel.get(current) : undefined;
-      if (owner) return owner;
+      if (current && this.topLevel.has(current)) return current;
     }
     return undefined;
   }
