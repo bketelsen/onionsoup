@@ -65,7 +65,7 @@ export function ItemView({ itemId }: { itemId: string }) {
       </div>
     </div>
     <Drawer side="right" isOpen={isActivityOpen} onClose={() => setActivityOpen(false)} label="Activity"
-      className="w-[34rem] max-w-[90vw] lg:max-w-[calc((100vw-15rem)/2)]">
+      className="w-[34rem] max-w-[90vw] lg:max-w-[calc((100vw-15rem)/2)] border-l border-border">
       <ItemActivity item={item} />
     </Drawer>
     </div>

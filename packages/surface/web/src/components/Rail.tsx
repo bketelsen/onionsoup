@@ -77,7 +77,7 @@ export function Rail({ state, route, onReorder }: { state?: SurfaceState; route:
   const activeItem = route[0] === 'item' ? route[1] : undefined;
   const inboxActive = route.length === 0 || route[0] === 'inbox';
   return (
-    <Drawer side="left" isOpen={isOpen} onClose={() => setRailOpen(false)} label="Navigation" className="w-60 flex">
+    <Drawer side="left" isOpen={isOpen} onClose={() => setRailOpen(false)} label="Navigation" className="w-60 flex border-r border-border">
     <nav className="flex-1 min-w-0 bg-sidebar flex flex-col min-h-0">
       <div className="px-4 h-12 flex items-center gap-2 border-b border-border">
         <span className="typography-ui-header font-semibold">onionsoup</span>

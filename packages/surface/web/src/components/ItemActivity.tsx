@@ -67,7 +67,7 @@ export function ItemActivity({ item }: { item: WorkItem }) {
             const isLive = live(session);
             return (
               <button key={session.id} onClick={() => setPicked(session.id)} title={hire ? `${hire.model} · ${hire.outcome}${hire.error ? `: ${hire.error}` : ''}` : isLive ? 'running now' : ''}
-                className={cx('inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 pointer-coarse:min-h-11 typography-meta border',
+                className={cx('inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 pointer-coarse:min-h-11 text-left typography-meta border',
                   session.id === selected?.id ? 'bg-interactive-active text-foreground border-border' : 'text-muted-foreground border-transparent hover:bg-interactive-hover hover:text-foreground')}>
                 {session.label}
                 {isLive && <span className="size-1.5 rounded-full bg-status-info animate-pulse" />}

@@ -132,7 +132,7 @@ export function OwnerView({ owner, inbox, sessionId, refresh }: { owner: OwnerSu
           )}
         </main>
         <Drawer side="right" isOpen={isDeskOpen} onClose={closeDesk} label={`${owner.name}'s desk`}
-          className="w-80 overflow-y-auto overscroll-contain p-4 flex flex-col gap-5">
+          className="w-80 border-l border-border overflow-y-auto overscroll-contain p-4 flex flex-col gap-5">
           {waiting.length > 0 && (
             <Section title={`Waiting on you (${waiting.length})`}>
               {waiting.map(entry => <Decision key={`${entry.kind}:${entry.id}`} entry={entry} compact onDone={refresh} />)}

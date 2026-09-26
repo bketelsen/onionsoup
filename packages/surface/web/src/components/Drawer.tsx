@@ -7,14 +7,14 @@ import { cx } from './ui.tsx';
 
 export type DrawerSide = 'left' | 'right';
 
-/** Where a drawer slides in from, what hides it, and which safe areas its edge has to clear. */
+/** Where a drawer slides in from, what hides it, and which safe areas its edge has to clear. The panel draws its own border. */
 const SIDES: Record<DrawerSide, { edge: string; hidden: string }> = {
   left: {
-    edge: 'left-0 max-lg:pl-[env(safe-area-inset-left)] border-r border-border',
+    edge: 'left-0 max-lg:pl-[env(safe-area-inset-left)]',
     hidden: '-translate-x-full',
   },
   right: {
-    edge: 'right-0 max-lg:pr-[env(safe-area-inset-right)] border-l border-border',
+    edge: 'right-0 max-lg:pr-[env(safe-area-inset-right)]',
     hidden: 'translate-x-full',
   },
 };
