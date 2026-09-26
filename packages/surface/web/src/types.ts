@@ -2,8 +2,11 @@
 
 export interface OwnerSummary {
   id: string; name: string; title: string; source: string; icon: string; color: string; model: string; domain: string;
-  chat: boolean; hasDesk: boolean; waiting: number; running: number; activity: OwnerActivity;
+  chat: boolean; hasDesk: boolean; waiting: number; running: number; runtimeWork: RuntimeWork[]; activity: OwnerActivity;
 }
+
+import type { RuntimeWork } from '../../src/runtime-work-public.ts';
+export type { RuntimeWork };
 
 import type { OwnerActivity } from '../../src/activity.ts';
 export type { OwnerActivity };

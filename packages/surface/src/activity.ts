@@ -1,18 +1,20 @@
 import { z } from 'zod';
 
 /**
- * What an owner's chats are doing right now, for the rail: a prompt or question stopped on the person, a session
- * busy in opencode, or nothing. Waiting comes first: a waiting session is stopped until the person answers.
+ * What an owner is doing right now, for the rail: a prompt or question stopped on the person, a chat session busy in
+ * opencode or work its host code is running, or nothing. Waiting comes first: a waiting session is stopped until the
+ * person answers.
  */
 export const OwnerActivity = z.enum(['waiting', 'working', 'idle']);
 export type OwnerActivity = z.infer<typeof OwnerActivity>;
 
 /** Signals the surface already reads for its inbox, per owner. */
-export interface ActivitySignals { isWaiting: boolean; isWorking: boolean }
+export interface ActivitySignals { isWaiting: boolean; isWorking: boolean; hasRuntimeWork: boolean }
 
 const ACTIVITY_PRECEDENCE: readonly [OwnerActivity, (signals: ActivitySignals) => boolean][] = [
   ['waiting', signals => signals.isWaiting],
   ['working', signals => signals.isWorking],
+  ['working', signals => signals.hasRuntimeWork],
 ];
 
 export function ownerActivity(signals: ActivitySignals): OwnerActivity {

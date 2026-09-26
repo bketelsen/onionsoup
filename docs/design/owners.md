@@ -47,7 +47,9 @@ The person talks to owners in the **surface** (`packages/surface`) or the openco
 agent whose chats run in its desk (or evidence folder). The surface is organized around owners: a rail of owners
 with what waits and what runs (a three-dot pulse for running work; the owner's icon amber while a chat prompt or
 question waits on the person, else accent while any of its sessions (desk, plan worktrees, subagents) is busy in
-opencode, read with the inbox and refreshed on opencode's session and permission events), one inbox of every gate and chat permission with the decision in place, and per owner
+opencode or a runner holds one of its items, read with the inbox and refreshed on opencode's session and permission
+events; items a runner holds, such as a `maintain-prs` rebase whose hires run on sandboxed servers, are listed under
+the owner and link to their item page), one inbox of every gate and chat permission with the decision in place, and per owner
 its chats (drawn like OpenChamber's, whose styles it borrows under MIT), work, activity and notebook. The Friction
 rail lists bounded incident reports and links them to their first reporting chat. It is a small
 Node server that starts its own opencode (which loads the plugin from the person's real, host config — see the

@@ -7,8 +7,8 @@ import {
   listFriction, frictionDetail, type FrictionRecord,
   approveInitiative, reviseInitiative, cancelInitiative, initiativeViews, managerOf, planGrantFor, cancelReminder,
   type AssignmentView, type Initiative, type InitiativeView, type WorkItem,
-  isDelegated, OWNER_CHANGE_WORKFLOW, PLAN_APPROVAL_PERMISSION, OPERATOR_ID, operatorChatDirectory, WIKI_DELETE_PERMISSION,
-  providerHealthViews, type ProviderHealthView,
+  isDelegated, isFinished, OWNER_CHANGE_WORKFLOW, PLAN_APPROVAL_PERMISSION, OPERATOR_ID, operatorChatDirectory, WIKI_DELETE_PERMISSION,
+  providerHealthViews, type ProviderHealthView, type OwnerDeclaration,
 } from '@onionsoup/owners';
 import type { OpencodeApi, PendingPermission, PendingQuestion } from './opencode.ts';
 import { planApprovalOf, type PlanApprovalRequest } from './plan-approval-request.ts';
@@ -19,6 +19,7 @@ import type { InitiativeSummary, OrgEntry, PublicAssignment, PublicInitiative } 
 import { InboxReadError } from './inbox-errors.ts';
 import type { ItemSession } from './item-session-public.ts';
 import { hasBusySession, ownerActivity, type OwnerActivity } from './activity.ts';
+import type { RuntimeWork } from './runtime-work-public.ts';
 
 interface OpencodeSession { id: string; title: string; directory: string; parentID?: string; time: { created: number; updated: number } }
 
@@ -125,7 +126,9 @@ export interface OwnerSummary {
   hasDesk: boolean;
   waiting: number;
   running: number;
-  /** Whether its chats are working, stopped on the person, or idle. */
+  /** Work its host code is running right now, listed under it in the rail. */
+  runtimeWork: RuntimeWork[];
+  /** Whether it is working (a chat or runtime work), stopped on the person, or idle. */
   activity: OwnerActivity;
 }
 
@@ -135,9 +138,19 @@ export interface ChatSnapshot { inbox: InboxEntry[]; busyChats: ReadonlySet<stri
 /** Kinds of inbox entry that stop a chat session until the person answers. */
 const CHAT_WAIT_KINDS = new Set<InboxEntry['kind']>(['permission', 'question']);
 
-function chatActivity(chatId: string, { inbox, busyChats }: ChatSnapshot) {
+function chatActivity(chatId: string, { inbox, busyChats }: ChatSnapshot, runtimeWork: readonly RuntimeWork[]) {
   const isWaiting = inbox.some(entry => entry.owner === chatId && CHAT_WAIT_KINDS.has(entry.kind));
-  return ownerActivity({ isWaiting, isWorking: busyChats.has(chatId) });
+  return ownerActivity({ isWaiting, isWorking: busyChats.has(chatId), hasRuntimeWork: runtimeWork.length > 0 });
+}
+
+/** An item a runner holds right now: host code is working on it, whatever its chats are doing. */
+function isRuntimeWork(item: WorkItem) {
+  return item.activeRunner !== undefined && !isFinished(item);
+}
+
+function runtimeWorkOf(items: readonly WorkItem[], ownerId: string): RuntimeWork[] {
+  return items.filter(item => item.owner === ownerId && isRuntimeWork(item))
+    .map(item => ({ id: item.id, title: item.proposal.title, status: item.status }));
 }
 
 /** How deep an assignment sits in its initiative's dependency order: 0 needs nothing first. */
@@ -394,10 +407,14 @@ export class SurfaceState {
 
   async owners(snapshot?: ChatSnapshot): Promise<OwnerSummary[]> {
     const chats = snapshot ?? await this.inboxSnapshot();
-    const waiting = chats.inbox;
     const items = await this.runtime.ledger.list();
     const { ownerOrder } = await this.settings.read();
-    return ordered([...this.runtime.declarations.owners.values()], ownerOrder).map(owner => ({
+    return ordered([...this.runtime.declarations.owners.values()], ownerOrder).map(owner => this.ownerSummary(owner, chats, items));
+  }
+
+  private ownerSummary(owner: OwnerDeclaration, chats: ChatSnapshot, items: readonly WorkItem[]): OwnerSummary {
+    const runtimeWork = runtimeWorkOf(items, owner.id);
+    return {
       id: owner.id,
       name: owner.persona?.name ?? owner.id,
       title: owner.persona?.title ?? '',
@@ -408,10 +425,11 @@ export class SurfaceState {
       domain: domainSummary(owner),
       chat: Boolean(owner.persona),
       hasDesk: true,
-      waiting: waiting.filter(entry => entry.owner === owner.id).length,
+      waiting: chats.inbox.filter(entry => entry.owner === owner.id).length,
       running: items.filter(item => item.owner === owner.id && RUNNING.has(item.status)).length,
-      activity: chatActivity(owner.id, chats),
-    }));
+      runtimeWork,
+      activity: chatActivity(owner.id, chats, runtimeWork),
+    };
   }
 
   async owner(ownerId: string) {
@@ -425,8 +443,8 @@ export class SurfaceState {
     return {
       id: OPERATOR_ID, name: operator.name, title: operator.title, source: '', icon: operator.icon, color: 'primary',
       model: operator.model, domain: operator.directory, chat: true, hasDesk: false,
-      waiting: snapshot.inbox.filter(entry => entry.owner === OPERATOR_ID).length, running: 0,
-      activity: chatActivity(OPERATOR_ID, snapshot),
+      waiting: snapshot.inbox.filter(entry => entry.owner === OPERATOR_ID).length, running: 0, runtimeWork: [],
+      activity: chatActivity(OPERATOR_ID, snapshot, []),
     };
   }
 
@@ -560,7 +578,7 @@ export class SurfaceState {
     const items = await this.runtime.ledger.list();
     const requests = await this.runtime.requests.list();
     return JSON.stringify([
-      items.map(item => [item.id, item.status, item.updatedAt]),
+      items.map(item => [item.id, item.status, item.updatedAt, item.activeRunner]),
       requests.map(request => [request.id, request.status, request.updatedAt]),
       (await this.runtime.initiatives.list()).map(initiative => [initiative.id, initiative.status, initiative.updatedAt]),
       await memoryFingerprint(this.runtime),

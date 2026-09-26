@@ -227,7 +227,7 @@ test('the operator has a chat of its own in its directory, apart from the owners
     const state = (await call('GET', '/api/state')).body as { operator: Record<string, unknown>; owners: { id: string }[]; inbox: { id: string; owner: string }[] };
     assert.deepEqual(state.operator, {
       id: OPERATOR_ID, name: 'Operator', title: 'Acts for you', source: '', icon: 'terminal', color: 'primary', model: 'github-copilot/gpt-6-sol',
-      domain: directory, chat: true, hasDesk: false, waiting: 1, running: 0, activity: 'waiting',
+      domain: directory, chat: true, hasDesk: false, waiting: 1, running: 0, runtimeWork: [], activity: 'waiting',
     });
     assert.ok(!state.owners.some(owner => owner.id === OPERATOR_ID), 'the operator is not an owner');
     assert.ok(state.inbox.some(entry => entry.id === 'per_op' && entry.owner === OPERATOR_ID));
@@ -352,6 +352,33 @@ test('an owner whose only busy session is on its desk is working, and the operat
     const read = (await call('GET', '/api/state')).body as ActivityRead;
     assert.equal(read.owners.find(owner => owner.id === 'bellonda')?.activity, 'working');
     assert.equal(read.operator?.activity, 'working');
+  } finally {
+    server.close();
+  }
+});
+
+test('work a runner holds is listed under its owner and makes it work, though its chats are idle', async () => {
+  const { server, call, runtime } = await start(api => {
+    api.permissions = async () => [];
+    api.status = async () => ({ ses_idle: { type: 'idle' } });
+  });
+  try {
+    const proposal = { goal: 'g', rationale: 'r', acceptance: ['a'], size: 'small' as const };
+    const rebase = await runtime.ledger.create('homelab', 'maintain-prs', { ...proposal, title: 'Rebase #12 onto the current base' }, {
+      status: 'implementing', activeRunner: process.pid,
+    });
+    await runtime.ledger.create('homelab', 'maintain-prs', { ...proposal, title: 'Finished rebase' }, { status: 'landed', activeRunner: process.pid });
+    await runtime.ledger.create('homelab', 'owner-change', { ...proposal, title: 'Queued work' }, { status: 'implementing' });
+    const read = (await call('GET', '/api/state')).body as { owners: { id: string; activity: string; runtimeWork: unknown[] }[] };
+    const homelab = read.owners.find(owner => owner.id === 'homelab');
+    assert.deepEqual(homelab?.runtimeWork, [{ id: rebase.id, title: 'Rebase #12 onto the current base', status: 'implementing' }]);
+    assert.equal(homelab?.activity, 'working', 'runtime work counts as working with every chat idle');
+    assert.equal(read.owners.find(owner => owner.id === 'moneo')?.activity, 'idle');
+
+    await runtime.ledger.update(rebase.id, current => ({ ...current, activeRunner: undefined }));
+    const settled = (await call('GET', '/api/state')).body as typeof read;
+    assert.deepEqual(settled.owners.find(owner => owner.id === 'homelab')?.runtimeWork, []);
+    assert.equal(settled.owners.find(owner => owner.id === 'homelab')?.activity, 'idle');
   } finally {
     server.close();
   }
