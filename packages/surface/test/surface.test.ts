@@ -1,14 +1,48 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rename, symlink, writeFile } from 'node:fs/promises';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import {
-  OPERATOR_ID, OperatorDeclaration, Runtime, approveInitiative, draftInitiative, recordProviderFailure, recordProviderSuccess, reportFriction, setReminder,
+  OPERATOR_ID, OperatorDeclaration, Runtime, approveInitiative, armDeployment, beginDrain, draftInitiative, listAdmissions,
+  recordProviderFailure, recordProviderSuccess, releaseDrain, reportFriction, setReminder,
   submitInitiative,
 } from '@onionsoup/owners';
 import { SurfaceState, surfaceServer, type OpencodeApi } from '@onionsoup/surface';
+import { DEFAULT_RELEASE_MANIFEST, readReleaseBuildId } from '../src/deployment-view.ts';
+
+test('state API reads pending deployment dynamically while retaining the installed build', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'surface-build-'));
+  const oldRelease = join(root, 'old');
+  const newRelease = join(root, 'new');
+  await mkdir(oldRelease);
+  await mkdir(newRelease);
+  await writeFile(join(oldRelease, 'release.json'), JSON.stringify({ buildId: 'installed-123' }));
+  await writeFile(join(newRelease, 'release.json'), JSON.stringify({ buildId: 'next-456' }));
+  const current = join(root, 'current');
+  await symlink(oldRelease, current);
+  const manifestPath = join(current, 'release.json');
+  const { runtime, server, call } = await start(undefined, undefined, manifestPath);
+  try {
+    assert.deepEqual((await call('GET', '/api/state')).body.deployment, { buildId: 'installed-123', isPending: false });
+    await mkdir(join(runtime.stateDirectory, 'deploy'), { recursive: true });
+    await writeFile(join(runtime.stateDirectory, 'deploy', 'pending.json'), JSON.stringify({ status: 'draining', targetBuildId: 'next-456' }));
+    await symlink(newRelease, join(root, 'next-pointer'));
+    await rename(join(root, 'next-pointer'), current);
+    assert.deepEqual((await call('GET', '/api/state')).body.deployment, {
+      buildId: 'installed-123', isPending: true, pending: { status: 'draining', targetBuildId: 'next-456' },
+    });
+    const replacement = await start(undefined, undefined, manifestPath);
+    try {
+      assert.deepEqual((await replacement.call('GET', '/api/state')).body.deployment, { buildId: 'next-456', isPending: false });
+    } finally {
+      replacement.server.close();
+    }
+  } finally {
+    server.close();
+  }
+});
 
 function fakeOpencode() {
   const calls: unknown[][] = [];
@@ -36,6 +70,89 @@ function fakeOpencode() {
   };
   return { api, calls };
 }
+
+test('drain refuses new surface writes and retains an in-flight prompt lease until the HTTP request completes', async () => {
+  let entered!: () => void;
+  const started = new Promise<void>(resolve => { entered = resolve; });
+  let finish!: () => void;
+  const held = new Promise<void>(resolve => { finish = resolve; });
+  const { runtime, server, call, calls } = await start(api => {
+    api.prompt = async (directory, sessionID, agent, text) => {
+      calls.push(['prompt', directory, sessionID, agent, text]);
+      entered();
+      await held;
+    };
+  });
+  const target = 'build-next';
+  try {
+    const pending = call('POST', '/api/owners/bellonda/sessions/ses_1/prompt', { text: 'first' });
+    await started;
+    await armDeployment(runtime.stateDirectory, target);
+    const admissions = await beginDrain(runtime.stateDirectory, target);
+    assert.equal(admissions.length, 1);
+    assert.match(admissions[0]!.kind, /^surface:POST:.*\/prompt$/);
+    assert.equal(admissions[0]!.alive, true);
+    await assert.rejects(releaseDrain(runtime.stateDirectory, target, 'completed'), /deployment_admissions_active/);
+
+    const blocked = [
+      ['POST', '/api/owners/bellonda/sessions', {}],
+      ['POST', '/api/owners/bellonda/sessions/ses_1/prompt', { text: 'second' }],
+      ['POST', '/api/owners/bellonda/sessions/ses_1/abort', {}],
+      ['POST', '/api/owners/bellonda/permissions/per_1', { reply: 'once' }],
+      ['POST', '/api/owners/bellonda/questions/question-1', { reject: true }],
+      ['POST', '/api/decide', { action: 'launch', id: 'x' }],
+      ['PUT', '/api/owners/bellonda/sessions/ses_1/auto-accept', { enabled: true }],
+      ['PATCH', '/api/owners/bellonda/sessions/ses_1', { title: 'new title' }],
+      ['POST', '/api/owners/bellonda/memory', {}],
+    ] as const;
+    for (const [method, path, body] of blocked) {
+      assert.deepEqual(await call(method, path, body), { status: 503, body: { error: 'deployment_draining' } });
+    }
+    assert.equal(calls.length, 1, 'no rejected request reached opencode');
+    assert.equal((await call('GET', '/api/state')).status, 200);
+    assert.equal((await listAdmissions(runtime.stateDirectory)).length, 1);
+
+    finish();
+    assert.deepEqual(await pending, { status: 200, body: { outcome: 'sent' } });
+    assert.deepEqual(await listAdmissions(runtime.stateDirectory), []);
+    await releaseDrain(runtime.stateDirectory, target, 'completed');
+    assert.equal((await call('POST', '/api/owners/bellonda/sessions', {})).status, 200);
+  } finally {
+    finish();
+    server.close();
+  }
+});
+
+test('a pending permission remains answerable while deployment is waiting before drain', async () => {
+  const { runtime, server, call, calls } = await start();
+  try {
+    await armDeployment(runtime.stateDirectory, 'build-next');
+    const { markDeploymentWaiting } = await import('@onionsoup/owners');
+    await markDeploymentWaiting(runtime.stateDirectory, 'build-next');
+    assert.deepEqual(await call('POST', '/api/owners/bellonda/permissions/per_1', { reply: 'once' }),
+      { status: 200, body: { outcome: 'once' } });
+    assert.deepEqual(calls.at(-1), ['permission', '/desks/bellonda', 'per_1', 'once']);
+    assert.deepEqual(await listAdmissions(runtime.stateDirectory), []);
+  } finally {
+    server.close();
+  }
+});
+
+test('a failed mutation releases its admission and an unreadable deployment intent fails closed', async () => {
+  const { runtime, server, call, calls } = await start();
+  try {
+    assert.equal((await call('POST', '/api/owners/bellonda/sessions/ses_1/prompt', { text: '' })).status, 400);
+    assert.deepEqual(await listAdmissions(runtime.stateDirectory), []);
+
+    await mkdir(join(runtime.stateDirectory, 'deploy'), { recursive: true });
+    await writeFile(join(runtime.stateDirectory, 'deploy', 'pending.json'), '{broken');
+    const refused = await call('POST', '/api/owners/bellonda/sessions', {});
+    assert.deepEqual(refused, { status: 500, body: { error: 'deployment_invalid_pending' } });
+    assert.deepEqual(calls, []);
+  } finally {
+    server.close();
+  }
+});
 
 test('the surface queues notebook maintenance alongside a running daemon and exposes failures', async () => {
   const { server, runtime, call } = await start();
@@ -65,6 +182,7 @@ test('the surface queues notebook maintenance alongside a running daemon and exp
 async function start(
   configure?: (api: OpencodeApi) => void,
   directory: (runtime: Runtime, ownerId: string) => Promise<string> = async (_runtime, ownerId) => `/desks/${ownerId}`,
+  manifestPath?: string,
 ) {
   const runtime = await Runtime.open({ declarations: 'packages/owners/test/fixtures/owners', state: await mkdtemp(join(tmpdir(), 'surface-')) });
   const { api, calls } = fakeOpencode();
@@ -76,7 +194,8 @@ async function start(
   ].filter(session => session.title.startsWith(prefix));
   const state = new SurfaceState(runtime, api, directory, undefined,
     sessionID => [{ info: { id: 'msg_1', sessionID, role: 'assistant' }, parts: [] }], hireSessions);
-  const { server } = surfaceServer(state, { webRoot: '/nonexistent', by: 'tester' });
+  const buildId = await readReleaseBuildId(manifestPath ?? DEFAULT_RELEASE_MANIFEST);
+  const { server } = surfaceServer(state, { webRoot: '/nonexistent', by: 'tester', buildId });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const call = async (method: string, path: string, body?: unknown) => {

@@ -15,9 +15,10 @@ import { refreshPublications } from './rebase.ts';
 import { requestRunnerIsAlive, type ResourceRequest } from './requests.ts';
 import type { Runtime } from './runtime.ts';
 import { advance, isRunnable, retirePipelineItems } from './work-recovery.ts';
+import { beginAdmission } from './deployment-admission.ts';
 
 export const DAEMON_LIMITS = {
-  tickMs: 60_000, shutdownGraceMs: 5_000, parallelItems: 4, parallelDuties: 2, parallelMemory: 1, parallelRequests: 2,
+  tickMs: 60_000, startupRetryMs: 250, shutdownGraceMs: 5_000, parallelItems: 4, parallelDuties: 2, parallelMemory: 1, parallelRequests: 2,
 };
 
 /**
@@ -28,7 +29,7 @@ export const DAEMON_LIMITS = {
 export class Background {
   private readonly running = new Map<string, Promise<void>>();
 
-  constructor(private readonly limit: number) {}
+  constructor(private readonly limit: number, private readonly stateDirectory?: string, private readonly kind?: string) {}
 
   has(key: string) {
     return this.running.has(key);
@@ -43,11 +44,33 @@ export class Background {
   }
 
   /** Start `job` unless its key is running or the cap is reached; returns whether it started. */
-  start(key: string, job: () => Promise<void>) {
+  async start(key: string, job: () => Promise<void>, stateDirectory = this.stateDirectory, kind = this.kind ?? key): Promise<boolean> {
     if (this.running.has(key) || this.running.size >= this.limit) return false;
-    const done = job().finally(() => this.running.delete(key));
+    let signalStarted!: (started: boolean) => void;
+    let rejectStart!: (error: unknown) => void;
+    const started = new Promise<boolean>((resolve, reject) => { signalStarted = resolve; rejectStart = reject; });
+    let admitted = false;
+    const done = (async () => {
+      try {
+        const lease = stateDirectory ? await beginAdmission(stateDirectory, kind) : undefined;
+        admitted = true;
+        signalStarted(true);
+        try {
+          await job();
+        } finally {
+          await lease?.release();
+        }
+      } catch (error) {
+        if (error instanceof Error && error.message === 'deployment_draining') {
+          signalStarted(false);
+          return;
+        }
+        if (!admitted) rejectStart(error);
+        throw error;
+      }
+    })().catch(() => {}).finally(() => this.running.delete(key));
     this.running.set(key, done);
-    return true;
+    return started;
   }
 
   /** Wait for everything started so far (a one-off tick from the CLI must not return while work runs). */
@@ -97,14 +120,14 @@ async function runDueDuties(runtime: Runtime, log: TickLog, reserved: ReadonlySe
       const previous = lastRun[key] ? Date.parse(lastRun[key]) : 0;
       if (reserved.has(owner.id)) continue;
       if (Date.now() - previous < spanMs(duty.every!) || duties.has(key)) continue;
-      const started = duties.start(key, async () => {
+      const started = await duties.start(key, async () => {
         try {
           const result = await wake(runtime, owner.id, duty.id);
           log.duty(owner.id, duty.id, result.survey.summary);
         } catch (error) {
           log.error(key, error);
         }
-      });
+      }, runtime.stateDirectory, 'daemon-duty');
       // A duty that could not start (the cap) stays due and starts on a later tick.
       if (!started) continue;
       lastRun[key] = new Date().toISOString();
@@ -117,18 +140,18 @@ async function runDueDuties(runtime: Runtime, log: TickLog, reserved: ReadonlySe
  * Advance runnable work items in the background, at most one per owner at a time: an owner's items share its
  * checkout, where creating worktrees at once would collide.
  */
-function advanceRunnable(runnable: readonly WorkItem[], runtime: Runtime, log: TickLog, reserved: ReadonlySet<string>) {
+async function advanceRunnable(runnable: readonly WorkItem[], runtime: Runtime, log: TickLog, reserved: ReadonlySet<string>) {
   const busyOwners = new Set(items.keys().map(key => key.split('/')[0]));
   for (const item of runnable) {
     if (memories.has(item.owner)) continue;
     if (reserved.has(item.owner) || busyOwners.has(item.owner) || items.has(`${item.owner}/${item.id}`)) continue;
-    const started = items.start(`${item.owner}/${item.id}`, async () => {
+    const started = await items.start(`${item.owner}/${item.id}`, async () => {
       try {
         await advance(runtime, item.id, log.item);
       } catch (error) {
         log.error(item.id, error);
       }
-    });
+    }, runtime.stateDirectory, 'daemon-item');
     if (started) busyOwners.add(item.owner);
   }
 }
@@ -143,14 +166,14 @@ export async function scheduleMemory(runtime: Runtime, log: TickLog, unavailable
     if (busy.has(ownerId) || unavailable.has(ownerId) || memories.has(ownerId)) continue;
     try {
       if (!(await distillIsDue(runtime, ownerId))) continue;
-      memories.start(ownerId, async () => {
+      await memories.start(ownerId, async () => {
         try {
           const outcome = await distill(runtime, ownerId);
           log.duty(ownerId, 'distill', `${outcome.entries} entries, ${outcome.edits} edits`);
         } catch (error) {
           log.error(`${ownerId}/distill`, error);
         }
-      });
+      }, runtime.stateDirectory, 'daemon-memory');
     } catch (error) {
       log.error(`${ownerId}/distill`, error);
     }
@@ -181,7 +204,7 @@ async function runRequests(runtime: Runtime, log: TickLog) {
     if (!requestCanRun(request) && !canReconcileRequest(request)) continue;
     const owners = requestParticipants(runtime, request);
     if ([...owners].some(owner => requestOwners.has(owner) || busyOwners.has(owner))) continue;
-    requests.start(request.id, async () => {
+    await requests.start(request.id, async () => {
       for (const owner of owners) requestOwners.add(owner);
       try {
         if (canReconcileRequest(request)) {
@@ -194,7 +217,7 @@ async function runRequests(runtime: Runtime, log: TickLog) {
       } finally {
         for (const owner of owners) requestOwners.delete(owner);
       }
-    });
+    }, runtime.stateDirectory, 'daemon-request');
   }
 }
 
@@ -212,6 +235,21 @@ async function reservedRequestOwners(runtime: Runtime) {
  * duties, work items, notices. PR states come first so everything after reacts to a merge on the same tick.
  */
 export async function tick(runtime: Runtime, log: TickLog) {
+  let lease;
+  try {
+    lease = await beginAdmission(runtime.stateDirectory, 'daemon-tick');
+  } catch (error) {
+    if (error instanceof Error && error.message === 'deployment_draining') return;
+    throw error;
+  }
+  try {
+    await tickAdmitted(runtime, log);
+  } finally {
+    await lease.release();
+  }
+}
+
+async function tickAdmitted(runtime: Runtime, log: TickLog) {
   const stranded = await runtime.ledger.markInterrupted();
   if (stranded) log.error('recovery', new Error(`${stranded} work items lost their runner and await a person`));
   try {
@@ -245,7 +283,7 @@ export async function tick(runtime: Runtime, log: TickLog) {
   }
   await runDueDuties(runtime, log, reserved);
   const runnable = (await runtime.ledger.list()).filter(isRunnable);
-  advanceRunnable(runnable, runtime, log, reserved);
+  await advanceRunnable(runnable, runtime, log, reserved);
   await scheduleMemory(runtime, log, reserved);
   try {
     for (const notice of await noticeWorkChanges(runtime, ownerId => chatDirectory(runtime, ownerId))) log.duty(notice.owner, 'notice', `${notice.workItem} ${notice.change}${notice.origin ? ' (to its chat)' : ''}`);
@@ -256,10 +294,25 @@ export async function tick(runtime: Runtime, log: TickLog) {
 
 /** Always on: tick forever. Work cut off by a stop is marked interrupted at the next start, never replayed. */
 export async function daemon(runtime: Runtime, log: TickLog, signal: AbortSignal) {
-  const stranded = await runtime.ledger.markInterrupted();
-  if (stranded) log.error('startup', new Error(`${stranded} work items were interrupted by the last stop`));
-  const retired = await retirePipelineItems(runtime);
-  if (retired.length) log.error('startup', new Error(`pipeline_removed: ${retired.join(', ')} failed; plan them again if they are still wanted`));
+  let startup;
+  while (!signal.aborted && !startup) {
+    try {
+      startup = await beginAdmission(runtime.stateDirectory, 'daemon-startup');
+    } catch (error) {
+      if (!(error instanceof Error && error.message === 'deployment_draining')) throw error;
+      await sleep(DAEMON_LIMITS.startupRetryMs, undefined, { signal }).catch(() => {});
+    }
+  }
+  if (startup) {
+    try {
+      const stranded = await runtime.ledger.markInterrupted();
+      if (stranded) log.error('startup', new Error(`${stranded} work items were interrupted by the last stop`));
+      const retired = await retirePipelineItems(runtime);
+      if (retired.length) log.error('startup', new Error(`pipeline_removed: ${retired.join(', ')} failed; plan them again if they are still wanted`));
+    } finally {
+      await startup.release();
+    }
+  }
   while (!signal.aborted) {
     await tick(runtime, log);
     await sleep(DAEMON_LIMITS.tickMs, undefined, { signal }).catch(() => {});

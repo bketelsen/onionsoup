@@ -467,10 +467,10 @@ test('long work runs beside the tick: once per key, within a cap, and a CLI tick
   const background = new Background(2);
   const finish: (() => void)[] = [];
   const job = () => new Promise<void>(resolve => finish.push(resolve));
-  assert.equal(background.start('leto/w-1', job), true);
-  assert.equal(background.start('leto/w-1', job), false, 'the same item never runs twice at once');
-  assert.equal(background.start('murbella/w-2', job), true);
-  assert.equal(background.start('clippy/w-3', job), false, 'the cap holds');
+  assert.equal(await background.start('leto/w-1', job), true);
+  assert.equal(await background.start('leto/w-1', job), false, 'the same item never runs twice at once');
+  assert.equal(await background.start('murbella/w-2', job), true);
+  assert.equal(await background.start('clippy/w-3', job), false, 'the cap holds');
   assert.deepEqual(background.keys(), ['leto/w-1', 'murbella/w-2']);
   let drained = false;
   const waiting = background.drain().then(() => { drained = true; });
@@ -478,7 +478,7 @@ test('long work runs beside the tick: once per key, within a cap, and a CLI tick
   await waiting;
   assert.equal(drained, true);
   assert.equal(background.size, 0);
-  assert.equal(background.start('clippy/w-3', async () => { throw new Error('a failing job frees its slot'); }), true);
+  assert.equal(await background.start('clippy/w-3', async () => { throw new Error('a failing job frees its slot'); }), true);
   await background.drain();
   assert.equal(background.size, 0);
 });

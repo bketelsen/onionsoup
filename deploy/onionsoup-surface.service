@@ -1,19 +1,20 @@
-# The onionsoup surface: owners, their chats and the inbox at http://127.0.0.1:4747. To use it:
-#   npm run surface:build
-#   cp deploy/onionsoup-surface.service ~/.config/systemd/user/
-#   systemctl --user daemon-reload && systemctl --user enable --now onionsoup-surface
-# It starts its own `opencode serve` (which loads the onionsoup plugin from your opencode config). To attach to a
-# running opencode instead, set OPENCODE_URL (and OPENCODE_SERVER_PASSWORD in an EnvironmentFile, never here).
+# Template for a manually bootstrapped release root at %h/projects/onionsoup-release.
+# See docs/deployment.md before installing or starting it. This unit does not signal readiness.
+# The surface publishes its spawned opencode endpoint for the worker. Global
+# quiescence and surface/plugin identity remain unverified: DO NOT ARM/ENABLE.
 [Unit]
 Description=onionsoup surface
 After=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=%h/projects/onionsoup
+WorkingDirectory=%h/projects/onionsoup-release/current
 Environment=PATH=%h/.local/share/mise/shims:%h/.local/bin:%h/.opencode/bin:/home/linuxbrew/.linuxbrew/bin:/usr/local/bin:/usr/bin:/bin
+Environment=ONIONSOUP_HOME=%h/.local/share/onionsoup
+Environment=ONIONSOUP_CONFIG=%h/.config/onionsoup
 Environment=SURFACE_PORT=4747
-ExecStart=%h/.local/share/mise/shims/node --conditions=onionsoup-source --import tsx packages/surface/src/main.ts
+Environment=ONIONSOUP_RELEASE_MANIFEST=%h/projects/onionsoup-release/current/packages/surface/release-manifest.json
+ExecStart=%h/.local/share/mise/shims/node --conditions=onionsoup-source --import tsx %h/projects/onionsoup-release/current/packages/surface/src/main.ts
 Restart=on-failure
 RestartSec=10
 

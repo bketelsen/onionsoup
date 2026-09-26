@@ -2,6 +2,7 @@ import { Fragment, useEffect, useRef, useState } from 'react';
 import { RiDraggable, RiInbox2Line, RiNotification3Line, RiErrorWarningLine, RiOrganizationChart } from '@remixicon/react';
 import { navigate, useConnected } from '../api.ts';
 import type { OwnerSummary, SurfaceState } from '../types.ts';
+import type { DeploymentView } from '../../../src/deployment-view.ts';
 import { BusyDots, cx } from './ui.tsx';
 import { Drawer, setRailOpen, useRailOpen } from './Drawer.tsx';
 import { OwnerActivityIcon } from './OwnerActivityIcon.tsx';
@@ -123,6 +124,7 @@ export function Rail({ state, route, onReorder }: { state?: SurfaceState; route:
         ))}
       </div>
       <div className="mt-auto border-t border-border p-2 flex flex-col gap-1">
+        <BuildBadge deployment={state?.deployment} />
         {typeof Notification !== 'undefined' && notifications !== 'granted' && (
           <button className="flex items-center gap-2 rounded-md px-2 py-1 pointer-coarse:min-h-11 typography-micro text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
             onClick={() => void Notification.requestPermission().then(setNotifications)}>
@@ -133,6 +135,19 @@ export function Rail({ state, route, onReorder }: { state?: SurfaceState; route:
       </div>
     </nav>
     </Drawer>
+  );
+}
+
+/** Compact installed build identity; a pending deployment affects the color, not the displayed identity. */
+export function BuildBadge({ deployment }: { deployment?: DeploymentView }) {
+  if (!deployment?.buildId) return null;
+  const target = deployment.pending;
+  return (
+    <div className={cx('px-2 typography-micro truncate', deployment.isPending ? 'text-status-error' : 'text-muted-foreground/60')}
+      title={target ? `Running ${deployment.buildId}; ${target.status} deployment to ${target.targetBuildId}` : `Running ${deployment.buildId}`}
+      aria-label={`Running build ${deployment.buildId}${target ? `; ${target.status} deployment to ${target.targetBuildId}` : ''}`}>
+      Build {deployment.buildId}
+    </div>
   );
 }
 
