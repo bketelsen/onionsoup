@@ -59,7 +59,8 @@ test('configured owner prompts carry repository writing guidance alongside each 
 
 test('the host review brief applies the same rule and says which severities send a change back', () => {
   assertWritingRule(REPOSITORY_REVIEW);
-  assert.match(REPOSITORY_REVIEW, /flag violations as review findings/);
+  assert.match(REPOSITORY_REVIEW, /process narration and flag it as a minor finding/);
+  assert.match(REPOSITORY_REVIEW, /process narration in documents are minor at most; they never block/);
   assert.match(REPOSITORY_REVIEW, /Apply repository-specific attribution requirements where declared/);
   assert.match(REPOSITORY_REVIEW, /- blocker: a correctness, safety or factual error[^\n]*Only blockers send the change back/);
   assert.match(REPOSITORY_REVIEW, /- major, minor, nit: worth fixing, but not blocking/);

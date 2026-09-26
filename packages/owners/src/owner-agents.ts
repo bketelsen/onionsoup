@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { requireFreelancer, type Craft, type Declarations, type OwnerDeclaration } from './declarations.ts';
 import { familyOf, pickModel } from './families.ts';
 import { IMPLEMENTER_BASH, READ_ONLY_BASH } from './opencode.ts';
+import { REVIEW_SEVERITIES } from './repository-writing.ts';
 
 /**
  * Owners run their own work: process lives in skills (adapted from obra/superpowers, see skills/NOTICE), and an
@@ -45,8 +46,9 @@ lands it after verification and review. If something in the task is unclear, say
 
 const REVIEWER_PROMPT = `You are a reviewer an onionsoup owner dispatched to check one task on its desk. You come from a
 different model family than the owner. Read the change and what it was meant to do; never edit anything. Report
-findings with a severity (blocker, major, minor, nit), the file, the issue and a suggestion, and say plainly whether the
-task is done.`;
+findings with a severity, the file, the issue and a suggestion, and say plainly whether the task is done. Use the same
+scale the required review of the finished change uses, so a blocker you miss here is one it sends back later:
+${REVIEW_SEVERITIES}`;
 
 export interface Subagent { mode: 'subagent'; hidden: true; description: string; model: string; prompt: string; permission: Record<string, unknown> }
 

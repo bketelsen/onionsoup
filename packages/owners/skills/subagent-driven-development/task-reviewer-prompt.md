@@ -11,7 +11,8 @@ task:
   prompt: |
     You are reviewing one task's implementation: first whether it matches
     its requirements, then whether it is well built. This is a task-scoped
-    gate; a whole-change review happens after all tasks are done.
+    gate; the required review of the whole change happens when it is
+    proposed, and it sends back every blocker you miss here.
 
     ## What Was Requested
 
@@ -91,13 +92,15 @@ task:
 
     ## Calibration
 
-    Categorize by actual severity. Important means the task cannot be
-    trusted until fixed: incorrect or fragile behavior, a missed
-    requirement, or damage you would block a merge over (duplicated logic,
-    swallowed errors, tests that assert nothing). Broader coverage and
-    polish are Minor. If the plan itself mandates something this rubric
-    calls a defect, report it as Important, labeled plan-mandated.
-    Acknowledge what was done well before listing issues.
+    Use the severity scale from your reviewer instructions (blocker, major, minor, nit): it is the same scale the required review of the finished change uses.
+    Judge unsafe or incorrect behavior by its effect on a person using the
+    software, whether or not the task text mentions its trigger. Major means
+    the task cannot be trusted until fixed but nothing is unsafe or wrong:
+    fragile behavior, duplicated logic, swallowed errors, tests that assert
+    nothing. Broader coverage and polish are minor or nit. If the plan
+    itself mandates something the scale calls a defect, report it at its
+    severity, labeled plan-mandated. Acknowledge what was done well before
+    listing issues.
 
     ## Output Format
 
@@ -109,9 +112,10 @@ task:
     ### Strengths
 
     ### Issues
-    #### Critical (Must Fix)
-    #### Important (Should Fix)
-    #### Minor (Nice to Have)
+    #### Blocker
+    #### Major
+    #### Minor
+    #### Nit
 
     For each: file:line, what is wrong, why it matters, how to fix.
 
@@ -120,4 +124,4 @@ task:
     **Reasoning:** [one or two sentences]
 ```
 
-**Reviewer returns:** a spec compliance verdict, strengths, issues (Critical / Important / Minor), and a task quality verdict.
+**Reviewer returns:** a spec compliance verdict, strengths, issues (blocker / major / minor / nit), and a task quality verdict.

@@ -17,7 +17,7 @@ task:
 
     ## Findings Under Verification
 
-    [The Critical/Important findings and spec gaps from the previous review,
+    [The blocker and major findings and spec gaps from the previous review,
     verbatim, one per bullet]
 
     ## The Fix
@@ -66,7 +66,7 @@ task:
     Issues outside the fix. Non-blocking. "None" if none.
 
     ### Verdict
-    **Fix round:** All findings addressed, no new Critical/Important
+    **Fix round:** All findings addressed, no new blocker or major
     breakage | Findings remain open: [list]
 ```
 

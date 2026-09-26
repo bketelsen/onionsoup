@@ -20,7 +20,7 @@ const run = promisify(execFile);
  * `failedOutputChars`: how much of each failing verification command's output the owner sees. The sandbox already
  * keeps the tail of each command; 600 characters cut pytest failures before their cause, so owners guessed.
  */
-export const DESK_CHANGE_LIMITS = { diffChars: 60_000, reviewRoundsBeforePerson: 4, failedOutputChars: 6_000 };
+export const DESK_CHANGE_LIMITS = { diffChars: 60_000, reviewRoundsBeforePerson: 6, failedOutputChars: 6_000 };
 
 /**
  * An owner's desk work becomes a reviewed change: host code verifies the desk in the sandbox, hires a reviewer

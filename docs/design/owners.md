@@ -167,7 +167,10 @@ changes. A session reopened after a failed start reuses the worktree and syncs i
 without asking (a session-level rule; the owner's other chats keep their rules). Its first message, marked as a runtime notice, is the
 approved plan with any conditions of approval, and tells the owner to carry it out with
 `subagent-driven-development` (an implementer subagent for each small task, its reviewer subagent after each), to
-make and record the rulings the plan leaves open, and to end with `onionsoup_propose_changes` for the item. The item
+make and record the rulings the plan leaves open, and to end with `onionsoup_propose_changes` for the item. The
+reviewer subagent grades on the same scale as the required review (`REVIEW_SEVERITIES`), so blockers surface per task;
+there is no whole-change review of the owner's own, since the required review at proposal is one and a send-back
+commits nothing. After `DESK_CHANGE_LIMITS.reviewRoundsBeforePerson` send-backs, the person reads the diff. The item
 records the session (`session`). A plan approved in chat opens its session at once; one approved from the inbox, the
 CLI (`owners approve`) or by a manager stays `working` without a session, and the plugin opens it on its next pass
 (every `PLUGIN_LIMITS.noticeMs`). The plugin holds the opencode client, so sessions open only while the surface runs;

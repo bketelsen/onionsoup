@@ -8,6 +8,7 @@ import type { Config, Plugin } from '@opencode-ai/plugin';
 import { recentJournal } from '../src/chat-context.ts';
 import { familyOf } from '../src/families.ts';
 import { BOOTSTRAP_SKILL, IMPLEMENTER_AGENT, reviewerAgent, SKILLS_DIRECTORY } from '../src/owner-agents.ts';
+import { REVIEW_SEVERITIES } from '../src/repository-writing.ts';
 import { Runtime } from '../src/runtime.ts';
 import { withActiveHooks } from './active-hooks.ts';
 
@@ -36,6 +37,7 @@ test('the config hook registers the skills and defines an implementer and, per o
     assert.equal(reviewer.mode, 'subagent');
     assert.equal(reviewer.permission!.edit, 'deny');
     assert.notEqual(familyOf(runtime.declarations.families, reviewer.model!), familyOf(runtime.declarations.families, owner.model), owner.id);
+    assert.ok(String((reviewer as { prompt?: string }).prompt).includes(REVIEW_SEVERITIES), `${owner.id}: the task reviewer uses the required review's severity scale`);
   }
 });
 

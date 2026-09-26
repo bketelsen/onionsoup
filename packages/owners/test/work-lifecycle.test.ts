@@ -97,7 +97,7 @@ test('a clean desk retries publication after commit and enrolls its PR in the le
   await writeFile(join(desk.path, 'change'), 'desk change');
   scriptHires(runtime, async request => {
     assert.match(request.brief, /read as the project's own record/);
-    assert.match(request.brief, /flag violations as review findings/);
+    assert.match(request.brief, /process narration and flag it as a minor finding/);
     assert.match(request.brief, /Repository-specific templates, conventions and review rubrics take precedence/);
     return verdict;
   });
