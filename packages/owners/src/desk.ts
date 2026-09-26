@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path';
 import type { OwnerDeclaration } from './declarations.ts';
 import { INITIATIVE_JOURNAL_KINDS, type AssignmentState, type Escalation, type PlanReview } from './initiatives.ts';
 import type { AssignmentView, InitiativeView } from './org-work.ts';
-import type { WorkItem } from './ledger.ts';
+import { isFinished, type WorkItem } from './ledger.ts';
 import { describeAsk, type ResourceRequest } from './requests.ts';
 import { pendingReminders, REMINDER_JOURNAL_KINDS, REMINDER_LIMITS, reminderSummary, type Reminder } from './reminders.ts';
 import { WIKI_JOURNAL_KINDS } from './wiki.ts';
@@ -24,10 +24,9 @@ const NOTE_KINDS = new Set([
   'owner-updated', 'owner-retired', 'ship-started', 'shipped', 'work-status', 'friction', 'fact',
   ...INITIATIVE_JOURNAL_KINDS, ...REMINDER_JOURNAL_KINDS, ...WIKI_JOURNAL_KINDS,
 ]);
-const DONE = new Set(['landed', 'failed', 'rejected', 'cancelled']);
 
 function isOpenWork(item: WorkItem) {
-  return !DONE.has(item.status) || item.publication?.state === 'open';
+  return !isFinished(item) || item.publication?.state === 'open';
 }
 
 async function journal(directory: string) {
@@ -133,7 +132,7 @@ export function statusText(items: readonly WorkItem[], requests: readonly Resour
 
 /** One work item in full, for an owner asking about it by id. */
 export function itemText(item: WorkItem) {
-  const lines = [`${item.id}: ${item.proposal.title}`, `Status: ${DONE.has(item.status) ? outcome(item) : item.status}`, `Opened ${item.createdAt}; updated ${item.updatedAt}`, `Goal: ${item.proposal.goal}`];
+  const lines = [`${item.id}: ${item.proposal.title}`, `Status: ${isFinished(item) ? outcome(item) : item.status}`, `Opened ${item.createdAt}; updated ${item.updatedAt}`, `Goal: ${item.proposal.goal}`];
   if (item.plan) lines.push(`Plan: ${item.plan.summary}`, ...item.plan.steps.map((step, index) => `  ${index + 1}. ${step.description}`));
   if (item.planDocument) lines.push(`Plan (${item.planDocument.digest}):`, item.planDocument.markdown);
   if (item.planApproval) lines.push(`Plan approved by ${item.planApproval.by} at ${item.planApproval.at}`);

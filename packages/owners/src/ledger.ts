@@ -46,6 +46,13 @@ export const WorkStatus = z.enum([
 ]);
 export type WorkStatus = z.infer<typeof WorkStatus>;
 
+/** Statuses no runner moves on from. */
+export const FINISHED_STATUSES: ReadonlySet<WorkStatus> = new Set(['landed', 'failed', 'rejected', 'cancelled']);
+
+export function isFinished(item: { status: WorkStatus }) {
+  return FINISHED_STATUSES.has(item.status);
+}
+
 export const HumanNote = z.object({
   kind: z.enum(['approval', 'plan-feedback', 'rejection', 'resume', 'retry', 'cancellation', 'override']),
   by: z.string(),

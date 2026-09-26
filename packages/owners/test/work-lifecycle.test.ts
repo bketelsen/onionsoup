@@ -746,6 +746,26 @@ test('syncing a desk moves it to the base and restores uncommitted work, includi
   assert.equal((await git(desk.path, ['stash', 'list'])).trim(), '', 'a clean restore leaves no stash behind');
 });
 
+test('a desk checked out on a PR is not synced off it; the refusal names the rebase that brings the PR up to date', async () => {
+  const { syncOwnerDesk } = await import('../src/desk-sync.ts');
+  const { runtime, root, remote, seed } = await fixture();
+  const desk = await ensureDesk(runtime.repositoryOwner('clippy'), runtime.desksRoot);
+  await writeFile(join(desk.path, 'feature'), 'original feature');
+  scriptHires(runtime, async () => verdict);
+  await fakeGithub(root, remote, async () => {
+    await proposeDeskChanges(runtime, 'clippy', { title: 'Feature', summary: 'Add the feature', origin: { sessionID: 'ses_clippy', directory: desk.path } });
+    const [source] = await runtime.ledger.list();
+    await landUpstream(seed, 'upstream.txt', 'from main\n');
+    const { head } = await checkoutPullRequest(runtime, 'clippy', source!.id);
+    await assert.rejects(syncOwnerDesk(runtime, 'clippy'), /desk_on_pull_request: .*maintain-prs rebase/);
+
+    await writeFile(join(root, 'github.json'), JSON.stringify({ ...await githubState(root), mergeable: 'CONFLICTING' }));
+    const [rebase] = (await maintainPullRequests(runtime, 'clippy')).opened;
+    await assert.rejects(syncOwnerDesk(runtime, 'clippy'), new RegExp(`desk_on_pull_request: .*${rebase!.id} is already rebasing it`));
+    assert.equal((await git(desk.path, ['rev-parse', 'HEAD'])).trim(), head, 'the desk stays on the PR head');
+  });
+});
+
 test('a sync that conflicts keeps the work in a stash and names the files; unpublished commits are never moved', async () => {
   const { runtime, seed } = await fixture();
   const { syncOwnerDesk } = await import('../src/desk-sync.ts');

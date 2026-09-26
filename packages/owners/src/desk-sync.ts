@@ -1,3 +1,4 @@
+import { isFinished, type WorkItem } from './ledger.ts';
 import type { Runtime } from './runtime.ts';
 import { ensureDesk, git } from './workspace.ts';
 
@@ -89,12 +90,39 @@ export async function recordSync(runtime: Runtime, ownerId: string, report: Desk
   return report;
 }
 
+/**
+ * The open PR the desk is on, after onionsoup_checkout_pr: its head is in the desk's history and not yet in the base.
+ * Syncing would move the desk to the base and drop the PR's commits from under the repair.
+ */
+async function pullRequestUnderDesk(deskPath: string, baseBranch: string, items: readonly WorkItem[]) {
+  const head = (await git(deskPath, ['rev-parse', 'HEAD'])).trim();
+  for (const item of items.filter(candidate => candidate.publication?.state === 'open')) {
+    const prHead = `origin/${item.publication!.branch}`;
+    const isUnderDesk = await isAncestor(deskPath, prHead, head);
+    if (isUnderDesk && !(await isAncestor(deskPath, prHead, `origin/${baseBranch}`))) return item;
+  }
+  return undefined;
+}
+
+/** Why a desk on a PR is not synced, and what brings that PR up to date with its base instead. */
+function onPullRequestText(pullRequest: WorkItem, items: readonly WorkItem[]) {
+  const rebase = items.find(item => item.rebaseOf?.itemId === pullRequest.id && !isFinished(item));
+  const upToDate = rebase
+    ? `${rebase.id} is already rebasing it onto the base; wait for it rather than resolving the conflict yourself`
+    : 'conflicts with the base are resolved by your maintain-prs rebase, not on your desk';
+  return `desk_on_pull_request: your desk is on ${pullRequest.publication!.url} (${pullRequest.id}); syncing would drop its commits. ${upToDate}. To change the PR's content, fix it on the desk and propose with item "${pullRequest.id}".`;
+}
+
 /** An owner's desk for one of its repositories, synced; a desk on a PR (a repair) is left where it is. */
 export async function syncOwnerDesk(runtime: Runtime, ownerId: string, repository?: string) {
   const owner = runtime.repositoryOwner(ownerId, repository);
   const desk = await ensureDesk(owner, runtime.desksRoot);
   const branch = (await git(desk.path, ['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
   if (branch !== desk.branch) throw new Error(`desk_on_pull_request: the desk is on ${branch}; propose or finish that repair first`);
+  await git(desk.path, ['fetch', '-q', 'origin']);
+  const items = await runtime.ledger.list();
+  const pullRequest = await pullRequestUnderDesk(desk.path, owner.domain.baseBranch, items.filter(item => item.owner === ownerId && runtime.repositoryFor(item).domain.name === owner.domain.name));
+  if (pullRequest) throw new Error(onPullRequestText(pullRequest, items));
   const sync = await syncDesk(desk.path, owner.domain.baseBranch);
   const place = `desk for ${owner.domain.name}`;
   return recordSync(runtime, ownerId, { ...sync, desk: desk.path, repository: owner.domain.name, place });
