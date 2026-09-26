@@ -15,6 +15,7 @@ import { applyChatEvent, orderedMessages, type Messages } from '../web/src/chat/
 import { addedFile, languageOf, parseUnifiedDiff } from '../web/src/chat/diff.ts';
 import type { Message, OwnerActivity, OwnerSummary, Part } from '../web/src/types.ts';
 import { OwnerActivityIcon } from '../web/src/components/OwnerActivityIcon.tsx';
+import { RuntimeWorkRows } from '../web/src/components/RuntimeWorkRows.tsx';
 import { ProviderHealthBanner } from '../web/src/components/ProviderHealthBanner.tsx';
 import type { ProviderHealthView } from '../web/src/types.ts';
 
@@ -22,7 +23,7 @@ const SESSION = 'ses_1';
 
 test('the rail icon is tinted by what the owner\'s chats are doing, and says so', () => {
   const owner: OwnerSummary = { id: 'leto', name: 'Leto', title: 't', source: '', icon: 'code', color: 'primary', model: 'm', domain: 'd',
-    chat: true, hasDesk: true, waiting: 0, running: 0, activity: 'idle' };
+    chat: true, hasDesk: true, waiting: 0, running: 0, runtimeWork: [], activity: 'idle' };
   const render = (activity: OwnerActivity) => renderToStaticMarkup(createElement(OwnerActivityIcon, { owner: { ...owner, activity } }));
   const working = render('working');
   assert.match(working, /text-primary animate-pulse/);
@@ -33,6 +34,19 @@ test('the rail icon is tinted by what the owner\'s chats are doing, and says so'
   const idle = render('idle');
   assert.doesNotMatch(idle, /text-primary|text-status-warning|aria-label/);
   assert.match(idle, /data-activity="idle"/);
+});
+
+test('an owner\'s runtime work is listed under it, each row linking to its item, and the owner works', () => {
+  const owner: OwnerSummary = { id: 'homelab', name: 'Miles Teg', title: 't', source: '', icon: 'server', color: 'primary', model: 'm', domain: 'd',
+    chat: true, hasDesk: true, waiting: 0, running: 0, activity: 'working',
+    runtimeWork: [{ id: 'w-20260926-38d7df', title: 'Rebase <#12> onto the current base', status: 'implementing' }] };
+  const rows = renderToStaticMarkup(createElement(RuntimeWorkRows, { owner, activeItem: 'w-20260926-38d7df' }));
+  assert.match(rows, /href="#\/item\/w-20260926-38d7df"/);
+  assert.match(rows, /Rebase &lt;#12&gt; onto the current base/);
+  assert.match(rows, /aria-label="runtime work"/);
+  assert.match(rows, /bg-interactive-active/, 'the item open on the page is marked');
+  assert.match(renderToStaticMarkup(createElement(OwnerActivityIcon, { owner })), /data-activity="working"/);
+  assert.equal(renderToStaticMarkup(createElement(RuntimeWorkRows, { owner: { ...owner, runtimeWork: [] } })), '');
 });
 
 test('partial inbox failures name the affected owner and operation without hiding available gates', () => {

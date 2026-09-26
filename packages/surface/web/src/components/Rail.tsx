@@ -1,11 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { RiDraggable, RiInbox2Line, RiNotification3Line, RiErrorWarningLine, RiOrganizationChart } from '@remixicon/react';
 import { navigate, useConnected } from '../api.ts';
 import type { OwnerSummary, SurfaceState } from '../types.ts';
 import { BusyDots, cx } from './ui.tsx';
 import { OwnerActivityIcon } from './OwnerActivityIcon.tsx';
+import { RuntimeWorkRows } from './RuntimeWorkRows.tsx';
 
-/** The owners down the left, each with what waits on the person, whether its work runs and what its chats are doing. */
+/** The owners down the left, each with what waits on the person, whether its work runs, what it is doing and the work its host code is running. */
 export function Rail({ state, route, onReorder }: { state?: SurfaceState; route: string[]; onReorder: (order: string[]) => void }) {
   const connected = useConnected();
   // Re-ordering with pointer events rather than HTML5 drag and drop: it behaves the same everywhere and needs no
@@ -57,6 +58,7 @@ export function Rail({ state, route, onReorder }: { state?: SurfaceState; route:
   }, [state, onReorder]);
 
   const active = route[0] === 'owner' ? route[1] : undefined;
+  const activeItem = route[0] === 'item' ? route[1] : undefined;
   const inboxActive = route.length === 0 || route[0] === 'inbox';
   return (
     <nav className="w-60 shrink-0 border-r border-border bg-sidebar flex flex-col min-h-0">
@@ -82,22 +84,25 @@ export function Rail({ state, route, onReorder }: { state?: SurfaceState; route:
         {state?.operator && <OperatorEntry operator={state.operator} isActive={active === state.operator.id} />}
         <div className="mt-3 mb-1 px-2 typography-micro uppercase tracking-wide text-muted-foreground text-[0.68rem]">Owners</div>
         {state?.owners.map(owner => (
-          <button key={owner.id} onClick={() => navigate('owner', owner.id)} title={`${owner.title}\n${owner.domain}\n(drag to re-order)`}
-            ref={element => { if (element) rows.current.set(owner.id, element); else rows.current.delete(owner.id); }}
-            onPointerDown={onPointerDown(owner.id)}
-            onClickCapture={event => { if (suppressClick.current) { suppressClick.current = false; event.stopPropagation(); event.preventDefault(); } }}
-            className={cx('group/owner relative flex items-center gap-2 rounded-md px-2 py-1.5 text-left select-none touch-none', active === owner.id ? 'bg-interactive-active text-foreground' : 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground',
-              dragging === owner.id && 'opacity-40',
-              over?.id === owner.id && dragging !== owner.id && (over.after ? 'shadow-[inset_0_-2px_0_var(--primary)]' : 'shadow-[inset_0_2px_0_var(--primary)]'))}>
-            <RiDraggable className="absolute -left-1 size-3.5 opacity-0 group-hover/owner:opacity-40" />
-            <OwnerActivityIcon owner={owner} />
-            <span className="flex flex-col min-w-0 flex-1">
-              <span className="typography-ui-label truncate">{owner.name}</span>
-              <span className="typography-micro text-muted-foreground truncate text-[0.7rem]">{owner.title || owner.domain}</span>
-            </span>
-            {owner.running > 0 && <BusyDots className="text-status-info" />}
-            {owner.waiting > 0 && <span className="rounded-full bg-primary text-primary-foreground px-1.5 typography-micro font-semibold">{owner.waiting}</span>}
-          </button>
+          <Fragment key={owner.id}>
+            <button onClick={() => navigate('owner', owner.id)} title={`${owner.title}\n${owner.domain}\n(drag to re-order)`}
+              ref={element => { if (element) rows.current.set(owner.id, element); else rows.current.delete(owner.id); }}
+              onPointerDown={onPointerDown(owner.id)}
+              onClickCapture={event => { if (suppressClick.current) { suppressClick.current = false; event.stopPropagation(); event.preventDefault(); } }}
+              className={cx('group/owner relative flex items-center gap-2 rounded-md px-2 py-1.5 text-left select-none touch-none', active === owner.id ? 'bg-interactive-active text-foreground' : 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground',
+                dragging === owner.id && 'opacity-40',
+                over?.id === owner.id && dragging !== owner.id && (over.after ? 'shadow-[inset_0_-2px_0_var(--primary)]' : 'shadow-[inset_0_2px_0_var(--primary)]'))}>
+              <RiDraggable className="absolute -left-1 size-3.5 opacity-0 group-hover/owner:opacity-40" />
+              <OwnerActivityIcon owner={owner} />
+              <span className="flex flex-col min-w-0 flex-1">
+                <span className="typography-ui-label truncate">{owner.name}</span>
+                <span className="typography-micro text-muted-foreground truncate text-[0.7rem]">{owner.title || owner.domain}</span>
+              </span>
+              {owner.running > 0 && <BusyDots className="text-status-info" />}
+              {owner.waiting > 0 && <span className="rounded-full bg-primary text-primary-foreground px-1.5 typography-micro font-semibold">{owner.waiting}</span>}
+            </button>
+            <RuntimeWorkRows owner={owner} activeItem={activeItem} />
+          </Fragment>
         ))}
       </div>
       <div className="mt-auto border-t border-border p-2 flex flex-col gap-1">
