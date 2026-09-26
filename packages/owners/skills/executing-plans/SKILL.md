@@ -5,9 +5,9 @@ description: Use when a plan is one or two tiny tasks not worth a subagent dispa
 
 # Executing Plans
 
-Run the plan yourself, task by task, on the desk: no implementer per task, no reviewer per task. One review of the whole change at the end from your reviewer subagent. In an approved plan's execution session, "the desk" means the plan's own git worktree, the session's directory.
+Run the plan yourself, task by task, on the desk: no implementer per task, no reviewer per task. The review of the whole change is the host's required review when you propose. In an approved plan's execution session, "the desk" means the plan's own git worktree, the session's directory.
 
-**Why inline:** subagent-driven-development pays for a fresh implementer and reviewer on every task. For a tiny plan that is overhead. Inline execution keeps what those bought by other means: the task text is the spec, your notebook is your memory, TDD is the per-task gate, and the final reviewer is the second pair of eyes.
+**Why inline:** subagent-driven-development pays for a fresh implementer and reviewer on every task. For a tiny plan that is overhead. Inline execution keeps what those bought by other means: the task text is the spec, your notebook is your memory, TDD is the per-task gate, and the host's required review, from another model family, is the second pair of eyes.
 
 **Core principle:** the plan already did the thinking. Execute it exactly, prove each step with a test you watched fail and then pass, and leave a record that survives your own forgetting.
 
@@ -57,24 +57,12 @@ Before a task is complete, all of this is true with evidence in this session:
 
 verification-before-completion governs the claim. Record `Task <N>: complete, tests: <command> -> <result>` with `onionsoup_record_fact`, mark the todo complete, and take the next task.
 
-## Final Review
-
-Dispatch your reviewer (`task` with the reviewer name from your prompt) using [code-reviewer.md](../requesting-code-review/code-reviewer.md), with the whole desk diff, the plan, its Review Focus lines, and your rulings. Do not replace it with your own read of the diff; same author, same blind spots.
-
-Sort the findings before acting. The severity labels are advice; the gate is yours. Re-grade by effect on a person using the software, not by whether the plan mentioned the input.
-
-- **Critical and Important:** fix them yourself in ONE pass. Each fix is proven by TDD: a test that reproduces the finding, watched failing, then passing, then the whole suite green.
-- **Minor:** record as `Final: minor (deferred): <one-liner>`. Minors never enter the fix pass.
-- A finding you decide not to fix is a ruling; record it.
-
-There is no second fix pass.
-
 ## Finish
 
 1. Run the repository's verification commands from your prompt and read the output. Do not propose a red desk.
 2. Call `onionsoup_propose_changes` with `title`, `summary` and the plan's `item` (and `repository` for a group). The summary lists every ruling under "Rulings I made", each with its cost if wrong, and every deferred minor under "Deferred minors".
 
-If the host's required review sends it back, use receiving-code-review, fix, verify, and propose again with the same `item`.
+The required review of the whole change is host code's: it runs at proposal, from another model family, independently of your plan, and a send-back commits nothing. If it sends it back, use receiving-code-review, fix, verify, and propose again with the same `item`.
 
 ## Common Rationalizations
 
@@ -83,7 +71,6 @@ If the host's required review sends it back, use receiving-code-review, fix, ver
 | "I remember what Task N says" | You remember a summary. Re-read the task. |
 | "The plan's code is right, skip watching the test fail" | A test you never saw fail proves nothing. |
 | "The plan is wrong here, I'll just do the right thing" | Do the right thing and record the ruling. |
-| "I read my own diff; the final reviewer is redundant" | Same author, same blind spots. Dispatch the reviewer. |
 | "Tests should pass, the change was trivial" | "Should" is not evidence. Run them. |
 | "I'll fix the minors too while I'm in there" | Record them; the person decides. |
 | "Let me commit what I have so far" | You never commit. The proposal does. |

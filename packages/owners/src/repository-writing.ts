@@ -10,9 +10,11 @@ Repository-specific templates, conventions and review rubrics take precedence ov
  */
 export const REVIEW_SEVERITIES = `Give every finding a severity. The runtime acts on severities, not on your decision:
 - blocker: a correctness, safety or factual error, the change not doing what it claims, or work outside its scope. Only blockers send the change back.
-- major, minor, nit: worth fixing, but not blocking. They are listed in the PR for the person who merges it.`;
+  A blocker stays a blocker whether or not the plan mentions its trigger: judge unsafe or incorrect behavior by its effect.
+- major, minor, nit: worth fixing, but not blocking. They are listed in the PR for the person who merges it.
+- Writing style and process narration in documents are minor at most; they never block.`;
 
 export const REPOSITORY_REVIEW = `${REPOSITORY_WRITING}
-Check changed repository documents for owner/person process narration and flag violations as review findings.
+Check changed repository documents for owner/person process narration and flag it as a minor finding.
 Apply repository-specific attribution requirements where declared.
 ${REVIEW_SEVERITIES}`;

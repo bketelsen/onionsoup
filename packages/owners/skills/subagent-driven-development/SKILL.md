@@ -111,12 +111,12 @@ The reviewer may report items it cannot verify from the changed files alone. Res
 
 ### 4. The fix loop
 
-The loop starts when the review reports a spec failure, any Critical or Important finding, or a gap you confirmed.
+The loop starts when the review reports a spec failure, any blocker or major finding, or a gap you confirmed.
 
 Two routes leave it at once:
 
-- Minor findings: record them with `onionsoup_record_fact` (`Task <N>: minor (deferred): <one-liner>`) and carry them to the proposal summary. They never enter the loop.
-- A finding that conflicts with what the plan requires is yours to rule on. Weigh it against the plan, decide, record the ruling, then act.
+- Minor and nit findings: record them with `onionsoup_record_fact` (`Task <N>: minor (deferred): <one-liner>`) and carry them to the proposal summary. They never enter the loop.
+- A major finding that conflicts with what the plan requires is yours to rule on. Weigh it against the plan, decide, record the ruling, then act. A blocker is not yours to rule away: the required review at proposal judges it by its effect, not by the plan, and will send it back.
 
 Everything else enters the loop. A round is one fix dispatch plus one scoped re-review. Five rounds at most per task:
 
@@ -129,7 +129,7 @@ Never fix findings yourself in the controller session. Your context stays clean 
 
 **The breaker.** When round 5 still leaves findings open, stop dispatching and adjudicate each:
 
-- **The reviewer is wrong, or the point is contestable:** park it with a ruling saying why the code stands.
+- **The reviewer is wrong, or the point is contestable:** park it with a ruling saying why the code stands. Park a blocker only when you are sure the reviewer is wrong, and say so under "Rulings I made": the required review will judge it again.
 - **Real, but nothing downstream builds on it:** park it with a ruling that it is real and deferred.
 - **Real and load-bearing:** rule on the smallest change that unblocks the dependent work, record it, and carry it into the next dispatch. Stop only if every path forward is a guess.
 
@@ -137,17 +137,16 @@ Adjudicate only at the cap. Every adjudication is recorded; a silent discard is 
 
 ### 5. Complete the task
 
-When the review is clean, or every open finding is parked with a ruling at the cap, record the completion with `onionsoup_record_fact`, mark the todo complete, and take the next task. Never move on with open Critical or Important findings that are neither fixed nor parked with a ruling.
+When the review is clean, or every open finding is parked with a ruling at the cap, record the completion with `onionsoup_record_fact`, mark the todo complete, and take the next task. Never move on with open blocker or major findings that are neither fixed nor parked with a ruling.
 
 ## Finish
 
 When all tasks are complete:
 
-1. **Whole-change review.** Dispatch your reviewer once more with [code-reviewer.md](../requesting-code-review/code-reviewer.md) over the whole desk diff, the plan, the plan's Review Focus lines, and your deferred minors and rulings. If it returns Critical or Important findings, dispatch ONE implementer with the complete list, then one scoped re-review. Park residuals with rulings; there is no second fix wave.
-2. **Verify.** Run the repository's verification commands from your prompt yourself and read the output (verification-before-completion). Failures go back to an implementer; do not propose a red desk.
-3. **Propose.** Call `onionsoup_propose_changes` with `title`, `summary` and the plan's `item` (and `repository` for a group). The summary says what changed and how it was verified, and lists under "Rulings I made" every ruling you recorded, each with its cost if wrong, and under "Deferred minors" every deferred minor. That list is how the decisions you took on the person's behalf reach them.
+1. **Verify.** Run the repository's verification commands from your prompt yourself and read the output (verification-before-completion). Failures go back to an implementer; do not propose a red desk.
+2. **Propose.** Call `onionsoup_propose_changes` with `title`, `summary` and the plan's `item` (and `repository` for a group). The summary says what changed and how it was verified, and lists under "Rulings I made" every ruling you recorded, each with its cost if wrong, and under "Deferred minors" every deferred minor. That list is how the decisions you took on the person's behalf reach them.
 
-Host code then verifies the desk in a sandbox and runs the required cross-family review. If it comes back needing work, the blocker findings are in the result: use receiving-code-review, dispatch an implementer with them, re-review, verify, and propose again with the same `item`.
+There is no separate whole-change review of your own: host code verifies the desk in a sandbox and runs the required cross-family review of the whole change, independently of the plan. A send-back commits nothing and costs one review, so it is the whole-change review. If it comes back needing work, the blocker findings are in the result: use receiving-code-review, dispatch an implementer with them, re-review, verify, and propose again with the same `item`.
 
 ## Common Rationalizations
 
@@ -182,7 +181,7 @@ Task 2: Retry failed fetches
 [Dispatch implementer]
 Implementer: DONE. 6/6 passing.
 [Dispatch reviewer]
-Reviewer: Spec failure - missing jitter required by Global Constraints. Important: magic number 250.
+Reviewer: Spec failure - missing jitter required by Global Constraints. Major: magic number 250.
 [Fix round 1: findings sent to the implementer]
 Implementer: fixed; re-ran test/retry.test.ts, 8/8.
 [Dispatch reviewer with the re-review brief]
@@ -191,6 +190,6 @@ Re-reviewer: both ADDRESSED. No new breakage.
 
 Task 3 ...
 
-[Whole-change review: clean. Run verification commands: all green]
+[Run verification commands: all green]
 [onionsoup_propose_changes { title, summary with rulings and deferred minors, item: "W-42" }]
 ```

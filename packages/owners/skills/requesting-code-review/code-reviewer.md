@@ -1,6 +1,6 @@
 # Code Reviewer Brief Template
 
-Use this template when dispatching your reviewer subagent for a whole-change review: after the last task of a plan, or before proposing a change of any size.
+Use this template when dispatching your reviewer subagent outside a plan's task loop: when stuck, before a risky refactor, or after fixing a complex bug. The whole change is reviewed by host code when you propose it.
 
 **Purpose:** review the finished work against its plan or requirements before it goes to the host's required review.
 
@@ -55,7 +55,9 @@ task:
 
     Before your verdict, list every behavior you considered and set aside
     as outside the plan, one line each, with the reason. The owner rules on
-    each line. An empty list means you set nothing aside.
+    each line. An empty list means you set nothing aside. Never set aside
+    a blocker: unsafe or incorrect behavior is a finding whether or not the
+    plan mentions its trigger.
 
     ## Read-Only Review
 
@@ -88,7 +90,7 @@ task:
 
     ## Calibration
 
-    Categorize by actual severity; not everything is Critical. Acknowledge
+    Use the severity scale from your reviewer instructions (blocker, major, minor, nit): it is the same scale the required review of the finished change uses. Not everything is a blocker. Acknowledge
     what was done well before listing issues. Flag significant deviations
     from the plan so the owner can confirm whether they were intended. If
     the plan itself is the problem, say so.
@@ -99,11 +101,12 @@ task:
     [Specific]
 
     ### Issues
-    #### Critical (Must Fix)
-    [Bugs, security issues, data loss, broken functionality]
-    #### Important (Should Fix)
+    #### Blocker
+    [Correctness, safety or factual errors; not doing what it claims; out of scope]
+    #### Major
     [Architecture problems, missing features, poor error handling, test gaps]
-    #### Minor (Nice to Have)
+    #### Minor
+    #### Nit
     [Style, optimization, documentation polish]
 
     For each: file:line, what is wrong, why it matters, how to fix.
@@ -120,7 +123,7 @@ task:
     Do: categorize by actual severity; be specific (file:line); explain why
     each issue matters; acknowledge strengths; give a clear verdict.
 
-    Do not: say "looks good" without checking; mark nitpicks Critical;
+    Do not: say "looks good" without checking; mark nitpicks as blockers;
     comment on code you did not read; be vague; dodge the verdict.
 ```
 
@@ -129,4 +132,4 @@ task:
 - `[PLAN_OR_REQUIREMENTS]`: the plan or requirements text, verbatim
 - `[DESK_PATH]`: the plan's worktree in an execution session; otherwise the desk, or the repository subfolder for a group
 
-**Reviewer returns:** strengths, issues (Critical / Important / Minor), declined-to-judge list, and an assessment.
+**Reviewer returns:** strengths, issues (blocker / major / minor / nit), declined-to-judge list, and an assessment.

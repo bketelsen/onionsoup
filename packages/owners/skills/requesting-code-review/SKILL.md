@@ -1,6 +1,6 @@
 ---
 name: requesting-code-review
-description: Use after each task, after finishing a feature, when stuck, or before onionsoup_propose_changes - dispatches your reviewer subagent (a model from another family) with precisely built context to catch issues before they cascade or reach the host's required review.
+description: Use after each task, when stuck, or before a risky refactor - dispatches your reviewer subagent (a model from another family) with precisely built context to catch issues before they cascade or reach the host's required review.
 ---
 
 # Requesting Code Review
@@ -14,14 +14,12 @@ Two reviews exist here:
 - **Your reviewer subagent** (`onionsoup-reviewer-<owner-id>`, named in your prompt): read-only, always from a different model family than you. You dispatch it during the work.
 - **The host's required review:** after `onionsoup_propose_changes`, host code has a reviewer from another family review the whole diff before anything is committed. Its blocker findings come back as needs-work. You do not dispatch it and cannot skip it.
 
-Your own reviews are how you arrive at the required review with nothing for it to block.
+The required review is the review of the whole change: a send-back commits nothing and costs one review, so do not run a second whole-change review of your own before proposing. Your own reviews catch problems per task, when they are cheapest to fix, on the same severity scale the required review uses.
 
 ## When to Request Review
 
 **Mandatory:**
 - After each task in subagent-driven-development
-- After the last task, over the whole desk diff
-- Before `onionsoup_propose_changes` on any change bigger than a trivial fix
 
 **Optional but valuable:**
 - When stuck (fresh perspective)
@@ -37,8 +35,8 @@ Your own reviews are how you arrive at the required review with nothing for it t
    - the desk path and the files to review
    - facts and decisions from your notebook that bind the change (the reviewer cannot see your notebook)
 3. **Act on the feedback** (receiving-code-review):
-   - fix Critical issues at once
-   - fix Important issues before going on
+   - fix blockers at once
+   - fix major issues before going on
    - record Minor issues as deferred with `onionsoup_record_fact`
    - push back with reasoning when the reviewer is wrong
 
@@ -59,11 +57,11 @@ You: Requesting review before Task 3.
 
 Reviewer:
   Strengths: clean structure, real tests
-  Important: no progress reporting for large indexes
+  Major: no progress reporting for large indexes
   Minor: magic number 100 for the reporting interval
   Ready: with fixes
 
-You: [dispatch implementer with the Important finding; record the Minor as deferred]
+You: [dispatch implementer with the major finding; record the minor as deferred]
 [Continue to Task 3]
 ```
 
@@ -79,8 +77,8 @@ You: [dispatch implementer with the Important finding; record the Minor as defer
 
 **Never:**
 - Skip review because "it's simple"
-- Ignore Critical issues
-- Go on with unfixed Important issues
+- Ignore blockers
+- Go on with unfixed major issues
 - Argue with valid technical feedback
 
 **If the reviewer is wrong:**
