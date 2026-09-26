@@ -10,6 +10,7 @@ import { OrgView } from './components/OrgView.tsx';
 import { InboxErrors } from './components/InboxErrors.tsx';
 import { ProviderHealthBanner } from './components/ProviderHealthBanner.tsx';
 import { MobileBar } from './components/Drawer.tsx';
+import { NARROW_BANNER_CAP } from './components/ui.tsx';
 import type { InboxEntry, OwnerSummary, SurfaceState } from './types.ts';
 
 /** What a notification says about a new inbox entry, by kind; other kinds say they are waiting. */
@@ -126,7 +127,7 @@ export function App() {
       <ProviderHealthBanner providerHealth={state?.providerHealth ?? []} />
       <InboxErrors errors={state?.inboxErrors ?? []} refreshError={refreshError} />
       {state?.opencode && !state.opencode.ok && (
-        <div role="alert" className="shrink-0 px-4 py-2 typography-meta border-b border-[var(--status-error-border)] bg-[var(--status-error-background)] text-[var(--status-error)]">
+        <div role="alert" className={`${NARROW_BANNER_CAP} shrink-0 px-4 py-2 typography-meta border-b border-[var(--status-error-border)] bg-[var(--status-error-background)] text-[var(--status-error)]`}>
           Chats are unavailable: {state.opencode.error}. If the surface is attached to another opencode (OPENCODE_URL), that opencode may have moved or stopped; restart the surface, or run it with its own opencode (the default).
         </div>
       )}

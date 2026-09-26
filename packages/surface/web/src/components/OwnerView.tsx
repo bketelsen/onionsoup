@@ -234,7 +234,7 @@ function DeskButton({ waiting, onOpen }: { waiting: number; onOpen: () => void }
     <button type="button" onClick={onOpen} aria-label={waiting ? `Open the desk, ${waiting} waiting on you` : 'Open the desk'}
       className="lg:hidden ml-auto -mr-2 relative flex size-11 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover hover:text-foreground">
       <RiLayoutRightLine className="size-5" />
-      {waiting > 0 && <span className="absolute top-1 right-0.5 rounded-full bg-primary text-primary-foreground px-1.5 typography-micro font-semibold leading-4">{waiting}</span>}
+      {waiting > 0 && <span className="absolute top-0.5 right-0.5 rounded-full bg-primary text-primary-foreground px-1.5 typography-micro font-semibold leading-4">{waiting}</span>}
     </button>
   );
 }

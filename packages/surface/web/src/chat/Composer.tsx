@@ -64,7 +64,7 @@ export function Composer({ agent, busy, onSend, onStop, autoAccept, onToggleAuto
         <div className="flex flex-col relative overflow-visible border border-border/80 focus-within:border-interactive-selection-foreground/35 shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)] oc-glass-composer"
           style={{ borderRadius: 'var(--radius-xl)' }}>
           <textarea ref={area} value={text} rows={1} placeholder={`Message ${agent}…`} aria-label={`Message ${agent}`} enterKeyHint={sendsOnEnter() ? 'send' : 'enter'} onChange={event => { setText(event.target.value); grow(); }} onKeyDown={onKeyDown}
-            className="bg-transparent outline-none resize-none w-full min-h-[52px] px-3 pt-4 pb-2 overscroll-contain text-[length:var(--text-ui-label)] text-[var(--surface-elevated-foreground,var(--foreground))] placeholder:text-[var(--surface-muted-foreground)]" />
+            className="bg-transparent outline-none resize-none w-full min-h-[52px] px-3 pt-4 pb-2 short:min-h-10 short:pt-2.5 short:pb-1 overscroll-contain text-[length:var(--text-ui-label)] text-[var(--surface-elevated-foreground,var(--foreground))] placeholder:text-[var(--surface-muted-foreground)]" />
           <div data-chat-input-footer="true" className="bg-transparent flex-shrink-0 px-2.5 py-1.5 pointer-coarse:py-0 flex items-center justify-between gap-x-1.5">
             <div className="flex items-center gap-x-1.5 min-w-0">
               {/* OpenChamber's auto-accept toggle (PermissionAutoAcceptButton.tsx): shield-check when on, shield-user when off. */}

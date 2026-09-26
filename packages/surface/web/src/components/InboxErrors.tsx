@@ -1,4 +1,5 @@
 import type { InboxReadError } from '../../../src/inbox-errors.ts';
+import { NARROW_BANNER_CAP } from './ui.tsx';
 
 const DESCRIPTIONS: Record<InboxReadError['code'], string> = {
   chat_directory_failed: 'The chat directory could not be opened.',
@@ -6,7 +7,7 @@ const DESCRIPTIONS: Record<InboxReadError['code'], string> = {
   question_list_failed: 'Pending questions could not be loaded.',
 };
 
-const ALERT_STYLE = 'shrink-0 px-4 py-2 typography-meta border-b border-[var(--status-error-border)] '
+const ALERT_STYLE = `${NARROW_BANNER_CAP} shrink-0 px-4 py-2 typography-meta border-b border-[var(--status-error-border)] `
   + 'bg-[var(--status-error-background)] text-[var(--status-error)]';
 
 export function InboxErrors({ errors, refreshError }: { errors: InboxReadError[]; refreshError?: string }) {

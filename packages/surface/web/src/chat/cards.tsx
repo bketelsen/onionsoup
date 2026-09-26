@@ -117,7 +117,7 @@ export function PlanApprovalCard({ entry, onDone }: { entry: InboxEntry; onDone:
         <div className="-mt-1 border border-border/30 rounded-xl bg-muted/10">
           <div className="px-3 py-2 border-b border-border/20 bg-muted/5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
             <RiFileList3Line className="h-4 w-4 shrink-0 text-[var(--status-warning)]" />
-            <span className="typography-ui-label font-medium text-foreground min-w-0 flex-1 [overflow-wrap:anywhere]">Approve plan: {request.title}</span>
+            <span className="typography-ui-label font-medium text-foreground min-w-[12rem] flex-1 [overflow-wrap:anywhere]">Approve plan: {request.title}</span>
             <span className="ml-auto font-mono text-[0.7rem] text-muted-foreground break-all">{request.item}</span>
           </div>
           <div className="px-3 py-2 max-h-[60vh] overflow-y-auto overscroll-contain"><Markdown text={request.plan} /></div>

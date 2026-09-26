@@ -6,6 +6,8 @@
 @source "./**/*.{ts,tsx}";
 
 @custom-variant dark (&:is(.dark *));
+/* A phone on its side: little height, so bars and the composer give back what they can. */
+@custom-variant short (@media (max-height: 500px));
 
 html, body { height: 100%; }
 body {

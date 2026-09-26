@@ -78,7 +78,7 @@ export function Rail({ state, route, onReorder }: { state?: SurfaceState; route:
   const inboxActive = route.length === 0 || route[0] === 'inbox';
   return (
     <Drawer side="left" isOpen={isOpen} onClose={() => setRailOpen(false)} label="Navigation" className="w-60 flex">
-    <nav className="flex-1 bg-sidebar flex flex-col min-h-0">
+    <nav className="flex-1 min-w-0 bg-sidebar flex flex-col min-h-0">
       <div className="px-4 h-12 flex items-center gap-2 border-b border-border">
         <span className="typography-ui-header font-semibold">onionsoup</span>
         <span title={connected ? 'live' : 'reconnecting'} className={cx('ml-auto size-2 rounded-full', connected ? 'bg-status-success' : 'bg-status-warning animate-pulse')} />

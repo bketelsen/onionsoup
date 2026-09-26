@@ -52,7 +52,7 @@ export function WorkRecovery({ item, onDone }: { item: WorkItem; onDone: () => v
       <Button variant="destructive" disabled={busy || !hasNote} onClick={() => void decide('cancel-item')}>Cancel work</Button>
     </div>
     <input value={reason} onChange={event => setReason(event.target.value)} placeholder={placeholder(actions)}
-      className="rounded-md border border-border bg-background px-2 py-1 typography-meta" />
+      className="rounded-md border border-border bg-background px-2 py-1 pointer-coarse:min-h-11 typography-meta" />
     {error && <div className="typography-meta text-status-error">{error}</div>}
   </div>;
 }

@@ -34,10 +34,10 @@ function AssignmentRow({ assignment }: { assignment: PublicAssignment }) {
       <div className="typography-ui-label">{assignment.title}</div>
       {item && (
         <div className="flex flex-wrap items-center gap-x-3 typography-meta">
-          <button className="text-primary hover:underline font-mono" onClick={() => navigate('item', item.id)}>{item.id}</button>
+          <button className="text-primary hover:underline font-mono pointer-coarse:min-h-11 break-all text-left" onClick={() => navigate('item', item.id)}>{item.id}</button>
           <span className="text-muted-foreground">{item.status}</span>
           {item.url && (
-            <a className="inline-flex items-center gap-1 text-primary hover:underline" href={item.url} target="_blank" rel="noreferrer">
+            <a className="inline-flex items-center gap-1 pointer-coarse:min-h-11 text-primary hover:underline" href={item.url} target="_blank" rel="noreferrer">
               <RiExternalLinkLine className="size-3.5" />PR ({item.prState})
             </a>
           )}
@@ -72,7 +72,7 @@ export function InitiativeView({ initiative, onDone }: { initiative: PublicIniti
           <Badge tone={statusTone(initiative.status)}>{initiative.status}</Badge>
           <span className="font-mono">{initiative.id}</span>
           <span>revision {initiative.revision}</span>
-          <button className="hover:text-foreground" onClick={() => navigate('owner', initiative.owner)}>{initiative.owner}</button>
+          <button className="hover:text-foreground pointer-coarse:min-h-11" onClick={() => navigate('owner', initiative.owner)}>{initiative.owner}</button>
           <span>updated {timeAgo(initiative.updatedAt)}</span>
         </div>
         <h1 className="typography-h text-xl font-semibold [overflow-wrap:anywhere]">{initiative.title}</h1>
@@ -107,7 +107,7 @@ export function InitiativeView({ initiative, onDone }: { initiative: PublicIniti
           {planReviews.map(review => (
             <div key={`${review.item}-${review.digest}-${review.at}`} className="typography-meta flex flex-wrap items-center gap-x-2">
               <Badge tone={review.verdict === 'approve' ? 'success' : 'warning'}>{review.verdict}</Badge>
-              <button className="text-primary hover:underline font-mono" onClick={() => navigate('item', review.item)}>{review.item}</button>
+              <button className="text-primary hover:underline font-mono pointer-coarse:min-h-11" onClick={() => navigate('item', review.item)}>{review.item}</button>
               <span>{review.by}{review.note ? `: ${review.note}` : ''}</span>
             </div>
           ))}
