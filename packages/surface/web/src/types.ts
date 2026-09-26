@@ -25,6 +25,7 @@ export interface InboxEntry {
 
 import type { InboxReadError } from '../../src/inbox-errors.ts';
 import type { PlanApprovalRequest } from '../../src/plan-approval-request.ts';
+import type { DeploymentView } from '../../src/deployment-view.ts';
 export interface SurfaceState {
   owners: OwnerSummary[];
   /** The person's operator, when declared: a chat of its own, apart from the owners. */
@@ -35,6 +36,7 @@ export interface SurfaceState {
   opencode?: { ok: boolean; error?: string };
   /** Model providers failing authentication, and those recently recovered. */
   providerHealth?: ProviderHealthView[];
+  deployment?: DeploymentView;
 }
 
 export type { PublicFrictionRecord as FrictionRecord } from '../../src/friction-public.ts';

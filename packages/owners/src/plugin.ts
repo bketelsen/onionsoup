@@ -47,6 +47,7 @@ import {
 } from './operator-memory.ts';
 import { bashAction } from './bash-rules.ts';
 import { SessionOwners } from './session-owners.ts';
+import { beginAdmission, type AdmissionLease } from './deployment-admission.ts';
 import { openNeededSessions, ownerSessionClient } from './owner-sessions.ts';
 import { cancelReminder, openDueReminders, setReminder } from './reminder-work.ts';
 import { parseReminderRequest } from './reminders.ts';
@@ -343,6 +344,192 @@ const server: Plugin = async (input, options) => {
   /** Decision watchers' sessions, while they run, with the owner whose chat each watches. */
   const watcherSessions = new Map<string, string>();
   const frictionEvents = new FrictionEvents();
+  const chatLeases = new Map<string, AdmissionLease>();
+  const admittingChats = new Map<string, Promise<void>>();
+  const releasingChats = new Map<string, Promise<void>>();
+  const toolLeases = new Map<string, AdmissionLease>();
+  const idleTasks = new Map<string, Promise<void>>();
+  const awaitingNudge = new Set<string>();
+  const busyAfterNudge = new Set<string>();
+  const chatActivity = new Map<string, number>();
+  const joinedChildren = new Map<string, Set<string>>();
+  const pendingChildren = new Map<string, Set<string>>();
+  const completedChildren = new Map<string, Set<string>>();
+  const chatLocks = new Map<string, Promise<void>>();
+  const SessionStatuses = tool.schema.record(tool.schema.string(), tool.schema.object({
+    type: tool.schema.enum(['busy', 'idle', 'retry']),
+  }));
+
+  async function sessionStatuses() {
+    const response = await input.client.session.status?.({}).catch(() => undefined);
+    if (!response || response.error) return undefined;
+    const parsed = SessionStatuses.safeParse(response.data);
+    return parsed.success ? parsed.data : undefined;
+  }
+
+  async function withChatLock<T>(sessionID: string, operation: () => Promise<T>): Promise<T> {
+    const previous = chatLocks.get(sessionID) ?? Promise.resolve();
+    let unlock!: () => void;
+    const current = new Promise<void>(resolve => { unlock = resolve; });
+    chatLocks.set(sessionID, current);
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      if (chatLocks.get(sessionID) === current) chatLocks.delete(sessionID);
+      unlock();
+    }
+  }
+
+  function markChatActive(sessionID: string) {
+    chatActivity.set(sessionID, (chatActivity.get(sessionID) ?? 0) + 1);
+  }
+
+  async function admitChat(sessionID: string) {
+    await releasingChats.get(sessionID);
+    if (chatLeases.has(sessionID)) {
+      const admission = await beginAdmission(runtime.stateDirectory, `chat-message:${sessionID}`);
+      await admission.release();
+      return;
+    }
+    const pending = admittingChats.get(sessionID);
+    if (pending) {
+      await pending;
+      const admission = await beginAdmission(runtime.stateDirectory, `chat-message:${sessionID}`);
+      await admission.release();
+      return;
+    }
+    const admitting = beginAdmission(runtime.stateDirectory, `chat:${sessionID}`).then(lease => {
+      chatLeases.set(sessionID, lease);
+    });
+    admittingChats.set(sessionID, admitting);
+    try {
+      await admitting;
+    } finally {
+      admittingChats.delete(sessionID);
+    }
+  }
+
+  /** A child can only join a live admitted ancestor's turn; a lookup failure never makes it top-level. */
+  async function admittedMessageParent(sessionID: string): Promise<string | undefined> {
+    const visited = new Set<string>();
+    let current = sessionID;
+    let parent: string | undefined;
+    while (true) {
+      if (visited.has(current)) throw new Error('deployment_chat_ancestry_unknown');
+      visited.add(current);
+      const session = await input.client.session.get({ path: { id: current } }).catch(() => undefined);
+      if (!session?.data || session.error) throw new Error('deployment_chat_ancestry_unknown');
+      parent = session.data.parentID;
+      if (!parent) break;
+      if (chatLeases.has(parent) && !releasingChats.has(parent)) break;
+      current = parent;
+    }
+    if (!parent) {
+      if (current !== sessionID) throw new Error('deployment_chat_parent_not_admitted');
+      return undefined;
+    }
+    await withChatLock(parent, async () => {
+      if (!chatLeases.has(parent) || releasingChats.has(parent)) throw new Error('deployment_chat_parent_not_admitted');
+      const joined = joinedChildren.get(parent) ?? new Set<string>();
+      joined.add(sessionID);
+      joinedChildren.set(parent, joined);
+      const pending = pendingChildren.get(parent) ?? new Set<string>();
+      pending.add(sessionID);
+      pendingChildren.set(parent, pending);
+      completedChildren.get(parent)?.delete(sessionID);
+      markChatActive(parent);
+    });
+    return parent;
+  }
+
+  async function releaseChat(sessionID: string) {
+    const lease = chatLeases.get(sessionID);
+    if (!lease) return;
+    const releasing = lease.release().then(() => {
+      chatLeases.delete(sessionID);
+      awaitingNudge.delete(sessionID);
+      busyAfterNudge.delete(sessionID);
+      chatActivity.delete(sessionID);
+    });
+    releasingChats.set(sessionID, releasing);
+    try {
+      await releasing;
+    } finally {
+      releasingChats.delete(sessionID);
+    }
+  }
+
+  async function isIdleWithChildren(sessionID: string, statuses: Record<string, { type: 'busy' | 'idle' | 'retry' }>): Promise<boolean> {
+    if (statuses[sessionID] && statuses[sessionID].type !== 'idle') return false;
+    if (pendingChildren.get(sessionID)?.size) return false;
+    for (const child of joinedChildren.get(sessionID) ?? []) {
+      if (statuses[child] && statuses[child].type !== 'idle') return false;
+    }
+    const children = await input.client.session.children({ path: { id: sessionID } });
+    if (children.error || !children.data) return false;
+    for (const child of children.data) {
+      if (!statuses[child.id] && !completedChildren.get(sessionID)?.has(child.id)) return false;
+      if (!await isIdleWithChildren(child.id, statuses)) return false;
+    }
+    return true;
+  }
+
+  async function finishIdle(sessionID: string) {
+    // Child work belongs to this turn; its final idle event will retry the parent.
+    if (chatLeases.has(sessionID)) {
+      const statuses = await sessionStatuses();
+      if (statuses && !await isIdleWithChildren(sessionID, statuses)) return;
+    }
+    const owner = sessions.ownerOf(sessionID);
+    if (owner) {
+      try {
+        await watch(sessionID, owner);
+      } catch (error) {
+        console.warn('owner_decision_watch_failed', sessionID, error);
+      }
+    }
+    const operatorChat = operatorSessions.ownerOf(sessionID);
+    if (operatorChat) {
+      try {
+        await reflectOnMemory(sessionID, operatorChat);
+      } catch (error) {
+        console.warn('operator_memory_idle_failed', sessionID, error);
+        return;
+      }
+    }
+    if (awaitingNudge.has(sessionID) && !busyAfterNudge.has(sessionID)) return;
+    const activity = chatActivity.get(sessionID);
+    await withChatLock(sessionID, async () => {
+      if (!chatLeases.has(sessionID)) return;
+      const statuses = await sessionStatuses();
+      if (!statuses || !await isIdleWithChildren(sessionID, statuses)) return;
+      if (chatActivity.get(sessionID) !== activity) return;
+      await releaseChat(sessionID);
+      joinedChildren.delete(sessionID);
+      pendingChildren.delete(sessionID);
+      completedChildren.delete(sessionID);
+    });
+  }
+
+  function queueIdle(sessionID: string) {
+    const previous = idleTasks.get(sessionID) ?? Promise.resolve();
+    const current = previous.catch(() => undefined).then(() => finishIdle(sessionID));
+    idleTasks.set(sessionID, current);
+    return current.finally(() => {
+      if (idleTasks.get(sessionID) === current) idleTasks.delete(sessionID);
+    });
+  }
+
+  /** A child's work belongs to the admitted top-level turn, including when a drain has begun. */
+  async function hasChatLease(sessionID: string) {
+    let current: string | undefined = sessionID;
+    while (current) {
+      if (chatLeases.has(current)) return true;
+      current = await parentOf(current).catch(() => undefined);
+    }
+    return false;
+  }
 
   /**
    * Where a chat's actions are journaled, the bash its rules allow outright (routine, not journaled), and what a
@@ -436,7 +623,13 @@ const server: Plugin = async (input, options) => {
     const decision = operatorActivity.decide(sessionID, await memorySignature(memoryDirectory));
     if (!decision?.shouldNudge) return;
     const directory = await sessionDirectory(sessionID, holder.directory);
-    await sessionClient().prompt({ sessionID, directory }, holder.name, MEMORY_NUDGE_TEXT);
+    awaitingNudge.add(sessionID);
+    try {
+      await sessionClient().prompt({ sessionID, directory }, holder.name, MEMORY_NUDGE_TEXT);
+    } catch (error) {
+      awaitingNudge.delete(sessionID);
+      throw error;
+    }
   }
 
   /** Owners can be named by id or by persona name. */
@@ -484,6 +677,16 @@ const server: Plugin = async (input, options) => {
   }
 
   async function watch(sessionID: string, owner: OwnerDeclaration) {
+    // The parent's chat lease already covers this watcher during drain.
+    const watcherLease = chatLeases.has(sessionID) ? undefined : await beginAdmission(runtime.stateDirectory, `watcher:${sessionID}`);
+    try {
+      await watchAdmitted(sessionID, owner);
+    } finally {
+      await watcherLease?.release();
+    }
+  }
+
+  async function watchAdmitted(sessionID: string, owner: OwnerDeclaration) {
     const messages = ((await input.client.session.messages({ path: { id: sessionID } })).data ?? []) as unknown as SessionMessage[];
     const lastUser = messages.findLastIndex(message => message.info.role === 'user');
     if (lastUser < 0) return;
@@ -525,7 +728,16 @@ const server: Plugin = async (input, options) => {
       await commitQuietly(notebook, 'chat decisions');
     } finally {
       watcherSessions.delete(childID);
-      await input.client.session.delete({ path: { id: childID } }).catch(() => undefined);
+      const deleted = await input.client.session.delete({ path: { id: childID } }).catch(() => undefined);
+      if (deleted && !deleted.error) {
+        await withChatLock(sessionID, async () => {
+          pendingChildren.get(sessionID)?.delete(childID);
+          joinedChildren.get(sessionID)?.delete(childID);
+          const completed = completedChildren.get(sessionID) ?? new Set<string>();
+          completed.add(childID);
+          completedChildren.set(sessionID, completed);
+        });
+      }
     }
   }
 
@@ -661,13 +873,16 @@ const server: Plugin = async (input, options) => {
   async function deliverNotices() {
     if (isDeliveringNotices) return;
     isDeliveringNotices = true;
+    let lease: AdmissionLease | undefined;
     try {
+      lease = await beginAdmission(runtime.stateDirectory, 'plugin:notices');
       await deliverWorkNotices();
       await deliverExchangeNotices(runtime, exchangeClient(input.client));
       await openNeededSessions(runtime, sessionClient(), (itemId, error) => console.warn('owner_session_failed', itemId, error));
       await openDueReminders(runtime, sessionClient(), (reminderId, error) => console.warn('reminder_session_failed', reminderId, error));
       await removeIdlePlanWorktrees(runtime, sessionClient(), (itemId, error) => console.warn('plan_worktree_cleanup_failed', itemId, error));
     } finally {
+      await lease?.release();
       isDeliveringNotices = false;
     }
   }
@@ -677,7 +892,26 @@ const server: Plugin = async (input, options) => {
   noticeTimer.unref?.();
 
   return {
-    'tool.execute.before': prepareToolArguments,
+    async 'tool.execute.before'(input, output) {
+      const isAdmittedTurn = await hasChatLease(input.sessionID);
+      const lease = isAdmittedTurn ? undefined : await beginAdmission(runtime.stateDirectory, `tool:${input.tool}`);
+      const key = `${input.sessionID}:${input.callID}`;
+      if (lease) toolLeases.set(key, lease);
+      try {
+        await prepareToolArguments(input, output);
+      } catch (error) {
+        toolLeases.delete(key);
+        await lease?.release();
+        throw error;
+      }
+    },
+    async 'tool.execute.after'(input) {
+      const key = `${input.sessionID}:${input.callID}`;
+      const lease = toolLeases.get(key);
+      if (!lease) return;
+      await lease.release();
+      toolLeases.delete(key);
+    },
     'shell.env': hideHostCredentials,
     async config(config) {
       const agents = (config.agent ??= {}) as Record<string, unknown>;
@@ -738,9 +972,14 @@ const server: Plugin = async (input, options) => {
     },
 
     async 'chat.message'(message, output) {
+      const admittedParent = await admittedMessageParent(message.sessionID);
+      if (!admittedParent) await admitChat(message.sessionID);
+      markChatActive(message.sessionID);
+      if (awaitingNudge.has(message.sessionID)) busyAfterNudge.add(message.sessionID);
       const owner = message.agent ? ownerByAgent.get(message.agent) : undefined;
-      if (owner) sessions.claim(message.sessionID, owner);
+      if (owner && !admittedParent) sessions.claim(message.sessionID, owner);
       if (!operator || message.agent !== operator.name) return;
+      if (admittedParent) return;
       operatorSessions.claim(message.sessionID, operator);
       await observeOperatorMessage(message.sessionID, textOf((output?.parts ?? []) as MessagePart[]));
     },
@@ -767,12 +1006,33 @@ const server: Plugin = async (input, options) => {
       await observeProvider(event).catch(error => console.warn('provider_health_failed', error instanceof Error ? error.message : String(error)));
       const typed = event as { type: string; properties: Record<string, any> };
       const isIdle = typed.type === 'session.idle' || (typed.type === 'session.status' && typed.properties.status?.type === 'idle');
+      if (typed.type === 'session.status' && typed.properties.status?.type !== 'idle') {
+        const sessionID = String(typed.properties.sessionID);
+        markChatActive(sessionID);
+        if (awaitingNudge.has(sessionID)) busyAfterNudge.add(sessionID);
+      }
       if (isIdle) {
         const sessionID = String(typed.properties.sessionID);
-        const owner = sessions.ownerOf(sessionID);
-        if (owner) await watch(sessionID, owner).catch(() => undefined);
-        const operatorChat = operatorSessions.ownerOf(sessionID);
-        if (operatorChat) await reflectOnMemory(sessionID, operatorChat).catch(error => console.warn('operator_memory_idle_failed', sessionID, error));
+        let ancestor = await parentOf(sessionID).catch(() => undefined);
+        while (ancestor) {
+          const parent = ancestor;
+          await withChatLock(parent, async () => {
+            pendingChildren.get(parent)?.delete(sessionID);
+            const completed = completedChildren.get(parent) ?? new Set<string>();
+            completed.add(sessionID);
+            completedChildren.set(parent, completed);
+          });
+          ancestor = await parentOf(ancestor).catch(() => undefined);
+        }
+        await queueIdle(sessionID).catch(error => console.warn('plugin_idle_admission_failed', sessionID, error));
+        // A child becoming idle may be the last work of a top-level chat.
+        ancestor = await parentOf(sessionID).catch(() => undefined);
+        while (ancestor) {
+          if (chatLeases.has(ancestor)) {
+            await queueIdle(ancestor).catch(error => console.warn('plugin_idle_admission_failed', ancestor, error));
+          }
+          ancestor = await parentOf(ancestor).catch(() => undefined);
+        }
         return;
       }
       if (typed.type !== 'message.part.updated') return;

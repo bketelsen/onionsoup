@@ -4,7 +4,8 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { userInfo } from 'node:os';
 import { extname, join, normalize, resolve } from 'node:path';
 import { Decision, type SurfaceState } from './state.ts';
-import { memoryStatus, requestDistill } from '@onionsoup/owners';
+import { beginAdmission, memoryStatus, requestDistill } from '@onionsoup/owners';
+import { readDeploymentView } from './deployment-view.ts';
 
 export const SURFACE_LIMITS = { pollMs: 3_000, reloadMs: 15_000, bodyBytes: 1024 * 1024, heartbeatMs: 25_000 };
 
@@ -81,7 +82,7 @@ function route(method: string, path: string, handler: Handler): Route {
  * The surface's HTTP server: a JSON API over the surface state and opencode, an event stream for the browser,
  * and the built UI. It listens on localhost only; the opencode password stays on this side.
  */
-export function surfaceServer(state: SurfaceState, options: { webRoot: string; by?: string }) {
+export function surfaceServer(state: SurfaceState, options: { webRoot: string; buildId: string | null; by?: string }) {
   const by = options.by ?? userInfo().username;
   const clients = new Set<ServerResponse>();
   const broadcast = (event: string, data: unknown) => {
@@ -117,6 +118,23 @@ export function surfaceServer(state: SurfaceState, options: { webRoot: string; b
     return state.pendingDirectory(ownerId, kind, requestID);
   };
 
+  const admitted = async <T>(kind: string, operation: () => Promise<T>): Promise<T> => {
+    let lease;
+    try {
+      lease = await beginAdmission(state.runtime.stateDirectory, kind);
+    } catch (error) {
+      if (error instanceof Error && error.message === 'deployment_draining') {
+        throw new HttpError(503, 'deployment_draining');
+      }
+      throw error;
+    }
+    try {
+      return await operation();
+    } finally {
+      await lease.release();
+    }
+  };
+
   const routes: Route[] = [
     route('GET', '/api/state', async () => {
       const [snapshot, opencode] = await Promise.all([state.inboxSnapshot(), state.opencode.health()]);
@@ -124,6 +142,10 @@ export function surfaceServer(state: SurfaceState, options: { webRoot: string; b
       return {
         owners: await state.owners(snapshot), operator: await state.operator(snapshot), inbox, inboxErrors, opencode, providerHealth,
         frictionCount: (await state.friction()).length,
+        deployment: await readDeploymentView({
+          buildId: options.buildId,
+          stateDirectory: state.runtime.stateDirectory,
+        }),
       };
     }),
     route('GET', '/api/friction', async () => codedRoute(FRICTION_HTTP_STATUS, () => state.friction())),
@@ -252,7 +274,11 @@ export function surfaceServer(state: SurfaceState, options: { webRoot: string; b
             const match = request.method === candidate.method ? candidate.pattern.exec(url.pathname) : null;
             if (!match) continue;
             const params = Object.fromEntries(candidate.keys.map((key, index) => [key, decodeURIComponent(match[index + 1]!)]));
-            return send(response, 200, await candidate.handler(params, () => readJson(request)));
+            const handle = () => candidate.handler(params, () => readJson(request));
+            const outcome = request.method === 'GET'
+              ? await handle()
+              : await admitted(`surface:${request.method}:${url.pathname}`, handle);
+            return send(response, 200, outcome);
           }
           throw new HttpError(404, `no route: ${request.method} ${url.pathname}`);
         }
@@ -271,7 +297,9 @@ export function surfaceServer(state: SurfaceState, options: { webRoot: string; b
       broadcast('opencode', event);
       // A prompt in a chat the person set to auto-accept is answered at once.
       const { directory, payload } = event as { directory?: string; payload?: { type?: string } };
-      if (payload?.type === 'permission.asked' && directory) void state.autoAnswer(directory).catch(() => undefined);
+      if (payload?.type === 'permission.asked' && directory) {
+        void admitted('surface:auto-answer:event', () => state.autoAnswer(directory)).catch(() => undefined);
+      }
     }, signal);
     let last = '';
     let lastReload = Date.now();
@@ -282,7 +310,7 @@ export function surfaceServer(state: SurfaceState, options: { webRoot: string; b
           await state.runtime.reloadDeclarations().catch(() => undefined);
         }
         // Catch prompts whose event was missed (a reconnect, a restart).
-        await state.autoAnswerAll().catch(() => undefined);
+        await admitted('surface:auto-answer:poll', () => state.autoAnswerAll()).catch(() => undefined);
         const fingerprint = await state.fingerprint().catch(() => last);
         if (fingerprint !== last) {
           if (last) broadcast('onionsoup', { reason: 'engine' });

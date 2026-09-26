@@ -29,6 +29,14 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
 - **Shipping and the surface.** `onionsoup_ship` restarts the services in the owner's `deploy` section with a health
   check. The surface's opencode loads the plugin, so plugin changes need `onionsoup-surface` restarted too; listing
   it in `deploy.services` makes ship do it, at the cost of cutting off any reply in progress.
+- **Guarded release remains best effort for chats and plugin identity.** The worker drains
+  admitted leases, checks known owner/operator/plan directories, scans `/proc` for another
+  opencode and requires a quiet interval plus a last check. An unknown directory or a process
+  appearing between scans can still be missed. It verifies both services, reported surface
+  build and its recorded opencode child's authenticated health, but the public `/api/state`
+  cannot attest the responding build or loaded plugin. The person accepted this risk for
+  [guarded deployment](deployment.md); a global status protocol and plugin attestation remain
+  follow-ups. `Type=simple` does not itself signal readiness.
 - **snosi builds run only in CI.** mkosi needs root, so Murbella verifies with snosi's static checks and relies on
   GitHub Actions for builds (CI failures wake her). Local builds would need a privileged build VM on minideb,
   requested from Miles Teg like the smoke-test instances.

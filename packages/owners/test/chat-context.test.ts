@@ -203,6 +203,7 @@ test('plugin rereads recent activity on every system transform and its watcher n
   const fake = transport();
   fake.chat('person', 1);
   const client = { session: {
+    get: async ({ path }: { path: { id: string } }) => ({ data: fake.sessions.find(session => session.id === path.id) }),
     messages: async () => ({ data: fake.messages.get('person') }),
     create: async () => { watcherCreates += 1; throw new Error('watcher_must_not_wake'); },
   } };

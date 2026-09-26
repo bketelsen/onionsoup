@@ -17,9 +17,23 @@ import type { Message, OwnerActivity, OwnerSummary, Part } from '../web/src/type
 import { OwnerActivityIcon } from '../web/src/components/OwnerActivityIcon.tsx';
 import { RuntimeWorkRows } from '../web/src/components/RuntimeWorkRows.tsx';
 import { ProviderHealthBanner } from '../web/src/components/ProviderHealthBanner.tsx';
+import { BuildBadge } from '../web/src/components/Rail.tsx';
 import type { ProviderHealthView } from '../web/src/types.ts';
 
 const SESSION = 'ses_1';
+
+test('build badge shows the installed ID and reserves red for armed deployment', () => {
+  const idle = renderToStaticMarkup(createElement(BuildBadge, { deployment: { buildId: 'old-123', isPending: false } }));
+  assert.match(idle, /old-123/);
+  assert.doesNotMatch(idle, /text-status-error/);
+  const pending = renderToStaticMarkup(createElement(BuildBadge, {
+    deployment: { buildId: 'old-123', isPending: true, pending: { status: 'draining', targetBuildId: 'next-456' } },
+  }));
+  assert.match(pending, /old-123/);
+  assert.match(pending, /text-status-error/);
+  assert.match(pending, /next-456/);
+  assert.equal(renderToStaticMarkup(createElement(BuildBadge, { deployment: { buildId: null, isPending: false } })), '');
+});
 
 test('the rail icon is tinted by what the owner\'s chats are doing, and says so', () => {
   const owner: OwnerSummary = { id: 'leto', name: 'Leto', title: 't', source: '', icon: 'code', color: 'primary', model: 'm', domain: 'd',

@@ -43,3 +43,7 @@ export {
   INDEX_PAGE, linkedPage, pageBacklinks, pageTree, searchPages, type WikiEntry, type WikiFrontmatter, type WikiNode, type WikiPage, type WikiSearchHit,
 } from './wiki-pages.ts';
 export { migrateNav, MIGRATION_REASON } from './wiki-migrate.ts';
+export {
+  beginAdmission, listAdmissions, armDeployment, markDeploymentWaiting, beginDrain, releaseDrain,
+  type AdmissionLease,
+} from './deployment-admission.ts';

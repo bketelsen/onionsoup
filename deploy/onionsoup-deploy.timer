@@ -1,0 +1,13 @@
+# Install and enable manually only after the stable worker and deploy.env exist.
+# The oneshot worker is idempotent when no deployment is pending. A non-quiescent
+# drain and an unverified rollback stay closed and are retried on the next tick.
+[Unit]
+Description=retry guarded onionsoup release deployment
+
+[Timer]
+OnCalendar=*-*-* *:*:00
+Persistent=true
+Unit=onionsoup-deploy.service
+
+[Install]
+WantedBy=timers.target

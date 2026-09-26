@@ -400,6 +400,16 @@ page in the surface, where the person can cancel any of them. They are not in th
 
 ### Always on
 
+The user-unit templates run from a manually prepared `release-root/current` symlink, with a
+matching surface release manifest and a host opencode plugin URL through that pointer. The
+[deployment guide](../deployment.md) describes bootstrap and rollback. The guarded release
+worker discovers the surface's spawned, authenticated opencode endpoint through the shared
+state directory. Its drain covers admitted work and known chat directories, not every
+possible independent opencode session; its readiness checks do not attest the loaded plugin.
+These are accepted best-effort limits (see [gaps](../gaps.md)). Bootstrap is manual; arm
+and enable the timer only after verifying both installed services and the plugin use the
+release pointer.
+
 `npm run owners -- daemon` (installed as `deploy/onionsoup-owners.service`) ticks every minute: it re-reads the
 configuration, reads the state of every open PR (`refreshPublications`, so merges and closes are seen within a minute
 and everything after reacts on the same tick), moves requests along, supervises initiatives, runs due duties,

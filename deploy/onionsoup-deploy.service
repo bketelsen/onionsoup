@@ -1,0 +1,23 @@
+# Install the whole worker tree (scripts, packages/owners/src and node_modules)
+# at /opt/onionsoup-deploy, outside the moving release pointer. Set absolute
+# ONIONSOUP_RELEASE_ROOT, ONIONSOUP_STATE (the engine's state directory), ONIONSOUP_CONFIG,
+# and SURFACE_URL in deploy.env. ONIONSOUP_STATE must match the services'
+# ONIONSOUP_HOME/state; the worker discovers the surface's authenticated opencode endpoint.
+# Bootstrap remains manual: install the stable worker tree and both units,
+# configure deploy.env, and establish root/releases/<old-commit>/ and the
+# root/current symlink with a matching surface release-manifest.json by hand.
+# Set the running services to use root/current, verify the old build is healthy,
+# then arm an explicit commit with deploy-release.mjs arm using absolute
+# --root, --state and --source paths and --commit. Only after bootstrap,
+# enable the timer. This is a best-effort drain, not a global opencode fence.
+# Do not point the worker at current.
+[Unit]
+Description=onionsoup guarded release worker
+After=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/onionsoup/deploy.env
+Environment=PATH=%h/.local/share/mise/shims:%h/.local/bin:%h/.opencode/bin:/home/linuxbrew/.linuxbrew/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/.local/share/mise/shims/node --conditions=onionsoup-source --import /opt/onionsoup-deploy/node_modules/tsx/dist/loader.mjs /opt/onionsoup-deploy/scripts/deploy-release.mjs worker --root ${ONIONSOUP_RELEASE_ROOT} --state ${ONIONSOUP_STATE} --config ${ONIONSOUP_CONFIG} --surface-url ${SURFACE_URL}
+TimeoutStartSec=45min

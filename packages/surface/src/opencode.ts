@@ -1,6 +1,8 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
+import { chmod, lstat, mkdir, open, readFile, rename, rm } from 'node:fs/promises';
 import { createServer } from 'node:net';
+import { join } from 'node:path';
 import { createOpencodeClient } from '@opencode-ai/sdk/v2/client';
 
 /**
@@ -46,7 +48,56 @@ async function freePort() {
   });
 }
 
-export interface OpencodeConnection { url: string; api: OpencodeApi; close(): void }
+export interface OpencodeConnection { url: string; api: OpencodeApi; close(): void; endpoint?: { username: string; password: string; pid: number } }
+
+/** The process identity is checked again by the worker, not taken on trust from this file. */
+export async function processIdentity(pid: number) {
+  const record = await readFile(`/proc/${pid}/stat`, 'utf8');
+  const fields = record.slice(record.lastIndexOf(') ') + 2).split(' ');
+  if (fields[0] === 'Z' || !/^\d+$/.test(fields[19] ?? '')) throw new Error('deployment_endpoint_invalid');
+  return { startTime: fields[19]!, parentPid: Number(fields[1]) };
+}
+
+export async function publishOpencodeEndpoint(state: string, endpoint: { url: string; username: string; password: string; pid: number }) {
+  const address = new URL(endpoint.url);
+  if (address.protocol !== 'http:' || address.hostname !== '127.0.0.1' || !address.port ||
+    address.pathname !== '/' || address.search || address.hash || address.username || address.password) {
+    throw new Error('deployment_endpoint_invalid');
+  }
+  const directory = join(state, 'deploy');
+  const path = join(directory, 'opencode-endpoint.json');
+  const instanceId = randomUUID();
+  const surface = await processIdentity(process.pid);
+  const opencode = await processIdentity(endpoint.pid);
+  const record = {
+    url: endpoint.url, username: endpoint.username, password: endpoint.password,
+    surfacePid: process.pid, surfaceStartTime: surface.startTime,
+    opencodePid: endpoint.pid, opencodeStartTime: opencode.startTime, instanceId,
+  };
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  const metadata = await lstat(directory);
+  if (!metadata.isDirectory() || metadata.isSymbolicLink() || metadata.uid !== process.getuid?.()) {
+    throw new Error('deployment_endpoint_directory_invalid');
+  }
+  await chmod(directory, 0o700);
+  const temporary = `${path}.${instanceId}.tmp`;
+  const file = await open(temporary, 'wx', 0o600);
+  try {
+    await file.writeFile(JSON.stringify(record));
+    await file.sync();
+    await file.close();
+    await rename(temporary, path);
+  } catch (error) {
+    await file.close().catch(() => undefined);
+    await rm(temporary, { force: true });
+    throw error;
+  }
+  return async () => {
+    // A delayed shutdown must not remove the replacement surface's record.
+    const current = await readFile(path, 'utf8').then(JSON.parse, () => null) as { instanceId?: string } | null;
+    if (current?.instanceId === instanceId) await rm(path, { force: true });
+  };
+}
 
 /** Start our own `opencode serve` (it loads the onionsoup plugin from the global config) behind a fresh password. */
 async function startServer() {
@@ -75,7 +126,8 @@ async function startServer() {
       reject(new Error(`opencode_exited: ${code} ${output.slice(-400)}`));
     });
   });
-  return { url, username: 'opencode', password, close: () => child.kill('SIGTERM') };
+  if (!child.pid) throw new Error('opencode_pid_missing');
+  return { url, username: 'opencode', password, pid: child.pid, close: () => child.kill('SIGTERM') };
 }
 
 /** Attach to a running opencode (url and credentials from the environment), or start one. */
@@ -86,7 +138,9 @@ export async function connectOpencode(options: { url?: string; username?: string
   const headers: Record<string, string> = server.password
     ? { authorization: `Basic ${Buffer.from(`${server.username}:${server.password}`).toString('base64')}` }
     : {};
-  return { url: server.url, api: opencodeApi(server.url, headers), close: server.close };
+  return { url: server.url, api: opencodeApi(server.url, headers), close: server.close,
+    endpoint: 'pid' in server && server.password
+      ? { username: server.username, password: server.password, pid: server.pid } : undefined };
 }
 
 function opencodeApi(url: string, headers: Record<string, string>): OpencodeApi {

@@ -23,6 +23,7 @@ import { ensureDesk } from './workspace.ts';
 import { openWiki } from './wiki.ts';
 import { migrateNav } from './wiki-migrate.ts';
 import { advance, approvePlan, resumeItem, retryItem, cancelItem, revisePlan } from './work-recovery.ts';
+import { beginAdmission } from './deployment-admission.ts';
 
 const run = promisify(execFile);
 
@@ -262,11 +263,21 @@ const COMMANDS: Record<string, Command> = {
       stop.abort();
       // Give in-flight work a moment, then mark it interrupted (never replayed) and exit cleanly.
       setTimeout(async () => {
-        const stranded = await runtime.ledger.markInterrupted();
-        console.log(`owners daemon: stopped; ${stranded} work items marked interrupted`);
-        runtime.close();
-        await rm(join(runtime.stateDirectory, 'runtime.lock'), { recursive: true, force: true });
-        process.exit(0);
+        let lease;
+        try {
+          lease = await beginAdmission(runtime.stateDirectory, 'cli-daemon-shutdown');
+        } catch (error) {
+          if (!(error instanceof Error && error.message === 'deployment_draining')) throw error;
+        }
+        try {
+          const stranded = lease ? await runtime.ledger.markInterrupted() : 0;
+          console.log(`owners daemon: stopped; ${stranded} work items marked interrupted`);
+          runtime.close();
+          await rm(join(runtime.stateDirectory, 'runtime.lock'), { recursive: true, force: true });
+          process.exitCode = 0;
+        } finally {
+          await lease?.release();
+        }
       }, DAEMON_LIMITS.shutdownGraceMs).unref();
     };
     for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, shutdown);
@@ -294,11 +305,6 @@ if (!command && commandName !== 'init') {
   console.error(`usage: owners <${Object.keys(COMMANDS).join('|')}> …`);
   process.exit(2);
 }
-if (commandName === 'init') {
-  await initConfig(options.declarations!);
-  process.exit(0);
-}
-const runtime = await Runtime.open({ declarations: options.declarations!, state: options.state! });
 /** Commands that only read, or only record a person's decision, never take the runtime lock. */
 const LOCK_FREE = [
   'distill', 'items', 'show', 'notebook', 'requests', 'approve', 'revise-plan',
@@ -308,12 +314,25 @@ const LOCK_FREE = [
   'wiki',
 ];
 try {
-  const unlock = LOCK_FREE.includes(commandName!) ? async () => {} : await runtime.lock();
+  // A daemon may restart while the deployment gate is held. Runtime.open only ensures the existing state
+  // directory and reads declarations; daemon startup and every tick take their own admissions.
+  // All other commands still acquire before Runtime.open, including direct CLI effects.
+  const lease = commandName === 'daemon' ? undefined : await beginAdmission(options.state!, `cli-${commandName}`);
   try {
-    await command(runtime, args);
+    if (commandName === 'init') {
+      await initConfig(options.declarations!);
+    } else {
+      const runtime = await Runtime.open({ declarations: options.declarations!, state: options.state! });
+      const unlock = LOCK_FREE.includes(commandName!) ? async () => {} : await runtime.lock();
+      try {
+        await command(runtime, args);
+      } finally {
+        runtime.close();
+        await unlock();
+      }
+    }
   } finally {
-    runtime.close();
-    await unlock();
+    await lease?.release();
   }
 } catch (error) {
   console.error(`owners ${commandName}: ${error instanceof Error ? error.message : error}`);
