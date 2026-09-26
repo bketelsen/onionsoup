@@ -8,10 +8,11 @@ import type { Plugin } from '@opencode-ai/plugin';
 import { Verdict } from '../src/artifacts.ts';
 import type { ConnectHire, HireSessionClient } from '../src/opencode.ts';
 import {
-  classifyProviderFailure, FAILURE_SIGNATURES, maskKeyLike, ProviderHealthRecord, providerHealthViews, recordProviderFailure,
+  classifyProviderFailure, FAILURE_SIGNATURES, ProviderHealthRecord, providerHealthViews, recordProviderFailure,
   type ProviderError,
 } from '../src/provider-health.ts';
 import { ApiKey } from '../src/providers.ts';
+import { maskKeyLike } from '../src/secret-shapes.ts';
 import { Runtime } from '../src/runtime.ts';
 import { withActiveHooks } from './active-hooks.ts';
 

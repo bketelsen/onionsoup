@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { INITIATIVE_JOURNAL_KINDS } from './initiatives.ts';
 import { parseJournalRecord, type JournalRecord } from './journal-record.ts';
 import { REMINDER_JOURNAL_KINDS } from './reminders.ts';
+import { WIKI_JOURNAL_KINDS } from './wiki.ts';
 import type { Runtime } from './runtime.ts';
 
 export const CHAT_CONTEXT_DEFAULTS = {
@@ -23,7 +24,8 @@ export type ChatContextPolicy = z.infer<typeof ChatContextPolicy>;
 
 const ACTIVITY = new Set(['asked', 'answered', 'work-status', 'ci-triage', 'attention',
   'owner-created', 'owner-updated', 'owner-retired', 'chat-decision', 'retracted', 'attention-decision',
-  'plan-approved', 'plan-feedback', 'push-approved', 'work-cancelled', 'published', 'friction', 'fact', ...INITIATIVE_JOURNAL_KINDS, ...REMINDER_JOURNAL_KINDS]);
+  'plan-approved', 'plan-feedback', 'push-approved', 'work-cancelled', 'published', 'friction', 'fact', ...INITIATIVE_JOURNAL_KINDS, ...REMINDER_JOURNAL_KINDS,
+  ...WIKI_JOURNAL_KINDS]);
 
 export function clipped(text: string, limit: number) {
   return text.length <= limit ? text : `${text.slice(0, Math.max(0, limit - 1))}…`;

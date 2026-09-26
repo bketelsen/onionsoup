@@ -7,7 +7,7 @@ import {
   listFriction, frictionDetail, type FrictionRecord,
   approveInitiative, reviseInitiative, cancelInitiative, initiativeViews, managerOf, planGrantFor, cancelReminder,
   type AssignmentView, type Initiative, type InitiativeView, type WorkItem,
-  isDelegated, OWNER_CHANGE_WORKFLOW, PLAN_APPROVAL_PERMISSION, OPERATOR_ID, operatorChatDirectory,
+  isDelegated, OWNER_CHANGE_WORKFLOW, PLAN_APPROVAL_PERMISSION, OPERATOR_ID, operatorChatDirectory, WIKI_DELETE_PERMISSION,
   providerHealthViews, type ProviderHealthView,
 } from '@onionsoup/owners';
 import type { OpencodeApi, PendingPermission, PendingQuestion } from './opencode.ts';
@@ -44,8 +44,8 @@ function requestRecoveryDetail(request: ResourceRequest) {
   ].join('; ');
 }
 
-/** Gates asked in chat that only the person answers: auto-accept never approves a plan, a ship or an owner change. */
-const PERSON_GATES = new Set([PLAN_APPROVAL_PERMISSION, 'onionsoup_ship', 'onionsoup_owner_change']);
+/** Gates asked in chat that only the person answers: auto-accept never approves a plan, a ship, an owner change or a wiki delete. */
+const PERSON_GATES = new Set([PLAN_APPROVAL_PERMISSION, 'onionsoup_ship', 'onionsoup_owner_change', WIKI_DELETE_PERMISSION]);
 
 /** Delegated plans wait in the inbox; a plan submitted from the person's chat is answered there instead. */
 function waitsInInbox(item: WorkItem) {

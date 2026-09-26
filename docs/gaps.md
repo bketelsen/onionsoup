@@ -19,9 +19,13 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
   permission prompt lives in its opencode); the item stays `awaiting-plan-approval` and the owner resubmits it with
   `item`.
 - **Desk changes need a first real run.** `onionsoup_propose_changes` (verify → cross-family review → commit →
-  push → PR → merge under a `merge` grant → publish if the owner is a site source) is built, and Bellonda holds a
-  merge grant for her wiki, but it has not yet run end to end. Her `minideb` page and `selfie` correction are
-  waiting on her desk: ask her to propose them.
+  push → PR → merge under a `merge` grant → publish if the owner is a site source) is built, but it has not yet run
+  end to end. (The wiki no longer goes through it: its keeper writes pages directly, see the next item.)
+- **The wiki is open to the LAN and has no editor.** The site at `wiki.yaml`'s `listen` has no login, so anyone who
+  can reach the port reads every page; there is no editing in the browser, and only the keeper writes. A move does
+  not rewrite links to the moved page (its backlinks list them). A `wiki_push_conflict` needs someone to rebase the
+  clone by hand. Corrections reach the keeper as `onionsoup_ask` exchange notices, which she sees only when the
+  person next chats with her.
 - **Shipping and the surface.** `onionsoup_ship` restarts the services in the owner's `deploy` section with a health
   check. The surface's opencode loads the plugin, so plugin changes need `onionsoup-surface` restarted too; listing
   it in `deploy.services` makes ship do it, at the cost of cutting off any reply in progress.
