@@ -140,7 +140,7 @@ test('the operator\'s commands and edits are journaled to its own journal, its s
   assert.deepEqual(await journalLines(runtime, 'homelab'), [], 'no owner hears of it');
 });
 
-test('an operator session gets no owner bootstrap or owner context', async () => {
+test('an operator session gets no owner bootstrap or owner context, only its memory index', async () => {
   const { hooks } = await operatorHooks();
   await hooks['chat.message']!({ sessionID: 'ses_operator', agent: 'Operator' }, {} as never);
   const messages = { messages: [{ info: { id: 'msg_1', sessionID: 'ses_operator', role: 'user', agent: 'Operator' }, parts: [{ id: 'prt_1', type: 'text', text: 'Hello' }] }] };
@@ -148,7 +148,9 @@ test('an operator session gets no owner bootstrap or owner context', async () =>
   assert.equal(messages.messages[0]!.parts.length, 1);
   const system = { system: [] as string[] };
   await hooks['experimental.chat.system.transform']!({ sessionID: 'ses_operator' } as never, system);
-  assert.deepEqual(system.system, []);
+  assert.equal(system.system.length, 1);
+  assert.match(system.system[0]!, /^<your-memory-index>/);
+  assert.doesNotMatch(system.system[0]!, /<your-notebook>|<your-open-work>/);
 });
 
 test('the operator\'s chat directory is its declared one, made if missing', async () => {

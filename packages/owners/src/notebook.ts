@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { appendFile, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { promisify } from 'node:util';
 import { z } from 'zod';
 import type { NotebookEdit, NotebookRegister } from './artifacts.ts';
@@ -184,22 +184,31 @@ export class Notebook {
 
   /**
    * Every owner's notebook lives in one git repository, and duties and work items now run side by side: commits
-   * queue within this process, and wait out another process's lock (the plugin commits too).
+   * queue within this process, and wait out another process's lock (the plugin commits too). `paths` (relative to
+   * this notebook) narrows the commit; by default it takes the whole notebook.
    */
-  async commit(message: string) {
+  async commit(message: string, paths: readonly string[] = ['']) {
     const previous = COMMITS.get(this.root) ?? Promise.resolve();
-    const next = previous.catch(() => undefined).then(() => this.commitNow(message));
+    const next = previous.catch(() => undefined).then(() => this.commitNow(message, paths));
     COMMITS.set(this.root, next);
     return next;
   }
 
-  private async commitNow(message: string) {
+  /** Files under `path` (relative to this notebook) that differ from the last commit, relative to `path`. */
+  async changes(path: string) {
+    const scope = join(this.ownerId, path);
+    const { stdout } = await git(this.root, ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--', scope]);
+    return [...new Set(porcelainPaths(stdout).map(file => relative(scope, file)))].sort();
+  }
+
+  private async commitNow(message: string, paths: readonly string[]) {
+    const scopes = paths.map(path => join(this.ownerId, path));
     for (let attempt = 0; ; attempt++) {
       try {
-        await git(this.root, ['add', '-A', this.ownerId]);
-        const { stdout } = await git(this.root, ['status', '--porcelain', this.ownerId]);
+        await git(this.root, ['add', '-A', '--', ...scopes]);
+        const { stdout } = await git(this.root, ['status', '--porcelain', '--', ...scopes]);
         if (!stdout.trim()) return;
-        await git(this.root, ['commit', '-q', '-m', `${this.ownerId}: ${message}`]);
+        await git(this.root, ['commit', '-q', '-m', `${this.ownerId}: ${message}`, '--', ...scopes]);
         return;
       } catch (error) {
         if (attempt >= 8 || !/index\.lock/.test(String((error as { stderr?: string }).stderr ?? error))) throw error;
@@ -251,6 +260,18 @@ export function editSection(markdown: string, edit: NotebookEdit) {
   const merged = edit.mode === 'append' && existing ? `${existing}\n\n${body}` : body;
   const rebuilt = [...lines.slice(0, start), heading, '', merged, '', ...lines.slice(end)];
   return rebuilt.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd() + '\n';
+}
+
+/** Paths named by `git status --porcelain -z`; a rename or copy is followed by its old path, which is skipped. */
+function porcelainPaths(stdout: string) {
+  const entries = stdout.split('\0').filter(Boolean);
+  const paths: string[] = [];
+  for (let index = 0; index < entries.length; index++) {
+    const entry = entries[index]!;
+    paths.push(entry.slice(3));
+    if (/^[RC]/.test(entry)) index++;
+  }
+  return paths;
 }
 
 async function git(directory: string, args: string[]) {

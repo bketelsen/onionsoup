@@ -412,7 +412,8 @@ Owners each hold one domain under gates. Some work belongs to no domain: operati
 every owner's records, a one-off job on the homelab. For that the person may declare an **operator** in
 `operator.yaml` (`OperatorDeclaration` in `packages/owners/src/declarations.ts`; the agent in `operator.ts`): one
 agent the person directs turn by turn in a chat of its own, like a coding agent in auto mode. It sits outside the owner
-rules on purpose. It owns nothing, keeps no notebook, runs no duties, and is never woken by the runtime; owners cannot
+rules on purpose. It owns nothing, keeps no owner notebook, runs no duties, and is woken by the runtime only for the
+memory nudge below; owners cannot
 reach it (it is in no roster, and `onionsoup_ask`, `onionsoup_request_work` and friends resolve only owners). Its id
 `operator` and its name are reserved: no owner may take either (`operator_reserved`).
 
@@ -429,10 +430,29 @@ owners' skills bootstrap.
 The risk is plain: the operator is unsandboxed, runs as the person, and bash rules are a convenience, not a
 boundary. Anything it reads (a web page, an issue, an owner's output) can try to steer it, and the prompt telling it
 that such text is data, not instructions, is the only defence beyond the ask list. What it does is audited: every
-command and edit it or its subagents run is journaled to `state/notebooks/operator/journal/` (a journal-only notebook,
+command and edit it or its subagents run is journaled to `state/notebooks/operator/journal/` (a notebook without registers,
 never distilled), so the person can see afterwards what it did. Every chat shell, the operator's and the owners',
 gets the surface opencode's own server credentials blanked (the plugin's `shell.env` hook sets each of
 `HOST_ONLY_VARIABLES` to empty), so no command can use them to answer another session's prompt through the API.
+
+#### Operator memory
+
+Each operator chat would otherwise start cold, so the operator keeps a memory of its own
+(`packages/owners/src/operator-memory.ts`): plain files in `state/notebooks/operator/memory/`, an `INDEX.md` with one
+line per topic (`- [Title](file.md) — one-line hook`) and one topic file per subject. The plugin seeds the index when
+it starts, and puts it into every turn of a top-level operator chat as `<your-memory-index>`, clipped at
+`OPERATOR_MEMORY_LIMITS.indexChars` with a request to consolidate. The operator reads the topics a task needs and
+writes them itself; its prompt says what belongs there (how things are set up, fixes that worked, the person's stated
+preferences, where things live) and what never does (what the repository, config or journal already records, and
+secrets).
+
+When a top-level operator chat goes idle, host code commits changed memory files to the notebooks repository
+(`operator: memory: <files>`; the operator's journal commits take only `journal/`), then decides with
+`decideMemoryNudge` whether to post one runtime notice asking whether anything is worth remembering. It nudges when,
+since memory last changed, the chat and its subagents made `OPERATOR_MEMORY_LIMITS.nudgeAfterToolCalls` journaled
+tool calls or edited a file under the person's configuration or the engine repository. A nudge resets the count and
+marks the chat as answering it until the person's next message, so the answer is never nudged again; a change to
+memory also resets the count. The counts live in the plugin's memory and a restart starts them over.
 
 ### Model providers
 
