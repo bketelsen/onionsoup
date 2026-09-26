@@ -71,7 +71,7 @@ export function useEvents(listener: Listener, deps: unknown[]) {
 }
 
 export function useConnected() {
-  return useSyncExternalStore(events.subscribeStatus, () => events.connected);
+  return useSyncExternalStore(events.subscribeStatus, () => events.connected, () => false);
 }
 
 /** An opencode event's payload type and properties, whichever wrapper it arrived in. */
