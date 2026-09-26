@@ -55,6 +55,20 @@ cause, and the fix is either applied through the normal gates or reported to the
   red banner in the surface). It clears itself (`status: ok`, `recoveredAt`) on the next successful call to that
   provider: fix the credentials (`opencode auth login`, or the key file named in `providers.yaml`), then send a chat
   on one of its models to confirm. Deleting the file also clears it.
+- **Wiki:** optional, declared in `wiki.yaml` in the config directory (`repository`, `branch`, `pagesDirectory`,
+  `listen`, `keeper`). The clone is `<ONIONSOUP_HOME>/wiki`, made on first use; the surface serves it read-only on
+  `listen` and fetches and fast-forwards it every `WIKI_LIMITS.syncMs` (5 minutes; `wiki_sync_failed` or
+  `wiki_sync_diverged` in the surface's log when it cannot). Only the keeper writes, through `onionsoup_wiki`; each
+  write is committed as the keeper and pushed at once, serialized by `state/locks/wiki.lock`, and journaled
+  (`wiki-write`, `wiki-move`, `wiki-delete`) to the keeper's notebook. A push the remote refused is rebased and pushed
+  once more; a rebase conflict aborts the rebase, keeps the keeper's commit in the clone, fails the write with
+  `wiki_push_conflict`, and raises an attention item for the keeper. To resolve one: in the clone,
+  `git fetch origin && git rebase origin/<branch>`, settle the conflict with the keeper's intent, `git rebase --continue`,
+  then `git push origin HEAD:<branch>` (nothing is ever pushed with force). `wiki_push_failed` (network, auth) also
+  keeps the commit; the next write pushes it. The move from MkDocs is one command, run once:
+  `npm run owners -- wiki migrate` (nav order into `order:` frontmatter, `mkdocs.yml` deleted, committed as the keeper
+  and pushed; `wiki_migration_not_needed` when there is no `mkdocs.yml`). A change to `wiki.yaml` takes effect when
+  the surface restarts.
 - **Notebooks:** under state, one Git repo per owner. Read one with `npm run owners -- notebook <id>`.
 - **Plugin:** `packages/owners/src/plugin.ts`, loaded by the surface's opencode (`onionsoup-surface.service`,
   http://127.0.0.1:4747). A change takes effect only when the surface restarts. The plugin, not the daemon, posts

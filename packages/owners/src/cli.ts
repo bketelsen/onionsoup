@@ -20,6 +20,8 @@ import { approveInitiative, cancelInitiative, initiativeView, initiativeViews, r
 import { initConfig } from './init.ts';
 import { configDirectory, stateDirectory } from './paths.ts';
 import { ensureDesk } from './workspace.ts';
+import { openWiki } from './wiki.ts';
+import { migrateNav } from './wiki-migrate.ts';
 import { advance, approvePlan, resumeItem, retryItem, cancelItem, revisePlan } from './work-recovery.ts';
 
 const run = promisify(execFile);
@@ -103,6 +105,15 @@ async function continueIfFree(runtime: Runtime, item: WorkItem) {
 }
 
 type Command = (runtime: Runtime, args: string[]) => Promise<void>;
+
+/** `owners wiki <action>`: operator commands on the wiki. */
+const WIKI_COMMANDS: Record<string, Command> = {
+  async migrate(runtime) {
+    const migration = await migrateNav(openWiki(runtime));
+    console.log(`wiki: ${migration.change.outcome} ${migration.change.commit.slice(0, 12)}; ordered ${migration.ordered.length} pages`);
+    if (migration.missing.length) console.log(`the nav named pages that do not exist: ${migration.missing.join(', ')}`);
+  },
+};
 
 const COMMANDS: Record<string, Command> = {
   async wake(runtime, [ownerId, dutyId = 'survey']) {
@@ -262,6 +273,11 @@ const COMMANDS: Record<string, Command> = {
     console.log(`owners daemon: ${runtime.declarations.owners.size} owners, tick every ${60}s; stop with SIGTERM`);
     await daemon(runtime, tickLog, stop.signal);
   },
+  async wiki(runtime, [action, ...rest]) {
+    const command = WIKI_COMMANDS[action ?? ''];
+    if (!command) throw new Error(`usage: owners wiki <${Object.keys(WIKI_COMMANDS).join('|')}>`);
+    await command(runtime, rest);
+  },
   async recover(runtime) {
     console.log(`marked interrupted: ${await runtime.ledger.markInterrupted()}`);
   },
@@ -289,6 +305,7 @@ const LOCK_FREE = [
   'resume', 'retry', 'cancel', 'desk', 'desk-state', 'retract', 'ask', 'request-publish', 'propose',
   'ship', 'approve-push', 'approve-create', 'approve-delete', 'deny-request',
   'desk-review-reset', 'initiatives', 'initiative', 'approve-initiative', 'revise-initiative', 'cancel-initiative',
+  'wiki',
 ];
 try {
   const unlock = LOCK_FREE.includes(commandName!) ? async () => {} : await runtime.lock();

@@ -55,6 +55,8 @@ import { requestPlanApproval } from './plan-approval.ts';
 import { HOST_ONLY_VARIABLES } from './sandbox.ts';
 import { opencodeProviders, type DeclaredProviders } from './providers.ts';
 import { CHAT_EXTERNAL_DIRECTORIES, chatBash } from './chat-permissions.ts';
+import { openWiki, WIKI_DELETE_PERMISSION } from './wiki.ts';
+import { WIKI_ACTIONS, WIKI_TOOL, WIKI_TOOL_ACTIONS, WIKI_TOOL_DESCRIPTION } from './wiki-tool.ts';
 import {
   AssistantMessageEvent, assistantOutcome, recordProviderFailure, recordProviderSuccess, type AssistantMessageInfo, type ProviderError,
   type ProviderUse,
@@ -156,6 +158,25 @@ function orgGuides(runtime: Runtime, owner: OwnerDeclaration) {
   return ORG_GUIDES.filter(([admits]) => admits(runtime, owner)).map(([, guide]) => guide).join('');
 }
 
+/** What an owner does with the wiki: the keeper writes it, everyone else sends the keeper corrections. */
+const WIKI_GUIDES: Record<'keeper' | 'reader', (keeper: string) => string> = {
+  keeper: () => `
+- You keep the wiki. Record what you learn there with onionsoup_wiki: write (the whole page and a one-line reason),
+  move, and delete (the person approves each delete). A write is committed and pushed at once; it needs no plan, desk
+  or review. Corrections from other owners reach you as onionsoup_ask exchanges: check them against evidence, then fix
+  the page.`,
+  reader: keeper => `
+- ${keeper} keeps the wiki. When a page is wrong or missing something you know, tell ${keeper} with onionsoup_ask,
+  quoting the page and your evidence; never try to write it yourself.`,
+};
+
+function wikiGuide(runtime: Runtime, owner: OwnerDeclaration) {
+  const wiki = runtime.declarations.wiki;
+  if (!wiki) return '';
+  const keeper = runtime.declarations.owners.get(wiki.keeper);
+  return WIKI_GUIDES[wiki.keeper === owner.id ? 'keeper' : 'reader'](keeper?.persona?.name ?? wiki.keeper);
+}
+
 /** How work gets done, for an owner that changes its repository itself and for one that only observes its domain. */
 const WORK_GUIDES: Record<'changes' | 'observes', string> = {
   changes: `
@@ -197,6 +218,7 @@ How you work with the person in this chat:
   onionsoup_evidence (what other owners recorded), onionsoup_ask (ask another owner a question about its domain),
   onionsoup_request_work (ask another owner to change its repository), onionsoup_friction (report reproducible engine
   behavior that fails expectations), onionsoup_remind (wake yourself later for a one-off check),
+  onionsoup_wiki (the homelab wiki: search it before asking the person about homelab facts),
   onionsoup_record_fact, onionsoup_record_decision and onionsoup_retract. When
   something belongs to another owner's domain, ask them instead of guessing or probing it yourself.${WORK_GUIDES[canChange(owner) ? 'changes' : 'observes']}
 - Record facts you observe, and rulings you make while working, with onionsoup_record_fact: they come back to you word
@@ -222,7 +244,7 @@ function conversationPermission(owner: OwnerDeclaration, verify: readonly string
     edit: mode.edit, bash: chatBash(mode.bash, verify), webfetch: mode.webfetch, external_directory: CHAT_EXTERNAL_DIRECTORIES,
     doom_loop: 'ask', task: taskPermission(owner.id),
     // opencode denies its question tool unless an agent allows it; answering is always the person's, so it grants nothing.
-    question: 'allow', [PLAN_APPROVAL_PERMISSION]: 'ask', ...NO_OPERATOR_SKILLS,
+    question: 'allow', [PLAN_APPROVAL_PERMISSION]: 'ask', [WIKI_DELETE_PERMISSION]: 'ask', ...NO_OPERATOR_SKILLS,
   };
 }
 
@@ -433,6 +455,12 @@ const server: Plugin = async (input, options) => {
     const owner = ownerByAgent.get(agent);
     if (!owner) throw new Error(`onionsoup tools are for owners; ${agent} is not one`);
     return owner;
+  }
+
+  /** Who calls a tool owners and the operator share: an owner's id, or the operator's. */
+  function ownerOrOperator(agent: string) {
+    if (operator && agent === operator.name) return OPERATOR_ID;
+    return requireOwner(agent).id;
   }
 
   async function workSummary(ownerId: string) {
@@ -687,7 +715,7 @@ const server: Plugin = async (input, options) => {
           mode: 'primary',
           description: `${persona.title} (${persona.source})`,
           model: owner.model,
-          prompt: agentPrompt(owner, persona, charter, rosterText(runtime.declarations, owner.id), orgText(runtime.declarations, owner.id), verify, orgGuides(runtime, owner)),
+          prompt: agentPrompt(owner, persona, charter, rosterText(runtime.declarations, owner.id), orgText(runtime.declarations, owner.id), verify, orgGuides(runtime, owner) + wikiGuide(runtime, owner)),
           permission,
         };
       }
@@ -776,6 +804,21 @@ const server: Plugin = async (input, options) => {
             throw error;
           });
           return `Recorded ${record.id} (${record.count} report${record.count === 1 ? '' : 's'}). Failure events: ${record.failureContext}. Triage and issue publication are separate gates.`;
+        },
+      }),
+      [WIKI_TOOL]: tool({
+        description: WIKI_TOOL_DESCRIPTION,
+        args: {
+          action: tool.schema.enum(WIKI_ACTIONS),
+          path: tool.schema.string().optional().describe('A page, relative to the pages directory, e.g. hosts/selfie.md'),
+          to: tool.schema.string().optional().describe('For move: the new path'),
+          query: tool.schema.string().optional().describe('For search: the words to find'),
+          content: tool.schema.string().optional().describe('For write: the whole page, frontmatter included'),
+          reason: tool.schema.string().optional().describe('For write, move and delete: one line; it becomes the commit subject'),
+        },
+        async execute(args, context) {
+          const caller = ownerOrOperator(context.agent);
+          return WIKI_TOOL_ACTIONS[args.action]({ wiki: openWiki(runtime), caller, args, context });
         },
       }),
       onionsoup_request_work: tool({

@@ -8,6 +8,7 @@ import type { AssignmentView, InitiativeView } from './org-work.ts';
 import type { WorkItem } from './ledger.ts';
 import { describeAsk, type ResourceRequest } from './requests.ts';
 import { pendingReminders, REMINDER_JOURNAL_KINDS, REMINDER_LIMITS, reminderSummary, type Reminder } from './reminders.ts';
+import { WIKI_JOURNAL_KINDS } from './wiki.ts';
 import type { Runtime } from './runtime.ts';
 import { clipped } from './chat-context.ts';
 
@@ -21,7 +22,7 @@ const NOTE_KINDS = new Set([
   'rebase-pushed', 'attention', 'app-held', 'app-update-proposed', 'app-updated', 'request-accepted', 'request-declined',
   'request-refused', 'instance-created', 'instance-deleted', 'follow-up', 'asked', 'answered', 'ci-triage', 'owner-created',
   'owner-updated', 'owner-retired', 'ship-started', 'shipped', 'work-status', 'friction', 'fact',
-  ...INITIATIVE_JOURNAL_KINDS, ...REMINDER_JOURNAL_KINDS,
+  ...INITIATIVE_JOURNAL_KINDS, ...REMINDER_JOURNAL_KINDS, ...WIKI_JOURNAL_KINDS,
 ]);
 const DONE = new Set(['landed', 'failed', 'rejected', 'cancelled']);
 

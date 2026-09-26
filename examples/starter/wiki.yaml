@@ -1,0 +1,8 @@
+# A wiki onionsoup serves on your LAN and one owner keeps. Uncomment to turn it on; while every line is a comment
+# there is no wiki. See docs/extending.md ("Keep a wiki").
+#
+# repository: git@github.com:you/homewiki.git   # the git remote each write is pushed to, as the backup
+# branch: main                                  # default main
+# pagesDirectory: docs                          # where the markdown pages live in the repository (default docs)
+# listen: 0.0.0.0:4748                          # where the surface serves the wiki, read-only
+# keeper: example                               # the one owner who writes pages; everyone else reads

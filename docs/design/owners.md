@@ -72,8 +72,8 @@ Onionsoup is the engine. A person's owners are configuration that lives outside 
 | What | Where | Default |
 | --- | --- | --- |
 | Engine: runtime, CLI, opencode plugin, Owner's Desk | this repository | |
-| Your owners: declarations, charters, freelancer models, model families, model providers | `ONIONSOUP_CONFIG` | `~/.config/onionsoup` |
-| Runtime state: notebooks, ledger, requests, checkouts, desks, plan worktrees, evidence, tools | `ONIONSOUP_HOME` | `~/.local/share/onionsoup` |
+| Your owners: declarations, charters, freelancer models, model families, model providers, the wiki | `ONIONSOUP_CONFIG` | `~/.config/onionsoup` |
+| Runtime state: notebooks, ledger, requests, checkouts, desks, plan worktrees, evidence, tools, the wiki's clone | `ONIONSOUP_HOME` | `~/.local/share/onionsoup` |
 
 `npm run owners -- init` creates a config directory from [`examples/starter`](../../examples/starter) as its
 own Git repository. Declarations contain no machine paths: an owner's workspace defaults to
@@ -421,8 +421,8 @@ Its permissions allow nearly everything: any bash, edits, the web, any directory
 `OPERATOR_ASK_BASH` asks, plus the person's own `ask:` patterns: recursive deletes, force pushes, hard resets and
 `git clean`, deleting incus instances, destroying ZFS datasets and pools, `mkfs`, `dd`, `kubectl delete`, and the
 CLI's person gates (`owners ... approve*`, `owners ... ship*`), so it does not answer an owner's plan or ship for the
-person unasked. It gets no `onionsoup_*` owner tools (they are denied, and refuse any agent that is not an owner), so
-it cannot submit, approve or ship through them, and the plan-approval, ship and owner-change prompts of owners'
+person unasked. It gets no `onionsoup_*` owner tools (they are denied, and refuse any agent that is not an owner)
+except `onionsoup_wiki`, with which it only reads the [wiki](#wiki), so it cannot submit, approve or ship through them, and the plan-approval, ship and owner-change prompts of owners'
 sessions are answered only in those sessions. It may load the person's operating skills in `.agents/skills`
 (operate-onionsoup, ship-onionsoup, create-owner), which owners and their subagents are denied, and never gets the
 owners' skills bootstrap.
@@ -486,6 +486,55 @@ with a fix from `PROVIDER_FIX_HINTS`: `opencode auth login` for opencode's provi
 ones) and in a red banner on every page; `/api/state` carries `providerHealth`, which also keeps a recovered provider
 for `PROVIDER_HEALTH_LIMITS.recoveredShownMs` as a green confirmation. Detection is reactive: nothing probes a
 provider that nothing is using.
+
+### Wiki
+
+The homelab wiki used to be an ordinary repository owner's domain: every edit was a plan, a desk change, a
+cross-family review, a merge and a separate site publish, which was too much ceremony for a page of notes. The person
+may now declare a **wiki** in `wiki.yaml` (`WikiDeclaration` in `packages/owners/src/wiki-config.ts`): its git
+`repository`, `branch` (main), `pagesDirectory` (docs), `listen` (host:port) and `keeper`, the one owner who writes it.
+The keeper must be a declared owner (`wiki_keeper_unknown`); no file, or one holding only comments, means no wiki.
+
+Host code (`packages/owners/src/wiki.ts`, pages in `wiki-pages.ts`) keeps a clone at `<home>/wiki`, made on first
+use. Reads come from its working tree: `list` (the page tree: index first, then frontmatter `order`, then title),
+`read` (frontmatter and body), `search` (ranked by how many query words a page holds, then how often, a title match
+counting more, with a snippet), `history` (git log, following renames) and `backlinks`. A page's title is its
+frontmatter `title`, else its first `# heading`, else its file name. Frontmatter is YAML between `---` lines; `title`,
+`order` (a number), `updated` and `sources` (a list) are read, and any other field is kept as it is.
+
+Writes (`write`, `move`, `delete`) are the keeper's alone (`wiki_not_keeper`, checked in host code). Each one checks
+the path (relative, `.md`, inside the pages directory, no `..`: `wiki_path_invalid`), the size
+(`WIKI_LIMITS.pageBytes`: `wiki_page_too_large`), the frontmatter (`wiki_frontmatter_invalid`), and scans the page
+and its reason for credentials (`wiki_secret_detected`): provider keys, GitHub tokens and private key blocks, the
+refused shapes of the detector provider health masks errors with (`secret-shapes.ts`); long hex and base64 runs, URLs
+and bearer examples are ordinary documentation and pass. Under a record lock (`state/locks/wiki.lock`) the change is
+then committed with the keeper's persona as author (`<keeper>@onionsoup`) and the one-line reason as subject, and
+pushed at once, so the remote is the backup. A push the remote refused because it moved is fetched, rebased and pushed
+once more; a rebase that conflicts is aborted, the commit is kept in the clone (the content is never lost), the write
+fails with `wiki_push_conflict`, and an attention item is raised for the keeper. Each write is journaled to the
+keeper's notebook (`wiki-write`, `wiki-move`, `wiki-delete`); distill keeps page content out of the notebook.
+
+Owners and the operator reach the wiki through `onionsoup_wiki { action, path?, to?, query?, content?, reason? }`,
+its actions dispatched through a table (`wiki-tool.ts`). Every owner and the operator read; the operator's permission
+allows the tool although it gets no other onionsoup tool, and subagents get none. A delete asks the person through the
+`onionsoup_wiki_delete` prompt, which the surface's auto-accept never answers; write and move need no gate, since
+every change is in git and pushed. Owners check the wiki before asking the person about homelab facts (the skills
+bootstrap says so), and send the keeper corrections with `onionsoup_ask`, which lands in the keeper's chat.
+
+The surface serves the wiki read-only on a second listener at `listen` (`packages/surface/src/wiki-site.ts`),
+started only when `wiki.yaml` exists: `/` is `index.md`, `/<path>` a page (`hosts/selfie.md` is `/hosts/selfie`),
+`/search?q=` and `/history/<path>`, and nothing else: no API, approvals, chat or files of the main surface. Pages are
+rendered on the server with marked (`wiki-render.ts`): raw HTML is shown as text, only http(s), mailto, anchor and
+site links survive, relative `.md` links are rewritten to site URLs, and headings get MkDocs' toc ids (old anchors keep
+working) with a permalink. Each page shows who changed it last and when, a history link and the pages linking to it,
+beside a sidebar tree and a search box. There is no script: one inline stylesheet (the surface's colours and fonts,
+light or dark by `prefers-color-scheme`, laid out for phones too) allowed by its hash in the Content-Security-Policy,
+whose `default-src 'none'` forbids every script. The site reads the clone's working tree, so the keeper's writes
+show at once; it fetches and fast-forwards every `WIKI_LIMITS.syncMs` so pushes from elsewhere show up too.
+
+`owners wiki migrate` moved the wiki off MkDocs once: the order of `mkdocs.yml`'s `nav` became `order:` frontmatter
+(numbered in steps of `NAV_ORDER_STEP`, a nav title that differs from the page's own kept as `title:`), `mkdocs.yml`
+was deleted, and the result was committed as the keeper and pushed.
 
 ### Safety
 

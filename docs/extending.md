@@ -196,9 +196,32 @@ ask:                             # more bash patterns that ask you, on top of th
 ```
 
 Restart the surface; the operator appears at the top of the rail. It may use the onionsoup CLI and the skills in
-`.agents/skills` like you would, but approvals and ships through the CLI ask you, and it has no owner tools. What it
+`.agents/skills` like you would, but approvals and ships through the CLI ask you, and it has no owner tools but
+`onionsoup_wiki`, with which it reads the wiki. What it
 runs is journaled to `state/notebooks/operator/journal/`. See [Operator](design/owners.md#operator) for why it sits
 outside the owner rules and what it risks.
+
+## Keep a wiki
+
+Onionsoup can serve a wiki on your LAN: markdown pages in a git repository that one owner, its keeper, writes and
+everyone reads. Declare it in `wiki.yaml` at the top of your config directory; without the file there is none.
+
+```yaml
+# wiki.yaml
+repository: git@github.com:you/homewiki.git   # each write is pushed here at once, as the backup
+branch: main                                  # default main
+pagesDirectory: docs                          # where the pages live in the repository (default docs)
+listen: 0.0.0.0:4748                          # where the surface serves it, read-only, with no login
+keeper: bellonda                              # a declared owner: the only one who writes
+```
+
+Restart the surface: it clones the repository to `<ONIONSOUP_HOME>/wiki` and serves it at `listen` (bind a LAN
+address or `0.0.0.0` to reach it from other machines; anyone who can reach the port can read the wiki). Owners read
+it with `onionsoup_wiki`, and the keeper writes, moves and deletes pages with it; each write is committed as the
+keeper and pushed, and a delete asks you first. Pages may start with YAML frontmatter: `title`, `order` (the sidebar
+sorts by it, then by title), `updated` and `sources`. If the wiki was an MkDocs site, run
+`npm run owners -- wiki migrate` once: it moves `mkdocs.yml`'s nav order into frontmatter, deletes `mkdocs.yml`, and
+pushes. See [Wiki](design/owners.md#wiki).
 
 ## Run it always on
 

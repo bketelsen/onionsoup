@@ -37,3 +37,9 @@ export {
   classifyProviderFailure, providerHealthViews, recordProviderFailure, recordProviderSuccess, PROVIDER_HEALTH_LIMITS,
   type ProviderHealthView,
 } from './provider-health.ts';
+export { openWiki, Wiki, WIKI_DELETE_PERMISSION, WIKI_JOURNAL_KINDS, WIKI_LIMITS, type WikiChange, type WikiHistoryEntry } from './wiki.ts';
+export { WikiDeclaration, WIKI_FILE } from './wiki-config.ts';
+export {
+  INDEX_PAGE, linkedPage, pageBacklinks, pageTree, searchPages, type WikiEntry, type WikiFrontmatter, type WikiNode, type WikiPage, type WikiSearchHit,
+} from './wiki-pages.ts';
+export { migrateNav, MIGRATION_REASON } from './wiki-migrate.ts';

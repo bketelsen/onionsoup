@@ -21,6 +21,7 @@ const NOTE_LABELS: Record<string, string> = {
   published: 'Published', 'publish-failed': 'Publish failed', asked: 'Asked', answered: 'Answered', attention: 'Needs you', 'ci-triage': 'CI triage',
   'work-status': 'Work update', friction: 'Friction report', 'owner-created': 'Created owner', 'owner-updated': 'Updated owner', 'owner-retired': 'Retired owner', 'ship-started': 'Shipping', shipped: 'Shipped',
   'reminder-set': 'Set a reminder', 'reminder-fired': 'Reminder due', 'reminder-cancelled': 'Reminder cancelled',
+  'wiki-write': 'Wrote a wiki page', 'wiki-move': 'Moved a wiki page', 'wiki-delete': 'Deleted a wiki page',
 };
 
 /** An owner's page: its chat in the middle, and beside it what waits, its threads, its work and what it has been doing. */

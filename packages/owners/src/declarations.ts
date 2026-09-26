@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { MemoryPolicy } from './memory-config.ts';
 import { expandHome } from './paths.ts';
 import { loadProviders, type DeclaredProviders } from './providers.ts';
+import { checkWikiKeeper, loadWiki, type WikiDeclaration } from './wiki-config.ts';
 
 export const ModelRef = z.string().regex(/^[^/\s]+\/\S+$/, 'model must be provider/model');
 export type ModelRef = z.infer<typeof ModelRef>;
@@ -284,6 +285,8 @@ export interface Declarations {
   operator?: OperatorDeclaration;
   /** Model providers from providers.yaml, keyed by provider id; empty without the file. */
   providers: DeclaredProviders;
+  /** The wiki from wiki.yaml; absent without the file. */
+  wiki?: WikiDeclaration;
 }
 
 async function yamlFiles(directory: string) {
@@ -380,9 +383,11 @@ export async function loadDeclarations(root: string): Promise<Declarations> {
   const families = FamilyTable.parse(parse(await readFile(join(base, 'families.yaml'), 'utf8')));
   const operator = await loadOperator(base);
   const providers = await loadProviders(base);
+  const wiki = await loadWiki(base);
   const ownersById = new Map(owners.map(owner => [owner.id, owner]));
   checkOrgChart(ownersById);
   checkOperatorReserved(ownersById, operator);
+  checkWikiKeeper(new Set(ownersById.keys()), wiki);
   return {
     root: base,
     owners: ownersById,
@@ -390,6 +395,7 @@ export async function loadDeclarations(root: string): Promise<Declarations> {
     families,
     operator,
     providers,
+    wiki,
   };
 }
 

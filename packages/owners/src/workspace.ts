@@ -24,11 +24,15 @@ export async function gitWithLiteralPathspecs(directory: string, args: string[])
   return stdout;
 }
 
+/** Clone a remote into a directory unless it already holds a clone; with a branch, that branch is checked out. */
+export async function cloneIfMissing(remote: string, directory: string, branch?: string) {
+  if (existsSync(join(directory, '.git'))) return;
+  await run('git', ['clone', '-q', ...(branch ? ['--branch', branch] : []), remote, directory]);
+}
+
 /** Bring the owner's checkout to the tip of its base branch. The owner's checkout is never edited. */
 export async function refreshCheckout(owner: RepositoryOwner) {
-  if (!existsSync(join(owner.workspace, '.git'))) {
-    await run('git', ['clone', '-q', owner.domain.remote, owner.workspace]);
-  }
+  await cloneIfMissing(owner.domain.remote, owner.workspace);
   await git(owner.workspace, ['fetch', '-q', 'origin']);
   await git(owner.workspace, ['checkout', '-q', owner.domain.baseBranch]);
   await git(owner.workspace, ['reset', '-q', '--hard', `origin/${owner.domain.baseBranch}`]);
@@ -88,7 +92,7 @@ export async function matchHead(worktree: string) {
 
 /** A new owner has no checkout yet: clone it, so worktrees can be made from it. */
 export async function ensureClone(owner: RepositoryOwner) {
-  if (!existsSync(join(owner.workspace, '.git'))) await run('git', ['clone', '-q', owner.domain.remote, owner.workspace]);
+  await cloneIfMissing(owner.domain.remote, owner.workspace);
 }
 
 /**

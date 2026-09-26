@@ -7,6 +7,7 @@ import { mkdir, readFile, readdir, rename, unlink, writeFile } from 'node:fs/pro
 import { z } from 'zod';
 import { AssistantMessageEvent } from './provider-health.ts';
 import { withRecordLock } from './record-lock.ts';
+import { secretShapesIn } from './secret-shapes.ts';
 import type { Runtime } from './runtime.ts';
 
 export const FRICTION_LIMITS = {
@@ -108,7 +109,7 @@ export class FrictionEvents {
 
 /** Prose is untrusted: retain the context of a failure, not credential values or patch bodies. */
 export function safeProse(value: string) {
-  if (/-----BEGIN [A-Z ]*PRIVATE KEY-----/i.test(value)
+  if (secretShapesIn(value, ['privateKeyBlock']).length
     || /(?:^|\n)\s*(?:diff --git|@@ -\d|[+-]{3} [ab]\/)/.test(value)) throw new Error('friction_unsafe_text');
   return value.replace(/\b(?:gh[pousr]_[A-Za-z0-9_]+|sk-[A-Za-z0-9_-]{12,}|eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)\b/gi, '[redacted]')
     .replace(/\bBearer\s+\S+/gi, 'Bearer [redacted]')

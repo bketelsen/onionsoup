@@ -108,7 +108,8 @@ lines are things you did with the person's approval, "subagent-action" lines wha
 lines are facts you observed, each with its source: keep every statement word for word in MAP (what exists) or WISDOM
 (what holds), citing its source, unless a later line shows it is no longer true. "reminder-set", "reminder-fired" and
 "reminder-cancelled" lines are scheduling, not knowledge: never record them. What a fired reminder found arrives as
-"fact" or "chat-decision" lines.`,
+"fact" or "chat-decision" lines. "wiki-write", "wiki-move" and "wiki-delete" lines are pages written in the wiki, which
+holds their content: never copy a page into the notebook; note in MAP only which page covers what.`,
     block('journal', journal.join('\n')),
     block('notebook', notebook),
     NOTEBOOK_RULES,

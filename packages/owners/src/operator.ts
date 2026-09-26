@@ -4,6 +4,7 @@ import { OPERATOR_FILE, type OperatorDeclaration } from './declarations.ts';
 import { NOTICE_PREFIX } from './notices.ts';
 import { MEMORY_INDEX } from './operator-memory.ts';
 import { BOOTSTRAP_SKILL, NO_ONIONSOUP_TOOLS } from './owner-agents.ts';
+import { WIKI_TOOL } from './wiki-tool.ts';
 
 /** The onionsoup repository this engine runs from: where the operator uses the CLI. */
 export const ENGINE_REPOSITORY = fileURLToPath(new URL('../../../', import.meta.url));
@@ -30,13 +31,14 @@ export function operatorBash(operator: OperatorDeclaration): Record<string, stri
 
 /**
  * Nearly everything is allowed, as in a person's own coding agent in auto mode; irreversible commands ask. The
- * operator gets no onionsoup owner tools, and may load every skill but the owners' bootstrap.
+ * operator gets no onionsoup owner tools but the wiki (which it only reads: writes are the keeper's, in host code),
+ * and may load every skill but the owners' bootstrap. The wiki's allow comes after the deny, so it wins.
  */
 export function operatorPermission(operator: OperatorDeclaration) {
   return {
     edit: 'allow', bash: operatorBash(operator), webfetch: 'allow', websearch: 'allow', external_directory: 'allow',
     task: 'allow', question: 'allow', doom_loop: 'ask', skill: { '*': 'allow', [BOOTSTRAP_SKILL]: 'deny' },
-    ...NO_ONIONSOUP_TOOLS,
+    ...NO_ONIONSOUP_TOOLS, [WIKI_TOOL]: 'allow',
   };
 }
 
@@ -61,7 +63,9 @@ function memoryGuide(memory: string) {
 export function operatorPrompt(operator: OperatorDeclaration, places: OperatorPlaces) {
   return `You are ${operator.name}, the person's operator. You act for the person, directed by them turn by turn in this
 chat, on their homelab and on onionsoup, the engine that runs their owners. You are not an owner: owners cannot reach
-you, you have no onionsoup owner tools, and you keep no owner notebook: your memory is your own files (below).
+you, you have no onionsoup owner tools but onionsoup_wiki, and you keep no owner notebook: your memory is your own files
+(below). With onionsoup_wiki you read the homelab wiki (list, read, search, history, backlinks); only its keeper writes
+it, so send corrections to the keeper through the person.
 
 Where things are:
 - The onionsoup repository: ${ENGINE_REPOSITORY} (engine, CLI, surface, docs). Run the CLI there as the person would:

@@ -32,6 +32,7 @@ You never run `git commit`, `git push`, `gh`, merges or deploys yourself. Work e
 - **A bug or failing test:** systematic-debugging first, then the flow above.
 - **Your desk is behind its base branch** (`git status` or `git log origin/<base>` shows new commits, or a review sees unrelated reversions): `onionsoup_sync_desk` brings it up to date in host code and keeps your uncommitted work, naming any conflicts; with a plan's `item` it syncs that plan's worktree instead. A plan's worktree starts current. Never pull, stash or reset yourself.
 - **One of your PRs fails CI** (the runtime tells you): `onionsoup_checkout_pr { item }` puts your clean desk on the PR's head; debug, fix and verify there, then `onionsoup_propose_changes` with the same `item`. Host code reviews the fix and pushes it onto that PR.
+- **A homelab fact you need** (which host runs what, addresses, how storage or the network is set up): check the wiki first with `onionsoup_wiki search` (then `read`) before asking the person. The wiki's keeper records what she learns there with `onionsoup_wiki write`; a write is committed and pushed at once, with no plan or proposal. Everyone else only reads: when a page is wrong or missing something you know, send the keeper the correction with `onionsoup_ask`, quoting the page and your evidence.
 - **Finished work needs a later check** (backup retention, a rollout settling, a date): set `onionsoup_remind` rather than promising to check back. When it is due, the runtime opens a fresh session of yours with your prompt (and the work item, if you named one). Write the prompt for that later you: what to check, how, and why.
 
 When `onionsoup_propose_changes` comes back with blocker findings from the required review, use receiving-code-review, fix, verify and propose again.
@@ -58,6 +59,7 @@ Onionsoup tools only you have (subagents have none of them):
 - `onionsoup_record_fact { fact, source }`: journal an observation word for word in your notebook.
 - `onionsoup_record_decision { statement, quote }`: record a decision the person made, quoting them.
 - `onionsoup_remind { action: set, after | at, prompt, item? }`: wake yourself later in a new session for a one-off check; `list` and `cancel { id, reason? }` manage yours.
+- `onionsoup_wiki { action: list | read | search | history | backlinks, path?, query? }`: the homelab wiki. Its keeper also has `write { path, content, reason }`, `move { path, to, reason }` and `delete { path, reason }` (the person approves each delete).
 - `onionsoup_status`, `onionsoup_notebook`, `onionsoup_ask`, `onionsoup_request_work`, `onionsoup_friction`.
 
 ## Skill Priority

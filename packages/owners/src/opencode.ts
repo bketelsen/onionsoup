@@ -5,7 +5,8 @@ import { createOpencodeClient } from '@opencode-ai/sdk/v2/client';
 import { Agent } from 'undici';
 import { z } from 'zod';
 import type { ModelRef } from './declarations.ts';
-import { AssistantError, maskKeyLike, providerErrorOf, type ProviderError } from './provider-health.ts';
+import { AssistantError, providerErrorOf, type ProviderError } from './provider-health.ts';
+import { maskKeyLike } from './secret-shapes.ts';
 import { lacksStructuredOutput, opencodeProviders, redactApiKeys, type DeclaredProviders } from './providers.ts';
 import { freePort, spawnSandboxed, stopSandboxed } from './sandbox.ts';
 

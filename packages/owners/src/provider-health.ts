@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import { redactApiKeys, type DeclaredProviders } from './providers.ts';
 import { withRecordLock } from './record-lock.ts';
+import { maskKeyLike } from './secret-shapes.ts';
 import type { Runtime } from './runtime.ts';
 
 /**
@@ -84,20 +85,6 @@ export const FAILURE_SIGNATURES: Record<string, FailureSignature> = {
 export function classifyProviderFailure(error: ProviderError) {
   const match = Object.entries(FAILURE_SIGNATURES).find(([, signature]) => signature.matches(error));
   return match && { kind: match[1].kind, signature: match[0] };
-}
-
-/** Key-like text: provider keys, GitHub tokens, bearer values, long base64 or hex runs. */
-const KEY_LIKE: readonly RegExp[] = [
-  /\bsk-[\w*.…-]*[\w*…]/g,
-  /\b(?:gh[pousr]_|github_pat_)\w+/g,
-  /\bBearer\s+\S+/gi,
-  /[A-Za-z0-9+/_=-]{32,}/g,
-  /\b[a-f0-9]{24,}\b/gi,
-];
-
-/** Text with every key-like run masked. Used where the declared keys are not at hand. */
-export function maskKeyLike(text: string) {
-  return KEY_LIKE.reduce((masked, pattern) => masked.replace(pattern, '[masked]'), text);
 }
 
 /** Text safe to store and show: declared keys redacted, then anything key-like masked. */
