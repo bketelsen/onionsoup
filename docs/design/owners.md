@@ -59,7 +59,10 @@ in question order, support multiple selections and permitted custom responses, a
 page shows its plan (markdown), who approved it and a link to its work session; its activity rail lists the work
 session and the subagent sessions it started (read from the surface's opencode) plus any hires, then the
 publication stage, host verification and reviews, with each finding's issue and suggestion. Its decisions are
-approve or send back a plan, retry, resume and cancel.
+approve or send back a plan, retry, resume and cancel. On a phone (below Tailwind's `lg`, portrait and landscape)
+the rail, an owner's desk and an item's activity become drawers opened from the page's top bar, so the chat keeps the
+width; the app follows the visual viewport so the composer stays above the on-screen keyboard, pads for the notch
+and home indicator (`viewport-fit=cover`), keeps fields at 16px so iOS does not zoom, and gives touch targets 44px.
 OpenChamber and its Owner's Desk panel came first and were retired for it.
 
 If a chat directory, permission list or question list cannot be read, the surface reports the affected

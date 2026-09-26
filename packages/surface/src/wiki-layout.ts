@@ -21,16 +21,20 @@ export const WIKI_STYLE = `
   }
 }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--background); color: var(--foreground); font: 15px/1.6 var(--font-sans); }
+body { margin: 0; background: var(--background); color: var(--foreground); font: 15px/1.6 var(--font-sans); -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 a { color: var(--primary); }
 header { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--border); }
+/* viewport-fit=cover: the page reaches under the notch and home indicator, so its edges pad for them. */
+header { padding-top: max(10px, env(safe-area-inset-top)); padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); }
+main, nav.pages { padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); }
+nav.pages { padding-bottom: max(16px, env(safe-area-inset-bottom)); }
 header .site { font-weight: 600; color: var(--foreground); text-decoration: none; margin-right: auto; }
 header form { display: flex; gap: 6px; }
 input[type=search] { font: inherit; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--muted); color: var(--foreground); min-width: 0; width: 14rem; max-width: 60vw; }
 button { font: inherit; padding: 4px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--muted); color: var(--foreground); }
 .layout { display: grid; grid-template-columns: 1fr; }
-main { padding: 16px; min-width: 0; max-width: 52rem; }
-nav.pages { padding: 16px; background: var(--sidebar); border-top: 1px solid var(--border); }
+main { padding-top: 16px; padding-bottom: 16px; min-width: 0; max-width: 52rem; overflow-wrap: break-word; }
+nav.pages { padding-top: 16px; background: var(--sidebar); border-top: 1px solid var(--border); }
 nav.pages ul { list-style: none; margin: 0; padding-left: 0; }
 nav.pages ul ul { padding-left: 14px; }
 nav.pages li { margin: 2px 0; }
@@ -38,14 +42,29 @@ nav.pages a { color: var(--foreground); text-decoration: none; }
 nav.pages a[aria-current=page] { color: var(--primary); font-weight: 600; }
 nav.pages .section { color: var(--muted-foreground); font-size: 13px; text-transform: uppercase; letter-spacing: .04em; margin-top: 8px; display: block; }
 .jump { font-size: 13px; }
+/* A phone: the site's name and the jump to the pages list share the first line, the search gets the second. */
+@media (max-width: 799px) {
+  header .jump { order: 1; }
+  header form { order: 2; flex-basis: 100%; }
+  header form input[type=search] { flex: 1; width: auto; max-width: none; }
+}
+/* A touch screen: fields at 16px so iOS does not zoom into them, and links and buttons a thumb can hit. */
+@media (pointer: coarse) {
+  input[type=search], button { font-size: 16px; min-height: 44px; }
+  header .site, header .jump, nav.pages a { display: inline-flex; align-items: center; min-height: 44px; }
+  nav.pages li { margin: 0; }
+}
 @media (min-width: 800px) {
   .layout { grid-template-columns: 16rem 1fr; }
   nav.pages { grid-column: 1; grid-row: 1; border-top: 0; border-right: 1px solid var(--border); min-height: calc(100vh - 50px); }
   main { grid-column: 2; padding: 24px 32px; }
+  main { padding-right: max(32px, env(safe-area-inset-right)); }
   .jump { display: none; }
 }
 h1, h2, h3, h4 { line-height: 1.25; }
 .permalink { margin-left: 6px; color: var(--muted-foreground); text-decoration: none; opacity: 0; font-weight: 400; }
+/* Without hover the permalinks would be invisible yet tappable: show them faintly. */
+@media (hover: none) { .permalink { opacity: .45; } }
 h1:hover .permalink, h2:hover .permalink, h3:hover .permalink, h4:hover .permalink, h5:hover .permalink, h6:hover .permalink, .permalink:focus { opacity: 1; }
 code, pre { font-family: var(--font-mono); font-size: 13px; background: var(--code); border-radius: 4px; }
 code { padding: 1px 4px; }
@@ -122,7 +141,7 @@ export function frameHtml({ title, siteTitle, tree, current, query, content }: W
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>${escapeHtml(title === siteTitle ? title : `${title} · ${siteTitle}`)}</title>
 <style>${WIKI_STYLE}</style>
 </head>

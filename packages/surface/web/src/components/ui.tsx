@@ -5,6 +5,9 @@ import {
   RiShieldLine, RiTerminalBoxLine,
 } from '@remixicon/react';
 
+/** A page-wide alert on a phone keeps to a few lines and scrolls, so the page under it stays usable. */
+export const NARROW_BANNER_CAP = 'max-lg:max-h-[20dvh] max-lg:overflow-y-auto';
+
 export function cx(...classes: (string | false | null | undefined)[]) {
   return classes.filter(Boolean).join(' ');
 }
@@ -21,7 +24,8 @@ export function Button({ children, variant = 'secondary', onClick, disabled, tit
 }) {
   return (
     <button type={type} title={title} disabled={disabled} onClick={onClick}
-      className={cx('inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 typography-ui-label font-medium transition-colors', VARIANTS[variant], className)}>
+      className={cx('inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 pointer-coarse:min-h-11 pointer-coarse:px-3 typography-ui-label font-medium transition-colors',
+        VARIANTS[variant], className)}>
       {children}
     </button>
   );

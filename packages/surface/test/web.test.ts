@@ -277,3 +277,64 @@ test('the provider banner shows failing providers with their fix, a recovered on
   assert.match(recovered, /OpenAI authentication recovered/);
   assert.equal(renderToStaticMarkup(createElement(ProviderHealthBanner, { providerHealth: [] })), '');
 });
+
+const PHONE_OWNER: OwnerSummary = { id: 'sheeana', name: 'Sheeana', title: 'Keeper of the installer', source: '', icon: 'flask', color: 'primary',
+  model: 'm', domain: 'd', chat: true, hasDesk: true, waiting: 2, running: 0, runtimeWork: [], activity: 'idle' };
+
+test('a drawer sits beside the page from lg up and slides over it below, closed until opened, with a backdrop that closes it', async () => {
+  const { Drawer } = await import('../web/src/components/Drawer.tsx');
+  const render = (isOpen: boolean) => renderToStaticMarkup(createElement(Drawer,
+    { side: 'right', isOpen, onClose: () => {}, label: 'Desk', className: 'w-80', children: createElement('p', null, 'inside') }));
+  const closed = render(false);
+  assert.match(closed, /data-drawer="right"/);
+  assert.match(closed, /data-open="false"/);
+  assert.match(closed, /translate-x-full invisible/, 'closed: off screen and out of the tab order');
+  assert.match(closed, /lg:static[^"]*lg:translate-x-0 lg:visible/, 'from lg up it is an ordinary panel');
+  assert.doesNotMatch(closed, /data-drawer-backdrop/);
+  assert.match(closed, /<div class="flex-1 min-h-0 w-80"><p>inside<\/p><\/div>/, 'the panel keeps its own width');
+  const open = render(true);
+  assert.match(open, /data-open="true"/);
+  assert.doesNotMatch(open, /invisible/);
+  assert.match(open, /data-drawer-backdrop[^>]*class="[^"]*lg:hidden/, 'the backdrop only covers a narrow screen');
+});
+
+test('the rail is a drawer on narrow screens, and its rows are thumb-sized on touch screens without blocking a scroll', async () => {
+  const { Rail } = await import('../web/src/components/Rail.tsx');
+  const state = { owners: [PHONE_OWNER], inbox: [], frictionCount: 0 };
+  const html = renderToStaticMarkup(createElement(Rail, { state, route: ['inbox'], onReorder: () => {} }));
+  assert.match(html, /data-drawer="left"/);
+  assert.match(html, /aria-label="Navigation"/);
+  assert.match(html, /pointer-coarse:min-h-11[^"]*pointer-fine:touch-none/, 'only a mouse drag re-orders; a finger scrolls the rail');
+  assert.doesNotMatch(html, /[" ]touch-none/);
+  const { MobileBar } = await import('../web/src/components/Drawer.tsx');
+  const bar = renderToStaticMarkup(createElement(MobileBar, { title: 'Inbox' }));
+  assert.match(bar, /<header class="lg:hidden/);
+  assert.match(bar, /aria-label="Open navigation"[^>]*class="lg:hidden[^"]*size-11/);
+  assert.match(bar, />Inbox<\/span>/);
+});
+
+test('an owner page opens its desk from the header on narrow screens, and the chat keeps the width', async () => {
+  const { OwnerView } = await import('../web/src/components/OwnerView.tsx');
+  const html = renderToStaticMarkup(createElement(OwnerView, { owner: PHONE_OWNER, inbox: [], refresh: () => {} }));
+  assert.match(html, /aria-label="Open navigation"/);
+  assert.match(html, /aria-label="Open the desk"[^>]*class="lg:hidden/);
+  assert.match(html, /data-drawer="right"[^>]*aria-label="Sheeana&#x27;s desk"/);
+});
+
+test('the composer clears the home indicator, labels its buttons, and on a touch screen Return is a new line', async () => {
+  const { Composer, sendsOnEnter } = await import('../web/src/chat/Composer.tsx');
+  const html = renderToStaticMarkup(createElement(Composer,
+    { agent: 'Sheeana', busy: true, onSend: async () => {}, onStop: () => {}, autoAccept: false, onToggleAutoAccept: () => {} }));
+  assert.match(html, /<form class="[^"]*pb-\[max\(1rem,env\(safe-area-inset-bottom\)\)\]"/);
+  assert.match(html, /aria-label="Message Sheeana"/);
+  assert.match(html, /aria-label="Send"/);
+  assert.match(html, /aria-label="Stop"/);
+  assert.equal(sendsOnEnter(), true, 'without a media query (a keyboard), Enter sends');
+  const original = globalThis.matchMedia;
+  globalThis.matchMedia = ((query: string) => ({ matches: query === '(pointer: coarse)' })) as unknown as typeof matchMedia;
+  try {
+    assert.equal(sendsOnEnter(), false);
+  } finally {
+    globalThis.matchMedia = original;
+  }
+});

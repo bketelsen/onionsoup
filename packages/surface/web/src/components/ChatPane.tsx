@@ -71,12 +71,12 @@ export function ChatPane({ owner, sessionId, directory, pending, onPendingDone, 
     <div className="flex h-full min-h-0 bg-background">
       <div className="relative flex min-w-0 flex-1 flex-col h-full bg-background">
         <div className="relative min-h-0 flex-1">
-          <div ref={scroller} onScroll={onScroll} className="absolute inset-0 overflow-y-auto overflow-x-hidden z-0 chat-scroll" data-scroll-shadow="true" data-orientation="vertical">
+          <div ref={scroller} onScroll={onScroll} className="absolute inset-0 overflow-y-auto overflow-x-hidden overscroll-contain z-0 chat-scroll" data-scroll-shadow="true" data-orientation="vertical">
             {!chat.loaded && <div className="chat-message-column pt-6"><Empty>Loading…</Empty></div>}
             {chat.loaded && !chat.messages.length && <div className="chat-message-column pt-6"><Empty>Say something to {owner.name}.</Empty></div>}
             {hidden > 0 && (
               <div className="chat-message-column pt-4 flex justify-center">
-                <button className="typography-meta text-muted-foreground hover:text-foreground rounded-md px-2 py-1 hover:bg-interactive-hover"
+                <button className="typography-meta text-muted-foreground hover:text-foreground rounded-md px-2 py-1 pointer-coarse:min-h-11 hover:bg-interactive-hover"
                   onClick={() => { pinned.current = false; setShownTurns(count => count + TURN_PAGE); }}>
                   Show {Math.min(hidden, TURN_PAGE)} earlier turns ({hidden} hidden)
                 </button>

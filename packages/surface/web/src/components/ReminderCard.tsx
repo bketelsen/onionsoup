@@ -28,7 +28,7 @@ export function ReminderCard({ reminder, onDone }: { reminder: ReminderSummary; 
     <span className="typography-meta text-foreground line-clamp-4 [overflow-wrap:anywhere]">{reminder.prompt}</span>
     <div className="flex items-center gap-2">
       <input value={note} onChange={event => setNote(event.target.value)} placeholder="Note (optional)"
-        className="flex-1 min-w-0 rounded-md border border-border bg-background px-2 py-1 typography-meta" />
+        className="flex-1 min-w-0 rounded-md border border-border bg-background px-2 py-1 pointer-coarse:min-h-11 typography-meta" />
       <Button variant="destructive" disabled={busy} onClick={() => void cancel()}>Cancel</Button>
     </div>
     {error && <div className="typography-meta text-status-error">{error}</div>}

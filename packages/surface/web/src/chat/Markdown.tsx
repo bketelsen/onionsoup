@@ -6,7 +6,7 @@ import { Marked, type Tokens } from 'marked';
 // as a card with a language header, copy and wrap buttons and line numbers (chat/markdown/decorate.ts), inline code
 // and tables marked up for the copied CSS. Code is highlighted with shiki after it renders (highlight.ts).
 
-const ICON_BUTTON = 'p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors';
+const ICON_BUTTON = 'p-1 pointer-coarse:p-3 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors';
 const COPY_ICON = '<svg viewBox="0 0 24 24" class="size-3.5" fill="currentColor"><path d="M7 6V3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-3v3c0 .552-.45 1-1.007 1H4.007A1.001 1.001 0 0 1 3 21l.003-14c0-.552.45-1 1.006-1H7zM5.002 8L5 20h10V8H5.002zM9 6h8v10h2V4H9v2z"/></svg>';
 const WRAP_ICON = '<svg viewBox="0 0 24 24" class="size-3.5" fill="currentColor"><path d="M15 18h1.5a2.5 2.5 0 1 0 0-5H3v-2h13.5a4.5 4.5 0 1 1 0 9H15v2l-4-3 4-3v2zM3 4h18v2H3V4zm6 14v2H3v-2h6z"/></svg>';
 

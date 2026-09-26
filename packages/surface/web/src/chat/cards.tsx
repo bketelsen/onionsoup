@@ -3,6 +3,7 @@ import { RiArrowGoBackLine, RiCheckLine, RiCloseLine, RiFileList3Line, RiQuestio
 import { api } from '../api.ts';
 import type { InboxEntry } from '../types.ts';
 import { Markdown } from './Markdown.tsx';
+import { CARD_ACTION } from './cardStyles.ts';
 import { QuestionCard } from './QuestionCard.tsx';
 import { ToolIcon } from './tools.tsx';
 
@@ -13,7 +14,6 @@ function Spinner() {
   return <div className="animate-spin h-3 w-3 border border-primary border-t-transparent rounded-full" />;
 }
 
-const ACTION = 'flex items-center gap-1 px-2 py-1 typography-meta font-medium rounded transition-all disabled:opacity-50 disabled:cursor-not-allowed';
 
 export function PermissionCard({ entry, onDone }: { entry: InboxEntry; onDone: () => void }) {
   const { responding, error, reply } = usePermissionReply(entry, onDone);
@@ -26,7 +26,7 @@ export function PermissionCard({ entry, onDone }: { entry: InboxEntry; onDone: (
       <div className="chat-column">
         <div className="-mt-1 border border-border/30 rounded-xl bg-muted/10">
           <div className="px-2 py-1.5 border-b border-border/20 bg-muted/5">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-x-2">
               <div className="flex items-center gap-2">
                 <RiQuestionLine className="h-3.5 w-3.5 text-[var(--status-warning)]" />
                 <span className="typography-meta font-medium text-muted-foreground">Permission Required</span>
@@ -49,13 +49,13 @@ export function PermissionCard({ entry, onDone }: { entry: InboxEntry; onDone: (
             )}
           </div>
           <div className="px-2 pb-1.5 pt-1 flex flex-wrap items-center gap-1.5 border-t border-border/20">
-            <button className={ACTION} style={{ color: 'var(--status-success)' }} disabled={responding} onClick={() => void reply('once')}>
+            <button className={CARD_ACTION} style={{ color: 'var(--status-success)' }} disabled={responding} onClick={() => void reply('once')}>
               <RiCheckLine className="h-3 w-3 flex-shrink-0" />Allow Once
             </button>
-            <button className={ACTION} style={{ color: 'var(--muted-foreground)' }} disabled={responding} onClick={() => void reply('always')}>
+            <button className={CARD_ACTION} style={{ color: 'var(--muted-foreground)' }} disabled={responding} onClick={() => void reply('always')}>
               <RiTimeLine className="h-3 w-3 flex-shrink-0" />{permission.always.length ? <span className="truncate max-w-[180px]">Always: {permission.always.join(', ')}</span> : 'Always Allow'}
             </button>
-            <button className={ACTION} style={{ color: 'var(--status-error)' }} disabled={responding} onClick={() => void reply('reject')}>
+            <button className={CARD_ACTION} style={{ color: 'var(--status-error)' }} disabled={responding} onClick={() => void reply('reject')}>
               <RiCloseLine className="h-3 w-3 flex-shrink-0" />Deny
             </button>
             {responding && <div className="ml-auto"><Spinner /></div>}
@@ -95,10 +95,10 @@ export function PlanApprovalActions({ entry, onDone }: { entry: InboxEntry; onDo
         placeholder="What should change? (sent with Send back)"
         className="w-full rounded-md border border-border bg-background px-2 py-1 typography-meta" />
       <div className="flex flex-wrap items-center gap-1.5">
-        <button className={ACTION} style={{ color: 'var(--status-success)' }} disabled={responding} onClick={() => void reply('once')}>
+        <button className={CARD_ACTION} style={{ color: 'var(--status-success)' }} disabled={responding} onClick={() => void reply('once')}>
           <RiCheckLine className="h-3 w-3 flex-shrink-0" />Approve plan
         </button>
-        <button className={ACTION} style={{ color: 'var(--status-error)' }} disabled={responding || !note.trim()} onClick={() => void reply('reject', note.trim())}>
+        <button className={CARD_ACTION} style={{ color: 'var(--status-error)' }} disabled={responding || !note.trim()} onClick={() => void reply('reject', note.trim())}>
           <RiArrowGoBackLine className="h-3 w-3 flex-shrink-0" />Send back
         </button>
         {responding && <div className="ml-auto"><Spinner /></div>}
@@ -115,12 +115,14 @@ export function PlanApprovalCard({ entry, onDone }: { entry: InboxEntry; onDone:
     <div className="group w-full pt-0 pb-2">
       <div className="chat-column">
         <div className="-mt-1 border border-border/30 rounded-xl bg-muted/10">
-          <div className="px-3 py-2 border-b border-border/20 bg-muted/5 flex items-center gap-2">
-            <RiFileList3Line className="h-4 w-4 text-[var(--status-warning)]" />
-            <span className="typography-ui-label font-medium text-foreground">Approve plan: {request.title}</span>
-            <span className="ml-auto font-mono text-[0.7rem] text-muted-foreground">{request.item}</span>
+          <div className="px-3 py-2 border-b border-border/20 bg-muted/5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+            <span className="flex items-center gap-2 min-w-[12rem] flex-1">
+              <RiFileList3Line className="h-4 w-4 shrink-0 text-[var(--status-warning)]" />
+              <span className="typography-ui-label font-medium text-foreground min-w-0 [overflow-wrap:anywhere]">Approve plan: {request.title}</span>
+            </span>
+            <span className="ml-auto font-mono text-[0.7rem] text-muted-foreground break-all">{request.item}</span>
           </div>
-          <div className="px-3 py-2 max-h-[60vh] overflow-y-auto"><Markdown text={request.plan} /></div>
+          <div className="px-3 py-2 max-h-[60vh] overflow-y-auto overscroll-contain"><Markdown text={request.plan} /></div>
           <PlanApprovalActions entry={entry} onDone={onDone} />
         </div>
       </div>

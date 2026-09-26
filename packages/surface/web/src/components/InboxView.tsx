@@ -7,7 +7,7 @@ export function InboxView({ state, refresh }: { state?: SurfaceState; refresh: (
   const owners = new Map(state?.owners.map(owner => [owner.id, owner]));
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="max-w-3xl mx-auto p-6 flex flex-col gap-3">
+      <div className="max-w-3xl mx-auto p-4 lg:p-6 flex flex-col gap-3">
         <h1 className="typography-h text-xl font-semibold">Inbox</h1>
         <p className="typography-meta text-muted-foreground">What your owners are waiting on you for: plans, publishing, requests, and permissions asked in chats.</p>
         {!state && <Empty>Loading…</Empty>}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { api, navigate, opencodePayload, useEvents, useRoute } from './api.ts';
 import { InboxView } from './components/InboxView.tsx';
 import { ItemView } from './components/ItemView.tsx';
@@ -9,7 +9,9 @@ import { InitiativePage } from './components/InitiativeView.tsx';
 import { OrgView } from './components/OrgView.tsx';
 import { InboxErrors } from './components/InboxErrors.tsx';
 import { ProviderHealthBanner } from './components/ProviderHealthBanner.tsx';
-import type { InboxEntry, SurfaceState } from './types.ts';
+import { MobileBar } from './components/Drawer.tsx';
+import { NARROW_BANNER_CAP } from './components/ui.tsx';
+import type { InboxEntry, OwnerSummary, SurfaceState } from './types.ts';
 
 /** What a notification says about a new inbox entry, by kind; other kinds say they are waiting. */
 const NOTIFICATION_TITLES: Partial<Record<InboxEntry['kind'], string>> = {
@@ -17,6 +19,42 @@ const NOTIFICATION_TITLES: Partial<Record<InboxEntry['kind'], string>> = {
   question: 'a question for you',
   'provider-auth': 'model provider authentication failing',
 };
+
+/** What a page is drawn from: the route, the surface's state, and the owner the route names, if any. */
+interface PageProps { route: string[]; state?: SurfaceState; owner?: OwnerSummary; refresh: () => void }
+
+/**
+ * Each route's page. A page with a title gets the narrow-screen bar from here; one without draws its own (the owner
+ * and item pages, whose bars carry their own buttons). An unknown route, or an owner that is not there, is the inbox.
+ */
+interface PageView {
+  title?: string;
+  /** Whether the route names what the page needs; the inbox shows when it does not. */
+  hasSubject?: (route: string[], owner: OwnerSummary | undefined) => boolean;
+  render: (props: PageProps) => ReactNode;
+}
+
+const hasId = (route: string[]) => Boolean(route[1]);
+
+const INBOX_PAGE: PageView = { title: 'Inbox', render: ({ state, refresh }) => <InboxView state={state} refresh={refresh} /> };
+
+const PAGES: Record<string, PageView> = {
+  inbox: INBOX_PAGE,
+  item: { hasSubject: hasId, render: ({ route }) => <ItemView itemId={route[1]!} /> },
+  friction: { title: 'Friction', render: ({ route }) => <FrictionView recordId={route[1]} /> },
+  org: { title: 'Org', render: () => <OrgView /> },
+  initiative: { title: 'Initiative', hasSubject: hasId, render: ({ route }) => <InitiativePage initiativeId={route[1]!} /> },
+  owner: {
+    hasSubject: (_route, owner) => Boolean(owner),
+    render: ({ route, state, owner, refresh }) => <OwnerView key={owner!.id} owner={owner!} inbox={state?.inbox ?? []} sessionId={route[2] === 'chat' ? route[3] : undefined} refresh={refresh} />,
+  },
+};
+
+/** The page for a route, falling back to the inbox when the route lacks what its page needs. */
+function pageFor(route: string[], owner: OwnerSummary | undefined): PageView {
+  const page = PAGES[route[0] ?? ''];
+  return page && (page.hasSubject?.(route, owner) ?? true) ? page : INBOX_PAGE;
+}
 
 const REFRESH_TYPES = new Set(['permission.asked', 'permission.replied', 'question.asked', 'question.replied', 'question.rejected', 'session.status', 'session.idle']);
 
@@ -83,12 +121,13 @@ export function App() {
 
   const chats = state ? [...(state.operator ? [state.operator] : []), ...state.owners] : [];
   const owner = route[0] === 'owner' ? chats.find(candidate => candidate.id === route[1]) : undefined;
+  const page = pageFor(route, owner);
   return (
     <div className="h-full flex flex-col bg-background text-foreground">
       <ProviderHealthBanner providerHealth={state?.providerHealth ?? []} />
       <InboxErrors errors={state?.inboxErrors ?? []} refreshError={refreshError} />
       {state?.opencode && !state.opencode.ok && (
-        <div role="alert" className="shrink-0 px-4 py-2 typography-meta border-b border-[var(--status-error-border)] bg-[var(--status-error-background)] text-[var(--status-error)]">
+        <div role="alert" className={`${NARROW_BANNER_CAP} shrink-0 px-4 py-2 typography-meta border-b border-[var(--status-error-border)] bg-[var(--status-error-background)] text-[var(--status-error)]`}>
           Chats are unavailable: {state.opencode.error}. If the surface is attached to another opencode (OPENCODE_URL), that opencode may have moved or stopped; restart the surface, or run it with its own opencode (the default).
         </div>
       )}
@@ -97,12 +136,10 @@ export function App() {
         setState(current => current && { ...current, owners: order.map(id => current.owners.find(owner => owner.id === id)!).filter(Boolean) });
         void api('/api/settings/owner-order', { method: 'PUT', body: { order } }).catch(() => refresh());
       }} />
-      {route[0] === 'item' && route[1] ? <ItemView itemId={route[1]} />
-        : route[0] === 'friction' ? <FrictionView recordId={route[1]} />
-        : route[0] === 'org' ? <OrgView />
-        : route[0] === 'initiative' && route[1] ? <InitiativePage initiativeId={route[1]} />
-        : owner ? <OwnerView key={owner.id} owner={owner} inbox={state?.inbox ?? []} sessionId={route[2] === 'chat' ? route[3] : undefined} refresh={refresh} />
-          : <InboxView state={state} refresh={refresh} />}
+      <div className="flex-1 flex flex-col min-w-0 min-h-0">
+        {page.title && <MobileBar title={page.title} />}
+        <div className="flex-1 flex min-w-0 min-h-0">{page.render({ route, state, owner, refresh })}</div>
+      </div>
       </div>
     </div>
   );

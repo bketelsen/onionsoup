@@ -6,9 +6,40 @@
 @source "./**/*.{ts,tsx}";
 
 @custom-variant dark (&:is(.dark *));
+/* A phone on its side: little height, so bars and the composer give back what they can. */
+@custom-variant short (@media (max-height: 500px));
 
-html, body, #root { height: 100%; }
-body { background: var(--background); color: var(--foreground); }
+html, body { height: 100%; }
+body {
+  background: var(--background);
+  color: var(--foreground);
+  /* The app scrolls inside its panes: no rubber-banding of the whole page, no text inflation on rotation. */
+  overscroll-behavior: none;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/*
+ * The app fills what the person can see: the visual viewport's height when the keyboard is up (viewport.ts sets
+ * --app-height), else the dynamic viewport, so the collapsing URL bar never hides the composer. With
+ * viewport-fit=cover the page reaches under the notch, Dynamic Island and home indicator: the root pads for the
+ * top and the sides, and whatever sits at the bottom edge (the composer, the drawers) pads for the home indicator.
+ */
+#root {
+  height: 100%;
+  height: var(--app-height, 100dvh);
+  padding-top: env(safe-area-inset-top);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+/* iOS zooms into a focused field whose text is under 16px; on touch screens every field is at least 16px. */
+@media (pointer: coarse) {
+  input, textarea, select { font-size: max(16px, 1em); }
+}
 
 :where(button, [role="button"], a[href]):not(:disabled) { cursor: pointer; }
 :where(button, [role="button"]):disabled { cursor: not-allowed; opacity: 0.6; }

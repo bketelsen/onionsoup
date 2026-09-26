@@ -97,7 +97,7 @@ export function ReasoningPart({ part, streaming }: { part: Part; streaming: bool
   return (
     <div className="py-0">
       <div role="button" tabIndex={0} aria-expanded={expanded} onClick={() => setToggled(!expanded)}
-        className="group/tool flex gap-1.5 pr-2 pl-px py-1.5 rounded-xl cursor-pointer items-center">
+        className="group/tool flex gap-1.5 pr-2 pl-px py-1.5 pointer-coarse:py-2.5 rounded-xl cursor-pointer items-center">
         <div className="flex items-center gap-1.5 flex-shrink-0">
           <Disclosure expanded={expanded} icon={<span style={{ color: 'var(--tools-icon)' }}><RiBrainLine className="h-3.5 w-3.5" /></span>} />
           <span className={cx(TOOL_ROW_TITLE, streaming && 'flex items-center gap-1')} style={{ color: 'var(--tools-title)' }}>Thinking{streaming && <BusyDots />}</span>
@@ -175,7 +175,7 @@ export function ToolPart({ part, directory }: { part: Part; directory: string })
   const deletions = files.reduce((total, file) => total + file.deletions, 0);
   return (
     <div>
-      <div role="button" tabIndex={0} onClick={() => setExpanded(!expanded)} className="group/tool flex gap-1.5 pr-2 pl-px py-1.5 rounded-xl items-center cursor-pointer">
+      <div role="button" tabIndex={0} onClick={() => setExpanded(!expanded)} className="group/tool flex gap-1.5 pr-2 pl-px py-1.5 pointer-coarse:py-2.5 rounded-xl items-center cursor-pointer">
         <div className="flex gap-1.5 items-center flex-shrink-0">
           <Disclosure expanded={expanded} icon={<span style={{ color }}><ToolIcon tool={tool} /></span>} />
           <span className={cx(TOOL_ROW_TITLE, 'flex-shrink-0 transition-opacity duration-200', running && 'opacity-70')} style={{ color: error ? 'var(--status-error)' : 'var(--tools-title)' }}>{title}</span>

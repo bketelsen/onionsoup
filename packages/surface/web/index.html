@@ -2,7 +2,10 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- viewport-fit=cover lets the page reach under the notch and home indicator; app.css pads for them with env(safe-area-inset-*). -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#fdfcfa" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#120f0e" />
     <title>onionsoup</title>
     <script>
       // Follow the system theme before first paint.

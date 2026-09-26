@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { RiAddLine, RiBookOpenLine, RiCloseLine, RiExternalLinkLine } from '@remixicon/react';
+import { RiAddLine, RiBookOpenLine, RiCloseLine, RiEditLine, RiExternalLinkLine, RiLayoutRightLine } from '@remixicon/react';
 import { api, navigate, opencodePayload, useEvents } from '../api.ts';
 import type { DeskState, InboxEntry, OwnerSummary, Session } from '../types.ts';
 import { ChatPane } from './ChatPane.tsx';
 import { Decision } from './Decision.tsx';
+import { Drawer, MenuButton } from './Drawer.tsx';
 import { MemoryMaintenance } from './MemoryMaintenance.tsx';
 import { ReminderCard } from './ReminderCard.tsx';
 import { Badge, BusyDots, Button, cx, Empty, OwnerIcon, Section, statusTone, timeAgo } from './ui.tsx';
@@ -38,6 +39,9 @@ export function OwnerView({ owner, inbox, sessionId, refresh }: { owner: OwnerSu
   const [renaming, setRenaming] = useState<string>();
   const [title, setTitle] = useState('');
   const [seen, setSeen] = useState<Record<string, number>>(() => readSeen());
+  const [isDeskOpen, setDeskOpen] = useState(false);
+  const closeDesk = useCallback(() => setDeskOpen(false), []);
+  useEffect(closeDesk, [sessionId, closeDesk]);
 
   const loadDesk = useCallback(() => {
     if (!owner.hasDesk) return Promise.resolve();
@@ -101,11 +105,13 @@ export function OwnerView({ owner, inbox, sessionId, refresh }: { owner: OwnerSu
   const waiting = inbox.filter(entry => entry.owner === owner.id);
   return (
     <div className="flex-1 flex flex-col min-w-0 min-h-0">
-      <header className="h-12 shrink-0 border-b border-border px-4 flex items-center gap-2 min-w-0">
+      <header className="h-12 shrink-0 border-b border-border px-3 lg:px-4 flex items-center gap-2 min-w-0">
+        <MenuButton />
         <OwnerIcon icon={owner.icon} className="size-5 text-primary" />
-        <span className="typography-ui-header font-semibold">{owner.name}</span>
+        <span className="typography-ui-header font-semibold shrink-0">{owner.name}</span>
         <span className="typography-meta text-muted-foreground truncate">{[owner.title, owner.source].filter(Boolean).join(' · ')}</span>
         <span className="ml-auto typography-micro text-muted-foreground truncate hidden lg:inline">{owner.domain} · {owner.model}</span>
+        <DeskButton waiting={waiting.length} onOpen={() => setDeskOpen(true)} />
       </header>
       <div className="flex-1 flex min-h-0">
         <main className="flex-1 flex flex-col min-w-0 min-h-0">
@@ -125,7 +131,8 @@ export function OwnerView({ owner, inbox, sessionId, refresh }: { owner: OwnerSu
             </div>
           )}
         </main>
-        <aside className="w-80 shrink-0 border-l border-border overflow-y-auto p-4 flex flex-col gap-5">
+        <Drawer side="right" isOpen={isDeskOpen} onClose={closeDesk} label={`${owner.name}'s desk`}
+          className="w-80 border-l border-border overflow-y-auto overscroll-contain p-4 flex flex-col gap-5">
           {waiting.length > 0 && (
             <Section title={`Waiting on you (${waiting.length})`}>
               {waiting.map(entry => <Decision key={`${entry.kind}:${entry.id}`} entry={entry} compact onDone={refresh} />)}
@@ -142,23 +149,32 @@ export function OwnerView({ owner, inbox, sessionId, refresh }: { owner: OwnerSu
                     onBlur={() => void rename(session.id)}
                     className="rounded-md border border-interactive-border-focus bg-background px-2 py-1 typography-meta outline-none" />
                 ) : (
-                  <button key={session.id} onClick={() => navigate('owner', owner.id, 'chat', session.id)} onDoubleClick={() => { setRenaming(session.id); setTitle(session.title); }}
+                  <div key={session.id} className="flex items-center gap-1">
+                  <button onClick={() => navigate('owner', owner.id, 'chat', session.id)} onDoubleClick={() => { setRenaming(session.id); setTitle(session.title); }}
                     title="Double-click to rename"
-                    className={cx('flex items-center gap-2 rounded-md px-2 py-1 text-left typography-meta', session.id === current ? 'bg-interactive-active text-foreground' : 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground')}>
+                    className={cx('flex flex-1 min-w-0 items-center gap-2 rounded-md px-2 py-1 pointer-coarse:min-h-11 text-left typography-meta', session.id === current ? 'bg-interactive-active text-foreground' : 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground')}>
                     {session.id !== current && session.time.updated > (seen[session.id] ?? BASELINE) && <span className="size-1.5 shrink-0 rounded-full bg-primary" title="New since you last looked" />}
                     <span className={cx('truncate flex-1', session.id !== current && session.time.updated > (seen[session.id] ?? BASELINE) && 'text-foreground font-medium')}>{session.title || 'Untitled'}</span>
                     {busySessions[session.id] ? <BusyDots className="text-status-info" /> : <span className="shrink-0 text-[0.7rem]">{timeAgo(session.time.updated)}</span>}
                   </button>
+                  {/* Touch screens have no double-click: the open chat gets a rename button. */}
+                  {session.id === current && (
+                    <button aria-label="Rename this chat" onClick={() => { setRenaming(session.id); setTitle(session.title); }}
+                      className="pointer-fine:hidden flex size-11 shrink-0 items-center justify-center rounded-md text-muted-foreground">
+                      <RiEditLine className="size-4" />
+                    </button>
+                  )}
+                  </div>
                 ))}
               </div>
               {engine.length > 0 && (
-                <button className="self-start typography-micro text-muted-foreground hover:text-foreground" onClick={() => setShowEngine(value => !value)}>
+                <button className="self-start typography-micro text-muted-foreground hover:text-foreground pointer-coarse:min-h-11" onClick={() => setShowEngine(value => !value)}>
                   {showEngine ? 'Hide' : 'Show'} {engine.length} engine sessions (hires, reviews)
                 </button>
               )}
               {showEngine && engine.map(session => (
                 <button key={session.id} onClick={() => navigate('owner', owner.id, 'chat', session.id)}
-                  className="flex items-center gap-2 rounded-md px-2 py-1 text-left typography-micro text-muted-foreground hover:bg-interactive-hover">
+                  className="flex items-center gap-2 rounded-md px-2 py-1 pointer-coarse:min-h-11 text-left typography-micro text-muted-foreground hover:bg-interactive-hover">
                   <span className="truncate flex-1">{session.title}</span><span className="shrink-0">{timeAgo(session.time.updated)}</span>
                 </button>
               ))}
@@ -178,7 +194,7 @@ export function OwnerView({ owner, inbox, sessionId, refresh }: { owner: OwnerSu
               </button>
             ))}
             {desk?.recent.map(item => (
-              <button key={item.id} onClick={() => navigate('item', item.id)} className="flex items-center gap-2 rounded-md px-2 py-1 text-left hover:bg-interactive-hover">
+              <button key={item.id} onClick={() => navigate('item', item.id)} className="flex items-center gap-2 rounded-md px-2 py-1 pointer-coarse:min-h-11 text-left hover:bg-interactive-hover">
                 <Badge tone={statusTone(item.status)}>{item.status}</Badge>
                 <span className="typography-micro text-muted-foreground truncate flex-1">{item.title}</span>
                 {item.url && <a href={item.url} target="_blank" rel="noreferrer" onClick={event => event.stopPropagation()}><RiExternalLinkLine className="size-3.5 text-muted-foreground" /></a>}
@@ -205,10 +221,21 @@ export function OwnerView({ owner, inbox, sessionId, refresh }: { owner: OwnerSu
               ))}
             </ol>
           </Section>}
-        </aside>
+        </Drawer>
       </div>
       {notebookOpen && desk && <Notebook desk={desk} onClose={() => setNotebookOpen(false)} />}
     </div>
+  );
+}
+
+/** On narrow screens, opens the desk (what waits, chats, work, activity) that sits beside the chat on wide ones. */
+function DeskButton({ waiting, onOpen }: { waiting: number; onOpen: () => void }) {
+  return (
+    <button type="button" onClick={onOpen} aria-label={waiting ? `Open the desk, ${waiting} waiting on you` : 'Open the desk'}
+      className="lg:hidden ml-auto -mr-2 relative flex size-11 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover hover:text-foreground">
+      <RiLayoutRightLine className="size-5" />
+      {waiting > 0 && <span className="absolute top-0.5 right-0.5 rounded-full bg-primary text-primary-foreground px-1.5 typography-micro font-semibold leading-4">{waiting}</span>}
+    </button>
   );
 }
 
@@ -216,17 +243,19 @@ function Notebook({ desk, onClose }: { desk: DeskState; onClose: () => void }) {
   const registers = Object.entries(desk.registers).filter(([, text]) => text.trim());
   const [tab, setTab] = useState(registers[0]?.[0] ?? '');
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-6" onClick={onClose}>
-      <div className="bg-background border border-border rounded-xl w-full max-w-3xl max-h-full flex flex-col" onClick={event => event.stopPropagation()}>
-        <div className="flex items-center gap-1 border-b border-border px-3 h-11">
-          <span className="typography-ui-label font-semibold mr-2">{desk.owner.name}'s notebook</span>
-          {registers.map(([name]) => (
-            <button key={name} onClick={() => setTab(name)} className={cx('px-2 py-1 rounded-md typography-meta', tab === name ? 'bg-interactive-active' : 'text-muted-foreground hover:bg-interactive-hover')}>{name}</button>
-          ))}
-          <button className="ml-auto text-muted-foreground hover:text-foreground" onClick={onClose}><RiCloseLine className="size-5" /></button>
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-2 pt-[max(0.5rem,env(safe-area-inset-top))] pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:p-6" onClick={onClose}>
+      <div className="bg-background border border-border rounded-xl w-full max-w-3xl max-h-full flex flex-col min-h-0" onClick={event => event.stopPropagation()}>
+        <div className="flex items-center gap-1 border-b border-border px-3 min-h-11">
+          <span className="typography-ui-label font-semibold mr-2 shrink-0">{desk.owner.name}'s notebook</span>
+          <div className="flex items-center gap-1 overflow-x-auto min-w-0">
+            {registers.map(([name]) => (
+              <button key={name} onClick={() => setTab(name)} className={cx('px-2 py-1 pointer-coarse:min-h-11 shrink-0 rounded-md typography-meta', tab === name ? 'bg-interactive-active' : 'text-muted-foreground hover:bg-interactive-hover')}>{name}</button>
+            ))}
+          </div>
+          <button aria-label="Close the notebook" className="ml-auto shrink-0 flex items-center justify-center pointer-coarse:size-11 text-muted-foreground hover:text-foreground" onClick={onClose}><RiCloseLine className="size-5" /></button>
         </div>
         <MemoryMaintenance ownerId={desk.owner.id} />
-        <pre className="overflow-y-auto p-4 typography-meta whitespace-pre-wrap font-sans">{desk.registers[tab] ?? ''}</pre>
+        <pre className="overflow-y-auto overscroll-contain p-4 typography-meta whitespace-pre-wrap [overflow-wrap:anywhere] font-sans">{desk.registers[tab] ?? ''}</pre>
       </div>
     </div>
   );

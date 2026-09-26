@@ -3,9 +3,9 @@ import { RiArrowRightSLine, RiCheckLine, RiCloseLine, RiEditLine, RiQuestionLine
 import { api } from '../api.ts';
 import type { InboxEntry, QuestionInfo } from '../types.ts';
 import { cx } from '../components/ui.tsx';
+import { CARD_ACTION } from './cardStyles.ts';
 import { answersFor, emptyAnswer, selectAnswer, toggleCustom, type QuestionDraft } from './questionAnswers.ts';
 
-const ACTION = 'flex items-center gap-1 px-2 py-1 typography-meta font-medium rounded transition-all disabled:opacity-50 disabled:cursor-not-allowed';
 
 function Choice({ multiple, selected }: { multiple: boolean; selected: boolean }) {
   if (multiple) {
@@ -60,7 +60,7 @@ function QuestionTabs({ form }: QuestionFormProps) {
   return <div className="flex items-center gap-1 mb-2 flex-wrap">
     {questions.map((question, position) => (
       <button key={position} disabled={responding} onClick={() => setIndex(position)}
-        className={cx('px-2 py-0.5 typography-meta font-medium rounded transition-colors',
+        className={cx('px-2 py-0.5 pointer-coarse:min-h-11 typography-meta font-medium rounded transition-colors',
           position === index ? 'bg-interactive-selection/40 text-foreground' : 'text-muted-foreground')}>
         {answers[position]!.length > 0 && <RiCheckLine className="inline h-3 w-3" />}
         {question.header || `Q${position + 1}`}
@@ -78,11 +78,11 @@ function QuestionChoices({ form }: QuestionFormProps) {
       return (
         <button key={option.label} disabled={responding}
           aria-pressed={selected} onClick={() => updateDraft(draft => selectAnswer(draft, question, option.label))}
-          className={cx('w-full px-1.5 py-1 text-left rounded hover:bg-interactive-hover/30', selected && 'bg-interactive-selection/20')}>
+          className={cx('w-full px-1.5 py-1 pointer-coarse:py-2.5 text-left rounded hover:bg-interactive-hover/30', selected && 'bg-interactive-selection/20')}>
           <div className="flex items-start gap-2">
             <div className="mt-0.5 shrink-0"><Choice multiple={Boolean(question.multiple)} selected={selected} /></div>
             <div className="min-w-0 flex-1">
-              <div className={cx('typography-meta break-all', selected ? 'text-foreground font-medium' : 'text-foreground/80')}>
+              <div className={cx('typography-meta [overflow-wrap:anywhere]', selected ? 'text-foreground font-medium' : 'text-foreground/80')}>
                 {option.label}
               </div>
               {option.description && <div className="typography-micro text-muted-foreground break-words">{option.description}</div>}
@@ -103,7 +103,7 @@ function CustomAnswer({ form }: QuestionFormProps) {
   return <>
     <button disabled={responding} aria-pressed={draft.usesCustom}
       onClick={() => updateDraft(current => toggleCustom(current, question))}
-      className={cx('w-full px-1.5 py-1 text-left rounded hover:bg-interactive-hover/30', draft.usesCustom && 'bg-interactive-selection/20')}>
+      className={cx('w-full px-1.5 py-1 pointer-coarse:min-h-11 text-left rounded hover:bg-interactive-hover/30', draft.usesCustom && 'bg-interactive-selection/20')}>
       <div className="flex items-center gap-2">
         <RiEditLine className={cx('h-3.5 w-3.5', draft.usesCustom ? 'text-primary' : 'text-muted-foreground/50')} />
         <span className="typography-meta">Other…</span>
@@ -119,12 +119,12 @@ function CustomAnswer({ form }: QuestionFormProps) {
 
 function QuestionActions({ form }: QuestionFormProps) {
   const { responding, satisfied, submit, respond, error } = form;
-  return <div className="px-2 pb-1.5 pt-1 flex items-center gap-1.5 border-t border-border/20">
-    <button className={ACTION} style={{ color: 'var(--status-success)' }} disabled={responding} onClick={submit}>
+  return <div className="px-2 pb-1.5 pt-1 flex flex-wrap items-center gap-1.5 border-t border-border/20">
+    <button className={CARD_ACTION} style={{ color: 'var(--status-success)' }} disabled={responding} onClick={submit}>
       {satisfied ? <RiCheckLine className="h-3 w-3" /> : <RiArrowRightSLine className="h-3 w-3" />}
       {satisfied ? 'Submit' : 'Next'}
     </button>
-    <button className={ACTION} style={{ color: 'var(--status-error)' }} disabled={responding}
+    <button className={CARD_ACTION} style={{ color: 'var(--status-error)' }} disabled={responding}
       onClick={() => void respond({ reject: true })}>
       <RiCloseLine className="h-3 w-3" />Dismiss
     </button>

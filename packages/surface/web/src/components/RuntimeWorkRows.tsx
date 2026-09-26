@@ -11,7 +11,7 @@ export function RuntimeWorkRows({ owner, activeItem }: { owner: OwnerSummary; ac
     <>
       {owner.runtimeWork.map(work => (
         <a key={work.id} href={`#/item/${work.id}`} title={`${work.title}\n${work.id} · ${work.status} (runtime work)`} data-runtime-work={work.id}
-          className={cx('ml-6 flex items-center gap-1.5 rounded-md px-2 py-1 typography-micro text-[0.7rem]',
+          className={cx('ml-6 flex items-center gap-1.5 rounded-md px-2 py-1 pointer-coarse:min-h-11 typography-micro text-[0.7rem]',
             activeItem === work.id ? 'bg-interactive-active text-foreground' : 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground')}>
           <RiCpuLine className="size-3 shrink-0 text-status-info" aria-label="runtime work" />
           <span className="truncate">{work.title}</span>

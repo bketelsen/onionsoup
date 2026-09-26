@@ -17,7 +17,7 @@ function WorkSession({ item }: { item: WorkItem }) {
   if (!item.session) return null;
   const open = () => navigate('owner', item.owner, 'chat', item.session!.sessionID);
   return (
-    <div className="flex items-center gap-2 typography-meta text-muted-foreground">
+    <div className="flex flex-wrap items-center gap-x-2 typography-meta text-muted-foreground">
       <Button variant="ghost" onClick={open}><RiChat3Line className="size-3.5" />Open the work session</Button>
       <span>The owner carries out the plan there; its subagents are in the activity rail.</span>
     </div>
@@ -77,7 +77,7 @@ function Verification({ item }: { item: WorkItem }) {
     <Section title="Host verification">
       {latest.verification.map((result, position) => (
         <details key={position} className="rounded-md border border-border">
-          <summary className="px-2 py-1 typography-meta flex items-center gap-2">
+          <summary className="px-2 py-1 pointer-coarse:min-h-11 typography-meta flex items-center gap-2 min-w-0">
             <Badge tone={result.exitCode === 0 ? 'success' : 'error'}>exit {result.exitCode}</Badge>
             <span className="font-mono truncate">{result.command}</span>
           </summary>
@@ -101,6 +101,7 @@ function Hires({ item }: { item: WorkItem }) {
   if (!item.hires.length) return null;
   return (
     <Section title="Hires">
+      <div className="overflow-x-auto overscroll-x-contain">
       <table className="typography-meta w-full">
         <tbody>
           {item.hires.map((hire, index) => (
@@ -114,6 +115,7 @@ function Hires({ item }: { item: WorkItem }) {
           ))}
         </tbody>
       </table>
+      </div>
     </Section>
   );
 }

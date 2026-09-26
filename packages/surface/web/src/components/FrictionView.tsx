@@ -39,19 +39,19 @@ export function FrictionView({ recordId }: { recordId?: string }) {
   const sorted = [...records].sort((left, right) => sort === 'newest'
     ? right.lastSeen.localeCompare(left.lastSeen)
     : right.count - left.count || right.lastSeen.localeCompare(left.lastSeen));
-  return <main className="flex-1 overflow-y-auto p-6 space-y-4">
+  return <main className="flex-1 min-w-0 overflow-y-auto p-4 lg:p-6 space-y-4">
     <h1 className="text-xl font-semibold">Friction</h1>
     {error && <p className="text-status-error">{error}</p>}
-    <Section title="Reports" action={<label>Sort <select className="rounded border border-border bg-secondary" value={sort}
+    <Section title="Reports" action={<label>Sort <select className="rounded border border-border bg-secondary pointer-coarse:min-h-11" value={sort}
       onChange={event => setSort(event.target.value as typeof sort)}>
       <option value="newest">Newest</option><option value="most-reported">Most reported</option>
     </select></label>}>
-    <div className="flex gap-6">
-      <div className="w-72 shrink-0 space-y-2">{sorted.length ? sorted.map(record => <Button key={record.id}
+    <div className="flex flex-col gap-6 lg:flex-row">
+      <div className="w-full lg:w-72 shrink-0 space-y-2">{sorted.length ? sorted.map(record => <Button key={record.id}
         className="w-full text-left break-words" onClick={() => navigate('friction', record.id)}>
         {record.summary} · {record.count}</Button>) : <Empty>No friction reports yet.</Empty>}</div>
       {detailError && <p className="text-status-error">{detailError}</p>}
-      {detail && <FrictionDetail record={detail} />}
+      {detail && <div className="min-w-0 max-lg:order-first"><FrictionDetail record={detail} /></div>}
     </div>
     </Section>
   </main>;

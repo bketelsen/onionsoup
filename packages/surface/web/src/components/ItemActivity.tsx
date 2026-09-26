@@ -57,7 +57,7 @@ export function ItemActivity({ item }: { item: WorkItem }) {
   const brief = messages.find(message => message.info.role === 'user');
   const replies = messages.filter(message => message.info.role === 'assistant');
   return (
-    <aside className="w-[34rem] max-w-[50%] shrink-0 border-l border-border flex flex-col min-h-0">
+    <aside className="h-full flex flex-col min-h-0">
       <div className="shrink-0 border-b border-border px-3 py-2 flex flex-col gap-1.5">
         <div className="typography-ui-label font-semibold text-muted-foreground uppercase tracking-wide text-[0.7rem]">Activity</div>
         {!sessions.length && <Empty>{running ? 'Waiting for the first session…' : 'No sessions recorded for this item.'}</Empty>}
@@ -67,7 +67,7 @@ export function ItemActivity({ item }: { item: WorkItem }) {
             const isLive = live(session);
             return (
               <button key={session.id} onClick={() => setPicked(session.id)} title={hire ? `${hire.model} · ${hire.outcome}${hire.error ? `: ${hire.error}` : ''}` : isLive ? 'running now' : ''}
-                className={cx('inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 typography-meta border',
+                className={cx('inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 pointer-coarse:min-h-11 text-left typography-meta border',
                   session.id === selected?.id ? 'bg-interactive-active text-foreground border-border' : 'text-muted-foreground border-transparent hover:bg-interactive-hover hover:text-foreground')}>
                 {session.label}
                 {isLive && <span className="size-1.5 rounded-full bg-status-info animate-pulse" />}
@@ -79,7 +79,7 @@ export function ItemActivity({ item }: { item: WorkItem }) {
         {selected && (() => {
           const hire = hires.get(selected.id);
           return (
-            <div className="flex items-center gap-2 typography-micro text-muted-foreground">
+            <div className="flex flex-wrap items-center gap-x-2 typography-micro text-muted-foreground">
               {hire ? <><span className="font-mono">{hire.model}</span><Badge tone={hire.outcome === 'delivered' ? 'success' : 'error'}>{hire.outcome}</Badge>{hire.cost > 0 && <span>${hire.cost.toFixed(3)}</span>}</>
                 : selectedLive ? <span className="inline-flex items-center text-status-info">working<BusyDots /></span> : <span>{selected.kind === 'owner' ? 'owner session' : 'not recorded as a hire'}</span>}
               <span className="ml-auto">{replies.reduce((count, message) => count + message.parts.filter(part => part.type === 'tool').length, 0)} tool calls</span>
@@ -88,11 +88,11 @@ export function ItemActivity({ item }: { item: WorkItem }) {
         })()}
       </div>
       <div ref={scroller} onScroll={() => { const element = scroller.current; if (element) pinned.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80; }}
-        className="flex-1 overflow-y-auto overflow-x-hidden px-3 py-2 chat-scroll">
+        className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-3 py-2 chat-scroll">
         {error && <div className="typography-meta text-[var(--status-error)]">{error}</div>}
         {brief && (
           <details className="mb-2 rounded-lg border border-border/60 bg-muted/10">
-            <summary className="cursor-pointer px-2 py-1 typography-meta text-muted-foreground">The first message it was given</summary>
+            <summary className="cursor-pointer px-2 py-1 pointer-coarse:py-3 typography-meta text-muted-foreground">The first message it was given</summary>
             <div className="px-3 pb-2 max-h-80 overflow-y-auto">
               <Markdown text={brief.parts.filter(part => part.type === 'text').map(part => part.text ?? '').join('\n\n')} variant="tool" />
             </div>

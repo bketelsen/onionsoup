@@ -1,9 +1,9 @@
 import type { ProviderHealthView } from '../types.ts';
-import { timeAgo } from './ui.tsx';
+import { NARROW_BANNER_CAP, timeAgo } from './ui.tsx';
 
-const ERROR_STYLE = 'shrink-0 px-4 py-2 typography-meta border-b border-[var(--status-error-border)] '
+const ERROR_STYLE = `${NARROW_BANNER_CAP} shrink-0 px-4 py-2 typography-meta border-b border-[var(--status-error-border)] `
   + 'bg-[var(--status-error-background)] text-[var(--status-error)]';
-const RECOVERED_STYLE = 'shrink-0 px-4 py-2 typography-meta border-b border-[var(--status-success-border)] '
+const RECOVERED_STYLE = `${NARROW_BANNER_CAP} shrink-0 px-4 py-2 typography-meta border-b border-[var(--status-success-border)] `
   + 'bg-[var(--status-success-background)] text-[var(--status-success)]';
 
 function affectedKinds(view: ProviderHealthView) {

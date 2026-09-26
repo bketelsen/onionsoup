@@ -52,6 +52,15 @@ test('the index renders with the sidebar in order, index first, and a search box
   assert.match(html, /<form action="\/search" method="get" role="search"><input type="search" name="q"/);
 });
 
+test('a page fits a phone: it reaches under the safe areas it pads for, and the pages list follows the content with a jump to it', async context => {
+  const { get } = await startSite(context);
+  const { html } = await get('/network');
+  assert.match(html, /<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">/);
+  assert.match(html, /<a class="jump" href="#pages">Pages<\/a>/);
+  assert.match(html, /<main>[^]*<\/main>\s*<nav class="pages" id="pages"/, 'without script, the sidebar moves below the page on a phone');
+  assert.doesNotMatch(html, /<script/i);
+});
+
 test('a page renders with heading ids, permalinks and working relative links', async context => {
   const { get } = await startSite(context);
   const index = await get('/');

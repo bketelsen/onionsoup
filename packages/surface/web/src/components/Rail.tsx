@@ -3,12 +3,27 @@ import { RiDraggable, RiInbox2Line, RiNotification3Line, RiErrorWarningLine, RiO
 import { navigate, useConnected } from '../api.ts';
 import type { OwnerSummary, SurfaceState } from '../types.ts';
 import { BusyDots, cx } from './ui.tsx';
+import { Drawer, setRailOpen, useRailOpen } from './Drawer.tsx';
 import { OwnerActivityIcon } from './OwnerActivityIcon.tsx';
 import { RuntimeWorkRows } from './RuntimeWorkRows.tsx';
 
-/** The owners down the left, each with what waits on the person, whether its work runs, what it is doing and the work its host code is running. */
+/** A rail row's height and padding: 44px tall on touch screens, so a thumb hits the row it means. */
+const ROW = 'flex items-center gap-2 rounded-md px-2 py-1.5 pointer-coarse:min-h-11';
+
+/** Closes the drawer once the person picks something in it, even the page already open. */
+function closeOnPick(event: React.MouseEvent) {
+  if (event.target instanceof Element && event.target.closest('a[href], button')) setRailOpen(false);
+}
+
+/**
+ * The owners down the left, each with what waits on the person, whether its work runs, what it is doing and the work
+ * its host code is running. On narrow screens it is a drawer, opened from the page's bar.
+ */
 export function Rail({ state, route, onReorder }: { state?: SurfaceState; route: string[]; onReorder: (order: string[]) => void }) {
   const connected = useConnected();
+  const isOpen = useRailOpen();
+  const routeKey = route.join('/');
+  useEffect(() => setRailOpen(false), [routeKey]);
   // Re-ordering with pointer events rather than HTML5 drag and drop: it behaves the same everywhere and needs no
   // drag image. A press becomes a drag after a few pixels; the click that ends a drag is swallowed.
   const [notifications, setNotifications] = useState(() => (typeof Notification === 'undefined' ? 'denied' : Notification.permission));
@@ -26,7 +41,8 @@ export function Rail({ state, route, onReorder }: { state?: SurfaceState; route:
     return undefined;
   };
   const onPointerDown = (id: string) => (event: React.PointerEvent) => {
-    if (event.button !== 0) return;
+    // Re-ordering is for a mouse or pen: on a touch screen a drag along the rail scrolls it.
+    if (event.button !== 0 || event.pointerType === 'touch') return;
     press.current = { id, y: event.clientY, moved: false };
   };
   useEffect(() => {
@@ -61,24 +77,25 @@ export function Rail({ state, route, onReorder }: { state?: SurfaceState; route:
   const activeItem = route[0] === 'item' ? route[1] : undefined;
   const inboxActive = route.length === 0 || route[0] === 'inbox';
   return (
-    <nav className="w-60 shrink-0 border-r border-border bg-sidebar flex flex-col min-h-0">
+    <Drawer side="left" isOpen={isOpen} onClose={() => setRailOpen(false)} label="Navigation" className="w-60 flex border-r border-border">
+    <nav className="flex-1 min-w-0 bg-sidebar flex flex-col min-h-0">
       <div className="px-4 h-12 flex items-center gap-2 border-b border-border">
         <span className="typography-ui-header font-semibold">onionsoup</span>
         <span title={connected ? 'live' : 'reconnecting'} className={cx('ml-auto size-2 rounded-full', connected ? 'bg-status-success' : 'bg-status-warning animate-pulse')} />
       </div>
-      <div className="p-2 flex flex-col gap-0.5 overflow-y-auto flex-1 min-h-0">
+      <div className="p-2 flex flex-col gap-0.5 overflow-y-auto overscroll-contain flex-1 min-h-0" onClick={closeOnPick}>
         <button onClick={() => navigate('inbox')}
-          className={cx('flex items-center gap-2 rounded-md px-2 py-1.5 typography-ui-label', inboxActive ? 'bg-interactive-active text-foreground' : 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground')}>
+          className={cx(ROW, 'typography-ui-label', inboxActive ? 'bg-interactive-active text-foreground' : 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground')}>
           <RiInbox2Line className="size-4" />Inbox
           {!!state?.inbox.length && <span className="ml-auto rounded-full bg-primary text-primary-foreground px-1.5 typography-micro font-semibold">{state.inbox.length}</span>}
         </button>
         <button onClick={() => navigate('friction')}
-          className={cx('flex items-center gap-2 rounded-md px-2 py-1.5 typography-ui-label', route[0] === 'friction' ? 'bg-interactive-active text-foreground' : 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground')}>
+          className={cx(ROW, 'typography-ui-label', route[0] === 'friction' ? 'bg-interactive-active text-foreground' : 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground')}>
           <RiErrorWarningLine className="size-4" />Friction
           {!!state?.frictionCount && <span className="ml-auto rounded-full bg-primary text-primary-foreground px-1.5 typography-micro font-semibold">{state.frictionCount}</span>}
         </button>
         <button onClick={() => navigate('org')}
-          className={cx('flex items-center gap-2 rounded-md px-2 py-1.5 typography-ui-label', route[0] === 'org' || route[0] === 'initiative' ? 'bg-interactive-active text-foreground' : 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground')}>
+          className={cx(ROW, 'typography-ui-label', route[0] === 'org' || route[0] === 'initiative' ? 'bg-interactive-active text-foreground' : 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground')}>
           <RiOrganizationChart className="size-4" />Org
         </button>
         {state?.operator && <OperatorEntry operator={state.operator} isActive={active === state.operator.id} />}
@@ -89,10 +106,10 @@ export function Rail({ state, route, onReorder }: { state?: SurfaceState; route:
               ref={element => { if (element) rows.current.set(owner.id, element); else rows.current.delete(owner.id); }}
               onPointerDown={onPointerDown(owner.id)}
               onClickCapture={event => { if (suppressClick.current) { suppressClick.current = false; event.stopPropagation(); event.preventDefault(); } }}
-              className={cx('group/owner relative flex items-center gap-2 rounded-md px-2 py-1.5 text-left select-none touch-none', active === owner.id ? 'bg-interactive-active text-foreground' : 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground',
+              className={cx(ROW, 'group/owner relative text-left select-none pointer-fine:touch-none', active === owner.id ? 'bg-interactive-active text-foreground' : 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground',
                 dragging === owner.id && 'opacity-40',
                 over?.id === owner.id && dragging !== owner.id && (over.after ? 'shadow-[inset_0_-2px_0_var(--primary)]' : 'shadow-[inset_0_2px_0_var(--primary)]'))}>
-              <RiDraggable className="absolute -left-1 size-3.5 opacity-0 group-hover/owner:opacity-40" />
+              <RiDraggable className="absolute -left-1 size-3.5 opacity-0 group-hover/owner:opacity-40 pointer-coarse:hidden" />
               <OwnerActivityIcon owner={owner} />
               <span className="flex flex-col min-w-0 flex-1">
                 <span className="typography-ui-label truncate">{owner.name}</span>
@@ -107,14 +124,15 @@ export function Rail({ state, route, onReorder }: { state?: SurfaceState; route:
       </div>
       <div className="mt-auto border-t border-border p-2 flex flex-col gap-1">
         {typeof Notification !== 'undefined' && notifications !== 'granted' && (
-          <button className="flex items-center gap-2 rounded-md px-2 py-1 typography-micro text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
+          <button className="flex items-center gap-2 rounded-md px-2 py-1 pointer-coarse:min-h-11 typography-micro text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
             onClick={() => void Notification.requestPermission().then(setNotifications)}>
             <RiNotification3Line className="size-3.5" />{notifications === 'denied' ? 'Notifications blocked by the browser' : 'Notify me when something waits'}
           </button>
         )}
-        <div className="px-2 typography-micro text-muted-foreground/60 text-[0.68rem]">Alt+↑↓ owners · Alt+I inbox · / message</div>
+        <div className="px-2 typography-micro text-muted-foreground/60 text-[0.68rem] pointer-coarse:hidden">Alt+↑↓ owners · Alt+I inbox · / message</div>
       </div>
     </nav>
+    </Drawer>
   );
 }
 
@@ -124,7 +142,7 @@ function OperatorEntry({ operator, isActive }: { operator: OwnerSummary; isActiv
     <>
       <div className="mt-3 mb-1 px-2 typography-micro uppercase tracking-wide text-muted-foreground text-[0.68rem]">Operator</div>
       <button onClick={() => navigate('owner', operator.id)} title={`${operator.title}\nworks in ${operator.domain}`}
-        className={cx('flex items-center gap-2 rounded-md px-2 py-1.5 text-left', isActive ? 'bg-interactive-active text-foreground' : 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground')}>
+        className={cx(ROW, 'text-left', isActive ? 'bg-interactive-active text-foreground' : 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground')}>
         <OwnerActivityIcon owner={operator} />
         <span className="flex flex-col min-w-0 flex-1">
           <span className="typography-ui-label truncate">{operator.name}</span>
