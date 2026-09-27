@@ -134,6 +134,57 @@ The plugin rechecks status, transcript and child evidence at release. Missing,
 unreadable or malformed evidence retains the lease, as do in-flight messages, tools, children
 and operator memory nudges. A held lease therefore needs investigation rather than manually
 clearing the drain on the strength of an absent status alone.
+
+### One-time bridge for the 04d26ea → 41aed2f deployment
+
+If the **already staged** target is `41aed2f0301d86f52e51f63aa9628faa70f5a233` and
+`current` still points to `04d26ea4857933f47b9b9650003706a6c70dc142`, the old
+opencode can retain live PID-bound chat leases even after its sessions go idle. The stable
+worker waits for those leases and cannot start its own drain. The one-time external
+`bootstrap-leases` command is for that exact transition. The previously installed stable
+worker does **not** have this handler; invoking it at `/opt/onionsoup-deploy` returns
+`unknown_command`. First prepare a separately reviewed bootstrap installation from the
+verified code containing this command and its matching `scripts/`, `packages/owners/`,
+`package.json`, lockfile and installed `node_modules`. Place the complete tree at a distinct,
+absolute path (for example `/opt/onionsoup-bootstrap-41aed2f`), and verify its contents and
+dependencies against the reviewed artifact before use. Install it while no bootstrap process
+is running, by copying to a new directory and atomically renaming that directory into place;
+never copy files into a running executable tree. **Do not overwrite or change** the stable
+worker installation, its service/timer command, or the currently running worker. The
+bootstrap process and stable timer share `deploy/worker.lock`, while the old worker remains
+able to process its existing checkpoint format. Run the separately installed command in an
+independent oneshot/timer **outside any surface/opencode chat**, with
+the same absolute `--root`, `--state`, `--config` and loopback `--surface-url` used by
+the worker, and both explicit expected full commit IDs:
+
+```text
+node /opt/onionsoup-bootstrap-41aed2f/scripts/deploy-release.mjs bootstrap-leases \
+  --root /absolute/release/root --state /absolute/onionsoup/state \
+  --config /absolute/onionsoup/config --surface-url http://127.0.0.1:4747/ \
+  --expected-old 04d26ea4857933f47b9b9650003706a6c70dc142 \
+  --expected-target 41aed2f0301d86f52e51f63aa9628faa70f5a233
+```
+
+It takes `deploy/worker.lock` against the timer, checks the exact pending intent,
+old pointer and manifests, authenticates the old opencode endpoint from its surface
+process identity, and accepts only live `chat:<session-id>` leases owned by that
+child PID and `/proc` start time. It probes known directories for busy statuses,
+permissions, questions, and independent opencode processes; for every leased parent
+and every descendant in its directory it requires the latest user message to be
+followed at the transcript tail by a completed assistant `stop` with that user's
+`parentID`. Missing or malformed transcript, ancestry or child enumeration holds the
+lease. These checks run through
+the same quiet interval on both sides of the admission-locked drain. If quiet, it
+restarts **only** the old surface (and its opencode child), verifies old-build health,
+changed child identity and dead leases, then leaves the intent **draining**. The
+existing worker timer finishes the target activation. A busy or unreadable probe
+before restart reopens admission where safe; uncertain post-restart health retains
+the drain and a bootstrap marker at `deploy/rollback.json` that the old worker's
+checkpoint validation also refuses; the timer and cancel path stay blocked for
+investigation. Check pending intent, endpoint and service health before
+retrying. This command is deliberately single-use for these two commits and does
+not install the worker or enable a timer.
+
 It checks both user units, the surface's reported build ID and opencode status, and the authenticated
 `/global/health` on the opencode child whose private endpoint record matches the live surface
 process. The worker never accepts a caller-chosen opencode URL. The surface URL is the configured
