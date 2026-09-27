@@ -134,6 +134,58 @@ export async function createAdmission(input) {
     opencodeRequest(endpoint.url, path, directory, `${endpoint.username}:${endpoint.password}`));
   const processes = checks.processes ?? independentOpencode;
   const sleep = checks.sleep ?? (milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds)));
+  async function completedTree(endpoint, session, directory, status, visited) {
+    if (!session || typeof session.id !== 'string' || visited.has(session.id)) return false;
+    if (session.directory !== directory || status[session.id]) return false;
+    visited.add(session.id);
+    const messages = await request(endpoint, `/session/${encodeURIComponent(session.id)}/message`, directory);
+    if (!Array.isArray(messages) || !messages.length) return false;
+    const latestUser = messages.findLastIndex(message => message?.info?.role === 'user');
+    const userID = messages[latestUser]?.info?.id;
+    const last = messages.at(-1)?.info;
+    if (latestUser < 0 || typeof userID !== 'string' || latestUser === messages.length - 1 ||
+      last?.role !== 'assistant' || last.parentID !== userID || last.finish !== 'stop' ||
+      typeof last.time?.completed !== 'number' || !Number.isFinite(last.time.completed)) return false;
+    const children = await request(endpoint, `/session/${encodeURIComponent(session.id)}/children`, directory);
+    if (!Array.isArray(children)) return false;
+    for (const child of children) {
+      if (child?.parentID !== session.id || !await completedTree(endpoint, child, directory, status, visited)) return false;
+    }
+    return true;
+  }
+  async function probe({ ignoreLeases = false, chatSessions = [], expectedEndpoint } = {}) {
+    if (!ignoreLeases && (await listAdmissions(input.state)).some(lease => lease.alive)) return false;
+    await runtime.reloadDeclarations();
+    const endpoint = await endpointProbe(input.state);
+    if (expectedEndpoint && (endpoint.instanceId !== expectedEndpoint.instanceId ||
+      endpoint.opencodePid !== expectedEndpoint.opencodePid ||
+      endpoint.opencodeStartTime !== expectedEndpoint.opencodeStartTime ||
+      endpoint.surfacePid !== expectedEndpoint.surfacePid || endpoint.url !== expectedEndpoint.url)) {
+      throw fail('bootstrap_endpoint_changed');
+    }
+    if (await processes(endpoint)) return false;
+    const found = new Set();
+    for (const directory of await directories(runtime)) {
+      const status = await request(endpoint, '/session/status', directory);
+      const permissions = await request(endpoint, '/permission', directory);
+      const questions = await request(endpoint, '/question', directory);
+      if (!status || typeof status !== 'object' || Array.isArray(status) ||
+        !Array.isArray(permissions) || !Array.isArray(questions)) throw fail('deployment_opencode_invalid');
+      if (Object.keys(status).length || permissions.length || questions.length) return false;
+      if (!chatSessions.length) continue;
+      const sessions = await request(endpoint, '/session', directory);
+      if (!Array.isArray(sessions)) throw fail('deployment_opencode_invalid');
+      for (const session of sessions) {
+        if (!chatSessions.includes(session?.id)) continue;
+        if (session.parentID || session.directory !== directory) throw fail('bootstrap_session_unverified');
+        found.add(session.id);
+        if (!await completedTree(endpoint, session, directory, status, new Set())) return false;
+      }
+    }
+    if (found.size !== chatSessions.length) throw fail('bootstrap_session_unverified');
+    checks.onProbe?.();
+    return true;
+  }
   return {
     async markWaiting(buildId) {
       await markDeploymentWaiting(input.state, buildId);
@@ -144,21 +196,16 @@ export async function createAdmission(input) {
     },
     async quiescent() {
       if (!target) return false;
-      if ((await listAdmissions(input.state)).some(lease => lease.alive)) return false;
       const pending = JSON.parse(await readFile(join(input.state, 'deploy', 'pending.json'), 'utf8'));
       if (pending.status !== 'draining' || pending.targetBuildId !== target) return false;
-      await runtime.reloadDeclarations();
-      const endpoint = await endpointProbe(input.state);
-      if (await processes(endpoint)) return false;
-      for (const directory of await directories(runtime)) {
-        const status = await request(endpoint, '/session/status', directory);
-        const permissions = await request(endpoint, '/permission', directory);
-        const questions = await request(endpoint, '/question', directory);
-        if (!status || typeof status !== 'object' || Array.isArray(status) ||
-          !Array.isArray(permissions) || !Array.isArray(questions)) throw fail('deployment_opencode_invalid');
-        if (Object.keys(status).length || permissions.length || questions.length) return false;
+      return probe();
+    },
+    async bootstrapQuiet(chatSessions, expectedEndpoint) {
+      if (!await probe({ ignoreLeases: true, chatSessions, expectedEndpoint })) return false;
+      for (let sample = 0; sample < QUIET_SAMPLES; sample++) {
+        await sleep(QUIET_SAMPLE_MS);
+        if (!await probe({ ignoreLeases: true, chatSessions, expectedEndpoint })) return false;
       }
-      checks.onProbe?.();
       return true;
     },
     async quiet() {

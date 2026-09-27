@@ -119,6 +119,24 @@ async function switchPointer(pointer, target) {
 }
 
 const rollbackPath = layout => join(layout.directory, 'rollback.json');
+// The old installed worker already refuses an unrecognised rollback checkpoint.
+const bootstrapPath = rollbackPath;
+
+async function bootstrapMarker(layout) {
+  let text;
+  try {
+    text = await readFile(bootstrapPath(layout), 'utf8');
+  } catch (error) {
+    if (error.code === 'ENOENT') return false;
+    throw error;
+  }
+  try {
+    const marker = JSON.parse(text);
+    return marker?.bootstrap === 'old-surface-restart';
+  } catch {
+    return false;
+  }
+}
 
 async function rollbackCheckpoint(layout) {
   let text;
@@ -254,6 +272,7 @@ export async function cancel(input) {
   return withRecordLock(join(layout.directory, 'worker.lock'), async () => {
     const record = await pending(layout);
     if (!record) throw fail('pending_missing');
+    if (await bootstrapMarker(layout)) throw fail('bootstrap_old_health_unverified_gate_held');
     if (await rollbackCheckpoint(layout)) throw fail('rollback_unverified_gate_held');
     const { cancelDeployment } = await coordinator();
     return cancelDeployment(layout.state, record.targetBuildId);
@@ -361,6 +380,7 @@ export async function worker(input) {
   const layout = paths(input);
   const { withRecordLock } = await import(new URL('../packages/owners/src/record-lock.ts', import.meta.url));
   return withRecordLock(join(layout.directory, 'worker.lock'), async () => {
+    if (await bootstrapMarker(layout)) throw fail('bootstrap_old_health_unverified_gate_held');
     const record = await pending(layout);
     if (!record) return null;
     if (!['armed', 'waiting', 'draining'].includes(record.status)) {
@@ -396,22 +416,137 @@ export async function worker(input) {
   });
 }
 
+const BOOTSTRAP_OLD = '04d26ea4857933f47b9b9650003706a6c70dc142';
+const BOOTSTRAP_TARGET = '41aed2f0301d86f52e51f63aa9628faa70f5a233';
+
+async function bootstrapIdentity(layout, input) {
+  const record = await pending(layout);
+  if (record?.targetBuildId !== BOOTSTRAP_TARGET || record.targetBuildId !== input.expectedTarget ||
+    !['armed', 'waiting'].includes(record.status) || await rollbackCheckpoint(layout)) {
+    throw fail('bootstrap_pending_mismatch');
+  }
+  const old = await currentTarget(layout);
+  if (old !== join(layout.releases, BOOTSTRAP_OLD) || input.expectedOld !== BOOTSTRAP_OLD) {
+    throw fail('bootstrap_old_pointer_mismatch');
+  }
+  if (await manifestBuildId(old) !== BOOTSTRAP_OLD) throw fail('bootstrap_old_build_mismatch');
+  await manifestMatches(join(layout.releases, BOOTSTRAP_TARGET), BOOTSTRAP_TARGET);
+  return record;
+}
+
+function bootstrapLeasesForEndpoint(leases, endpoint) {
+  const live = leases.filter(lease => lease.alive);
+  if (!live.length || live.some(lease => !lease.kind.startsWith('chat:') ||
+    lease.pid !== endpoint.opencodePid || lease.startTime !== endpoint.opencodeStartTime)) {
+    throw fail('bootstrap_unexpected_lease');
+  }
+  return live.map(lease => lease.kind.slice('chat:'.length));
+}
+
+export async function bootstrapLeases(input) {
+  const layout = paths(input);
+  const { withRecordLock } = await import(new URL('../packages/owners/src/record-lock.ts', import.meta.url));
+  return withRecordLock(join(layout.directory, 'worker.lock'), async () => {
+    if (await bootstrapMarker(layout)) throw fail('bootstrap_old_health_unverified_gate_held');
+    const record = await bootstrapIdentity(layout, input);
+    const { listAdmissions, beginDrain, pauseDrain } = await coordinator();
+    const { createAdmission, readOpencodeEndpoint } = await import('./deploy-admission.mjs');
+    const endpointProbe = input.admissionEffects?.endpoint ?? readOpencodeEndpoint;
+    let endpoint;
+    try {
+      endpoint = await endpointProbe(layout.state);
+    } catch {
+      throw fail('bootstrap_endpoint_unavailable');
+    }
+    const sessions = bootstrapLeasesForEndpoint(await listAdmissions(layout.state), endpoint);
+    const admission = await createAdmission({ ...input, state: layout.state, root: layout.root });
+    const effects = input.effects ?? { ...defaultEffects, opencode: buildId => surfaceHealth(input, buildId) };
+    await ready(BOOTSTRAP_OLD, effects);
+    if (!await admission.bootstrapQuiet(sessions, endpoint)) throw fail('deployment_waiting_for_turns');
+    await bootstrapIdentity(layout, input);
+    const drained = await beginDrain(layout.state, record.targetBuildId);
+    let restartAttempted = false;
+    let markerWritten = false;
+    try {
+      const drainedSessions = bootstrapLeasesForEndpoint(drained, endpoint);
+      if (drainedSessions.length !== sessions.length ||
+        drainedSessions.some(session => !sessions.includes(session))) throw fail('bootstrap_unexpected_lease');
+      if (!await admission.bootstrapQuiet(sessions, endpoint)) throw fail('deployment_waiting_for_turns');
+      if (await currentTarget(layout) !== join(layout.releases, BOOTSTRAP_OLD)) {
+        throw fail('bootstrap_old_pointer_mismatch');
+      }
+      await saveBootstrapMarker(layout);
+      markerWritten = true;
+      restartAttempted = true;
+      await effects.systemctl('restart', 'onionsoup-surface.service');
+      await waitForReady(BOOTSTRAP_OLD, effects, input.readiness);
+      const nextEndpoint = await endpointProbe(layout.state).catch(() => {
+        throw fail('bootstrap_old_health_unverified_gate_held');
+      });
+      if (nextEndpoint.instanceId === endpoint.instanceId ||
+        nextEndpoint.opencodePid === endpoint.opencodePid &&
+          nextEndpoint.opencodeStartTime === endpoint.opencodeStartTime ||
+        (await listAdmissions(layout.state)).some(lease => lease.alive) ||
+        await currentTarget(layout) !== join(layout.releases, BOOTSTRAP_OLD)) {
+        throw fail('bootstrap_old_health_unverified_gate_held');
+      }
+      await rm(bootstrapPath(layout));
+      return pending(layout);
+    } catch (error) {
+      if (restartAttempted) throw fail('bootstrap_old_health_unverified_gate_held');
+      if (markerWritten) throw fail('bootstrap_old_health_unverified_gate_held');
+      if (await bootstrapMarker(layout)) {
+        throw fail('bootstrap_old_health_unverified_gate_held');
+      }
+      try {
+        await pauseDrain(layout.state, record.targetBuildId);
+      } catch {
+        throw fail('bootstrap_gate_held');
+      }
+      throw error;
+    }
+  });
+}
+
+async function saveBootstrapMarker(layout) {
+  const path = bootstrapPath(layout);
+  const file = await open(path, 'wx', 0o600);
+  try {
+    await file.writeFile(JSON.stringify({ bootstrap: 'old-surface-restart',
+      oldBuildId: BOOTSTRAP_OLD, targetBuildId: BOOTSTRAP_TARGET }));
+    await file.sync();
+  } finally {
+    await file.close();
+  }
+  const directory = await open(layout.directory, 'r');
+  try {
+    await directory.sync();
+  } finally {
+    await directory.close();
+  }
+}
+
 async function main() {
   try {
     const { values, positionals } = parseArgs({ allowPositionals: true, options: {
        root: { type: 'string' }, state: { type: 'string' }, source: { type: 'string' },
        commit: { type: 'string' }, config: { type: 'string' }, 'opencode-url': { type: 'string' },
-      'surface-url': { type: 'string' },
+       'surface-url': { type: 'string' }, 'expected-target': { type: 'string' },
+       'expected-old': { type: 'string' },
     } });
     const [command] = positionals;
     if (positionals.length !== 1) throw fail('command_required');
-    const handlers = { arm, worker, status, cancel };
+    const handlers = { arm, worker, status, cancel, 'bootstrap-leases': bootstrapLeases };
     if (!Object.hasOwn(handlers, command)) throw fail('unknown_command');
     console.log(JSON.stringify(await handlers[command]({ ...values,
-       opencodeUrl: values['opencode-url'], surfaceUrl: values['surface-url'],
+        opencodeUrl: values['opencode-url'], surfaceUrl: values['surface-url'],
+        expectedTarget: values['expected-target'], expectedOld: values['expected-old'],
     })));
   } catch (error) {
-    console.error(JSON.stringify({ error: error.code ?? error.message ?? 'deploy_failed' }));
+    const reason = process.argv[2] === 'bootstrap-leases' ?
+      (typeof error.code === 'string' && /^(bootstrap_|deployment_|readiness_|manifest_|current_)/.test(error.code) ?
+        error.code : 'bootstrap_probe_unavailable') : error.code ?? error.message ?? 'deploy_failed';
+    console.error(JSON.stringify({ error: reason }));
     process.exitCode = 1;
   }
 }
