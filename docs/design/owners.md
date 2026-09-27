@@ -406,6 +406,18 @@ matching surface release manifest and a host opencode plugin URL through that po
 worker discovers the surface's spawned, authenticated opencode endpoint through the shared
 state directory. Its drain covers admitted work and known chat directories, not every
 possible independent opencode session; its readiness checks do not attest the loaded plugin.
+The host opencode plugin reconciles its own chat admission leases on a periodic pass
+(`PLUGIN_LIMITS.noticeMs`). A missed idle event releases a top-level lease only after a
+directory-scoped status omits the session (opencode lists busy/retry sessions) and the transcript ends in a completed, stopped assistant
+message whose `parentID` is this lease's persisted user-message ID; if the marker is unavailable the lease
+stays held. Children are enumerated in that directory and must likewise be absent or idle with final answers
+(or have completed through their idle events). A child without a tracked user-message ID uses its latest transcript user;
+one with no user cannot prove completion. Failed or malformed reads, pending child activity
+and a memory nudge without its own completed answer keep the lease. During drain, only the plugin's pending
+operator-memory nudge (matched to its generated message ID and exact text under the chat lock) continues on
+the existing lease; unrelated messages still pass the drain admission gate. The final release rechecks status, transcript
+and child evidence while serialized with chat completion and tool registration; normal
+idle-event release still runs the decision watcher and operator memory handling.
 These are accepted best-effort limits (see [gaps](../gaps.md)). Bootstrap is manual; arm
 and enable the timer only after verifying both installed services and the plugin use the
 release pointer.

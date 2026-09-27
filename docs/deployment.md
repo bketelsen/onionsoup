@@ -126,6 +126,14 @@ The drain stops new admitted turns and requires all live leases to finish. The w
 directory and recorded plan/session directory; missing, malformed or unreadable responses hold
 the gate. It rejects another same-user opencode process detected through `/proc`. After a
 five-second quiet interval it probes every second, and rechecks just before the atomic pointer switch.
+The plugin periodically reconciles a chat lease if its idle event was missed: its own
+directory-scoped status must report idle and its last assistant message must have completed
+with a final stop after the admitted turn's persisted user-message ID. Children are enumerated
+in the same directory and require idle status plus a final answer or a completed idle event.
+The plugin rechecks status, transcript and child evidence at release. Missing,
+unreadable or malformed evidence retains the lease, as do in-flight messages, tools, children
+and operator memory nudges. A held lease therefore needs investigation rather than manually
+clearing the drain on the strength of an absent status alone.
 It checks both user units, the surface's reported build ID and opencode status, and the authenticated
 `/global/health` on the opencode child whose private endpoint record matches the live surface
 process. The worker never accepts a caller-chosen opencode URL. The surface URL is the configured

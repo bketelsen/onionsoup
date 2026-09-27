@@ -19,7 +19,7 @@ export interface SessionActivity { isBusy: boolean; updatedAt: number | undefine
 
 export interface OwnerSessionClient {
   create(directory: string, title: string, permission: readonly PermissionRule[]): Promise<string>;
-  prompt(target: ChatOrigin, agent: string, text: string): Promise<void>;
+  prompt(target: ChatOrigin, agent: string, text: string, messageID?: string): Promise<void>;
   remove(target: ChatOrigin): Promise<void>;
   activity(target: ChatOrigin): Promise<SessionActivity>;
 }
@@ -159,9 +159,9 @@ export function ownerSessionClient(client: Parameters<Plugin>[0]['client']): Own
       if (!created.data?.id) throw new Error('owner_session_create_failed');
       return created.data.id;
     },
-    async prompt(target, agent, text) {
+    async prompt(target, agent, text, messageID) {
       const sent = await client.session.promptAsync({
-        path: { id: target.sessionID }, query: { directory: target.directory }, body: { agent, parts: [{ type: 'text', text }] },
+        path: { id: target.sessionID }, query: { directory: target.directory }, body: { agent, messageID, parts: [{ type: 'text', text }] },
       });
       if (sent.error) throw new Error('owner_session_prompt_failed');
     },
