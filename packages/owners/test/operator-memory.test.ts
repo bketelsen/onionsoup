@@ -28,6 +28,8 @@ async function memoryHooks(parents: Record<string, string> = {}) {
   const state = await mkdtemp(join(tmpdir(), 'onionsoup-memory-state-'));
   const posted: PostedPrompt[] = [];
   const session = {
+    status: async () => ({ data: {} }),
+    children: async () => ({ data: [] }),
     get: async ({ path }: { path: { id: string } }) => ({ data: { id: path.id, parentID: parents[path.id], directory: `/chats/${path.id}` } }),
     promptAsync: async ({ path, query, body }: PromptRequest) => {
       posted.push({ sessionID: path.id, directory: query.directory, agent: body.agent, text: body.parts[0]!.text });

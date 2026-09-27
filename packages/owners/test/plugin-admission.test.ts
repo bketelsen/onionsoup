@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
 import { mkdtemp, cp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import type { Plugin } from '@opencode-ai/plugin';
 import { armDeployment, beginDrain, listAdmissions } from '../src/deployment-admission.ts';
+import { MEMORY_NUDGE_TEXT } from '../src/operator-memory.ts';
 import { withActiveHooks } from './active-hooks.ts';
+
+type TimerCallback = () => Promise<unknown>;
 
 async function setup(operator = false) {
   const declarations = await mkdtemp(join(tmpdir(), 'plugin-admission-config-'));
@@ -15,6 +17,22 @@ async function setup(operator = false) {
   const state = await mkdtemp(join(tmpdir(), 'plugin-admission-state-'));
   const statuses: Record<string, { type: string }> = {};
   const children: Record<string, string[]> = {};
+  let requireScopedChildren = false;
+  let requireScopedStatus = false;
+  const messages: Record<string, unknown[]> = {};
+  let nextMessageID = 0;
+  const statusDirectories: string[] = [];
+  let failMessages = false;
+  let pauseMessages = false;
+  let pauseFinalChatMessages = false;
+  let chatMessageReads = 0;
+  let pauseFinalChildMessages = false;
+  let childMessageReads = 0;
+  let messagesStarted: (() => void) | undefined;
+  let resumeMessages: (() => void) | undefined;
+  const messagesStart = new Promise<void>(resolve => { messagesStarted = resolve; });
+  const timers: TimerCallback[] = [];
+  const originalInterval = globalThis.setInterval;
   let failWatcher = false;
   let failSessionLookup = false;
   let failStatusLookup = false;
@@ -29,10 +47,13 @@ async function setup(operator = false) {
   let pauseChildLookup = false;
   const childStatusStart = new Promise<void>(resolve => { childStatusStarted = resolve; });
   let releasePrompt: (() => void) | undefined;
+  let generatedNudgeID: string | undefined;
+  let deliverNudgeThroughHook = false;
   let promptStarted: (() => void) | undefined;
   const promptStart = new Promise<void>(resolve => { promptStarted = resolve; });
   const client = { session: {
-    status: async () => {
+    status: async ({ query }: { query?: { directory?: string } } = {}) => {
+      statusDirectories.push(query?.directory ?? '');
       if (pauseChildStatus) {
         pauseChildStatus = false;
         childStatusStarted?.();
@@ -40,9 +61,10 @@ async function setup(operator = false) {
       }
       if (failStatusLookup) return { error: new Error('status unavailable') };
       if (malformedStatus) return { data: { parent: { type: 123 } } };
-      return { data: statuses };
+      return { data: requireScopedStatus && !query?.directory ? {} : Object.fromEntries(
+        Object.entries(statuses).filter(([, status]) => status.type !== 'idle')) };
     },
-    children: async ({ path }: { path: { id: string } }) => ({ data: (children[path.id] ?? []).map(id => ({ id })) }),
+    children: async ({ path, query }: { path: { id: string }; query?: { directory?: string } }) => ({ data: requireScopedChildren && !query?.directory ? [] : (children[path.id] ?? []).map(id => ({ id })) }),
     get: async ({ path }: { path: { id: string } }) => {
       if (path.id === 'child' && pauseChildLookup) {
         pauseChildLookup = false;
@@ -53,8 +75,27 @@ async function setup(operator = false) {
         ? { error: new Error('session unavailable') }
         : { data: { id: path.id, directory: '/chats', parentID: ['child', 'watcher'].includes(path.id) ? 'parent' : undefined } };
     },
-    messages: async () => {
-      if (failWatcher) throw new Error('watcher unavailable');
+    messages: async ({ path }: { path: { id: string } }) => {
+      if (['chat', 'parent'].includes(path.id) && ++chatMessageReads === 4 && pauseFinalChatMessages) {
+        const snapshot = messages[path.id];
+        messagesStarted?.();
+        await new Promise<void>(resolve => { resumeMessages = resolve; });
+        return { data: snapshot };
+      }
+      if (path.id === 'child' && ++childMessageReads === 2 && pauseFinalChildMessages) {
+        const snapshot = messages.child;
+        messagesStarted?.();
+        await new Promise<void>(resolve => { resumeMessages = resolve; });
+        return { data: snapshot };
+      }
+      if (pauseMessages) {
+        pauseMessages = false;
+        messagesStarted?.();
+        await new Promise<void>(resolve => { resumeMessages = resolve; });
+      }
+      if (failMessages) throw new Error('messages unavailable');
+      if (failWatcher && !messages[path.id]) throw new Error('watcher unavailable');
+      if (messages[path.id]) return { data: messages[path.id] };
       if (runWatcher) return { data: [{ info: { id: 'person-message', role: 'user' }, parts: [{ type: 'text', text: 'Hello' }] }] };
       return { data: [] };
     },
@@ -73,19 +114,63 @@ async function setup(operator = false) {
       watcherDeleted = true;
       return { data: true };
     },
-    promptAsync: async () => {
+    promptAsync: async ({ body }: { body: { messageID?: string } }) => {
+      generatedNudgeID = body.messageID;
       promptStarted?.();
       await new Promise<void>(resolve => { releasePrompt = resolve; });
+      if (deliverNudgeThroughHook) {
+        await hooks['chat.message']!({ sessionID: 'operator', agent: 'Operator', messageID: body.messageID }, {
+          message: { id: body.messageID, role: 'user', sessionID: 'operator' },
+          parts: [{ type: 'text', text: MEMORY_NUDGE_TEXT }],
+        } as never);
+      }
+      messages.operator = [...(messages.operator ?? []), {
+        info: { id: body.messageID ?? 'nudge', role: 'user' }, parts: [{ type: 'text', text: MEMORY_NUDGE_TEXT }],
+      }];
       return { data: {} };
     },
   } };
-  const hooks = await withActiveHooks({ client } as unknown as Parameters<Plugin>[0], { declarations, state });
-  const say = (sessionID: string, agent = 'Miles Teg', text = 'Hello') =>
-    hooks['chat.message']!({ sessionID, agent }, { parts: [{ type: 'text', text }] } as never);
+  let hooks: Awaited<ReturnType<typeof withActiveHooks>>;
+  try {
+    globalThis.setInterval = ((callback: TimerCallback) => {
+      timers.push(callback);
+      return { unref() {} } as NodeJS.Timeout;
+    }) as typeof setInterval;
+    hooks = await withActiveHooks({ client } as unknown as Parameters<Plugin>[0], { declarations, state });
+  } finally {
+    globalThis.setInterval = originalInterval;
+  }
+  const say = (sessionID: string, agent = 'Miles Teg', text = 'Hello') => {
+    const id = ++nextMessageID === 1 ? 'user' : `user-${nextMessageID}`;
+    const admitted = hooks['chat.message']!({ sessionID, agent, messageID: id }, {
+      message: { id, role: 'user', sessionID }, parts: [{ type: 'text', text }],
+    } as never);
+    return admitted.then(() => {
+      messages[sessionID] = [...(messages[sessionID] ?? []),
+        { info: { id, role: 'user' }, parts: [{ type: 'text', text }] },
+        { info: { id: `final-${id}`, role: 'assistant', parentID: id, time: { completed: 2 }, finish: 'stop' }, parts: [] }];
+    });
+  };
+  const sayWithoutMarker = (sessionID: string) => hooks['chat.message']!({ sessionID, agent: 'Miles Teg' }, {
+    message: { role: 'user', sessionID }, parts: [{ type: 'text', text: 'Hello' }],
+  } as never);
   sayWatcher = () => say('watcher', 'onionsoup-watcher');
-  const idle = (sessionID: string) => hooks.event!({ event: { type: 'session.idle', properties: { sessionID } } as never });
+  const idle = (sessionID: string) => {
+    if (sessionID === 'child' && !messages.child) {
+      messages.child = [{ info: { id: 'child-user', role: 'user' }, parts: [] }, finishedFor('child-user')];
+    }
+    return hooks.event!({ event: { type: 'session.idle', properties: { sessionID } } as never });
+  };
   return {
-    hooks, state, declarations, statuses, children, say, idle, promptStart, childStatusStart,
+    hooks, state, declarations, statuses, children, messages, statusDirectories, say, sayWithoutMarker, idle, promptStart, childStatusStart, messagesStart,
+    requireScopedChildren: () => { requireScopedChildren = true; },
+    requireScopedStatus: () => { requireScopedStatus = true; },
+    reconcile: async () => { for (const tick of timers.slice(1)) await tick(); },
+    failMessages: () => { failMessages = true; },
+    pauseNextMessages: () => { pauseMessages = true; },
+    pauseFinalChatMessages: () => { pauseFinalChatMessages = true; },
+    pauseFinalChildMessages: () => { pauseFinalChildMessages = true; },
+    resumeMessages: () => resumeMessages?.(),
     pauseNextStatus: () => { pauseChildStatus = true; },
     pauseNextChildLookup: () => { pauseChildLookup = true; },
     resumeChildStatus: () => releaseChildStatus?.(),
@@ -97,6 +182,12 @@ async function setup(operator = false) {
     watcherFirstMessage: () => { watcherFirstMessage = true; },
     watcherDeleted: () => watcherDeleted,
     releasePrompt: () => releasePrompt?.(),
+    nudgeID: () => generatedNudgeID,
+    deliverNudge: () => hooks['chat.message']!({ sessionID: 'operator', agent: 'Operator', messageID: generatedNudgeID }, {
+      message: { id: generatedNudgeID, role: 'user', sessionID: 'operator' },
+      parts: [{ type: 'text', text: MEMORY_NUDGE_TEXT }],
+    } as never),
+    deliverNudgeThroughHook: () => { deliverNudgeThroughHook = true; },
   };
 }
 
@@ -171,33 +262,14 @@ test('an already admitted chat cannot start another turn during drain', async ()
   await idle('chat');
 });
 
-test('a concurrent message sharing pending chat admission rechecks the drain gate', async () => {
+test('a second message on an admitted chat rechecks the drain gate', async () => {
   const { state, say, idle } = await setup();
+  await say('chat');
   await armDeployment(state, 'build');
-  const holder = spawn('flock', ['--exclusive', join(state, 'deploy', 'admission.lock'), 'sh', '-c', 'printf ready; cat >/dev/null'], {
-    stdio: ['pipe', 'pipe', 'pipe'],
-  });
-  const closed = new Promise<void>(resolve => { holder.once('close', () => resolve()); });
-  await new Promise<void>((resolve, reject) => {
-    holder.once('error', reject);
-    holder.stdout.once('data', () => resolve());
-  });
-  try {
-    const first = say('chat');
-    await new Promise(resolve => setImmediate(resolve));
-    const draining = beginDrain(state, 'build');
-    await new Promise(resolve => setImmediate(resolve));
-    const rejectedSecond = assert.rejects(say('chat', 'Miles Teg', 'Concurrent turn'), /deployment_draining/);
-    holder.stdin.end();
-    await first;
-    await draining;
-    await rejectedSecond;
-    assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 1);
-    await idle('chat');
-  } finally {
-    holder.stdin.end();
-    await closed;
-  }
+  await beginDrain(state, 'build');
+  await assert.rejects(say('chat', 'Miles Teg', 'Concurrent turn'), /deployment_draining/);
+  assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 1);
+  await idle('chat');
 });
 
 test('a tool in an admitted turn continues after drain while standalone tools are refused', async () => {
@@ -434,7 +506,7 @@ test('a child without a known busy status joins but a missing status cannot comp
 });
 
 test('operator memory nudge keeps the lease through its answering turn', async () => {
-  const { state, declarations, hooks, say, idle, promptStart, releasePrompt } = await setup(true);
+  const { state, declarations, hooks, say, idle, promptStart, releasePrompt, messages, nudgeID } = await setup(true);
   await say('operator', 'Operator', 'Change the owner configuration');
   await hooks.event!({ event: { type: 'message.part.updated', properties: { part: {
     id: 'edit-1', sessionID: 'operator', type: 'tool', tool: 'edit',
@@ -446,7 +518,563 @@ test('operator memory nudge keeps the lease through its answering turn', async (
   releasePrompt();
   await finishing;
   assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length > 0, true);
-  await say('operator', 'Operator', 'Remember this for later');
+  messages.operator = [{ info: { id: 'user', role: 'user' }, parts: [] }, finished,
+    { info: { id: nudgeID(), role: 'user' }, parts: [{ type: 'text', text: MEMORY_NUDGE_TEXT }] }, finishedFor(nudgeID()!)];
   await idle('operator');
   assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 0);
+});
+
+test('only the pending plugin memory nudge continues an operator chat during drain', async () => {
+  const { state, declarations, hooks, say, idle, promptStart, releasePrompt, deliverNudgeThroughHook, messages } = await setup(true);
+  deliverNudgeThroughHook();
+  await say('operator', 'Operator', 'Change the owner configuration');
+  await hooks.event!({ event: { type: 'message.part.updated', properties: { part: {
+    id: 'edit-drain', sessionID: 'operator', type: 'tool', tool: 'edit',
+    state: { status: 'completed', input: { filePath: join(declarations, 'owners', 'nas.yaml') }, output: 'ok' },
+  } } } as never });
+  const finishing = idle('operator');
+  await promptStart;
+  await armDeployment(state, 'build');
+  await beginDrain(state, 'build');
+  await assert.rejects(say('operator', 'Operator', 'Another turn'), /deployment_draining/);
+  await assert.rejects(say('operator', 'Operator', MEMORY_NUDGE_TEXT), /deployment_draining/);
+  releasePrompt();
+  await finishing;
+  assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 1);
+  await assert.rejects(say('operator', 'Operator', MEMORY_NUDGE_TEXT), /deployment_draining/);
+  messages.operator = [...messages.operator, finishedFor((messages.operator.at(-1) as { info: { id: string } }).info.id)];
+  await idle('operator');
+  assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 0);
+});
+
+test('a 204 prompt acknowledgement before its nudge hook retains admission through drain', async () => {
+  const { state, declarations, hooks, say, idle, promptStart, releasePrompt, deliverNudge, nudgeID, messages } = await setup(true);
+  await say('operator', 'Operator', 'Change the owner configuration');
+  await hooks.event!({ event: { type: 'message.part.updated', properties: { part: {
+    id: 'edit-late-nudge', sessionID: 'operator', type: 'tool', tool: 'edit',
+    state: { status: 'completed', input: { filePath: join(declarations, 'owners', 'nas.yaml') }, output: 'ok' },
+  } } } as never });
+  const finishing = idle('operator');
+  await promptStart;
+  await armDeployment(state, 'build');
+  await beginDrain(state, 'build');
+  releasePrompt();
+  await finishing;
+  await deliverNudge();
+  messages.operator = [...messages.operator, finishedFor(nudgeID()!)];
+  await idle('operator');
+  assert.equal(messages.operator.some(message => (message as { info: { id: string } }).info.id === nudgeID()), true);
+  assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 0);
+});
+
+test('matching nudge text under a different ID cannot prove the generated nudge was answered', async () => {
+  const { state, declarations, hooks, say, idle, promptStart, releasePrompt, messages, nudgeID } = await setup(true);
+  await say('operator', 'Operator', 'Change the owner configuration');
+  await hooks.event!({ event: { type: 'message.part.updated', properties: { part: {
+    id: 'edit-false-nudge', sessionID: 'operator', type: 'tool', tool: 'edit',
+    state: { status: 'completed', input: { filePath: join(declarations, 'owners', 'nas.yaml') }, output: 'ok' },
+  } } } as never });
+  const finishing = idle('operator');
+  await promptStart;
+  releasePrompt();
+  await finishing;
+  messages.operator = [{ info: { id: 'user', role: 'user' }, parts: [] }, finished,
+    { info: { id: 'impostor', role: 'user' }, parts: [{ type: 'text', text: MEMORY_NUDGE_TEXT }] }, finished];
+  assert.notEqual(nudgeID(), 'impostor');
+  await idle('operator');
+  assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 1);
+});
+
+  const finishedFor = (parentID: string) => ({
+    info: { id: `assistant-final-${parentID}`, role: 'assistant', parentID, time: { created: 1, completed: 2 }, finish: 'stop' },
+    parts: [],
+  });
+  const finished = finishedFor('user');
+
+test('periodic reconciliation releases a missed idle only after a completed final assistant message', async () => {
+  const { state, say, statuses, messages, reconcile, statusDirectories } = await setup();
+  await say('chat');
+  statuses.chat = { type: 'idle' };
+  messages.chat = [{ info: { id: 'user', role: 'user' }, parts: [] }, finished];
+  await reconcile();
+  assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 0);
+  assert.ok(statusDirectories.includes('/chats'));
+});
+
+test('a stopped assistant belonging to an older turn cannot release an admitted chat', async () => {
+  const { state, say, idle, reconcile, messages } = await setup();
+  await say('chat');
+  messages.chat = [
+    { info: { id: 'older', role: 'user' }, parts: [] },
+    { info: { id: 'user', role: 'user' }, parts: [] },
+    { info: { id: 'older-final', role: 'assistant', parentID: 'older', time: { completed: 2 }, finish: 'stop' }, parts: [] },
+  ];
+  await reconcile();
+  assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 1);
+  await idle('chat');
+  assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 1);
+});
+
+test('a stopped assistant belonging to the original turn cannot answer the nudge', async () => {
+  const { state, declarations, hooks, say, idle, promptStart, releasePrompt, messages, nudgeID } = await setup(true);
+  await say('operator', 'Operator', 'Change the owner configuration');
+  await hooks.event!({ event: { type: 'message.part.updated', properties: { part: {
+    id: 'nudge-edit', sessionID: 'operator', type: 'tool', tool: 'edit',
+    state: { status: 'completed', input: { filePath: join(declarations, 'owners', 'nas.yaml') }, output: 'ok' },
+  } } } as never });
+  const finishing = idle('operator');
+  await promptStart;
+  releasePrompt();
+  await finishing;
+  messages.operator = [
+    { info: { id: 'user', role: 'user' }, parts: [] }, finished,
+    { info: { id: nudgeID(), role: 'user' }, parts: [] }, finished,
+  ];
+  await idle('operator');
+  assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 1);
+});
+
+test('a child final with no user or with the wrong parent retains the parent lease', async () => {
+  const { state, say, children, messages, reconcile } = await setup();
+  await say('parent');
+  children.parent = ['child'];
+  messages.child = [finishedFor('missing-user')];
+  await reconcile();
+  assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 1);
+  messages.child = [
+    { info: { id: 'child-user', role: 'user' }, parts: [] },
+    finishedFor('other-user'),
+  ];
+  await reconcile();
+  assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 1);
+  messages.child = [messages.child[0], finishedFor('child-user')];
+  await reconcile();
+  assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 0);
+});
+
+test('real status shape omits idle sessions and reconciles only with a scoped completed answer', async () => {
+  const { state, say, statuses, messages, reconcile, statusDirectories, requireScopedStatus } = await setup();
+  requireScopedStatus();
+  await say('chat');
+  statuses.chat = { type: 'idle' };
+  messages.chat = [{ info: { id: 'user', role: 'user' }, parts: [] }, finished];
+  await reconcile();
+  assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 0);
+  assert.ok(statusDirectories.every(directory => directory === '/chats'));
+});
+
+test('idle event retains a parent while a scoped child is busy and an unscoped lookup omits it', async () => {
+  const { state, say, idle, statuses, children, requireScopedChildren, requireScopedStatus } = await setup();
+  requireScopedChildren();
+  requireScopedStatus();
+  await say('parent');
+  children.parent = ['child'];
+  statuses.child = { type: 'busy' };
+  await idle('parent');
+  assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 1);
+  delete statuses.child;
+  await idle('child');
+  assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 0);
+});
+
+test('a missed nudge-answer idle releases only after the nudge user message has a final answer', async () => {
+  const { state, declarations, hooks, say, idle, promptStart, releasePrompt, reconcile, messages, nudgeID } = await setup(true);
+  await say('operator', 'Operator', 'Change the owner configuration');
+  await hooks.event!({ event: { type: 'message.part.updated', properties: { part: {
+    id: 'edit-nudge', sessionID: 'operator', type: 'tool', tool: 'edit',
+    state: { status: 'completed', input: { filePath: join(declarations, 'owners', 'nas.yaml') }, output: 'ok' },
+  } } } as never });
+  const finishing = idle('operator');
+  await promptStart;
+  messages.operator = [{ info: { id: 'user', role: 'user' }, parts: [] }, finished];
+  await reconcile();
+  assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 1);
+  releasePrompt();
+  await finishing;
+  messages.operator = [{ info: { id: 'user', role: 'user' }, parts: [] }, finished,
+    { info: { id: nudgeID(), role: 'user' }, parts: [{ type: 'text', text: MEMORY_NUDGE_TEXT }] }];
+  await reconcile();
+  assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 1);
+  messages.operator = [...messages.operator, finishedFor(nudgeID()!)];
+  await reconcile();
+  assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 0);
+});
+
+test('a nudge answering message without a busy event can reconcile its completed reply', async () => {
+  const { state, declarations, hooks, say, idle, promptStart, releasePrompt, reconcile, messages, nudgeID, deliverNudge } = await setup(true);
+  await say('operator', 'Operator', 'Change the owner configuration');
+  await hooks.event!({ event: { type: 'message.part.updated', properties: { part: {
+    id: 'edit-nudge', sessionID: 'operator', type: 'tool', tool: 'edit',
+    state: { status: 'completed', input: { filePath: join(declarations, 'owners', 'nas.yaml') }, output: 'ok' },
+  } } } as never });
+  const finishing = idle('operator');
+  await promptStart;
+  releasePrompt();
+  await finishing;
+  await deliverNudge();
+  messages.operator = [{ info: { id: 'user', role: 'user' }, parts: [] }, finished,
+    { info: { id: nudgeID(), role: 'user' }, parts: [{ type: 'text', text: MEMORY_NUDGE_TEXT }] }, finishedFor(nudgeID()!)];
+  await reconcile();
+  assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 0);
+});
+
+test('a premature idle during the nudge answer cannot release without that answers final', async () => {
+  const { state, declarations, hooks, say, idle, promptStart, releasePrompt, messages } = await setup(true);
+  await say('operator', 'Operator', 'Change the owner configuration');
+  await hooks.event!({ event: { type: 'message.part.updated', properties: { part: {
+    id: 'edit-nudge', sessionID: 'operator', type: 'tool', tool: 'edit',
+    state: { status: 'completed', input: { filePath: join(declarations, 'owners', 'nas.yaml') }, output: 'ok' },
+  } } } as never });
+  const finishing = idle('operator');
+  await promptStart;
+  releasePrompt();
+  await finishing;
+  await say('operator', 'Operator', MEMORY_NUDGE_TEXT);
+  messages.operator = [{ info: { id: 'user', role: 'user' }, parts: [] }, finished,
+    { info: { id: 'user-2', role: 'user' }, parts: [{ type: 'text', text: MEMORY_NUDGE_TEXT }] }];
+  await idle('operator');
+  assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 1);
+});
+
+test('periodic reconciliation retains a chat without final proof, including an absent status', async () => {
+  const { state, say, statuses, messages, reconcile, failMessages } = await setup();
+  await say('chat');
+  messages.chat = [{ info: { id: 'assistant', role: 'assistant', time: { created: 1 } }, parts: [] }];
+  await reconcile();
+  statuses.chat = { type: 'idle' };
+  await reconcile();
+  messages.chat = [finished, { info: { id: 'new-user', role: 'user' }, parts: [] }];
+  await reconcile();
+  messages.chat = [finished];
+  failMessages();
+  await reconcile();
+  assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 1);
+});
+
+test('periodic reconciliation retains a parent with an unproved child', async () => {
+  const { state, say, statuses, children, messages, reconcile } = await setup();
+  await say('parent');
+  statuses.parent = { type: 'idle' };
+  children.parent = ['child'];
+  messages.parent = [{ info: { id: 'user', role: 'user' }, parts: [] }, finished];
+  await reconcile();
+  assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 1);
+});
+
+test('periodic reconciliation releases a parent after its child has a completed final answer', async () => {
+  const { state, say, statuses, children, messages, reconcile } = await setup();
+  await say('parent');
+  children.parent = ['child'];
+  statuses.parent = { type: 'idle' };
+  statuses.child = { type: 'idle' };
+  messages.parent = [{ info: { id: 'user', role: 'user' }, parts: [] }, finished];
+  messages.child = [{ info: { id: 'child-user', role: 'user' }, parts: [] }, finishedFor('child-user')];
+  await reconcile();
+  assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 0);
+});
+
+test('periodic reconciliation retains a turn while its tool is in flight', async () => {
+  const { state, hooks, say, statuses, messages, reconcile } = await setup();
+  await say('chat');
+  statuses.chat = { type: 'idle' };
+  messages.chat = [{ info: { id: 'user', role: 'user' }, parts: [] }, finished];
+  await hooks['tool.execute.before']!({ sessionID: 'chat', tool: 'bash', callID: 'one' }, { args: {} });
+  await reconcile();
+  assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 1);
+  await hooks['tool.execute.after']!({ sessionID: 'chat', tool: 'bash', callID: 'one', args: {} }, { title: '', output: '', metadata: {} });
+  await reconcile();
+  assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 0);
+});
+
+test('periodic reconciliation retains a chat until all concurrent tools finish', async () => {
+  const { state, hooks, say, statuses, messages, reconcile } = await setup();
+  await say('chat');
+  statuses.chat = { type: 'idle' };
+  messages.chat = [{ info: { id: 'user', role: 'user' }, parts: [] }, finished];
+  for (const callID of ['one', 'two']) {
+    await hooks['tool.execute.before']!({ sessionID: 'chat', tool: 'bash', callID }, { args: {} });
+  }
+  await hooks['tool.execute.after']!({ sessionID: 'chat', tool: 'bash', callID: 'one', args: {} }, { title: '', output: '', metadata: {} });
+  await reconcile();
+  assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 1);
+  await hooks['tool.execute.after']!({ sessionID: 'chat', tool: 'bash', callID: 'two', args: {} }, { title: '', output: '', metadata: {} });
+  await reconcile();
+  assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 0);
+});
+
+test('a new message during reconciliation invalidates its earlier completion proof', async () => {
+  const { state, say, statuses, messages, reconcile, pauseNextMessages, messagesStart, resumeMessages } = await setup();
+  await say('chat');
+  statuses.chat = { type: 'idle' };
+  messages.chat = [finished];
+  pauseNextMessages();
+  const checking = reconcile();
+  await messagesStart;
+  const newTurn = say('chat', 'Miles Teg', 'Another turn');
+  resumeMessages();
+  await newTurn;
+  await checking;
+  assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 1);
+});
+
+test('a message starting during the final idle transcript read keeps the existing chat lease', async () => {
+  const { state, say, idle, pauseFinalChatMessages, messagesStart, resumeMessages } = await setup();
+  await say('chat');
+  const [original] = await listAdmissions(state);
+  pauseFinalChatMessages();
+  const finishing = idle('chat');
+  await messagesStart;
+  const newTurn = say('chat', 'Miles Teg', 'Another turn');
+  resumeMessages();
+  await finishing;
+  await newTurn;
+  const alive = (await listAdmissions(state)).filter(lease => lease.alive);
+  assert.deepEqual(alive.map(lease => lease.id), [original!.id]);
+  await idle('chat');
+  assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 0);
+});
+
+test('a prior turn final cannot reconcile an admitted message before its user record is persisted', async () => {
+  const { state, say, statuses, messages, reconcile } = await setup();
+  await say('chat');
+  statuses.chat = { type: 'idle' };
+  messages.chat = [{ info: { id: 'prior-user', role: 'user' }, parts: [] }, finished];
+  await reconcile();
+  assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 1);
+  messages.chat = [...messages.chat, { info: { id: 'user', role: 'user' }, parts: [] },
+    { info: { id: 'fresh-final', role: 'assistant', parentID: 'user', time: { completed: 3 }, finish: 'stop' }, parts: [] }];
+  await reconcile();
+  assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 0);
+});
+
+test('an idle event delayed in child ancestry cannot finish a newer admitted turn', async () => {
+  const { state, say, idle, statuses, children, messages, pauseNextChildLookup, childStatusStart, resumeChildStatus } = await setup();
+  await say('parent');
+  children.parent = ['child'];
+  statuses.child = { type: 'busy' };
+  messages.parent = [{ info: { id: 'user', role: 'user' }, parts: [] }, finished];
+  pauseNextChildLookup();
+  const oldIdle = idle('child');
+  await childStatusStart;
+  await say('parent', 'Miles Teg', 'New turn');
+  delete statuses.child;
+  messages.parent = [...messages.parent, { info: { id: 'user-2', role: 'user' }, parts: [] }, finished];
+  resumeChildStatus();
+  await oldIdle;
+  assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 1);
+});
+
+test('an old child idle after its new message cannot clear pending completion or reuse its prior final', async () => {
+  const { state, say, idle, statuses, children, messages, pauseNextChildLookup, childStatusStart, resumeChildStatus } = await setup();
+  await say('parent');
+  children.parent = ['child'];
+  statuses.child = { type: 'busy' };
+  await say('child', 'onionsoup-implementer', 'First child turn');
+  pauseNextChildLookup();
+  const oldIdle = idle('child');
+  await childStatusStart;
+  await say('child', 'onionsoup-implementer', 'New child turn');
+  messages.child = [
+    { info: { id: 'user-2', role: 'user' }, parts: [] }, finished,
+    { info: { id: 'user-3', role: 'user' }, parts: [] },
+  ];
+  delete statuses.child;
+  resumeChildStatus();
+  await oldIdle;
+  await idle('parent');
+  assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 1);
+  messages.child = [...messages.child, finishedFor('user-3')];
+  await idle('child');
+  assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 0);
+});
+
+test('ordinary idle retains the lease until the admitted user has a completed final', async () => {
+  const { state, say, idle, messages } = await setup();
+  await say('chat');
+  messages.chat = [{ info: { id: 'older', role: 'user' }, parts: [] }, finished];
+  await idle('chat');
+  assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 1);
+  messages.chat = [...messages.chat, { info: { id: 'user', role: 'user' }, parts: [] }, finished];
+  await idle('chat');
+  assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 0);
+});
+
+test('an arbitrary reply after a pending nudge cannot release the lease', async () => {
+  const { state, declarations, hooks, say, idle, promptStart, releasePrompt, messages } = await setup(true);
+  await say('operator', 'Operator', 'Change the owner configuration');
+  await hooks.event!({ event: { type: 'message.part.updated', properties: { part: {
+    id: 'edit-nudge', sessionID: 'operator', type: 'tool', tool: 'edit',
+    state: { status: 'completed', input: { filePath: join(declarations, 'owners', 'nas.yaml') }, output: 'ok' },
+  } } } as never });
+  const finishing = idle('operator');
+  await promptStart;
+  releasePrompt();
+  await finishing;
+  await say('operator', 'Operator', 'Unrelated reply');
+  messages.operator = [{ info: { id: 'user', role: 'user' }, parts: [] }, finished,
+    { info: { id: 'user-2', role: 'user' }, parts: [{ type: 'text', text: 'Unrelated reply' }] }, finished];
+  await idle('operator');
+  assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 1);
+});
+
+test('a later arbitrary reply cannot stand in for the persisted nudge answer', async () => {
+  const { state, declarations, hooks, say, idle, promptStart, releasePrompt, messages } = await setup(true);
+  await say('operator', 'Operator', 'Change the owner configuration');
+  await hooks.event!({ event: { type: 'message.part.updated', properties: { part: {
+    id: 'edit-nudge', sessionID: 'operator', type: 'tool', tool: 'edit',
+    state: { status: 'completed', input: { filePath: join(declarations, 'owners', 'nas.yaml') }, output: 'ok' },
+  } } } as never });
+  const finishing = idle('operator');
+  await promptStart;
+  releasePrompt();
+  await finishing;
+  await say('operator', 'Operator', 'Unrelated reply');
+  messages.operator = [{ info: { id: 'user', role: 'user' }, parts: [] }, finished,
+    { info: { id: 'nudge', role: 'user' }, parts: [{ type: 'text', text: MEMORY_NUDGE_TEXT }] },
+    { info: { id: 'user-2', role: 'user' }, parts: [{ type: 'text', text: 'Unrelated reply' }] }, finished];
+  await idle('operator');
+  assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 1);
+});
+
+test('reconciliation retains a lease if the admitted message has no persisted ID', async () => {
+  const { state, sayWithoutMarker, statuses, messages, reconcile } = await setup();
+  await sayWithoutMarker('chat');
+  statuses.chat = { type: 'idle' };
+  messages.chat = [{ info: { id: 'old-user', role: 'user' }, parts: [] }, finished];
+  await reconcile();
+  assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 1);
+});
+
+test('a child tool awaiting ancestry retains the parent admission until it completes', async () => {
+  const { state, hooks, say, idle, statuses, children, pauseNextChildLookup, childStatusStart, resumeChildStatus } = await setup();
+  await say('parent');
+  statuses.parent = { type: 'idle' };
+  children.parent = [];
+  statuses.child = { type: 'idle' };
+  await armDeployment(state, 'build');
+  await beginDrain(state, 'build');
+  pauseNextChildLookup();
+  const tool = hooks['tool.execute.before']!({ sessionID: 'child', tool: 'bash', callID: 'late' }, { args: {} });
+  await childStatusStart;
+  await idle('parent');
+  assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 1);
+  resumeChildStatus();
+  await tool;
+  await hooks['tool.execute.after']!({ sessionID: 'child', tool: 'bash', callID: 'late', args: {} }, { title: '', output: '', metadata: {} });
+  await idle('parent');
+  assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 0);
+});
+
+test('a child message awaiting ancestry during the parent final read keeps its lease through drain', async () => {
+  const { state, say, idle, children, pauseFinalChatMessages, messagesStart, resumeMessages,
+    pauseNextChildLookup, childStatusStart, resumeChildStatus } = await setup();
+  await say('parent');
+  children.parent = [];
+  await armDeployment(state, 'build');
+  await beginDrain(state, 'build');
+  pauseFinalChatMessages();
+  const finishing = idle('parent');
+  await messagesStart;
+  pauseNextChildLookup();
+  const joining = say('child', 'onionsoup-implementer');
+  await childStatusStart;
+  resumeMessages();
+  await finishing;
+  assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 1);
+  resumeChildStatus();
+  await joining;
+  children.parent = ['child'];
+  await idle('child');
+  assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 0);
+});
+
+test('a child tool awaiting ancestry during the parent final read keeps its lease through drain', async () => {
+  const { state, hooks, say, idle, children, pauseFinalChatMessages, messagesStart, resumeMessages,
+    pauseNextChildLookup, childStatusStart, resumeChildStatus } = await setup();
+  await say('parent');
+  children.parent = [];
+  await armDeployment(state, 'build');
+  await beginDrain(state, 'build');
+  pauseFinalChatMessages();
+  const finishing = idle('parent');
+  await messagesStart;
+  pauseNextChildLookup();
+  const tool = hooks['tool.execute.before']!({ sessionID: 'child', tool: 'bash', callID: 'pending' }, { args: {} });
+  await childStatusStart;
+  resumeMessages();
+  await finishing;
+  assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 1);
+  resumeChildStatus();
+  await tool;
+  await hooks['tool.execute.after']!({ sessionID: 'child', tool: 'bash', callID: 'pending', args: {} }, { title: '', output: '', metadata: {} });
+  await idle('parent');
+  assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 0);
+});
+
+test('a child omitted by an unscoped lookup retains its parent until its scoped final is proved', async () => {
+  const { state, say, statuses, children, messages, reconcile, requireScopedChildren } = await setup();
+  requireScopedChildren();
+  await say('parent');
+  statuses.parent = { type: 'idle' };
+  statuses.child = { type: 'idle' };
+  children.parent = ['child'];
+  messages.parent = [{ info: { id: 'user', role: 'user' }, parts: [] }, finished];
+  await reconcile();
+  assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 1);
+  messages.child = [{ info: { id: 'child-user', role: 'user' }, parts: [] }, finishedFor('child-user')];
+  await reconcile();
+  assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 0);
+});
+
+test('a child becoming busy after initial proof cannot release through the final boundary', async () => {
+  const { state, say, statuses, children, messages, reconcile, pauseNextStatus, childStatusStart, resumeChildStatus } = await setup();
+  await say('parent');
+  statuses.parent = { type: 'idle' };
+  statuses.child = { type: 'idle' };
+  children.parent = ['child'];
+  messages.parent = [{ info: { id: 'user', role: 'user' }, parts: [] }, finished];
+  messages.child = [{ info: { id: 'child-user', role: 'user' }, parts: [] }, finishedFor('child-user')];
+  pauseNextStatus();
+  const checking = reconcile();
+  await childStatusStart;
+  statuses.child = { type: 'busy' };
+  resumeChildStatus();
+  await checking;
+  assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 1);
+});
+
+test('a known child busy event during the final parent transcript read retains its lease', async () => {
+  const { state, hooks, say, idle, statuses, children, messages,
+    pauseFinalChatMessages, messagesStart, resumeMessages } = await setup();
+  await say('parent');
+  children.parent = ['child'];
+  statuses.child = { type: 'idle' };
+  messages.child = [{ info: { id: 'child-user', role: 'user' }, parts: [] }, finishedFor('child-user')];
+  pauseFinalChatMessages();
+  const finishing = idle('parent');
+  await messagesStart;
+  statuses.child = { type: 'busy' };
+  const busy = hooks.event!({ event: { type: 'session.status', properties: {
+    sessionID: 'child', status: { type: 'busy' },
+  } } as never });
+  resumeMessages();
+  await Promise.all([busy, finishing]);
+  assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 1);
+});
+
+test('a child final disappearing after initial proof retains the parent at final release', async () => {
+  const { state, say, statuses, children, messages, reconcile, pauseFinalChildMessages, messagesStart, resumeMessages } = await setup();
+  await say('parent');
+  statuses.parent = { type: 'idle' };
+  statuses.child = { type: 'idle' };
+  children.parent = ['child'];
+  messages.parent = [{ info: { id: 'user', role: 'user' }, parts: [] }, finished];
+  messages.child = [{ info: { id: 'child-user', role: 'user' }, parts: [] }, finishedFor('child-user')];
+  pauseFinalChildMessages();
+  const checking = reconcile();
+  await messagesStart;
+  messages.child = [{ info: { id: 'child-user', role: 'user' }, parts: [] }];
+  resumeMessages();
+  await checking;
+  assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 1);
 });
