@@ -203,7 +203,7 @@ outside the owner rules and what it risks.
 
 ## Keep a wiki
 
-Onionsoup can serve a wiki on your LAN: markdown pages in a git repository that one owner, its keeper, writes and
+Onionsoup keeps a wiki of markdown pages in a git repository that one owner, its keeper, writes and
 everyone reads. Declare it in `wiki.yaml` at the top of your config directory; without the file there is none.
 
 ```yaml
@@ -211,13 +211,14 @@ everyone reads. Declare it in `wiki.yaml` at the top of your config directory; w
 repository: git@github.com:you/homewiki.git   # each write is pushed here at once, as the backup
 branch: main                                  # default main
 pagesDirectory: docs                          # where the pages live in the repository (default docs)
-listen: 0.0.0.0:4748                          # where the surface serves it, read-only, with no login
 keeper: bellonda                              # a declared owner: the only one who writes
 ```
 
-Restart the surface: it clones the repository to `<ONIONSOUP_HOME>/wiki` and serves it at `listen` (bind a LAN
-address or `0.0.0.0` to reach it from other machines; anyone who can reach the port can read the wiki). Owners read
-it with `onionsoup_wiki`, and the keeper writes, moves and deletes pages with it; each write is committed as the
+The surface serves the read-only wiki at `http://127.0.0.1:4747/wiki/`, on the existing
+localhost surface with no second listener. `listen` is obsolete and ignored by this release; keep it in your live
+configuration while an older release requiring it is a rollback target. The wiki clone lives
+at `<ONIONSOUP_HOME>/wiki`. Owners read it with `onionsoup_wiki`, and the keeper writes, moves and deletes pages with
+it; each write is committed as the
 keeper and pushed, and a delete asks you first. Pages may start with YAML frontmatter: `title`, `order` (the sidebar
 sorts by it, then by title), `updated` and `sources`. If the wiki was an MkDocs site, run
 `npm run owners -- wiki migrate` once: it moves `mkdocs.yml`'s nav order into frontmatter, deletes `mkdocs.yml`, and

@@ -1,11 +1,10 @@
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { type IncomingMessage, type ServerResponse } from 'node:http';
 import { INDEX_PAGE, pageBacklinks, pageTree, searchPages, WIKI_LIMITS, type Wiki, type WikiPage } from '@onionsoup/owners';
 import { frameHtml, historyHtml, notFoundHtml, pageHtml, searchHtml, WIKI_SECURITY_HEADERS } from './wiki-layout.ts';
 import { renderMarkdown } from './wiki-render.ts';
 
 /**
- * The wiki's own listener, beside the surface: read-only HTML for the LAN, served from the wiki's clone. It serves
- * pages, search and history and nothing else: no API, approvals or chat, and nothing of the main surface.
+ * Read-only wiki mounted at /wiki/ by the surface, served from the wiki's clone.
  */
 
 /** One request's view of the wiki: every page, read once. */
@@ -109,14 +108,16 @@ function failureHtml(error: unknown) {
   return `<!doctype html><meta charset="utf-8"><title>Wiki unavailable</title><p>The wiki could not be read (${code}).</p>`;
 }
 
-async function serve(wiki: Wiki, request: IncomingMessage, response: ServerResponse) {
+export async function serveWiki(wiki: Wiki, request: IncomingMessage, response: ServerResponse) {
   if (!READ_METHODS.has(request.method ?? '')) {
     response.writeHead(405, { ...WIKI_SECURITY_HEADERS, allow: 'GET, HEAD' });
     response.end();
     return;
   }
   try {
-    const { status, html } = await renderRequest(wiki, new URL(request.url ?? '/', 'http://wiki.invalid'));
+    const url = new URL(request.url ?? '/wiki/', 'http://wiki.invalid');
+    url.pathname = url.pathname.slice('/wiki'.length) || '/';
+    const { status, html } = await renderRequest(wiki, url);
     sendHtml(response, status, html);
   } catch (error) {
     console.warn('wiki_site_failed', error instanceof Error ? error.message : String(error));
@@ -124,31 +125,16 @@ async function serve(wiki: Wiki, request: IncomingMessage, response: ServerRespo
   }
 }
 
-/** The wiki's HTTP server, not yet listening. */
-export function wikiServer(wiki: Wiki): Server {
-  return createServer((request, response) => {
-    void serve(wiki, request, response);
-  });
-}
-
 function warnSync(error: unknown) {
   console.warn('wiki_sync_failed', error instanceof Error ? error.message : String(error));
 }
 
 /**
- * Serve the wiki where wiki.yaml says. The clone is made (or brought up to date) first, then fetched and
- * fast-forwarded every WIKI_LIMITS.syncMs so pages pushed from elsewhere show up.
+ * Sync the wiki clone at startup and periodically while the surface runs.
  */
-export async function startWikiSite(wiki: Wiki) {
+export async function startWikiSync(wiki: Wiki) {
   await wiki.sync().catch(warnSync);
-  const server = wikiServer(wiki);
   const timer = setInterval(() => void wiki.sync().catch(warnSync), WIKI_LIMITS.syncMs);
   timer.unref();
-  server.on('close', () => clearInterval(timer));
-  const { host, port } = wiki.declaration.listen;
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(port, host, () => resolve());
-  });
-  return server;
+  return () => clearInterval(timer);
 }

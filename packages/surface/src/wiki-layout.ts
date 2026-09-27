@@ -147,8 +147,8 @@ export function frameHtml({ title, siteTitle, tree, current, query, content }: W
 </head>
 <body>
 <header>
-<a class="site" href="/">${escapeHtml(siteTitle)}</a>
-<form action="/search" method="get" role="search"><input type="search" name="q" value="${escapeHtml(query ?? '')}" placeholder="Search the wiki" aria-label="Search the wiki"><button type="submit">Search</button></form>
+<a class="site" href="/wiki/">${escapeHtml(siteTitle)}</a>
+<form action="/wiki/search" method="get" role="search"><input type="search" name="q" value="${escapeHtml(query ?? '')}" placeholder="Search the wiki" aria-label="Search the wiki"><button type="submit">Search</button></form>
 <a class="jump" href="#pages">Pages</a>
 </header>
 <div class="layout">
@@ -175,7 +175,7 @@ export interface WikiPageView {
 /** A page's article: its rendered body, who changed it last, its history link and the pages that link to it. */
 export function pageHtml({ path, html, latest, backlinks }: WikiPageView) {
   const updated = latest ? `Updated by ${escapeHtml(latest.author)}, ${timeTag(latest.date)}. ` : '';
-  const historyLink = `<a href="/history${escapeHtml(pageUrl(path))}">History</a>`;
+  const historyLink = `<a href="/wiki/history${escapeHtml(pageUrl(path).slice('/wiki'.length))}">History</a>`;
   const linking = backlinks.length ? `<section class="backlinks"><h2>Linked from</h2><ul>${entriesHtml(backlinks)}</ul></section>` : '';
   return `<article>${html}</article>\n<p class="meta">${updated}${historyLink}</p>\n${linking}`;
 }
