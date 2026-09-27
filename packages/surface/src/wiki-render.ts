@@ -19,10 +19,10 @@ function unescapeHtml(text: string) {
   return text.replace(/&(?:amp|lt|gt|quot|#39);/g, entity => HTML_UNESCAPES[entity]!);
 }
 
-/** The site URL of a page: index.md is /, hosts/index.md is /hosts/, hosts/selfie.md is /hosts/selfie. */
+/** The site URL of a page, rooted at /wiki/. */
 export function pageUrl(path: string) {
   const withoutIndex = posix.basename(path) === INDEX_PAGE ? path.slice(0, -INDEX_PAGE.length) : path.replace(/\.md$/, '');
-  return `/${withoutIndex.split('/').map(encodeURIComponent).join('/')}`;
+  return `/wiki/${withoutIndex.split('/').map(encodeURIComponent).join('/')}`;
 }
 
 /** Schemes a link may use; anything else (javascript:, data:, file:) is dropped. */
@@ -34,8 +34,22 @@ export function siteHref(href: string, fromPath: string) {
   // Browsers ignore whitespace and control characters inside a scheme ("java\tscript:"), so the check does too.
   const scheme = SCHEME.exec(href.replace(/[\u0000- \u007f]/g, ''))?.[1]?.toLowerCase();
   if (scheme) return SAFE_SCHEMES.has(scheme) ? href.trim() : undefined;
+  if (href.startsWith('//')) return undefined;
+  if (href.startsWith('/')) {
+    const [path, suffix = ''] = href.split(/(?=[?#])/, 2);
+    if (path.includes('\\') || /%5c/i.test(path)) return undefined;
+    if (path.split('/').some(segment => /^\.{1,2}$/.test(segment.replace(/%2e/gi, '.')))) return undefined;
+    if (path === '/') return `/wiki/${suffix}`;
+    if (path.startsWith('/wiki/')) return href;
+    return `${pageUrl(path.slice(1).replace(/\.md$/, ''))}${suffix}`;
+  }
   const target = linkedPage(fromPath, href);
-  if (!target) return href;
+  if (!target) {
+    if (href.startsWith('#')) return href;
+    if (href.includes('\\') || /%(?:2e|2f|5c)/i.test(href)) return undefined;
+    const resolved = new URL(href, `http://wiki.invalid${pageUrl(fromPath)}`);
+    return resolved.pathname.startsWith('/wiki/') ? `${resolved.pathname}${resolved.search}${resolved.hash}` : undefined;
+  }
   const anchor = href.includes('#') ? href.slice(href.indexOf('#')) : '';
   return `${pageUrl(target)}${anchor}`;
 }

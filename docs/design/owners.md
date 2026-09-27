@@ -510,7 +510,9 @@ provider that nothing is using.
 The homelab wiki used to be an ordinary repository owner's domain: every edit was a plan, a desk change, a
 cross-family review, a merge and a separate site publish, which was too much ceremony for a page of notes. The person
 may now declare a **wiki** in `wiki.yaml` (`WikiDeclaration` in `packages/owners/src/wiki-config.ts`): its git
-`repository`, `branch` (main), `pagesDirectory` (docs), `listen` (host:port) and `keeper`, the one owner who writes it.
+`repository`, `branch` (main), `pagesDirectory` (docs) and `keeper`, the one owner who writes it. The obsolete
+`listen` setting is ignored by this release; leave it in a live configuration until the previous release is no
+longer needed for rollback, because that release requires it.
 The keeper must be a declared owner (`wiki_keeper_unknown`); no file, or one holding only comments, means no wiki.
 
 Host code (`packages/owners/src/wiki.ts`, pages in `wiki-pages.ts`) keeps a clone at `<home>/wiki`, made on first
@@ -539,10 +541,12 @@ allows the tool although it gets no other onionsoup tool, and subagents get none
 every change is in git and pushed. Owners check the wiki before asking the person about homelab facts (the skills
 bootstrap says so), and send the keeper corrections with `onionsoup_ask`, which lands in the keeper's chat.
 
-The surface serves the wiki read-only on a second listener at `listen` (`packages/surface/src/wiki-site.ts`),
-started only when `wiki.yaml` exists: `/` is `index.md`, `/<path>` a page (`hosts/selfie.md` is `/hosts/selfie`),
-`/search?q=` and `/history/<path>`, and nothing else: no API, approvals, chat or files of the main surface. Pages are
-rendered on the server with marked (`wiki-render.ts`): raw HTML is shown as text, only http(s), mailto, anchor and
+The surface serves the wiki read-only under `/wiki/` on the existing localhost surface
+(`http://127.0.0.1:4747/wiki/`), with no second listener. It is available only when `wiki.yaml` exists:
+`/wiki/` is `index.md`, `/wiki/<path>` a page (`hosts/selfie.md` is `/wiki/hosts/selfie`),
+`/wiki/search?q=` and `/wiki/history/<path>`. The wiki routes expose no write API; the main surface's chats and
+approvals remain on their own routes. Pages are rendered on the server with marked (`wiki-render.ts`): raw HTML is
+shown as text, only http(s), mailto, anchor and
 site links survive, relative `.md` links are rewritten to site URLs, and headings get MkDocs' toc ids (old anchors keep
 working) with a permalink. Each page shows who changed it last and when, a history link and the pages linking to it,
 beside a sidebar tree and a search box. There is no script: one inline stylesheet (the surface's colours and fonts,

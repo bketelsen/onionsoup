@@ -64,7 +64,7 @@ export async function configWith(files: Record<string, string>) {
 }
 
 export function wikiYaml(remote: string, keeper = 'bellonda') {
-  return `repository: ${remote}\nlisten: 127.0.0.1:4748\nkeeper: ${keeper}\n`;
+  return `repository: ${remote}\nkeeper: ${keeper}\n`;
 }
 
 /** A runtime whose configuration declares a wiki on a fresh remote of these files, kept by Bellonda. */

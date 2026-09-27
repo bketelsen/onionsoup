@@ -5,20 +5,6 @@ import { z } from 'zod';
 
 export const WIKI_FILE = 'wiki.yaml';
 
-/** host:port, with an IPv6 host in brackets: 0.0.0.0:4748, [::]:4748. */
-const LISTEN = /^(?:\[(?<ipv6>[^\]]+)\]|(?<host>[^:\s[\]]+)):(?<port>\d{1,5})$/;
-
-export const WikiListen = z.string().transform((value, context) => {
-  const groups = LISTEN.exec(value)?.groups;
-  const port = Number(groups?.port);
-  if (!groups || port < 1 || port > 65_535) {
-    context.addIssue({ code: 'custom', message: 'listen must be host:port, e.g. 0.0.0.0:4748' });
-    return z.NEVER;
-  }
-  return { host: groups.ipv6 ?? groups.host!, port };
-});
-export type WikiListen = z.infer<typeof WikiListen>;
-
 /** A directory inside the repository: relative, and never climbing out of it. */
 const RepositoryDirectory = z.string().min(1).refine(
   path => !isAbsolute(path) && !path.split(/[\\/]/).includes('..'),
@@ -26,8 +12,8 @@ const RepositoryDirectory = z.string().min(1).refine(
 ).transform(path => path.replace(/\/+$/, ''));
 
 /**
- * The person's wiki (wiki.yaml): a git repository of markdown pages that onionsoup serves on the LAN and one owner,
- * the keeper, writes. Absent file (or one holding only comments), no wiki.
+ * The person's wiki (wiki.yaml): a git repository of markdown pages for the localhost surface.
+ * One owner, the keeper, writes. Absent file (or one holding only comments), no wiki.
  */
 export const WikiDeclaration = z.object({
   /** The git remote the wiki is pushed to as its backup. */
@@ -35,8 +21,6 @@ export const WikiDeclaration = z.object({
   branch: z.string().min(1).default('main'),
   /** Where the pages live in the repository. */
   pagesDirectory: RepositoryDirectory.default('docs'),
-  /** Where the surface serves the wiki. */
-  listen: WikiListen,
   /** The one owner who writes pages; everyone else reads. */
   keeper: z.string().regex(/^[a-z0-9-]+$/),
 });

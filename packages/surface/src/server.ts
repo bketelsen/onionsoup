@@ -4,8 +4,9 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { userInfo } from 'node:os';
 import { extname, join, normalize, resolve } from 'node:path';
 import { Decision, type SurfaceState } from './state.ts';
-import { beginAdmission, memoryStatus, requestDistill } from '@onionsoup/owners';
+import { beginAdmission, memoryStatus, requestDistill, type Wiki } from '@onionsoup/owners';
 import { readDeploymentView } from './deployment-view.ts';
+import { serveWiki } from './wiki-site.ts';
 
 export const SURFACE_LIMITS = { pollMs: 3_000, reloadMs: 15_000, bodyBytes: 1024 * 1024, heartbeatMs: 25_000 };
 
@@ -82,7 +83,7 @@ function route(method: string, path: string, handler: Handler): Route {
  * The surface's HTTP server: a JSON API over the surface state and opencode, an event stream for the browser,
  * and the built UI. It listens on localhost only; the opencode password stays on this side.
  */
-export function surfaceServer(state: SurfaceState, options: { webRoot: string; buildId: string | null; by?: string }) {
+export function surfaceServer(state: SurfaceState, options: { webRoot: string; buildId: string | null; by?: string; wiki?: Wiki }) {
   const by = options.by ?? userInfo().username;
   const clients = new Set<ServerResponse>();
   const broadcast = (event: string, data: unknown) => {
@@ -266,8 +267,20 @@ export function surfaceServer(state: SurfaceState, options: { webRoot: string; b
 
   const server = createServer((request, response) => {
     void (async () => {
+      const rawPath = (request.url ?? '/').split(/[?#]/, 1)[0]!;
+      if (/^\/wiki(?:[\\/]|$)/i.test(rawPath) && (rawPath.includes('\\') || rawPath.split('/').some(segment => /^\.{1,2}$/.test(segment.replace(/%2e/gi, '.'))))) {
+        response.writeHead(404, { 'content-type': 'text/plain' });
+        response.end('Not found');
+        return;
+      }
       const url = new URL(request.url ?? '/', 'http://localhost');
       try {
+        if (options.wiki && url.pathname === '/wiki') {
+          response.writeHead(308, { location: `/wiki/${url.search}` });
+          response.end();
+          return;
+        }
+        if (options.wiki && url.pathname.startsWith('/wiki/')) return serveWiki(options.wiki, request, response);
         if (url.pathname === '/api/events') return events(request, response);
         if (url.pathname.startsWith('/api/')) {
           for (const candidate of routes) {

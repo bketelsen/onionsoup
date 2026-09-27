@@ -34,11 +34,15 @@ function flatTitles(nodes: readonly WikiNode[]): string[] {
 test('wiki.yaml is optional; it parses with defaults, and a keeper who is not a declared owner is refused', async () => {
   assert.equal((await loadDeclarations('packages/owners/test/fixtures/owners')).wiki, undefined, 'no file, no wiki');
   assert.equal((await loadDeclarations(await configWith({ 'wiki.yaml': '# repository: git@github.com:me/wiki.git\n' }))).wiki, undefined, 'only comments, no wiki');
-  const wiki = (await loadDeclarations(await configWith({ 'wiki.yaml': 'repository: git@github.com:me/wiki.git\nlisten: 0.0.0.0:4748\nkeeper: bellonda\n' }))).wiki;
-  assert.deepEqual(wiki, { repository: 'git@github.com:me/wiki.git', branch: 'main', pagesDirectory: 'docs', listen: { host: '0.0.0.0', port: 4748 }, keeper: 'bellonda' });
+  const wiki = (await loadDeclarations(await configWith({ 'wiki.yaml': 'repository: git@github.com:me/wiki.git\nkeeper: bellonda\n' }))).wiki;
+  assert.deepEqual(wiki, { repository: 'git@github.com:me/wiki.git', branch: 'main', pagesDirectory: 'docs', keeper: 'bellonda' });
   await assert.rejects(loadDeclarations(await configWith({ 'wiki.yaml': wikiYaml('/tmp/wiki.git', 'chani') })), /^Error: wiki_keeper_unknown: wiki\.yaml names chani/);
-  await assert.rejects(loadDeclarations(await configWith({ 'wiki.yaml': 'repository: r\nlisten: 4748\nkeeper: bellonda\n' })), /wiki_invalid: wiki\.yaml: listen/);
-  await assert.rejects(loadDeclarations(await configWith({ 'wiki.yaml': 'repository: r\nlisten: a:1\nkeeper: bellonda\npagesDirectory: ../x\n' })), /wiki_invalid: wiki\.yaml: pagesDirectory/);
+  await assert.rejects(loadDeclarations(await configWith({ 'wiki.yaml': 'repository: r\nkeeper: bellonda\npagesDirectory: ../x\n' })), /wiki_invalid: wiki\.yaml: pagesDirectory/);
+});
+
+test('a legacy listen setting is ignored during deployment and rollback', async () => {
+  const declared = await loadDeclarations(await configWith({ 'wiki.yaml': 'repository: r\nkeeper: bellonda\nlisten: 0.0.0.0:4748\n' }));
+  assert.deepEqual(declared.wiki, { repository: 'r', branch: 'main', pagesDirectory: 'docs', keeper: 'bellonda' });
 });
 
 test('a write commits as the keeper with the reason as subject, pushes, and journals', async () => {
