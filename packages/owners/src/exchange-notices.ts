@@ -45,13 +45,30 @@ async function save(path: string, notice: ExchangeNotice) {
   await rename(temporary, path);
 }
 
-export async function queueExchangeNotice(runtime: Runtime, owner: string, text: string) {
-  const notice = ExchangeNotice.parse({ id: `msg_${randomUUID().replaceAll('-', '')}`, owner,
-    text, at: new Date().toISOString() });
-  const { pending } = paths(runtime);
-  await mkdir(pending, { recursive: true });
-  await save(join(pending, `${notice.id}.json`), notice);
-  return notice;
+export async function queueExchangeNotice(runtime: Runtime, owner: string, text: string,
+  delivery?: Pick<ExchangeNotice, 'id' | 'at' | 'target'>) {
+  const notice = ExchangeNotice.parse({ id: delivery?.id ?? `msg_${randomUUID().replaceAll('-', '')}`, owner,
+    text, at: delivery?.at ?? new Date().toISOString(), target: delivery?.target });
+  if (!/^msg_[a-f0-9]{32}$/.test(notice.id)) throw new Error('exchange_notice_identity_invalid');
+  const locations = paths(runtime);
+  await mkdir(locations.pending, { recursive: true });
+  return withRecordLock(join(locations.pending, `${notice.id}.queue.lock`), async () => {
+    for (const directory of Object.values(locations)) {
+      const existing = await readFile(join(directory, `${notice.id}.json`), 'utf8').catch(error => {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        return undefined;
+      });
+      if (!existing) continue;
+      const previous = ExchangeNotice.parse(JSON.parse(existing));
+      if (previous.owner !== notice.owner || previous.text !== notice.text || previous.at !== notice.at
+        || (notice.target && JSON.stringify(previous.target) !== JSON.stringify(notice.target))) {
+        throw new Error('exchange_notice_identity_conflict');
+      }
+      return previous;
+    }
+    await save(join(locations.pending, `${notice.id}.json`), notice);
+    return notice;
+  });
 }
 
 function personMessage(message: NoticeMessage, agent: string) {

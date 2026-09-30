@@ -153,9 +153,9 @@ export type ResourceRequest = z.infer<typeof ResourceRequest>;
 export class Requests {
   constructor(readonly directory: string) {}
 
-  async open(from: string, to: string, ask: ResourceAsk, followUp: string) {
+  async open(from: string, to: string, ask: ResourceAsk, followUp: string, origin?: ChatOrigin) {
     const now = new Date().toISOString();
-    const request = ResourceRequest.parse({ id: `r-${now.slice(0, 10).replaceAll('-', '')}-${randomUUID().slice(0, 6)}`, from, to, ask, followUp, status: 'pending-owner', createdAt: now, updatedAt: now });
+    const request = ResourceRequest.parse({ id: `r-${now.slice(0, 10).replaceAll('-', '')}-${randomUUID().slice(0, 6)}`, from, to, ask, followUp, origin, status: 'pending-owner', createdAt: now, updatedAt: now });
     return this.save(request);
   }
 

@@ -314,6 +314,30 @@ the separately tracked request-opened journal. Exchange notification and journal
 authoritative handoff state. Rollback leaves the
 new sidecars unread by older binaries; regular requests retain their existing schema and execution semantics.
 
+The requester now receives a current cross-owner progress summary in chat context and `onionsoup_status`.
+Visibility includes request participants and the receiving owner's direct manager, matching report-work visibility;
+it does not expose unrelated owners' work. Each row names the goal, accountable receiver, decision, linked work,
+blocker, recorded PR evidence and next step. It gives the record-read time and last-change time, labels records
+older than 24 hours as stale, and treats absent/mismatched linked work as unknown. Reading status does not probe
+live services, and repository merge never claims deployment. Recently finished requests stay visible for seven days.
+Injected summaries prioritize active requests and are bounded to 12 records and 12,000 characters. Omitted records
+and abbreviated blocker details are explicitly labeled; `onionsoup_status offset=<next>` pages through them,
+and `onionsoup_status request=<id>` reads full details under the same visibility check.
+
+New direct work requests and actionable asks retain the exact requester chat origin. The admitted daemon queues
+significant request/work/PR changes there as **informational `noReply` notices**, never model wakes, approvals or
+new work. Timestamp-only refreshes are suppressed. A persisted per-request outbox in
+`state/notices/request-progress` holds each notice before enqueueing; a stable ID lets the existing exchange
+transport reconcile posts accepted before a crash. Transition IDs preserve per-request delivery order. At most
+20 new transitions are queued per tick. Origin-less legacy requests remain visible through status but receive
+no guessed-chat delivery or backfill. Missing/unavailable origin chats retain pending notices; retiring an owner
+uses the exchange transport's undeliverable record. The status summary remains useful even when delivery fails.
+
+These are snapshots of observed transitions, not an exhaustive event log: a transition occurring and disappearing
+between ticks can be missed. Queued snapshots retain observation times and may be old by delivery; read status
+for current records. Reads across request and ledger files are not transactional. Informational notices do not
+promise that a coordinator will automatically resume reasoning; they give it durable context for its next turn.
+
 Request kinds:
 
 | Request | From → to | After the receiving owner accepts |

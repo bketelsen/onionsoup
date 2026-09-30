@@ -2,6 +2,7 @@ import { recentActivityContext } from './chat-context.ts';
 import { deliverExchangeNotices } from './exchange-notices.ts';
 import { exchangeClient } from './exchange-client.ts';
 import { listAttention, changeAttention } from './attention.ts';
+import { requestProgressDetail, requestProgressSummary } from './request-status.ts';
 import { requestWork } from './delegation.ts';
 import { ProposedWork } from './artifacts.ts';
 import { readdir, readFile } from 'node:fs/promises';
@@ -811,14 +812,13 @@ const server: Plugin = async (input, options) => {
     return requireOwner(agent).id;
   }
 
-  async function workSummary(ownerId: string) {
+  async function workSummary(ownerId: string, offset = 0) {
     const allItems = await runtime.ledger.list();
     const items = allItems.filter(item => item.owner === ownerId);
-    const requests = (await runtime.requests.list()).filter(request => request.from === ownerId || request.to === ownerId);
     const initiatives = initiativeSection(await initiativeViews(runtime), ownerId);
     const reports = reportsWorkText(allItems, directReports(runtime.declarations, ownerId).map(report => report.id));
     const reminders = reminderSection(await runtime.reminders.list(), ownerId);
-    return [statusText(items, requests), initiatives, reports, reminders].filter(Boolean).join('\n\n');
+    return [statusText(items, []), await requestProgressSummary(runtime, ownerId, new Date(), offset), initiatives, reports, reminders].filter(Boolean).join('\n\n');
   }
 
   /** Quotes already noted as decisions in this chat, by the owner or an earlier watch. */
@@ -1282,7 +1282,7 @@ const server: Plugin = async (input, options) => {
           const sender = requireOwner(context.agent);
           const receiver = resolveOwner(args.owner);
           const proposal = ProposedWork.parse(args);
-          return JSON.stringify(await requestWork(runtime, sender.id, receiver.id, proposal));
+          return JSON.stringify(await requestWork(runtime, sender.id, receiver.id, proposal, undefined, { sessionID: context.sessionID, directory: context.directory }));
         },
       }),
       [INITIATIVE_TOOL]: tool({
@@ -1370,10 +1370,15 @@ const server: Plugin = async (input, options) => {
       }),
       onionsoup_status: tool({
         description: 'Your open work items and requests (including anything waiting on the person), your initiatives if you manage owners, and work that finished recently with its outcome. Pass a work item id to see that item in full (yours, or any work of your direct reports).',
-        args: { item: tool.schema.string().optional().describe('A work item id, e.g. w-20260923-31a48a') },
+        args: {
+          item: tool.schema.string().optional().describe('A work item id, e.g. w-20260923-31a48a'),
+          request: tool.schema.string().optional().describe('A visible request ID for complete linked progress and blocker details'),
+          offset: tool.schema.number().int().nonnegative().optional().describe('Next cross-owner progress page offset shown by status'),
+        },
         async execute(args, context) {
           const owner = requireOwner(context.agent);
-          if (!args.item) return workSummary(owner.id);
+          if (args.request) return requestProgressDetail(runtime, owner.id, args.request);
+          if (!args.item) return workSummary(owner.id, args.offset);
           const item = await runtime.ledger.get(args.item).catch(() => undefined);
           const isVisible = item && (item.owner === owner.id || isDirectReport(runtime.declarations, owner.id, item.owner));
           if (!item || !isVisible) return `No work item ${args.item} of yours or your reports'. Your status:\n\n${await workSummary(owner.id)}`;

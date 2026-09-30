@@ -1,0 +1,195 @@
+import { clipped } from './chat-context.ts';
+import { createHash, randomUUID } from 'node:crypto';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { z } from 'zod';
+import { isDirectReport } from './declarations.ts';
+import { ExchangeNotice, queueExchangeNotice } from './exchange-notices.ts';
+import type { WorkItem, WorkStatus } from './ledger.ts';
+import { withRecordLock } from './record-lock.ts';
+import { describeAsk, type ResourceRequest, type RequestStatus } from './requests.ts';
+import type { Runtime } from './runtime.ts';
+
+export const REQUEST_STATUS_LIMITS = { staleMs: 24 * 60 * 60_000, recentMs: 7 * 24 * 60 * 60_000, noticesPerTick: 20, summaryRecords: 12, summaryChars: 12_000, fieldChars: 240 };
+const RequestProgress = z.object({
+  id: z.string(), from: z.string(), to: z.string(), purpose: z.string(), title: z.string(), status: z.string(),
+  decision: z.string().optional(), reason: z.string().optional(), workItem: z.string().optional(),
+  workStatus: z.string().optional(), workReason: z.string().optional(),
+  publication: z.object({ url: z.string(), state: z.string() }).optional(),
+  next: z.string(), lastRecordedAt: z.string(), observedAt: z.string(), stale: z.boolean(),
+  evidence: z.enum(['recorded', 'linked_work_missing', 'linked_work_mismatch']),
+});
+export type RequestProgress = z.infer<typeof RequestProgress>;
+
+const REQUEST_NEXT: Record<RequestStatus, string> = {
+  'pending-owner': 'Receiving owner must accept or decline.',
+  declined: 'Requester can revise the approach; no work will start from this request.',
+  'awaiting-create-approval': 'Wait for the configured create approval.',
+  'create-approved': 'Runtime can execute the approved create step.',
+  denied: 'Stopped at the person’s denial; do not reopen automatically.',
+  provisioned: 'Requester follow-up or release is next.',
+  'awaiting-delete-approval': 'Wait for delete approval; resource remains present.',
+  'delete-approved': 'Runtime can execute the approved delete step.',
+  deleted: 'Recorded resource cleanup complete.',
+  published: 'Publication is recorded; consult its verification before broader health claims.',
+  updated: 'Update is recorded; broader operating health is not established by this status.',
+  failed: 'Requester must inspect the blocker before proposing a different approach.',
+  interrupted: 'Reconcile uncertain effects before any retry.',
+  'work-running': 'Receiving owner carries the linked work; inspect its recorded stage.',
+  completed: 'Request completion is recorded; deployment is not implied by repository merge.',
+};
+const WORK_NEXT: Record<WorkStatus, string> = {
+  proposed: 'Receiving owner must plan this proposal.', planning: 'Receiving owner is preparing the plan.',
+  'awaiting-plan-approval': 'Wait for the person or configured manager’s plan approval.',
+  working: 'Receiving owner is carrying out the approved plan.', implementing: 'Implementation is in progress.',
+  reviewing: 'Required review is in progress.', landing: 'Verified changes are being published.',
+  'awaiting-push-approval': 'Wait for push approval.',
+  landed: 'Inspect the PR state; landed or merged code does not establish deployment.',
+  failed: 'Inspect the work blocker before proposing another approach.',
+  rejected: 'The proposed method was rejected; do not restart it automatically.',
+  interrupted: 'Reconcile interrupted work before any retry.', cancelled: 'Work was cancelled; no automatic continuation.',
+};
+const FINISHED = new Set<RequestStatus>(['declined', 'denied', 'deleted', 'published', 'updated', 'failed', 'completed']);
+
+export function requestVisibleTo(runtime: Runtime, owner: string, request: ResourceRequest) {
+  return request.from === owner || request.to === owner || isDirectReport(runtime.declarations, owner, request.to);
+}
+
+/** A fresh read of durable records, not a live probe of repositories, hosts, or deployments. */
+export function requestProgress(request: ResourceRequest, item: WorkItem | undefined, now = new Date()): RequestProgress {
+  const matches = item?.owner === request.to && item.request === request.id;
+  const linked = matches ? item : undefined;
+  const lastRecordedAt = linked && linked.updatedAt > request.updatedAt ? linked.updatedAt : request.updatedAt;
+  const evidence = request.workItem && !linked ? (item ? 'linked_work_mismatch' : 'linked_work_missing') : 'recorded';
+  const next = evidence !== 'recorded' ? 'Linked work is unavailable or inconsistent; inspect before claiming progress.'
+    : request.status === 'work-running' && linked ? WORK_NEXT[linked.status] : REQUEST_NEXT[request.status];
+  return RequestProgress.parse({
+    id: request.id, from: request.from, to: request.to, purpose: request.ask.purpose, title: describeAsk(request.ask), status: request.status,
+    decision: request.publishDecision?.reply ?? request.decision?.reply, reason: request.reason,
+    workItem: request.workItem, workStatus: linked?.status, workReason: linked?.reason,
+    publication: linked?.publication ? { url: linked.publication.url, state: linked.publication.state } : undefined,
+    next, lastRecordedAt, observedAt: now.toISOString(),
+    stale: !Number.isFinite(Date.parse(lastRecordedAt)) || now.getTime() - Date.parse(lastRecordedAt) > REQUEST_STATUS_LIMITS.staleMs,
+    evidence,
+  });
+}
+
+export function requestProgressText(progress: RequestProgress) {
+  return [
+    `${progress.id}: ${progress.from} → ${progress.to}; ${progress.title}; request ${progress.status}`,
+    `Goal: ${progress.purpose}`,
+    progress.decision && `Receiver decision: ${progress.decision}`,
+    progress.reason && `Request reason: ${progress.reason}`,
+    progress.workItem && `Linked work ${progress.workItem}: ${progress.workStatus ?? 'unknown'}${progress.workReason ? `; ${progress.workReason}` : ''}`,
+    progress.publication && `PR ${progress.publication.url}: ${progress.publication.state} (recorded; deployment unknown).`,
+    `Next: ${progress.next}`,
+    `Records read at ${progress.observedAt}; last recorded change ${progress.lastRecordedAt}${progress.stale ? ' (stale)' : ''}; ${progress.evidence}. Live state not probed.`,
+  ].filter(Boolean).join('\n');
+}
+
+function compactProgress(progress: RequestProgress) {
+  const maximum = REQUEST_STATUS_LIMITS.fieldChars;
+  const hasAbbreviation = [progress.purpose, progress.title, progress.reason, progress.workReason, progress.decision, progress.publication?.url]
+    .some(value => value && value.length > maximum);
+  const compact = { ...progress, purpose: clipped(progress.purpose, maximum), title: clipped(progress.title, maximum),
+    reason: progress.reason ? clipped(progress.reason, maximum) : undefined,
+    workReason: progress.workReason ? clipped(progress.workReason, maximum) : undefined,
+    decision: progress.decision ? clipped(progress.decision, maximum) : undefined,
+    publication: progress.publication ? { ...progress.publication, url: clipped(progress.publication.url, maximum) } : undefined };
+  const note = hasAbbreviation ? `\nDetails abbreviated (including any long blocker); use onionsoup_status request=${progress.id}.` : '';
+  return requestProgressText(compact) + note;
+}
+
+/** Exact request lookup uses the same visibility boundary as summaries. */
+export async function requestProgressDetail(runtime: Runtime, owner: string, id: string) {
+  const request = await runtime.requests.get(id).catch(error => {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    return undefined;
+  });
+  if (!request || !requestVisibleTo(runtime, owner, request)) return 'No visible request with that ID.';
+  const item = request.workItem ? await runtime.ledger.get(request.workItem).catch(() => undefined) : undefined;
+  return requestProgressText(requestProgress(request, item));
+}
+
+export async function requestProgressSummary(runtime: Runtime, owner: string, now = new Date(), offset = 0) {
+  const requests = (await runtime.requests.list()).filter(request => requestVisibleTo(runtime, owner, request))
+    .filter(request => !FINISHED.has(request.status) || now.getTime() - Date.parse(request.updatedAt) <= REQUEST_STATUS_LIMITS.recentMs)
+    .sort((left, right) => Number(FINISHED.has(left.status)) - Number(FINISHED.has(right.status))
+      || right.updatedAt.localeCompare(left.updatedAt));
+  if (!requests.length) return '';
+  const items = new Map((await runtime.ledger.list()).map(item => [item.id, item]));
+  const sections = [`Cross-owner progress (records read ${now.toISOString()}):`];
+  let count = 0;
+  for (const request of requests.slice(offset, offset + REQUEST_STATUS_LIMITS.summaryRecords)) {
+    const entry = compactProgress(requestProgress(request, request.workItem ? items.get(request.workItem) : undefined, now));
+    if (sections.join('\n\n').length + entry.length + REQUEST_STATUS_LIMITS.fieldChars > REQUEST_STATUS_LIMITS.summaryChars) break;
+    sections.push(entry);
+    count++;
+  }
+  const omitted = requests.length - offset - count;
+  if (omitted > 0) sections.push(`${omitted} additional requests omitted; blockers may be among them. Read onionsoup_status offset=${offset + count} for the next page; use request=<id> for full details.`);
+  if (!count) sections.push('No requests on this page.');
+  return sections.join('\n\n');
+}
+
+const Cursor = z.object({ sequence: z.number().int().nonnegative(), fingerprint: z.string(), pending: ExchangeNotice.optional() });
+type Cursor = z.infer<typeof Cursor>;
+function fingerprint(progress: RequestProgress) {
+  const { observedAt: _observedAt, lastRecordedAt: _lastRecordedAt, stale: _stale, ...significant } = progress;
+  return createHash('sha256').update(JSON.stringify(significant)).digest('hex');
+}
+async function saveCursor(path: string, cursor: Cursor) {
+  const temporary = `${path}.${randomUUID()}.tmp`;
+  await writeFile(temporary, JSON.stringify(cursor) + '\n', { mode: 0o600 });
+  await rename(temporary, path);
+}
+async function enqueuePending(runtime: Runtime, path: string, cursor: Cursor) {
+  if (!cursor.pending) return cursor;
+  await queueExchangeNotice(runtime, cursor.pending.owner, cursor.pending.text, cursor.pending);
+  const queued = { ...cursor, pending: undefined };
+  await saveCursor(path, queued);
+  return queued;
+}
+
+async function noticeRequest(runtime: Runtime, request: ResourceRequest, progress: RequestProgress) {
+  if (!request.origin || !runtime.declarations.owners.has(request.from)) return false;
+  const directory = join(runtime.stateDirectory, 'notices', 'request-progress');
+  await mkdir(directory, { recursive: true });
+  const key = createHash('sha256').update(request.id).digest('hex');
+  const path = join(directory, `${key}.json`);
+  return withRecordLock(`${path}.lock`, async () => {
+    const contents = await readFile(path, 'utf8').catch(error => {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      return undefined;
+    });
+    let cursor = contents ? Cursor.parse(JSON.parse(contents)) : { sequence: 0, fingerprint: '' };
+    const hadPending = Boolean(cursor.pending);
+    cursor = await enqueuePending(runtime, path, cursor);
+    const nextFingerprint = fingerprint(progress);
+    if (cursor.fingerprint === nextFingerprint) return hadPending;
+    const sequence = cursor.sequence + 1;
+    // Existing delivery sorts message IDs: preserve transition order within each request.
+    const id = `msg_${key.slice(0, 16)}${sequence.toString(16).padStart(16, '0')}`;
+    const pending = ExchangeNotice.parse({ id, owner: request.from, target: request.origin,
+      text: `Request progress (informational; no new authorization):\n${requestProgressText(progress)}`,
+      at: progress.observedAt });
+    const next = { sequence, fingerprint: nextFingerprint, pending };
+    await saveCursor(path, next);
+    await enqueuePending(runtime, path, next);
+    return true;
+  });
+}
+
+/** Queue informational updates only; never hire a model, approve, retry or dispatch work. */
+export async function noticeRequestProgress(runtime: Runtime, onError: (id: string, error: unknown) => void) {
+  const requests = (await runtime.requests.list()).filter(request => request.origin);
+  const items = new Map((await runtime.ledger.list()).map(item => [item.id, item]));
+  let processed = 0;
+  for (const request of requests) {
+    try {
+      if (processed >= REQUEST_STATUS_LIMITS.noticesPerTick) break;
+      if (await noticeRequest(runtime, request, requestProgress(request, request.workItem ? items.get(request.workItem) : undefined))) processed++;
+    } catch (error) { onError(request.id, error); }
+  }
+  return processed;
+}

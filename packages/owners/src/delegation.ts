@@ -1,3 +1,4 @@
+import type { ChatOrigin } from './chat-origin.ts';
 import { ProposedWork } from './artifacts.ts';
 import { canChange, isDirectReport } from './declarations.ts';
 import { OWNER_CHANGE_WORKFLOW } from './plan-work.ts';
@@ -14,12 +15,12 @@ export async function journalRequest(runtime: Runtime, request: ResourceRequest,
 }
 
 /** Delegation chooses an existing receiver that changes its own repository; it never grants new authority. */
-export async function requestWork(runtime: Runtime, from: string, to: string, proposal: ProposedWork, assignment?: AssignmentRef) {
+export async function requestWork(runtime: Runtime, from: string, to: string, proposal: ProposedWork, assignment?: AssignmentRef, origin?: ChatOrigin) {
   runtime.owner(from);
   const receiver = runtime.owner(to);
   if (!canChange(receiver)) throw new Error(`owner_cannot_change: ${to} does not change its repository itself`);
   runtime.repositoryOwner(to, proposal.repository);
-  const request = await runtime.requests.open(from, to, { kind: 'work', purpose: proposal.goal, proposal, assignment }, 'none');
+  const request = await runtime.requests.open(from, to, { kind: 'work', purpose: proposal.goal, proposal, assignment }, 'none', origin);
   await journalRequest(runtime, request, 'request-opened', proposal.title);
   return request;
 }
