@@ -608,6 +608,12 @@ operator-memory nudge (matched to its generated message ID and exact text under 
 the existing lease; unrelated messages still pass the drain admission gate. The final release rechecks status, transcript
 and child evidence while serialized with chat completion and tool registration; normal
 idle-event release still runs the decision watcher and operator memory handling.
+Native tool errors may skip OpenCode's normal after-hook. Terminal-error events and the periodic
+pass verify the exact registered session, call, tool and admitted user against the persisted
+assistant tool part before removing its own and its ancestor's tool marker. Events alone are
+not completion evidence; running tools, mismatched or unreadable history, and registration
+races retain their markers. Removing a tool marker does not complete a turn or release a
+later user's lease: the ordinary final-answer, child and idle checks still run.
 These are accepted best-effort limits (see [gaps](../gaps.md)). Bootstrap is manual; arm
 and enable the timer only after verifying both installed services and the plugin use the
 release pointer.

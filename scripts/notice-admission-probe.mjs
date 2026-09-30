@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { lstat, readFile, realpath } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
 import { z } from 'zod';
@@ -7,8 +6,9 @@ import { AdmissionRecord, DeploymentIntent, listAdmissions } from '../packages/o
 import { deliveredExchangeNoticeProof } from '../packages/owners/src/exchange-notices.ts';
 import { createAdmission, readOpencodeEndpoint } from './deploy-admission.mjs';
 
-export const fail = code => Object.assign(new Error(code), { code });
-export const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+import { fail, hash } from './admission-recovery-proof.mjs';
+import { FailedToolSelection, FailedToolProof, proveFailedTool } from './failed-tool-admission-proof.mjs';
+export { fail, hash } from './admission-recovery-proof.mjs';
 const absolute = z.string().refine(value => isAbsolute(value) && resolve(value) === value);
 const commit = z.string().regex(/^[a-f0-9]{40}$/);
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
@@ -16,8 +16,10 @@ export const LEGACY_NOTICE_BUILD = 'b2db85b5fa46b1d8f6608ab6e1c3e29a75da0f95';
 export const Selection = z.object({ root: absolute, state: absolute, config: absolute,
   surfaceUrl: z.string().url(), expectedOld: commit, expectedTarget: commit,
   sessions: z.array(z.string().regex(/^ses_[a-zA-Z0-9]+$/)).min(1).max(20),
+  failedTool: FailedToolSelection.optional(),
 }).strict().superRefine((value, context) => {
-  if (new Set(value.sessions).size !== value.sessions.length || value.expectedOld === value.expectedTarget) {
+  if (new Set(value.sessions).size !== value.sessions.length || value.expectedOld === value.expectedTarget
+    || (value.failedTool && !value.sessions.includes(value.failedTool.sessionID))) {
     context.addIssue({ code: 'custom', message: 'notice_recovery_selection_invalid' });
   }
 });
@@ -29,8 +31,16 @@ export const RecoveryProof = z.object({ selection: Selection,
   manifests: z.array(z.object({ build: commit, digest }).strict()).length(2),
   endpoint: EndpointIdentity, leases: z.array(AdmissionRecord.extend({ alive: z.boolean() }).strict()),
   sessions: z.array(z.object({ sessionID: z.string(), directory: absolute, userID: z.string(), finalID: z.string(),
-    noticeIDs: z.array(z.string()).min(1), transcriptDigest: digest, noticeDigest: digest }).strict()).min(1),
-}).strict();
+    noticeIDs: z.array(z.string()).min(1), transcriptDigest: digest, noticeDigest: digest }).strict()),
+  failedTool: FailedToolProof.optional(),
+}).strict().superRefine((proof, context) => {
+  const sessions = [...proof.sessions.map(session => session.sessionID),
+    ...(proof.failedTool ? [proof.failedTool.selection.sessionID] : [])].sort();
+  if (hash(sessions) !== hash([...proof.selection.sessions].sort())
+    || hash([proof.failedTool?.selection]) !== hash([proof.selection.failedTool])) {
+    context.addIssue({ code: 'custom', message: 'notice_recovery_proof_selection_mismatch' });
+  }
+});
 
 export function endpointIdentity(endpoint) {
   return { instanceId: endpoint.instanceId, surfacePid: endpoint.surfacePid,
@@ -131,14 +141,16 @@ export async function probeNoticeAdmissions(selection, effects = {}, statuses, r
   const identity = endpointIdentity(endpoint);
   try {
     await assertNoWork(runtime);
+    const failedTool = selection.failedTool
+      ? await proveFailedTool(selection.failedTool, selection.expectedOld, endpoint, request) : undefined;
     const admission = await createAdmission({ ...selection, admissionEffects: { ...effects,
       request: async (observedEndpoint, path, directory) => {
         if (hash(endpointIdentity(observedEndpoint)) !== hash(identity)) throw fail('notice_recovery_endpoint_changed');
         const response = await request(observedEndpoint, path, directory);
         const session = selection.sessions.find(id => path === `/session/${encodeURIComponent(id)}/message`);
         const childSession = selection.sessions.find(id => path === `/session/${encodeURIComponent(id)}/children`);
-        if (childSession && (!Array.isArray(response) || response.length)) throw fail('notice_recovery_has_children');
-        if (!session) return response;
+        if (childSession && childSession !== selection.failedTool?.sessionID && (!Array.isArray(response) || response.length)) throw fail('notice_recovery_has_children');
+        if (!session || session === selection.failedTool?.sessionID) return response;
         const { projected, proof } = await noticeProjection(runtime, { sessionID: session, directory }, response,
           selection.expectedOld === LEGACY_NOTICE_BUILD);
         if (snapshots.has(session) && hash(snapshots.get(session)) !== hash(proof)) {
@@ -150,13 +162,18 @@ export async function probeNoticeAdmissions(selection, effects = {}, statuses, r
     } });
     if (!await admission.bootstrapQuiet(selection.sessions, endpoint)) throw fail('notice_recovery_not_quiet');
     await assertNoWork(runtime);
+    const checkedFailure = selection.failedTool
+      ? await proveFailedTool(selection.failedTool, selection.expectedOld, endpoint, request) : undefined;
+    if (hash([checkedFailure]) !== hash([failedTool])) throw fail('notice_recovery_evidence_changed');
     const after = await endpointProbe(selection.state);
     if (hash(endpointIdentity(after)) !== hash(identity)) throw fail('notice_recovery_endpoint_changed');
     const afterLeases = recoveryLeases(await listAdmissions(selection.state), selection, after, recovered);
     if (hash(afterLeases) !== hash(leases) || hash(await readContext(selection, statuses)) !== hash(context)) {
       throw fail('notice_recovery_evidence_changed');
     }
+    if (snapshots.size + (failedTool ? 1 : 0) !== selection.sessions.length) throw fail('notice_recovery_evidence_incomplete');
     const proof = RecoveryProof.parse({ ...context, endpoint: identity, leases,
+      ...(failedTool ? { failedTool } : {}),
       sessions: [...snapshots.values()].sort((left, right) => left.sessionID.localeCompare(right.sessionID)) });
     return { state: 'preview', digest: hash(proof), proof };
   } finally { runtime.close(); }

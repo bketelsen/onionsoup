@@ -1115,3 +1115,241 @@ test('approved inactive child releases only its completed parent; active child, 
   await reconcile();
   assert.equal((await listAdmissions(state)).length, 2, 'new evidence invalidates the old receipt');
 });
+
+function persistFailedTool(fixture: Awaited<ReturnType<typeof setup>>, sessionID: string, callID: string, userID = 'user') {
+  const messageID = `tool-message-${callID}`;
+  const part = { id: `part-${callID}`, sessionID, messageID, callID, type: 'tool', tool: 'apply_patch',
+    state: { status: 'error', error: 'apply_patch verification failed', time: { start: 3, end: 4 } } };
+  const messages = fixture.messages[sessionID]!;
+  for (const message of messages as { info: { role: string; sessionID?: string } }[]) {
+    message.info.sessionID = sessionID;
+  }
+  messages.splice(messages.length - 1, 0, {
+    info: { id: messageID, role: 'assistant', sessionID, parentID: userID }, parts: [part],
+  });
+  return part;
+}
+
+async function toolErrorEvent(fixture: Awaited<ReturnType<typeof setup>>, part: unknown) {
+  await fixture.hooks.event!({ event: { type: 'message.part.updated', properties: { part } } as never });
+}
+
+async function beforeFailedTool(fixture: Awaited<ReturnType<typeof setup>>, sessionID: string, callID = 'failed') {
+  await fixture.hooks['tool.execute.before']!({ sessionID, callID, tool: 'apply_patch' }, { args: {} });
+}
+
+async function liveAdmissions(fixture: Awaited<ReturnType<typeof setup>>) {
+  return (await listAdmissions(fixture.state)).filter(lease => lease.alive).length;
+}
+
+test('persisted terminal error releases exact parent and child markers without an after hook', async () => {
+  const fixture = await setup();
+  fixture.children.parent = ['child'];
+  await fixture.say('parent');
+  await fixture.say('child');
+  await beforeFailedTool(fixture, 'child');
+  const part = persistFailedTool(fixture, 'child', 'failed', 'user-2');
+  await toolErrorEvent(fixture, part);
+  await fixture.idle('child');
+  assert.equal(await liveAdmissions(fixture), 0);
+  await toolErrorEvent(fixture, part);
+  await fixture.hooks['tool.execute.after']!({ sessionID: 'child', callID: 'failed', tool: 'apply_patch', args: {} }, { title: '', output: '', metadata: {} });
+  assert.equal(await liveAdmissions(fixture), 0);
+});
+
+test('periodic reconciliation repairs a missed terminal-error event using persisted evidence', async () => {
+  const fixture = await setup();
+  await fixture.say('chat');
+  await beforeFailedTool(fixture, 'chat');
+  persistFailedTool(fixture, 'chat', 'failed');
+  await fixture.reconcile();
+  assert.equal(await liveAdmissions(fixture), 0);
+});
+
+test('terminal-error event before persistence retains the call until a later reconciliation', async () => {
+  const fixture = await setup();
+  await fixture.say('chat');
+  await beforeFailedTool(fixture, 'chat');
+  await toolErrorEvent(fixture, { type: 'tool', sessionID: 'chat', state: { status: 'error' } });
+  await fixture.idle('chat');
+  assert.equal(await liveAdmissions(fixture), 1);
+  persistFailedTool(fixture, 'chat', 'failed');
+  await fixture.reconcile();
+  assert.equal(await liveAdmissions(fixture), 0);
+});
+
+test('failed-call cleanup retains concurrent genuine tools and does not treat completed parts as errors', async () => {
+  const fixture = await setup();
+  await fixture.say('chat');
+  await beforeFailedTool(fixture, 'chat');
+  await beforeFailedTool(fixture, 'chat', 'running');
+  const part = persistFailedTool(fixture, 'chat', 'failed');
+  const running = persistFailedTool(fixture, 'chat', 'running');
+  running.state.status = 'completed';
+  await toolErrorEvent(fixture, part);
+  await fixture.reconcile();
+  assert.equal(await liveAdmissions(fixture), 1);
+  await fixture.hooks['tool.execute.after']!({ sessionID: 'chat', callID: 'running', tool: 'apply_patch', args: {} }, { title: '', output: '', metadata: {} });
+  await fixture.reconcile();
+  assert.equal(await liveAdmissions(fixture), 0);
+});
+
+test('duplicate old error and after callbacks preserve a later genuine turn and tool', async () => {
+  const fixture = await setup();
+  await fixture.say('chat');
+  await beforeFailedTool(fixture, 'chat');
+  const part = persistFailedTool(fixture, 'chat', 'failed');
+  await toolErrorEvent(fixture, part);
+  await fixture.reconcile();
+  assert.equal(await liveAdmissions(fixture), 0);
+  await fixture.say('chat');
+  fixture.messages.chat!.pop();
+  await beforeFailedTool(fixture, 'chat', 'later');
+  await toolErrorEvent(fixture, part);
+  await fixture.hooks['tool.execute.after']!({ sessionID: 'chat', callID: 'failed', tool: 'apply_patch', args: {} }, { title: '', output: '', metadata: {} });
+  await fixture.reconcile();
+  assert.equal(await liveAdmissions(fixture), 1);
+  await fixture.hooks['tool.execute.after']!({ sessionID: 'chat', callID: 'later', tool: 'apply_patch', args: {} }, { title: '', output: '', metadata: {} });
+  await fixture.reconcile();
+  assert.equal(await liveAdmissions(fixture), 1);
+  fixture.messages.chat!.push(finishedFor('user-2'));
+  await fixture.reconcile();
+  assert.equal(await liveAdmissions(fixture), 0);
+});
+
+test('an error during before-hook ancestry registration cannot clear a marker before registration finishes', async () => {
+  const fixture = await setup();
+  fixture.children.parent = ['child'];
+  await fixture.say('parent');
+  await fixture.say('child');
+  fixture.pauseNextChildLookup();
+  const starting = beforeFailedTool(fixture, 'child');
+  await fixture.childStatusStart;
+  const part = persistFailedTool(fixture, 'child', 'failed', 'user-2');
+  await toolErrorEvent(fixture, part);
+  await fixture.reconcile();
+  assert.equal(await liveAdmissions(fixture), 1);
+  fixture.resumeChildStatus();
+  await starting;
+  await fixture.idle('child');
+  assert.equal(await liveAdmissions(fixture), 1);
+  await fixture.reconcile();
+  assert.equal(await liveAdmissions(fixture), 0);
+});
+
+test('a new user arriving during error-proof reads keeps its unfinished admission', async () => {
+  const fixture = await setup();
+  await fixture.say('chat');
+  await beforeFailedTool(fixture, 'chat');
+  const part = persistFailedTool(fixture, 'chat', 'failed');
+  fixture.pauseNextMessages();
+  const checking = toolErrorEvent(fixture, part);
+  await fixture.messagesStart;
+  await fixture.say('chat');
+  fixture.messages.chat!.pop();
+  fixture.resumeMessages();
+  await checking;
+  await fixture.reconcile();
+  assert.equal(await liveAdmissions(fixture), 1);
+  fixture.messages.chat!.push(finishedFor('user-2'));
+  await fixture.reconcile();
+  assert.equal(await liveAdmissions(fixture), 0);
+});
+
+for (const mismatch of ['callID', 'sessionID', 'messageID', 'tool', 'parentID', 'time', 'running'] as const) {
+  test(`failed-tool reconciliation fails closed for mismatched ${mismatch}`, async () => {
+    const fixture = await setup();
+    await fixture.say('chat');
+    await beforeFailedTool(fixture, 'chat');
+    const part = persistFailedTool(fixture, 'chat', 'failed');
+    const changes = {
+      callID: () => { part.callID = 'other'; },
+      sessionID: () => { part.sessionID = 'other'; },
+      messageID: () => { part.messageID = 'other'; },
+      tool: () => { part.tool = 'read'; },
+      parentID: () => { (fixture.messages.chat![1] as { info: { parentID: string } }).info.parentID = 'other'; },
+      time: () => { part.state.time.end = 1; },
+      running: () => { part.state.status = 'running'; },
+    };
+    changes[mismatch]();
+    await toolErrorEvent(fixture, part);
+    await fixture.reconcile();
+    assert.equal(await liveAdmissions(fixture), 1);
+  });
+}
+
+test('failed-tool proof read errors retain the lease and duplicate before hooks cannot replace tracking', async () => {
+  const fixture = await setup();
+  await fixture.say('chat');
+  await beforeFailedTool(fixture, 'chat');
+  await assert.rejects(beforeFailedTool(fixture, 'chat'), /tool_call_already_active/);
+  const part = persistFailedTool(fixture, 'chat', 'failed');
+  fixture.failMessagesFor('chat');
+  await toolErrorEvent(fixture, part);
+  await fixture.reconcile();
+  assert.equal(await liveAdmissions(fixture), 1);
+});
+
+test('conflicting persisted states for the same call cannot prove terminal failure', async () => {
+  const fixture = await setup();
+  await fixture.say('chat');
+  await beforeFailedTool(fixture, 'chat');
+  const part = persistFailedTool(fixture, 'chat', 'failed');
+  const conflict = persistFailedTool(fixture, 'chat', 'failed');
+  conflict.state.status = 'running';
+  await toolErrorEvent(fixture, part);
+  await fixture.reconcile();
+  assert.equal(await liveAdmissions(fixture), 1);
+});
+
+test('an aborted tool error clears only that call and still waits for its real final answer', async () => {
+  const fixture = await setup();
+  await fixture.say('chat');
+  await beforeFailedTool(fixture, 'chat');
+  const part = persistFailedTool(fixture, 'chat', 'failed');
+  part.state.error = 'The operation was aborted.';
+  fixture.messages.chat!.pop();
+  await toolErrorEvent(fixture, part);
+  await fixture.reconcile();
+  assert.equal(await liveAdmissions(fixture), 1);
+  fixture.messages.chat!.push(finishedFor('user'));
+  await fixture.reconcile();
+  assert.equal(await liveAdmissions(fixture), 0);
+});
+
+test('a failed grandchild tool cleans its admitted ancestor without releasing a later child turn', async () => {
+  const fixture = await setup();
+  fixture.children.parent = ['child'];
+  fixture.children.child = ['grandchild'];
+  await fixture.say('parent');
+  await fixture.say('child');
+  await fixture.say('grandchild');
+  await beforeFailedTool(fixture, 'grandchild');
+  const part = persistFailedTool(fixture, 'grandchild', 'failed', 'user-3');
+  await fixture.idle('grandchild');
+  await fixture.idle('child');
+  await fixture.say('child');
+  fixture.messages.child!.pop();
+  await toolErrorEvent(fixture, part);
+  await fixture.reconcile();
+  assert.equal(await liveAdmissions(fixture), 1);
+  fixture.messages.child!.push(finishedFor('user-4'));
+  await fixture.idle('child');
+  await fixture.reconcile();
+  assert.equal(await liveAdmissions(fixture), 0);
+});
+
+test('a completed call identity cannot be reused where a delayed after hook would be ambiguous', async () => {
+  const fixture = await setup();
+  await fixture.say('chat');
+  await beforeFailedTool(fixture, 'chat');
+  const part = persistFailedTool(fixture, 'chat', 'failed');
+  await toolErrorEvent(fixture, part);
+  await fixture.reconcile();
+  await fixture.say('chat');
+  fixture.messages.chat!.pop();
+  await assert.rejects(beforeFailedTool(fixture, 'chat'), /tool_call_already_finished/);
+  await fixture.hooks['tool.execute.after']!({ sessionID: 'chat', callID: 'failed', tool: 'apply_patch', args: {} }, { title: '', output: '', metadata: {} });
+  await fixture.reconcile();
+  assert.equal(await liveAdmissions(fixture), 1);
+});
