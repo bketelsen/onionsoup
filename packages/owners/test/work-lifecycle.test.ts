@@ -1326,3 +1326,153 @@ test('first external reconciliation refuses an unreachable merge without changin
     assert.deepEqual(await runtime.requests.get(request.id), priorRequest);
   });
 });
+
+test('delegated host checks and review become request-scoped interim evidence without waking or publishing', async () => {
+  const { requestProgressDetail, noticeRequestProgress } = await import('../src/request-status.ts');
+  const { readRequestWorkEvidence } = await import('../src/request-work-evidence.ts');
+  const { agentConfig } = await import('../src/opencode.ts');
+  const { runtime } = await fixture();
+  const request = await runtime.requests.open('odrade', 'clippy', { kind: 'work', purpose: proposal.goal, proposal }, 'none',
+    { sessionID: 'odrade-origin', directory: '/fixture/odrade' });
+  const item = await runtime.ledger.create('clippy', 'owner-change', proposal, { status: 'working', request: request.id,
+    planDocument: { markdown: 'Approved method', digest: 'original-plan' } });
+  await runtime.requests.update(request.id, current => ({ ...current, status: 'work-running', workItem: item.id }));
+  const fail = (_id: string, error: unknown): never => { throw error; };
+  await noticeRequestProgress(runtime, fail);
+  const owner = runtime.declarations.owners.get('clippy')!;
+  if (owner.domain.kind === 'git-repository') owner.domain.verify = [['sh', '-c', 'echo private-test-output; true']];
+  const desk = await ensureDesk(runtime.repositoryOwner('clippy'), runtime.desksRoot);
+  await writeFile(join(desk.path, 'change'), 'candidate\n');
+  let reviews = 0;
+  scriptHires(runtime, async hire => {
+    reviews++;
+    assert.equal(hire.role, 'reviewer');
+    const status = await requestProgressDetail(runtime, 'odrade', request.id);
+    const evidence = (await readRequestWorkEvidence(runtime, item)).verification!;
+    assert.match(status, /Host attempt: reviewing/);
+    assert.match(status, /#1 sh exit=0/);
+    assert.match(status, /no completed review/);
+    assert.ok(status.includes(evidence.tree));
+    assert.ok(hire.brief.includes(JSON.stringify(evidence)), 'requester and reviewer see the same host evidence');
+    assert.ok(hire.brief.includes(proposal.acceptance[0]!));
+    assert.doesNotMatch(status, /private-test-output/);
+    assert.equal(await noticeRequestProgress(runtime, fail), 1);
+    assert.equal(await noticeRequestProgress(runtime, fail), 0);
+    const agents = agentConfig(desk.path, runtime.toolsDirectory, undefined).agent;
+    assert.deepEqual(agents['onionsoup-reviewer']!.permission.read, agents['onionsoup-implementer']!.permission.read);
+    return revise('A required live prerequisite is missing');
+  });
+  const outcome = await proposeDeskChanges(runtime, 'clippy', { title: 'Patch', summary: 'Claim', item: item.id });
+  assert.equal(outcome.outcome, 'needs-work');
+  const status = await requestProgressDetail(runtime, 'odrade', request.id);
+  assert.match(status, /Review by .*: revise/);
+  assert.match(status, /\[blocker\].*required live prerequisite/);
+  assert.match(status, /current workspace, deployment and goal completion are unknown/);
+  assert.equal(await requestProgressDetail(runtime, 'moneo', request.id), 'No visible request with that ID.');
+  assert.equal(await noticeRequestProgress(runtime, fail), 1);
+  assert.equal(await noticeRequestProgress(runtime, fail), 0);
+  assert.equal(reviews, 1);
+  assert.equal((await runtime.requests.list()).length, 1);
+  assert.equal((await runtime.ledger.get(item.id)).publication, undefined);
+  await runtime.ledger.update(item.id, current => ({ ...current, planDocument: { markdown: 'New method', digest: 'new-plan' } }));
+  assert.match(await requestProgressDetail(runtime, 'odrade', request.id), /Host attempt: reviewed; superseded/);
+});
+
+test('failed host verification records its blocker without exposing output or hiring a reviewer', async () => {
+  const { requestProgressDetail } = await import('../src/request-status.ts');
+  const { runtime } = await fixture();
+  const request = await runtime.requests.open('odrade', 'clippy', { kind: 'work', purpose: proposal.goal, proposal }, 'none');
+  const item = await runtime.ledger.create('clippy', 'owner-change', proposal, { status: 'working', request: request.id });
+  await runtime.requests.update(request.id, current => ({ ...current, workItem: item.id, status: 'work-running' }));
+  const owner = runtime.declarations.owners.get('clippy')!;
+  if (owner.domain.kind === 'git-repository') owner.domain.verify = [['sh', '-c', 'echo private-failure-output; echo changed > change; exit 7']];
+  const desk = await ensureDesk(runtime.repositoryOwner('clippy'), runtime.desksRoot);
+  await writeFile(join(desk.path, 'change'), 'candidate\n');
+  runtime.hire = async () => { throw new Error('must_not_hire'); };
+  assert.equal((await proposeDeskChanges(runtime, 'clippy', { title: 'Patch', summary: 'Claim', item: item.id })).outcome, 'needs-work');
+  const status = await requestProgressDetail(runtime, 'odrade', request.id);
+  assert.match(status, /Host blocker: host_verification_failed/);
+  assert.doesNotMatch(status, /verification_changed_source/);
+  assert.match(status, /#1 sh exit=7/);
+  assert.doesNotMatch(status, /private-failure-output/);
+});
+
+test('evidence storage failures preserve successful review and publication outcomes with safe diagnostics', async () => {
+  const { requestProgressDetail } = await import('../src/request-status.ts');
+  const { runtime, root, remote } = await fixture();
+  const request = await runtime.requests.open('odrade', 'clippy', { kind: 'work', purpose: proposal.goal, proposal }, 'none');
+  const item = await runtime.ledger.create('clippy', 'owner-change', proposal, { status: 'working', request: request.id });
+  await runtime.requests.update(request.id, current => ({ ...current, status: 'work-running', workItem: item.id }));
+  const desk = await ensureDesk(runtime.repositoryOwner('clippy'), runtime.desksRoot);
+  await writeFile(join(desk.path, 'change'), 'candidate\n');
+  scriptHires(runtime, async () => {
+    await rm(join(runtime.stateDirectory, 'request-work-evidence'), { recursive: true });
+    await writeFile(join(runtime.stateDirectory, 'request-work-evidence'), 'unavailable storage');
+    return verdict;
+  });
+  await fakeGithub(root, remote, async () => {
+    const outcome = await proposeDeskChanges(runtime, 'clippy', { title: 'Patch', summary: 'Claim', item: item.id });
+    assert.equal(outcome.outcome, 'opened');
+  });
+  const saved = await runtime.ledger.get(item.id);
+  assert.equal(saved.verdicts[0]?.decision, 'approve');
+  assert.equal(saved.publication?.state, 'open');
+  assert.match(await requestProgressDetail(runtime, 'odrade', request.id), /Host tests\/review: unavailable/);
+  assert.ok((await journalKinds(runtime, 'clippy')).includes('request_work_evidence_write_failed'));
+});
+
+test('evidence storage failure cannot replace the original reviewer error', async () => {
+  const { runtime } = await fixture();
+  const item = await runtime.ledger.create('clippy', 'owner-change', proposal, { status: 'working', request: 'r-fixture' });
+  const desk = await ensureDesk(runtime.repositoryOwner('clippy'), runtime.desksRoot);
+  await writeFile(join(desk.path, 'change'), 'candidate\n');
+  await writeFile(join(runtime.stateDirectory, 'request-work-evidence'), 'unavailable storage');
+  const original = new Error('fixture_review_transport_failed');
+  runtime.hire = async () => { throw original; };
+  await assert.rejects(proposeDeskChanges(runtime, 'clippy', { title: 'Patch', summary: 'Claim', item: item.id }), error => error === original);
+});
+
+test('fresh external reconciliation exposes interim host evidence to Odrade and final merged progress without duplicate review', async () => {
+  const { requestProgressDetail, noticeRequestProgress } = await import('../src/request-status.ts');
+  const { readRequestWorkEvidence } = await import('../src/request-work-evidence.ts');
+  const { trackDelegatedWork } = await import('../src/delegation.ts');
+  const { runtime, root, remote, desk, head, item, request, external } = await externalFixture();
+  await runtime.notebook('odrade').ensure('# Fixture');
+  await runtime.requests.update(request.id, current => ({ ...current, from: 'odrade',
+    origin: { sessionID: 'odrade-origin', directory: '/fixture/odrade' } }));
+  await git(desk.path, ['push', '-q', 'origin', 'HEAD:main']);
+  external.merged = true;
+  external.state = 'closed';
+  external.draft = false;
+  external.merge_commit_sha = head;
+  runtime.repositoryOwner('clippy').domain.verify.push(['sh', '-c', 'test -f external']);
+  const fail = (_id: string, error: unknown): never => { throw error; };
+  await noticeRequestProgress(runtime, fail);
+  let reviews = 0;
+  scriptHires(runtime, async hired => {
+    reviews++;
+    const status = await requestProgressDetail(runtime, 'odrade', request.id);
+    assert.match(status, /Host attempt: reviewing/);
+    assert.match(status, /#1 sh exit=0/);
+    assert.match(status, /no completed review/);
+    const evidence = (await readRequestWorkEvidence(runtime, item)).verification!;
+    assert.ok(hired.brief.includes(JSON.stringify(evidence)));
+    assert.equal(await noticeRequestProgress(runtime, fail), 1);
+    return verdict;
+  });
+  await fakeGithub(root, remote, async () => {
+    await writeFile(join(root, 'github.json'), JSON.stringify({ created: 0, state: 'MERGED', external }));
+    await reconcileExternalPublication(runtime, 'clippy', item.id, external.html_url, 'person');
+    await trackDelegatedWork(runtime, await runtime.requests.get(request.id));
+    const status = await requestProgressDetail(runtime, 'odrade', request.id);
+    assert.match(status, /request completed/);
+    assert.match(status, /Review by .*: approve/);
+    assert.match(status, /merged \(recorded; deployment unknown\)/);
+    assert.equal(await noticeRequestProgress(runtime, fail), 1);
+    assert.equal(await noticeRequestProgress(runtime, fail), 0);
+    await reconcileExternalPublication(runtime, 'clippy', item.id, external.html_url, 'person');
+    assert.equal(reviews, 1);
+    assert.equal((await runtime.requests.list()).length, 1);
+    assert.equal((await githubState(root)).created, 0);
+  });
+});

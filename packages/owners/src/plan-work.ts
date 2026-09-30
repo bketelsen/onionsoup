@@ -135,6 +135,9 @@ export function planningPrompt(item: WorkItem) {
   const who = item.assignment ? `Your manager assigned this work (initiative ${item.assignment.initiative}, assignment ${item.assignment.assignment})` : 'Another owner asked for this work';
   return [
     `${NOTICE_PREFIX} ${who}${item.request ? ` in request ${item.request}` : ''}; you accepted it as ${item.id}. Nobody is in this chat.`,
+    `This is the accepted work handoff, distinct from an earlier consultation or status query.
+Follow the requested goal and acceptance below. A read-only/status-only instruction for that earlier interaction
+does not prohibit this gated planning step; it also grants no permission to bypass plan approval or effect gates.`,
     `Brainstorm it alone with the brainstorming skill (record the assumptions you make), write the plan with the
 writing-plans skill, and submit it with onionsoup_submit_plan with item "${item.id}"${repositoryLine(item)}. The plan is
 approved in the person's inbox, or by your manager under a standing grant; an approved plan starts its own session.

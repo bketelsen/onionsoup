@@ -207,3 +207,109 @@ test('interrupted baseline write cannot partially backfill historical requests',
   assert.equal(await readFile(join(directory, 'baseline.json'), 'utf8'), stored);
   assert.equal((await notices(runtime)).length, 0);
 });
+
+test('upgrade retains legacy notice fingerprints without replaying historical progress', async () => {
+  const { createHash } = await import('node:crypto');
+  const runtime = await setup();
+  const request = await open(runtime);
+  const progress = requestProgress(request, undefined);
+  const { observedAt, lastRecordedAt, stale, hostEvidence, hostEvidenceState, ...legacy } = progress;
+  const fingerprint = createHash('sha256').update(JSON.stringify(legacy)).digest('hex');
+  const key = createHash('sha256').update(request.id).digest('hex');
+  const directory = join(runtime.stateDirectory, 'notices', 'request-progress');
+  await writeFile(join(directory, `${key}.json`), JSON.stringify({ sequence: 7, fingerprint }));
+  assert.equal(await noticeRequestProgress(runtime, fail), 0);
+  assert.equal((await notices(runtime)).length, 0);
+});
+
+test('scoped evidence is bounded and redacted; corrupt or mismatched evidence stays unknown', async () => {
+  const { recordRequestWorkEvidence, REQUEST_EVIDENCE_LIMITS } = await import('../src/request-work-evidence.ts');
+  const runtime = await setup();
+  const request = await open(runtime);
+  const item = await runtime.ledger.create('clippy', 'owner-change', proposal, { request: request.id, status: 'working' });
+  await runtime.requests.update(request.id, current => ({ ...current, status: 'work-running', workItem: item.id }));
+  await recordRequestWorkEvidence(runtime, item, { stage: 'reviewed', review: { reviewer: 'other-family', verdict: {
+    decision: 'revise', summary: 'token=private-value ' + 'long '.repeat(1000),
+    findings: Array.from({ length: REQUEST_EVIDENCE_LIMITS.findings + 1 }, () => ({ severity: 'blocker', file: 'file',
+      issue: 'password=hidden-value', suggestion: 'Require evidence' })),
+  } } });
+  const text = await requestProgressDetail(runtime, 'odrade', request.id);
+  assert.match(text, /abbreviated/);
+  assert.match(text, /\[redacted\]/);
+  assert.doesNotMatch(text, /private-value|hidden-value/);
+  assert.ok(text.length < REQUEST_STATUS_LIMITS.summaryChars);
+  await runtime.ledger.update(item.id, current => ({ ...current, planDocument: { markdown: 'First recorded plan', digest: 'new-digest' } }));
+  assert.match(await requestProgressDetail(runtime, 'odrade', request.id), /Host attempt: reviewed; superseded/);
+  await runtime.ledger.update(item.id, current => ({ ...current, planDocument: undefined }));
+  const directory = join(runtime.stateDirectory, 'request-work-evidence');
+  const [name] = await readdir(directory);
+  const path = join(directory, name!);
+  const record = JSON.parse(await readFile(path, 'utf8'));
+  await writeFile(path, JSON.stringify({ ...record, observedAt: '2020-01-01T00:00:00.000Z' }));
+  assert.match(await requestProgressDetail(runtime, 'odrade', request.id), /Host attempt: reviewed; stale/);
+  await writeFile(path, JSON.stringify({ ...record, request: 'r-other' }));
+  assert.match(await requestProgressDetail(runtime, 'odrade', request.id), /Host tests\/review: unavailable/);
+  await writeFile(path, '{broken');
+  assert.match(await requestProgressDetail(runtime, 'odrade', request.id), /Host tests\/review: unavailable/);
+});
+
+test('accepted assignment retains its original goal through feedback, revision, interruption recovery and cancellation', async () => {
+  const { requestWork, decideWork, trackDelegatedWork } = await import('../src/delegation.ts');
+  const { submitPlan, recordPlanFeedback, planningPrompt } = await import('../src/plan-work.ts');
+  const { approvePlan, revisePlan, resumeItem, cancelItem } = await import('../src/work-recovery.ts');
+  const runtime = await setup();
+  for (const owner of ['odrade', 'clippy']) await runtime.notebook(owner).ensure('# Fixture');
+  const request = await requestWork(runtime, 'odrade', 'clippy', proposal, undefined, origin);
+  const accepted = await decideWork(runtime, request);
+  const item = await runtime.ledger.get(accepted.workItem!);
+  assert.match(planningPrompt(item), /accepted work handoff, distinct from an earlier consultation or status query/);
+  assert.match(planningPrompt(item), /no permission to bypass plan approval or effect gates/);
+  assert.ok(planningPrompt(item).includes(proposal.goal));
+  await submitPlan(runtime, 'clippy', { item: item.id, title: proposal.title, goal: proposal.goal, plan: 'First approach' }, origin);
+  await recordPlanFeedback(runtime, item.id, 'Brian', 'Reject this method; keep the goal');
+  await revisePlan(runtime, item.id, 'Brian', 'Use a smaller approach');
+  await submitPlan(runtime, 'clippy', { item: item.id, title: proposal.title, goal: proposal.goal, plan: 'Smaller approach' }, origin);
+  await approvePlan(runtime, item.id, 'Brian');
+  await runtime.ledger.update(item.id, current => ({ ...current, status: 'interrupted', reason: 'Fixture interrupted' }));
+  await resumeItem(runtime, item.id, 'Brian', 'Continue approved work');
+  const resumed = await runtime.ledger.get(item.id);
+  assert.equal(resumed.status, 'working');
+  assert.deepEqual(resumed.proposal, proposal);
+  assert.ok(resumed.humanNotes.some(note => note.note.includes('keep the goal')));
+  await cancelItem(runtime, item.id, 'Brian', 'Stop this attempt');
+  await trackDelegatedWork(runtime, await runtime.requests.get(request.id));
+  const cancelled = await runtime.ledger.get(item.id);
+  assert.equal(cancelled.status, 'cancelled');
+  assert.deepEqual(cancelled.proposal, proposal);
+  const status = await requestProgressDetail(runtime, 'odrade', request.id);
+  assert.ok(status.includes(`Goal: ${proposal.goal}`));
+  assert.match(status, /Stop this attempt/);
+  assert.equal((await runtime.requests.list()).length, 1);
+});
+
+test('old finished requests skip new evidence projection but retain pending notice recovery', async () => {
+  const { createHash } = await import('node:crypto');
+  const { recordRequestWorkEvidence } = await import('../src/request-work-evidence.ts');
+  const runtime = await setup();
+  const request = await open(runtime);
+  const item = await runtime.ledger.create('clippy', 'owner-change', proposal, { request: request.id, status: 'landed' });
+  await runtime.requests.update(request.id, current => ({ ...current, status: 'completed', workItem: item.id }));
+  assert.equal(await noticeRequestProgress(runtime, fail), 1);
+  const [notice] = await notices(runtime);
+  const key = createHash('sha256').update(request.id).digest('hex');
+  const cursorPath = join(runtime.stateDirectory, 'notices', 'request-progress', `${key}.json`);
+  const cursor = JSON.parse(await readFile(cursorPath, 'utf8'));
+  await writeFile(cursorPath, JSON.stringify({ ...cursor, pending: notice }));
+  await unlink(join(runtime.stateDirectory, 'notices', 'exchanges', 'pending', `${notice.id}.json`));
+  const old = '2020-01-01T00:00:00.000Z';
+  await writeFile(join(runtime.requests.directory, `${request.id}.json`), JSON.stringify({
+    ...await runtime.requests.get(request.id), updatedAt: old,
+  }));
+  await writeFile(join(runtime.ledger.directory, `${item.id}.json`), JSON.stringify({ ...item, updatedAt: old }));
+  await recordRequestWorkEvidence(runtime, item, { stage: 'blocked', blocker: 'historical_sidecar_changed' });
+  assert.equal(await noticeRequestProgress(runtime, fail), 1, 'existing pending notice is recovered');
+  assert.equal(await noticeRequestProgress(runtime, fail), 0, 'old evidence changes are not projected');
+  const queued = await notices(runtime);
+  assert.equal(queued.length, 1);
+  assert.doesNotMatch(queued[0].text, /historical_sidecar_changed/);
+});
