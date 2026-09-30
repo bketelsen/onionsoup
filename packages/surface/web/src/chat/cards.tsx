@@ -92,14 +92,14 @@ export function PlanApprovalActions({ entry, onDone }: { entry: InboxEntry; onDo
   return (
     <div className="px-3 pb-2 pt-2 flex flex-col gap-2 border-t border-border/20">
       <textarea value={note} onChange={event => setNote(event.target.value)} rows={2}
-        placeholder="What should change? (sent with Send back)"
+        placeholder="What should change? (sent with Revise approach)"
         className="w-full rounded-md border border-border bg-background px-2 py-1 typography-meta" />
       <div className="flex flex-wrap items-center gap-1.5">
         <button className={CARD_ACTION} style={{ color: 'var(--status-success)' }} disabled={responding} onClick={() => void reply('once')}>
           <RiCheckLine className="h-3 w-3 flex-shrink-0" />Approve plan
         </button>
         <button className={CARD_ACTION} style={{ color: 'var(--status-error)' }} disabled={responding || !note.trim()} onClick={() => void reply('reject', note.trim())}>
-          <RiArrowGoBackLine className="h-3 w-3 flex-shrink-0" />Send back
+          <RiArrowGoBackLine className="h-3 w-3 flex-shrink-0" />Revise approach
         </button>
         {responding && <div className="ml-auto"><Spinner /></div>}
         {error && <span className="typography-meta text-[var(--status-error)]">{error}</span>}

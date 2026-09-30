@@ -10,6 +10,7 @@ import { Badge, Button, cx, OwnerIcon, timeAgo } from './ui.tsx';
 
 const KIND_LABELS: Record<InboxEntry['kind'], string> = {
   plan: 'Plan to approve', push: 'Force-push to approve', create: 'Create request', delete: 'Delete request',
+  'plan-revision-blocked': 'Revision delivery blocked',
   attention: 'Attention', 'request-recovery': 'Request interrupted', initiative: 'Initiative to approve',
   permission: 'Permission', question: 'Question', 'provider-auth': 'Model provider',
 };

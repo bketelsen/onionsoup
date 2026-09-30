@@ -3,6 +3,8 @@ import { deliverExchangeNotices } from './exchange-notices.ts';
 import { exchangeClient } from './exchange-client.ts';
 import { listAttention, changeAttention } from './attention.ts';
 import { requestProgressDetail, requestProgressSummary } from './request-status.ts';
+import { deliverPlanRevisions, planRevisionStatus } from './plan-revision.ts';
+import { planRevisionClient } from './plan-revision-client.ts';
 import { requestWork } from './delegation.ts';
 import { ProposedWork } from './artifacts.ts';
 import { readdir, readFile } from 'node:fs/promises';
@@ -818,7 +820,12 @@ const server: Plugin = async (input, options) => {
     const initiatives = initiativeSection(await initiativeViews(runtime), ownerId);
     const reports = reportsWorkText(allItems, directReports(runtime.declarations, ownerId).map(report => report.id));
     const reminders = reminderSection(await runtime.reminders.list(), ownerId);
-    return [statusText(items, []), await requestProgressSummary(runtime, ownerId, new Date(), offset), initiatives, reports, reminders].filter(Boolean).join('\n\n');
+    const revisionRows = await Promise.all(allItems.filter(item => item.owner === ownerId
+      || isDirectReport(runtime.declarations, ownerId, item.owner)).map(async item => {
+      const delivery = await planRevisionStatus(runtime, item.id);
+      return delivery?.status === 'blocked' ? `Revision delivery blocked for ${item.id}: ${delivery.reason}` : '';
+    }));
+    return [statusText(items, []), await requestProgressSummary(runtime, ownerId, new Date(), offset), initiatives, reports, reminders, revisionRows.filter(Boolean).join('\n')].filter(Boolean).join('\n\n');
   }
 
   /** Quotes already noted as decisions in this chat, by the owner or an earlier watch. */
@@ -1028,6 +1035,7 @@ const server: Plugin = async (input, options) => {
     let lease: AdmissionLease | undefined;
     try {
       lease = await beginAdmission(runtime.stateDirectory, 'plugin:notices');
+      await deliverPlanRevisions(runtime, planRevisionClient(input.client), (itemId, error) => console.warn('plan_revision_delivery_failed', itemId, error));
       await deliverWorkNotices();
       await deliverExchangeNotices(runtime, exchangeClient(input.client));
       await openNeededSessions(runtime, sessionClient(), (itemId, error) => console.warn('owner_session_failed', itemId, error));
@@ -1382,7 +1390,8 @@ const server: Plugin = async (input, options) => {
           const item = await runtime.ledger.get(args.item).catch(() => undefined);
           const isVisible = item && (item.owner === owner.id || isDirectReport(runtime.declarations, owner.id, item.owner));
           if (!item || !isVisible) return `No work item ${args.item} of yours or your reports'. Your status:\n\n${await workSummary(owner.id)}`;
-          return itemText(item);
+          const revision = await planRevisionStatus(runtime, item.id);
+          return itemText(item) + (revision ? `\nPlan revision delivery: ${revision.status}${revision.reason ? ` (${revision.reason})` : ''}` : '');
         },
       }),
       onionsoup_notebook: tool({

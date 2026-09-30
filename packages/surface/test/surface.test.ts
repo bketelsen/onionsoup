@@ -868,3 +868,17 @@ test('HTTP friction promotion binds displayed evidence and exposes gated linked 
     assert.doesNotMatch(JSON.stringify(linked.body), /private\/desk/);
   } finally { server.close(); }
 });
+
+
+test('synthetic revision IDs cannot be acknowledged, resolved or assigned through HTTP', async () => {
+  const { runtime, server, call } = await start();
+  try {
+    const assignment = { owner: 'clippy', repository: 'example/clippy', title: 'Fix', goal: 'Fix check', acceptance: ['Passes'] };
+    for (const action of ['acknowledge-attention', 'resolve-attention', 'assign-attention']) {
+      const rejected = await call('POST', '/api/decide', { action, id: 'plan-revision-w-fixture', reason: 'Fix it', assignment });
+      assert.notEqual(rejected.status, 200);
+      assert.match(JSON.stringify(rejected.body), /attention_not_found/);
+    }
+    assert.equal((await runtime.requests.list()).length, 0);
+  } finally { server.close(); }
+});

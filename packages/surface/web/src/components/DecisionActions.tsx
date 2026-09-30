@@ -18,7 +18,7 @@ function PlanActions(props: DecisionActionProps) {
   const { entry, busy, text, decide } = props;
   return <>
     <Button variant="primary" disabled={busy} onClick={() => void decide('approve-plan', { note: text || undefined })}>Approve plan</Button>
-    <Button disabled={busy || !text.trim()} onClick={() => void decide('revise-plan', { note: text })}>Send back</Button>
+    <Button disabled={busy || !text.trim()} onClick={() => void decide('revise-plan', { note: text })}>Revise approach</Button>
     <ItemLink entry={entry} label="Full plan" />
   </>;
 }
@@ -116,6 +116,7 @@ const ACTIONS: Record<ActionKind, (props: DecisionActionProps) => ReactNode> = {
   delete: DeleteActions,
   permission: PermissionActions,
   attention: AttentionActions,
+  'plan-revision-blocked': () => null,
   'request-recovery': RecoveryActions,
   initiative: InitiativeActions,
   question: () => null,
