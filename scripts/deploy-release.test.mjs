@@ -139,23 +139,35 @@ test('candidate stage hides host credentials and prevents runtime writes while i
   }
 });
 
-test('stage test filter excludes only exact host-bus test names, including names with spaces', async () => {
+test('stage test filter excludes only exact host-bus names and ordinary verification retains all names', async () => {
   const scratch = await mkdtemp(join(tmpdir(), 'onionsoup-stage-filter-'));
   const probe = join(scratch, 'filter.test.mjs');
+  const similarNames = HOST_BUS_TESTS.flatMap(name => [`prefix ${name}`, `${name} suffix`]);
   try {
     await writeFile(probe, `import test from 'node:test';
-      ${HOST_BUS_TESTS.map(name => `test(${JSON.stringify(name)}, () => { throw new Error('nested_bus_test_ran'); });`).join('\n')}
+      ${HOST_BUS_TESTS.map((name, index) =>
+        `test(${JSON.stringify(name)}, () => { console.log('host_bus_fixture_${index}_executed'); });`).join('\n')}
+      ${similarNames.map(name => `test(${JSON.stringify(name)}, () => {});`).join('\n')}
       test('a normal regression still runs', () => { console.log('ordinary_test_executed'); });
       test('approved-plan review with a different name still runs', () => { console.log('other_test_executed'); });
     `);
     const environment = { ...process.env, NODE_OPTIONS: STAGE_TEST_OPTIONS };
     delete environment.NODE_TEST_CONTEXT;
-    const { stdout } = await exec(process.execPath, ['--test', '--test-reporter=tap', probe], {
-      env: environment,
-    });
-    assert.match(stdout, /ordinary_test_executed/);
-    assert.match(stdout, /other_test_executed/);
-    assert.match(stdout, /# pass 2/);
+    const args = ['--test', '--test-reporter=tap', probe];
+    const staged = await exec(process.execPath, args, { env: environment });
+    assert.match(staged.stdout, /ordinary_test_executed/);
+    assert.match(staged.stdout, /other_test_executed/);
+    assert.doesNotMatch(staged.stdout, /host_bus_fixture_\d+_executed/);
+    assert.match(staged.stdout, new RegExp(`# pass ${similarNames.length + 2}\n`));
+    // Node excludes name-filtered tests from its reported totals.
+    assert.match(staged.stdout, new RegExp(`# tests ${similarNames.length + 2}\n`));
+    delete environment.NODE_OPTIONS;
+    const ordinary = await exec(process.execPath, args, { env: environment });
+    for (const index of HOST_BUS_TESTS.keys()) {
+      assert.match(ordinary.stdout, new RegExp(`host_bus_fixture_${index}_executed`));
+    }
+    assert.match(ordinary.stdout, new RegExp(`# pass ${HOST_BUS_TESTS.length + similarNames.length + 2}\n`));
+    assert.match(ordinary.stdout, /# skipped 0\n/);
   } finally {
     await rm(scratch, { recursive: true, force: true });
   }
