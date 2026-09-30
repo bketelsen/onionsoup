@@ -1,3 +1,4 @@
+import { failedToolInTranscript, type TrackedToolCall } from './tool-completion.ts';
 import { isAbandonedChild, readChildAbandonment } from './child-recovery.ts';
 import { ownerChatAgent, ownerChatVoice, observationChatPermission, observationChatPrompt } from './owner-chat.ts';
 import { recentActivityContext } from './chat-context.ts';
@@ -374,6 +375,9 @@ const server: Plugin = async (input, options) => {
   const pendingAncestry = new Set<symbol>();
   const admittedMessages = new Map<string, string | undefined>();
   const toolParents = new Map<string, string>();
+  // After callbacks carry no turn ID. Never let a delayed callback match a reused call identity.
+  const retiredTools = new Set<string>();
+  const trackedTools = new Map<string, TrackedToolCall & { ready: boolean; clearing?: Promise<void> }>();
   const SessionStatuses = tool.schema.record(tool.schema.string(), tool.schema.object({
     type: tool.schema.enum(['busy', 'idle', 'retry']),
   }));
@@ -673,8 +677,51 @@ const server: Plugin = async (input, options) => {
   }
 
   async function reconcileChats() {
+    await reconcileFailedTools().catch(error => console.warn('plugin_tool_reconciliation_failed', error));
     for (const sessionID of chatLeases.keys()) {
       await reconcileChat(sessionID).catch(error => console.warn('plugin_chat_reconciliation_failed', sessionID, error));
+    }
+  }
+
+  /** Clear one incarnation; the lease stays held throughout asynchronous release. */
+  async function clearTrackedTool(key: string, tracked: NonNullable<ReturnType<typeof trackedTools.get>>) {
+    if (trackedTools.get(key) !== tracked) return;
+    if (tracked.clearing) return tracked.clearing;
+    tracked.clearing = (async () => {
+      await toolLeases.get(key)?.release();
+      if (trackedTools.get(key) !== tracked) return;
+      toolLeases.delete(key);
+      for (const sessionID of [tracked.sessionID, toolParents.get(key)]) {
+        if (!sessionID) continue;
+        const tools = activeTools.get(sessionID);
+        tools?.delete(key);
+        if (!tools?.size) activeTools.delete(sessionID);
+      }
+      toolParents.delete(key);
+      trackedTools.delete(key);
+      retiredTools.add(key);
+    })();
+    try {
+      await tracked.clearing;
+    } finally {
+      tracked.clearing = undefined;
+    }
+  }
+
+  /** OpenCode skips its after hook on thrown errors; events are hints, persisted parts are proof. */
+  async function reconcileFailedTools(sessionID?: string) {
+    const candidates = [...trackedTools].filter(([, tracked]) => tracked.ready && tracked.userID
+      && (!sessionID || tracked.sessionID === sessionID));
+    for (const childID of new Set(candidates.map(([, tracked]) => tracked.sessionID))) {
+      const session = await input.client.session.get({ path: { id: childID } }).catch(() => undefined);
+      const directory = session?.data?.directory;
+      if (!directory || session.error || session.data?.id !== childID) continue;
+      const reply = await input.client.session.messages({ path: { id: childID }, query: { directory } }).catch(() => undefined);
+      if (!reply || reply.error || !Array.isArray(reply.data)) continue;
+      for (const [key, tracked] of candidates) {
+        if (tracked.sessionID !== childID || trackedTools.get(key) !== tracked || !tracked.ready) continue;
+        if (failedToolInTranscript(reply.data, tracked)) await clearTrackedTool(key, tracked);
+      }
     }
   }
 
@@ -1081,6 +1128,12 @@ const server: Plugin = async (input, options) => {
     async 'tool.execute.before'(input, output) {
       if (await readChildAbandonment(runtime.stateDirectory, input.sessionID)) throw new Error('child_session_abandoned: preserved history is read-only');
       const key = `${input.sessionID}:${input.callID}`;
+      if (trackedTools.has(key)) throw new Error('tool_call_already_active');
+      if (retiredTools.has(key)) throw new Error('tool_call_already_finished');
+      const userID = childMessages.get(input.sessionID) ?? (acceptedNudges.has(input.sessionID)
+        ? pendingNudges.get(input.sessionID) : admittedMessages.get(input.sessionID));
+      const tracked = { ...input, userID, ready: false };
+      trackedTools.set(key, tracked);
       const pending = Symbol(key);
       pendingAncestry.add(pending);
       const tools = activeTools.get(input.sessionID) ?? new Set<string>();
@@ -1088,42 +1141,21 @@ const server: Plugin = async (input, options) => {
       activeTools.set(input.sessionID, tools);
       try {
         const isAdmittedTurn = await toolParent(input.sessionID, key);
-        pendingAncestry.delete(pending);
         const lease = isAdmittedTurn ? undefined : await beginAdmission(runtime.stateDirectory, `tool:${input.tool}`);
         if (lease) toolLeases.set(key, lease);
         await prepareToolArguments(input, output);
+        tracked.ready = true;
       } catch (error) {
-        pendingAncestry.delete(pending);
-        tools.delete(key);
-        if (!tools.size) activeTools.delete(input.sessionID);
-        const lease = toolLeases.get(key);
-        toolLeases.delete(key);
-        const parent = toolParents.get(key);
-        if (parent) {
-          const parentTools = activeTools.get(parent);
-          parentTools?.delete(key);
-          if (!parentTools?.size) activeTools.delete(parent);
-          toolParents.delete(key);
-        }
-        await lease?.release();
+        await clearTrackedTool(key, tracked);
         throw error;
+      } finally {
+        pendingAncestry.delete(pending);
       }
     },
     async 'tool.execute.after'(input) {
       const key = `${input.sessionID}:${input.callID}`;
-      const lease = toolLeases.get(key);
-      await lease?.release();
-      toolLeases.delete(key);
-      const tools = activeTools.get(input.sessionID);
-      tools?.delete(key);
-      if (!tools?.size) activeTools.delete(input.sessionID);
-      const parent = toolParents.get(key);
-      if (parent) {
-        const parentTools = activeTools.get(parent);
-        parentTools?.delete(key);
-        if (!parentTools?.size) activeTools.delete(parent);
-        toolParents.delete(key);
-      }
+      const tracked = trackedTools.get(key);
+      if (tracked?.ready && tracked.tool === input.tool) await clearTrackedTool(key, tracked);
     },
     'shell.env': hideHostCredentials,
     async config(config) {
@@ -1275,6 +1307,9 @@ const server: Plugin = async (input, options) => {
       }
       if (typed.type !== 'message.part.updated') return;
       const part = typed.properties.part as ToolPart;
+      if (part.type === 'tool' && part.state?.status === 'error' && typeof part.sessionID === 'string') {
+        await reconcileFailedTools(part.sessionID).catch(error => console.warn('plugin_tool_reconciliation_failed', error));
+      }
       if (part.type !== 'tool' || part.state?.status !== 'completed' || journaledParts.has(part.id)) return;
       const chat = await chatJournalOf(part.sessionID);
       if (chat && await journalToolCall(chat.journal, part, chat.kind)) await observeOperatorToolCall(part);

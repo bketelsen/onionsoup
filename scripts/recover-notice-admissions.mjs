@@ -124,7 +124,7 @@ async function finishRecovery(input, selection, paths, checkpoint, effects) {
     || (current.proof.endpoint.opencodePid === previous.endpoint.opencodePid
       && current.proof.endpoint.opencodeStartTime === previous.endpoint.opencodeStartTime)
     || hash(current.proof.manifests) !== hash(previous.manifests)
-    || hash(current.proof.sessions) !== hash(previous.sessions)) throw fail('notice_recovery_health_unverified_gate_held');
+    || hash([current.proof.sessions, current.proof.failedTool]) !== hash([previous.sessions, previous.failedTool])) throw fail('notice_recovery_health_unverified_gate_held');
   const receipt = Receipt.parse({ ...checkpoint, state: 'completed', completedAt: new Date().toISOString(),
     nextEndpoint: current.proof.endpoint });
   await mkdir(paths.receipts, { recursive: true, mode: 0o700 });
@@ -178,7 +178,7 @@ async function applyRecovery(input, selection, paths, approvedDigest) {
 export async function recoverNoticeAdmissions(input) {
   const selection = Selection.parse({ root: input.root, state: input.state, config: input.config,
     surfaceUrl: input.surfaceUrl, expectedOld: input.expectedOld, expectedTarget: input.expectedTarget,
-    sessions: [...input.sessions].sort() });
+    sessions: [...input.sessions].sort(), ...(input.failedTool ? { failedTool: input.failedTool } : {}) });
   const approvedDigest = input.approveDigest && digest.parse(input.approveDigest);
   const paths = recoveryPaths(selection, approvedDigest);
   if (!approvedDigest) {
@@ -198,11 +198,13 @@ async function main() {
       root: { type: 'string' }, state: { type: 'string' }, config: { type: 'string' },
       'surface-url': { type: 'string' }, 'expected-old': { type: 'string' }, 'expected-target': { type: 'string' },
       session: { type: 'string', multiple: true }, 'approve-digest': { type: 'string' },
-      'approved-by': { type: 'string' },
+      'approved-by': { type: 'string' }, 'failed-tool-proof': { type: 'string' },
     } });
+    const failedTool = values['failed-tool-proof']
+      ? JSON.parse(await readFile(values['failed-tool-proof'], 'utf8')) : undefined;
     const outcome = await recoverNoticeAdmissions({ ...values, surfaceUrl: values['surface-url'],
       expectedOld: values['expected-old'], expectedTarget: values['expected-target'], sessions: values.session ?? [],
-      approveDigest: values['approve-digest'], approvedBy: values['approved-by'] });
+      failedTool, approveDigest: values['approve-digest'], approvedBy: values['approved-by'] });
     console.log(JSON.stringify(outcome, null, 2));
   } catch (error) {
     console.error(typeof error.code === 'string' && error.code.startsWith('notice_recovery_')

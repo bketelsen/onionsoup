@@ -11,6 +11,7 @@ import { chatPath } from '../packages/owners/src/chats.ts';
 import { listAdmissions } from '../packages/owners/src/deployment-admission.ts';
 import { oldSurfaceHealth, recoverNoticeAdmissions } from './recover-notice-admissions.mjs';
 import { LEGACY_NOTICE_BUILD } from './notice-admission-probe.mjs';
+import { readFailedToolTree } from './failed-tool-admission-proof.mjs';
 import { worker } from './deploy-release.mjs';
 
 const NEXT = 'a'.repeat(40);
@@ -342,4 +343,135 @@ test('digest approval requires an explicitly named approver before recovery effe
   assert.equal((await state.pending()).status, 'armed');
   assert.equal(state.restarts.length, 0);
   await assert.rejects(readFile(join(state.deploy, 'rollback.json')), { code: 'ENOENT' });
+});
+
+async function failedTree(state) {
+  const parent = 'ses_failedparent';
+  const child = 'ses_failedchild';
+  const scope = chatPath(state.runtime, 'clippy');
+  const selection = { sessionID: parent, directory: scope, toolSessionID: child,
+    messageID: 'msg_failedassistant', callID: 'call_failedpatch' };
+  const user = id => ({ info: { id, role: 'user', time: { created: 1 } }, parts: [{ type: 'text', text: 'Real task' }] });
+  const final = (id, parentID) => ({ info: { id, role: 'assistant', parentID, finish: 'stop', time: { completed: 5 } }, parts: [] });
+  const failure = { info: { id: selection.messageID, role: 'assistant', parentID: 'msg_childuser' }, parts: [{
+    id: 'part_failedpatch', type: 'tool', tool: 'apply_patch', callID: selection.callID, sessionID: child,
+    messageID: selection.messageID, state: { status: 'error', input: { patchText: 'fixture patch' },
+      error: 'apply_patch verification failed: Error: Failed to find expected lines in /fixture/file', time: { start: 2, end: 3 } },
+  }] };
+  state.messages.set(parent, [user('msg_parentuser'), final('msg_parentfinal', 'msg_parentuser')]);
+  state.messages.set(child, [user('msg_childuser'), failure, final('msg_childfinal', 'msg_childuser')]);
+  const lease = JSON.parse(await readFile(state.leasePaths[0]));
+  const id = randomUUID();
+  const leasePath = join(state.deploy, 'leases', `${id}.json`);
+  await writeFile(leasePath, JSON.stringify({ ...lease, id, kind: `chat:${parent}` }));
+  state.leasePaths.push(leasePath);
+  state.input.sessions.push(parent);
+  const identities = new Map([[parent, { id: parent, directory: scope }],
+    [child, { id: child, parentID: parent, directory: scope }]]);
+  const children = new Map([[parent, [identities.get(child)]], [child, []]]);
+  const original = state.input.admissionEffects.request;
+  const request = async (endpoint, path, scope) => {
+    if (path === '/global/health') return { healthy: true, version: '1.18.33' };
+    for (const [id, identity] of identities) {
+      if (path === `/session/${id}`) return structuredClone(identity);
+      if (path === `/session/${id}/message`) return structuredClone(state.messages.get(id));
+      if (path === `/session/${id}/children`) return structuredClone(children.get(id));
+    }
+    return original(endpoint, path, scope);
+  };
+  state.input.admissionEffects.request = request;
+  const fingerprint = async () => (await readFailedToolTree(selection, {}, request)).treeDigest;
+  state.input.failedTool = { ...selection, treeDigest: await fingerprint() };
+  return { parent, child, failure, identities, children, fingerprint };
+}
+
+test('exact failed native call and completed descendants recover with notice admissions once without changing history', async context => {
+  const state = await fixture(context, { legacy: true });
+  const tree = await failedTree(state);
+  const before = JSON.stringify([...state.messages]);
+  const leases = await Promise.all(state.leasePaths.map(path => readFile(path, 'utf8')));
+  const notices = await Promise.all(state.noticePaths.map(path => readFile(path, 'utf8')));
+  const { preview, apply } = await previewAndApprove(state);
+  assert.equal(preview.proof.sessions.length, 3);
+  assert.equal(preview.proof.failedTool.sessions.length, 2);
+  assert.equal(preview.proof.failedTool.selection.toolSessionID, tree.child);
+  assert.doesNotMatch(JSON.stringify(preview), /fixture patch|Real task|fixture-secret/);
+  const [first, concurrent] = await Promise.all([recoverNoticeAdmissions(apply), recoverNoticeAdmissions(apply)]);
+  assert.deepEqual(first, concurrent);
+  assert.equal(first.state, 'completed');
+  assert.deepEqual(await recoverNoticeAdmissions(apply), first);
+  assert.deepEqual(state.restarts, ['onionsoup-surface.service']);
+  assert.equal(JSON.stringify([...state.messages]), before);
+  assert.deepEqual(await Promise.all(state.leasePaths.map(path => readFile(path, 'utf8'))), leases);
+  assert.deepEqual(await Promise.all(state.noticePaths.map(path => readFile(path, 'utf8'))), notices);
+  assert.equal((await state.pending()).status, 'draining');
+});
+
+for (const invalid of ['wrong-call', 'wrong-message', 'wrong-user', 'no-error', 'another-error', 'running-tool', 'wrong-runtime']) {
+  test(`failed-call recovery refuses ${invalid} even with a newly calculated tree fingerprint`, async context => {
+    const state = await fixture(context);
+    const tree = await failedTree(state);
+    const changes = {
+      'wrong-call': () => { state.input.failedTool.callID = 'call_other'; },
+      'wrong-message': () => { state.input.failedTool.messageID = 'msg_other'; },
+      'wrong-user': () => { tree.failure.info.parentID = 'msg_otheruser'; },
+      'no-error': () => { tree.failure.parts[0].state.status = 'completed'; },
+      'another-error': () => { tree.failure.parts.push({ ...structuredClone(tree.failure.parts[0]), id: 'part_other', callID: 'call_other' }); },
+      'running-tool': () => { tree.failure.parts[0].state.status = 'running'; },
+      'wrong-runtime': () => {
+        const request = state.input.admissionEffects.request;
+        state.input.admissionEffects.request = (endpoint, path, scope) => path === '/global/health'
+          ? { healthy: true, version: '1.18.34' } : request(endpoint, path, scope);
+      },
+    };
+    changes[invalid]();
+    state.input.failedTool.treeDigest = await tree.fingerprint();
+    await assert.rejects(recoverNoticeAdmissions(state.input));
+    assert.equal(state.restarts.length, 0);
+    assert.equal((await state.pending()).status, 'armed');
+  });
+}
+
+for (const change of ['later-completed-user', 'new-child', 'changed-error', 'cycle', 'missing-selection']) {
+  test(`approved failed-call proof refuses ${change} without releasing later genuine work`, async context => {
+    const state = await fixture(context);
+    const tree = await failedTree(state);
+    const { apply } = await previewAndApprove(state);
+    const changes = {
+      'later-completed-user': () => state.messages.get(tree.parent).push(
+        { info: { id: 'msg_lateruser', role: 'user' }, parts: [] },
+        { info: { id: 'msg_laterfinal', role: 'assistant', parentID: 'msg_lateruser', finish: 'stop', time: { completed: 8 } }, parts: [] }),
+      'new-child': () => tree.children.get(tree.parent).push({ id: 'ses_newchild', parentID: tree.parent, directory: state.input.failedTool.directory }),
+      'changed-error': () => { tree.failure.parts[0].state.error += ' changed'; },
+      cycle: () => tree.children.get(tree.child).push(tree.identities.get(tree.parent)),
+      'missing-selection': () => { delete apply.failedTool; },
+    };
+    changes[change]();
+    await assert.rejects(recoverNoticeAdmissions(apply));
+    assert.equal(state.restarts.length, 0);
+    assert.equal((await state.pending()).status, 'armed');
+  });
+}
+
+test('failed-tree changes during drain reopen admission and post-restart changes hold checkpoint', async context => {
+  for (const phase of ['drain', 'restart']) {
+    const state = await fixture(context);
+    const tree = await failedTree(state);
+    const { apply } = await previewAndApprove(state);
+    const change = () => { tree.failure.parts[0].state.error += ' changed'; };
+    if (phase === 'drain') state.input.admissionEffects.sleep = async () => {
+      if ((await state.pending()).status === 'draining') change();
+    };
+    else {
+      const systemctl = state.input.effects.systemctl;
+      state.input.effects.systemctl = async (...args) => {
+        const outcome = await systemctl(...args);
+        if (args[0] === 'restart') change();
+        return outcome;
+      };
+    }
+    await assert.rejects(recoverNoticeAdmissions(apply));
+    assert.equal(state.restarts.length, phase === 'drain' ? 0 : 1);
+    assert.equal((await state.pending()).status, phase === 'drain' ? 'waiting' : 'draining');
+  }
 });

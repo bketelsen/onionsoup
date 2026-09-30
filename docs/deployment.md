@@ -295,3 +295,41 @@ never remove a checkpoint or lease to force progress.
 The identical approved digest can resume an interruption between starting the drain and writing
 the checkpoint. Failures before a checkpoint reopen admissions; any partial checkpoint remains
 held for diagnosis.
+
+### A failed native tool holding a completed tree
+
+OpenCode 1.18.33 skips `tool.execute.after` when a native tool throws. A plugin predating
+terminal-error reconciliation can therefore retain the child's tool marker on its parent
+after both have finished. Current plugins reconcile an exact persisted terminal error;
+the normal idle and final-answer checks still decide when a chat can be released.
+
+For the affected `b2db85b5fa46b1d8f6608ab6e1c3e29a75da0f95` runtime only, the notice recovery
+command accepts one additional `--failed-tool-proof /absolute/selection.json`. Include that
+tree's top-level session in the existing `--session` list. The JSON selection has these fields:
+
+```json
+{
+  "sessionID": "ses_exactParent",
+  "directory": "/absolute/plan/worktree",
+  "toolSessionID": "ses_exactChild",
+  "messageID": "msg_exactFailedAssistant",
+  "callID": "call_exactFailedPatch",
+  "treeDigest": "<64-character SHA-256 from the inspected tree>"
+}
+```
+
+The read-only `readFailedToolTree` helper in `scripts/failed-tool-admission-proof.mjs` produces
+the fingerprint from the verified endpoint's original messages and ancestry. Capture and
+inspect it before approval; a new digest is not permission to include new work. The proof
+requires the selected native `apply_patch` expected-lines validation error to be the only
+tool error in the entire tree, bound to its child's latest user turn. Every parent and
+descendant must have its own completed final answer, all tools must be terminal, and the
+exact tree must remain unchanged. Busy work, notices after a final answer, new children,
+different calls, missing evidence, another runtime version, or another old build refuse
+recovery. A completed tree without that failed-call evidence is ineligible.
+
+This proof supplements the existing notice proofs in the same digest, drain, checkpoint,
+single old-surface restart and immutable receipt. It does not abandon children, clear lease
+files, edit messages or invoke synthetic plugin callbacks. The global activity checks and
+uncertain-restart protections above still apply. No recovery or deployment follows from
+collecting the fingerprint or opening a draft change.
