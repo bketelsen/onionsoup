@@ -14,6 +14,7 @@ export function FrictionDetail({ record }: { record: FrictionRecord }) {
     {record.failures.map((failure, index) => <p key={index}>{failure.tool}: {failure.error} ({failure.input})</p>)}
     <p>{record.owner} · {record.count} reports · first {record.firstSeen} · latest {record.lastSeen}</p>
     <p>Engine: {record.commit} · Model: {record.model}</p>
+    {record.triageError && <p role="alert">Investigation status unavailable: {record.triageError}</p>}
     {record.triage && <section className="space-y-2">
       <h3 className="font-semibold">Investigation: {record.triage.state}</h3>
       <p>Updated {record.triage.updatedAt}{record.triage.reason ? ` · ${record.triage.reason}` : ''}</p>
@@ -71,7 +72,7 @@ export function FrictionView({ recordId }: { recordId?: string }) {
     <div className="flex flex-col gap-6 lg:flex-row">
       <div className="w-full lg:w-72 shrink-0 space-y-2">{sorted.length ? sorted.map(record => <Button key={record.id}
         className="w-full text-left break-words" onClick={() => navigate('friction', record.id)}>
-        {record.summary} · {record.count} · {record.triage?.state ?? 'not investigated'}</Button>) : <Empty>No friction reports yet.</Empty>}</div>
+        {record.summary} · {record.count} · {record.triageError ? 'status unavailable' : record.triage?.state ?? 'not investigated'}</Button>) : <Empty>No friction reports yet.</Empty>}</div>
       {detailError && <p className="text-status-error">{detailError}</p>}
       {detail && <div className="min-w-0 max-lg:order-first"><FrictionDetail record={detail} /></div>}
     </div>

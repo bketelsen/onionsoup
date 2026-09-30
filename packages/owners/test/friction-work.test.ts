@@ -28,6 +28,7 @@ async function fixture() {
   runtime.hire = async (_owner, request) => {
     calls++;
     assert.equal(request.role, 'owner');
+    assert.equal(request.extraPermission?.bash, 'deny');
     assert.equal(request.directory, owner.workspace);
     return { value: request.schema.parse({ observed: ['fixture source examined'], inferred: [], unknown: [],
       disposition: 'propose-fix', proposedWork: { title: 'Fix evidence', goal: 'Provide evidence', rationale: 'Review blocked',
@@ -168,5 +169,47 @@ test('changed selection policy cannot dispatch under the previously reserved own
     await fixtureState.enable({ ...fixtureState.policy, owner: 'bellonda', repository: 'example/wiki' });
     assert.equal(await consumeFrictionWake(fixtureState.runtime, selected), undefined);
     assert.equal(fixtureState.calls(), 0);
+  } finally { await fixtureState.cleanup(); }
+});
+
+
+test('invalid oldest wake cannot starve later valid reports or consume cadence', async () => {
+  const fixtureState = await fixture();
+  try {
+    await fixtureState.enable();
+    const valid = await reportFriction(fixtureState.runtime, { owner: 'clippy', submissionID: 'second',
+      origin: { sessionID: 'fixture', directory: '/fixture' }, model: 'fixture/model', commit: 'a'.repeat(40), failures: [],
+      input: { summary: 'Distinct later issue', expected: 'Useful answer', actual: 'Answer unavailable' } });
+    await writeFile(join(fixtureState.root, 'state/friction/records', `${fixtureState.report.id}.json`), JSON.stringify({
+      ...fixtureState.report, firstSeen: '2021-01-01T00:00:00.000Z', lastSeen: '2021-01-01T00:00:00.000Z',
+    }));
+    await rm(join(fixtureState.root, 'state/friction/wakes', `${fixtureState.report.id}.json`));
+    const errors: string[] = [];
+    const next = await nextFrictionInvestigation(fixtureState.runtime, (id, reason) => errors.push(`${id}:${reason}`));
+    assert.equal(next?.id, valid.id);
+    assert.ok(errors.includes(`${fixtureState.report.id}:friction_triage_discovery_unreadable`));
+    const outcome = await consumeFrictionWake(fixtureState.runtime, next);
+    assert.equal(outcome?.id, valid.id);
+    assert.equal(outcome?.state, 'investigated');
+    assert.equal(fixtureState.calls(), 1);
+  } finally { await fixtureState.cleanup(); }
+});
+
+test('corrupt sidecar is attributable and skipped; due duties take priority over friction', async () => {
+  const fixtureState = await fixture();
+  const log = { duty() {}, item() {}, request() {}, error() {} };
+  try {
+    await fixtureState.enable();
+    fixtureState.runtime.declarations.owners.get('clippy')!.duties.push({ id: 'due', kind: 'survey', raises: 'attention',
+      every: '1h', instructions: 'Observe fixture' });
+    await scheduleFriction(fixtureState.runtime, log, new Set());
+    await drain();
+    assert.equal(fixtureState.calls(), 0);
+    const directory = join(fixtureState.root, 'state/friction/investigations');
+    await mkdir(directory, { recursive: true });
+    await writeFile(join(directory, `${fixtureState.report.id}.json`), '{broken');
+    const errors: string[] = [];
+    assert.equal(await nextFrictionInvestigation(fixtureState.runtime, (id, reason) => errors.push(`${id}:${reason}`)), undefined);
+    assert.deepEqual(errors, [`${fixtureState.report.id}:friction_triage_discovery_unreadable`]);
   } finally { await fixtureState.cleanup(); }
 });

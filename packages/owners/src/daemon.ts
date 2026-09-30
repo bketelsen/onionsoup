@@ -237,8 +237,12 @@ async function reservedRequestOwners(runtime: Runtime) {
 /** Lowest-priority investigation: no refresh or work dispatch, and one bounded hire off the tick. */
 export async function scheduleFriction(runtime: Runtime, log: TickLog, reserved: ReadonlySet<string>) {
   if (friction.size) return;
-  const selected = await nextFrictionInvestigation(runtime);
+  const selected = await nextFrictionInvestigation(runtime, (id, reason) => log.error(id, new Error(reason)));
   if (!selected || reserved.has(selected.owner) || memories.has(selected.owner)) return;
+  const dutyState = await readDutyState(join(runtime.stateDirectory, 'duties.json'));
+  const hasDueDuty = runtime.owner(selected.owner).duties.some(duty => duty.every
+    && Date.now() - Date.parse(dutyState[`${selected.owner}/${duty.id}`] ?? '1970-01-01') >= spanMs(duty.every));
+  if (hasDueDuty) return;
   const busy = [...items.keys(), ...duties.keys()].some(key => key.split('/')[0] === selected.owner);
   if (busy) return;
   const work = await runtime.ledger.list();
@@ -311,15 +315,15 @@ async function tickAdmitted(runtime: Runtime, log: TickLog) {
     log.error('request reservations', error);
     return; // Retry next tick when the owner reservations can be read safely.
   }
+  await runDueDuties(runtime, log, reserved);
+  const runnable = (await runtime.ledger.list()).filter(isRunnable);
+  await advanceRunnable(runnable, runtime, log, reserved);
   try {
     await scheduleFriction(runtime, log, reserved);
     reserved = new Set([...reserved, ...friction.keys()]);
   } catch (error) {
     log.error('friction triage', error);
   }
-  await runDueDuties(runtime, log, reserved);
-  const runnable = (await runtime.ledger.list()).filter(isRunnable);
-  await advanceRunnable(runnable, runtime, log, reserved);
   await scheduleMemory(runtime, log, reserved);
   try {
     for (const notice of await noticeWorkChanges(runtime, ownerId => chatDirectory(runtime, ownerId))) log.duty(notice.owner, 'notice', `${notice.workItem} ${notice.change}${notice.origin ? ' (to its chat)' : ''}`);

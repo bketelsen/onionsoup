@@ -310,6 +310,12 @@ test('HTTP friction views show bounded safe records and the originating chat wit
     const detail = await call('GET', `/api/friction/${first.id}`);
     assert.match(JSON.stringify(detail.body), /Need a reproduction/);
     assert.doesNotMatch(JSON.stringify(detail.body), /private-claim-token|private-hire-session|runner/);
+    await writeFile(join(runtime.stateDirectory, 'friction/investigations', `${first.id}.json`), '{broken');
+    const corrupt = await call('GET', `/api/friction/${first.id}`);
+    assert.equal(corrupt.status, 200);
+    assert.equal(corrupt.body.triageError, 'friction_triage_unreadable');
+    assert.equal(((await call('GET', '/api/friction')).body as unknown as unknown[]).length, 2);
+    assert.equal((await call('GET', '/api/state')).status, 200);
     assert.equal(detail.status, 200);
     assert.equal(detail.body.summary, '<script>alert(1)</script>');
     assert.doesNotMatch(JSON.stringify([listing, detail.body]), /secret\/desk|command|\.env/);

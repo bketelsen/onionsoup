@@ -278,13 +278,14 @@ pending wake intent. The surface lists these reports and links to the first repo
 `{ "version": 1, "owner": "maintainer-id", "repository": "org/repo", "enabledSince": "ISO timestamp", "intervalMs": 3600000 }`.
 The owner must own that repository. With no file, triage is disabled. A configured daemon considers only reports
 first seen on or after the cutoff, among the most recent 100 reports. It schedules at most one read-only
-investigation per interval (minimum one minute), after existing requests and while the maintainer has no reserved,
+investigation per interval (minimum one minute), after existing requests, due duties and runnable items, and while the maintainer has no reserved,
 runnable or running work. Admission and owner reservations keep it off deployment and existing worker paths.
 
 The worker reads the existing clean checkout, records its commit, and explicitly labels remote freshness unknown;
-it never fetches, resets or gathers infrastructure snapshots. A sandboxed owner hire returns observed/inferred/unknown
+it never fetches, resets or gathers infrastructure snapshots. A sandboxed owner hire with shell access denied returns observed/inferred/unknown
 facts and either a bounded proposed fix in that repository, missing evidence, or no action. A versioned sidecar in
-`state/friction/investigations/<id>.json` holds the claim, result, session and cost. Original reports and pending wake
+`state/friction/investigations/<id>.json` holds the claim, result, session and cost. Unreadable wake/sidecar candidates are skipped with a diagnostic naming the report, so another valid report can proceed.
+The surface shows unavailable investigation status on a corrupt sidecar while preserving other reports. Original reports and pending wake
 files stay compatible; the sidecar is the processing status. Repeated discoveries adopt the saved result. A crashed
 claim becomes `blocked: friction_triage_delivery_uncertain`; inference failures stop without automatic paid retries.
 The cadence timestamp is durable before dispatch; a crash there may delay dispatch by one interval. The underlying

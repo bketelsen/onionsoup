@@ -111,6 +111,7 @@ async function investigate(runtime: Runtime, report: FrictionRecord, record: Fri
   const sourceCommit = await sourceSnapshot(owner.workspace);
   record = await updateClaim(runtime, { ...record, sourceCommit });
   const response = await runtime.hire(owner.id, { role: 'owner', model: owner.model, directory: owner.workspace,
+    extraPermission: { bash: 'deny' },
     title: `Friction investigation ${record.id}`, brief: brief(report, record), schema: FrictionInvestigation });
   const investigation = FrictionInvestigation.parse(response.value);
   investigation.observed = investigation.observed.map(safeProse);
@@ -182,16 +183,22 @@ function failureReason(error: unknown) {
 }
 
 /** Bounded discovery of recent captures. Original pending wakes are never rewritten. */
-export async function nextFrictionInvestigation(runtime: Runtime) {
+export async function nextFrictionInvestigation(runtime: Runtime, onError: (id: string, reason: string) => void =
+  (id, reason) => console.warn(id, reason)) {
   const policy = await frictionTriagePolicy(runtime);
   if (!policy) return undefined;
   const cadence = await optionalText(join(runtime.stateDirectory, 'friction', 'triage-last-start.json'));
   if (cadence && Date.now() - Date.parse(z.string().datetime().parse(JSON.parse(cadence))) < policy.intervalMs) return undefined;
   for (const report of (await listFriction(runtime)).reverse()) {
     if (Date.parse(report.firstSeen) < Date.parse(policy.enabledSince)) continue;
-    const saved = await readFrictionTriage(runtime, report.id);
-    if (!saved || (saved.state === 'running' && (!saved.runner || !requestRunnerIsAlive(saved.runner)))) {
+    try {
+      const saved = await readFrictionTriage(runtime, report.id);
+      if (saved && (saved.state !== 'running' || (saved.runner && requestRunnerIsAlive(saved.runner)))) continue;
+      await eligible(runtime, report.id, policy);
       return { id: report.id, owner: policy.owner, policy };
+    } catch {
+      // One corrupt sidecar/wake cannot starve valid later reports or consume their inference budget.
+      onError(report.id, 'friction_triage_discovery_unreadable');
     }
   }
   return undefined;
