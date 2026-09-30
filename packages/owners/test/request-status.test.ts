@@ -238,6 +238,9 @@ test('scoped evidence is bounded and redacted; corrupt or mismatched evidence st
   assert.match(text, /\[redacted\]/);
   assert.doesNotMatch(text, /private-value|hidden-value/);
   assert.ok(text.length < REQUEST_STATUS_LIMITS.summaryChars);
+  await runtime.ledger.update(item.id, current => ({ ...current, planDocument: { markdown: 'First recorded plan', digest: 'new-digest' } }));
+  assert.match(await requestProgressDetail(runtime, 'odrade', request.id), /Host attempt: reviewed; superseded/);
+  await runtime.ledger.update(item.id, current => ({ ...current, planDocument: undefined }));
   const directory = join(runtime.stateDirectory, 'request-work-evidence');
   const [name] = await readdir(directory);
   const path = join(directory, name!);
@@ -282,4 +285,31 @@ test('accepted assignment retains its original goal through feedback, revision, 
   assert.ok(status.includes(`Goal: ${proposal.goal}`));
   assert.match(status, /Stop this attempt/);
   assert.equal((await runtime.requests.list()).length, 1);
+});
+
+test('old finished requests skip new evidence projection but retain pending notice recovery', async () => {
+  const { createHash } = await import('node:crypto');
+  const { recordRequestWorkEvidence } = await import('../src/request-work-evidence.ts');
+  const runtime = await setup();
+  const request = await open(runtime);
+  const item = await runtime.ledger.create('clippy', 'owner-change', proposal, { request: request.id, status: 'landed' });
+  await runtime.requests.update(request.id, current => ({ ...current, status: 'completed', workItem: item.id }));
+  assert.equal(await noticeRequestProgress(runtime, fail), 1);
+  const [notice] = await notices(runtime);
+  const key = createHash('sha256').update(request.id).digest('hex');
+  const cursorPath = join(runtime.stateDirectory, 'notices', 'request-progress', `${key}.json`);
+  const cursor = JSON.parse(await readFile(cursorPath, 'utf8'));
+  await writeFile(cursorPath, JSON.stringify({ ...cursor, pending: notice }));
+  await unlink(join(runtime.stateDirectory, 'notices', 'exchanges', 'pending', `${notice.id}.json`));
+  const old = '2020-01-01T00:00:00.000Z';
+  await writeFile(join(runtime.requests.directory, `${request.id}.json`), JSON.stringify({
+    ...await runtime.requests.get(request.id), updatedAt: old,
+  }));
+  await writeFile(join(runtime.ledger.directory, `${item.id}.json`), JSON.stringify({ ...item, updatedAt: old }));
+  await recordRequestWorkEvidence(runtime, item, { stage: 'blocked', blocker: 'historical_sidecar_changed' });
+  assert.equal(await noticeRequestProgress(runtime, fail), 1, 'existing pending notice is recovered');
+  assert.equal(await noticeRequestProgress(runtime, fail), 0, 'old evidence changes are not projected');
+  const queued = await notices(runtime);
+  assert.equal(queued.length, 1);
+  assert.doesNotMatch(queued[0].text, /historical_sidecar_changed/);
 });

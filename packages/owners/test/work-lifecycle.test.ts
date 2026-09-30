@@ -1386,13 +1386,46 @@ test('failed host verification records its blocker without exposing output or hi
   const item = await runtime.ledger.create('clippy', 'owner-change', proposal, { status: 'working', request: request.id });
   await runtime.requests.update(request.id, current => ({ ...current, workItem: item.id, status: 'work-running' }));
   const owner = runtime.declarations.owners.get('clippy')!;
-  if (owner.domain.kind === 'git-repository') owner.domain.verify = [['sh', '-c', 'echo private-failure-output; exit 7']];
+  if (owner.domain.kind === 'git-repository') owner.domain.verify = [['sh', '-c', 'echo private-failure-output; echo changed > change; exit 7']];
   const desk = await ensureDesk(runtime.repositoryOwner('clippy'), runtime.desksRoot);
   await writeFile(join(desk.path, 'change'), 'candidate\n');
   runtime.hire = async () => { throw new Error('must_not_hire'); };
   assert.equal((await proposeDeskChanges(runtime, 'clippy', { title: 'Patch', summary: 'Claim', item: item.id })).outcome, 'needs-work');
   const status = await requestProgressDetail(runtime, 'odrade', request.id);
   assert.match(status, /Host blocker: host_verification_failed/);
+  assert.doesNotMatch(status, /verification_changed_source/);
   assert.match(status, /#1 sh exit=7/);
   assert.doesNotMatch(status, /private-failure-output/);
+});
+
+test('evidence storage failures preserve successful review and publication outcomes with safe diagnostics', async () => {
+  const { requestProgressDetail } = await import('../src/request-status.ts');
+  const { runtime, root, remote } = await fixture();
+  const request = await runtime.requests.open('odrade', 'clippy', { kind: 'work', purpose: proposal.goal, proposal }, 'none');
+  const item = await runtime.ledger.create('clippy', 'owner-change', proposal, { status: 'working', request: request.id });
+  await runtime.requests.update(request.id, current => ({ ...current, status: 'work-running', workItem: item.id }));
+  const desk = await ensureDesk(runtime.repositoryOwner('clippy'), runtime.desksRoot);
+  await writeFile(join(desk.path, 'change'), 'candidate\n');
+  await writeFile(join(runtime.stateDirectory, 'request-work-evidence'), 'unavailable storage');
+  scriptHires(runtime, async () => verdict);
+  await fakeGithub(root, remote, async () => {
+    const outcome = await proposeDeskChanges(runtime, 'clippy', { title: 'Patch', summary: 'Claim', item: item.id });
+    assert.equal(outcome.outcome, 'opened');
+  });
+  const saved = await runtime.ledger.get(item.id);
+  assert.equal(saved.verdicts[0]?.decision, 'approve');
+  assert.equal(saved.publication?.state, 'open');
+  assert.match(await requestProgressDetail(runtime, 'odrade', request.id), /Host tests\/review: unavailable/);
+  assert.ok((await journalKinds(runtime, 'clippy')).includes('request_work_evidence_write_failed'));
+});
+
+test('evidence storage failure cannot replace the original reviewer error', async () => {
+  const { runtime } = await fixture();
+  const item = await runtime.ledger.create('clippy', 'owner-change', proposal, { status: 'working', request: 'r-fixture' });
+  const desk = await ensureDesk(runtime.repositoryOwner('clippy'), runtime.desksRoot);
+  await writeFile(join(desk.path, 'change'), 'candidate\n');
+  await writeFile(join(runtime.stateDirectory, 'request-work-evidence'), 'unavailable storage');
+  const original = new Error('fixture_review_transport_failed');
+  runtime.hire = async () => { throw original; };
+  await assert.rejects(proposeDeskChanges(runtime, 'clippy', { title: 'Patch', summary: 'Claim', item: item.id }), error => error === original);
 });

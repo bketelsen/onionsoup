@@ -430,7 +430,9 @@ and blockers. Command arguments/output are excluded; review prose is redacted an
 findings and labeling omissions. This is attempt evidence, not proof of current workspace state, deployment or goal
 completion. Missing/unreadable evidence is unknown; old evidence is stale and a changed plan digest supersedes it.
 The same informational notice path exposes new attempt evidence without model wakes; adding this view does not
-replay historical requests or import past reviewer/model claims. The next host attempt replaces the view; existing
+replay historical requests or import past reviewer/model claims. Evidence writes are best-effort with metadata-only diagnostics and never change a proposal outcome.
+Old finished requests skip evidence reads on notice ticks while existing pending notices still recover.
+The next host attempt replaces the view; existing
 review history remains with its original records. External work without a host proposal attempt stays unknown.
 Consultation/status-only instructions apply to that interaction. A separately accepted work handoff follows its
 own goal and existing plan/effect gates; it never inherits permission to bypass those gates.

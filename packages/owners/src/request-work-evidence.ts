@@ -34,8 +34,7 @@ function evidencePath(runtime: Runtime, item: WorkItem) {
 }
 
 type AttemptEvidence = Pick<RequestWorkEvidence, 'stage' | 'verification' | 'review' | 'blocker'>;
-export async function recordRequestWorkEvidence(runtime: Runtime, item: WorkItem | undefined, attempt: AttemptEvidence) {
-  if (!item?.request) return;
+async function writeRequestWorkEvidence(runtime: Runtime, item: WorkItem, attempt: AttemptEvidence) {
   const verdict = attempt.review?.verdict;
   const limits = REQUEST_EVIDENCE_LIMITS;
   const abbreviated = Boolean(verdict && (verdict.findings.length > limits.findings || verdict.summary.length > limits.fieldChars
@@ -52,6 +51,20 @@ export async function recordRequestWorkEvidence(runtime: Runtime, item: WorkItem
   const temporary = `${path}.${randomUUID()}.tmp`;
   await writeFile(temporary, JSON.stringify(record) + '\n', { mode: 0o600 });
   await rename(temporary, path);
+}
+
+/** Observability must never replace the verification/review result or become a publication gate. */
+export async function recordRequestWorkEvidence(runtime: Runtime, item: WorkItem | undefined, attempt: AttemptEvidence) {
+  if (!item?.request) return;
+  try {
+    await writeRequestWorkEvidence(runtime, item, attempt);
+  } catch {
+    const reason = 'request_work_evidence_write_failed';
+    console.warn(reason, item.id, attempt.stage);
+    await runtime.notebook(item.owner).journal({ kind: reason, workItem: item.id,
+      note: `Request-scoped evidence unavailable for host stage ${attempt.stage}; original proposal outcome is unchanged.` })
+      .catch(() => console.warn('request_work_evidence_diagnostic_failed', item.id));
+  }
 }
 
 export async function readRequestWorkEvidence(runtime: Runtime, item: WorkItem) {

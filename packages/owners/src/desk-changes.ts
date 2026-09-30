@@ -235,18 +235,20 @@ async function publicationItem(runtime: Runtime, desk: ReviewedDesk, proposal: D
 async function requestScopedReview(runtime: Runtime, owner: RepositoryOwner, scope: ReviewScope,
   target: DeskTarget, proposal: DeskProposal, evidence: ReviewEvidence, criteria: readonly string[]) {
   const item = target.kind === 'new' ? undefined : target.item;
+  const base = await reviewBase(owner, target);
+  let review: DeskReview;
   try {
-    const review = await reviewDesk(runtime, owner, scope, target.path, proposal, await reviewBase(owner, target), evidence, criteria);
-    await recordRequestWorkEvidence(runtime, item, { stage: 'reviewed', verification: evidence,
-      review: { reviewer: review.reviewer, verdict: review.verdict },
-      blocker: effectiveDecision(review.verdict) === 'approve' ? undefined : 'review_changes_required' });
-    return review;
+    review = await reviewDesk(runtime, owner, scope, target.path, proposal, base, evidence, criteria);
   } catch (error) {
     const blocker = error instanceof Error && error.message.startsWith('review_evidence_stale:')
       ? 'review_evidence_stale' : 'review_unavailable';
     await recordRequestWorkEvidence(runtime, item, { stage: 'blocked', verification: evidence, blocker });
     throw error;
   }
+  await recordRequestWorkEvidence(runtime, item, { stage: 'reviewed', verification: evidence,
+    review: { reviewer: review.reviewer, verdict: review.verdict },
+    blocker: effectiveDecision(review.verdict) === 'approve' ? undefined : 'review_changes_required' });
+  return review;
 }
 
 async function prepareDeskChanges(runtime: Runtime, owner: RepositoryOwner, proposal: DeskProposal, target: DeskTarget): Promise<DeskChangeResult> {
@@ -262,7 +264,7 @@ async function prepareDeskChanges(runtime: Runtime, owner: RepositoryOwner, prop
   const evidence: ReviewEvidence = { observedAt: new Date().toISOString(), tree: verifiedTree,
     verifier: 'host-sandbox', checks: verification.map((check, index) => ({ command: safeProse(check.command.split(/\s+/)[0]!), exitCode: check.exitCode, configurationIndex: index + 1 })) };
   const changed = await snapshotTree(target.path) !== verifiedTree;
-  const blocker = changed ? 'verification_changed_source' : failure ? 'host_verification_failed' : undefined;
+  const blocker = failure ? 'host_verification_failed' : changed ? 'verification_changed_source' : undefined;
   await recordRequestWorkEvidence(runtime, item, { stage: blocker ? 'blocked' : 'reviewing', verification: evidence, blocker });
   if (failure) return failure;
   if (changed) return { outcome: 'needs-work', summary: 'verification_changed_source: host checks changed the proposed tree. Inspect those changes and propose again so verification covers the final source.' };

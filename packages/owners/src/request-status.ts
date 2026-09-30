@@ -219,7 +219,7 @@ async function noticeBaseline(runtime: Runtime, progress: readonly RequestProgre
   });
 }
 
-async function noticeRequest(runtime: Runtime, request: ResourceRequest, progress: RequestProgress, baselineFingerprint = '') {
+async function noticeRequest(runtime: Runtime, request: ResourceRequest, progress: RequestProgress, baselineFingerprint = '', pendingOnly = false) {
   if (!request.origin) return false;
   const directory = join(runtime.stateDirectory, 'notices', 'request-progress');
   await mkdir(directory, { recursive: true });
@@ -233,7 +233,7 @@ async function noticeRequest(runtime: Runtime, request: ResourceRequest, progres
     let cursor = contents ? Cursor.parse(JSON.parse(contents)) : { sequence: 0, fingerprint: baselineFingerprint };
     const hadPending = Boolean(cursor.pending);
     cursor = await enqueuePending(runtime, path, cursor);
-    if (!runtime.declarations.owners.has(request.from)) return hadPending;
+    if (pendingOnly || !runtime.declarations.owners.has(request.from)) return hadPending;
     const nextFingerprint = fingerprint(progress);
     if (cursor.fingerprint === nextFingerprint) return hadPending;
     const sequence = cursor.sequence + 1;
@@ -251,16 +251,21 @@ async function noticeRequest(runtime: Runtime, request: ResourceRequest, progres
 
 /** Queue informational updates only; never hire a model, approve, retry or dispatch work. */
 export async function noticeRequestProgress(runtime: Runtime, onError: (id: string, error: unknown) => void) {
-  const requests = (await runtime.requests.list()).filter(request => request.origin);
   const items = new Map((await runtime.ledger.list()).map(item => [item.id, item]));
-  const projections = new Map(await Promise.all(requests.map(async request => [request.id,
-    await recordedProgress(runtime, request, request.workItem ? items.get(request.workItem) : undefined)] as const)));
+  const cutoff = Date.now() - REQUEST_STATUS_LIMITS.recentMs;
+  const requests = (await runtime.requests.list()).filter(request => request.origin);
+  const eligible = new Set(requests.filter(request => !FINISHED.has(request.status) || Date.parse(request.updatedAt) >= cutoff
+    || Date.parse(request.workItem ? items.get(request.workItem)?.updatedAt ?? '' : '') >= cutoff).map(request => request.id));
+  const projections = new Map(await Promise.all(requests.map(async request => {
+    const item = request.workItem ? items.get(request.workItem) : undefined;
+    return [request.id, eligible.has(request.id) ? await recordedProgress(runtime, request, item) : requestProgress(request, item)] as const;
+  })));
   const baseline = await noticeBaseline(runtime, [...projections.values()]);
   let processed = 0;
   for (const request of requests) {
     try {
       if (processed >= REQUEST_STATUS_LIMITS.noticesPerTick) break;
-      if (await noticeRequest(runtime, request, projections.get(request.id)!, baseline.fingerprints[request.id])) processed++;
+      if (await noticeRequest(runtime, request, projections.get(request.id)!, baseline.fingerprints[request.id], !eligible.has(request.id))) processed++;
     } catch (error) { onError(request.id, error); }
   }
   return processed;
