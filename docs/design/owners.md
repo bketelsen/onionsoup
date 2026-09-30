@@ -424,7 +424,7 @@ Injected cross-owner progress summaries (not all other chat-context sections) pr
 and abbreviated blocker details are explicitly labeled; `onionsoup_status offset=<next>` pages through them,
 and `onionsoup_status request=<id>` reads details under the same visibility check.
 
-Host proposal attempts for delegated work also write a request/item/owner-scoped view in
+Host proposal attempts and supported external-PR reconciliation for delegated work also write a request/item/owner-scoped view in
 `state/request-work-evidence`: verification stage, exact source tree, host check exit codes, cross-family review
 and blockers. Command arguments/output are excluded; review prose is redacted and bounded, prioritizing blocker
 findings and labeling omissions. This is attempt evidence, not proof of current workspace state, deployment or goal
@@ -433,7 +433,7 @@ The same informational notice path exposes new attempt evidence without model wa
 replay historical requests or import past reviewer/model claims. Evidence writes are best-effort with metadata-only diagnostics and never change a proposal outcome.
 Old finished requests skip evidence reads on notice ticks while existing pending notices still recover.
 The next host attempt replaces the view; existing
-review history remains with its original records. External work without a host proposal attempt stays unknown.
+review history remains with its original records. Historical external work stays unknown until its supported fresh reconciliation runs.
 Consultation/status-only instructions apply to that interaction. A separately accepted work handoff follows its
 own goal and existing plan/effect gates; it never inherits permission to bypass those gates.
 

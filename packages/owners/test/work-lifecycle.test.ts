@@ -1326,7 +1326,6 @@ test('first external reconciliation refuses an unreachable merge without changin
     assert.deepEqual(await runtime.requests.get(request.id), priorRequest);
   });
 });
-||||||| parent of 919b7f6 (feat: expose scoped host evidence in delegated request progress)
 
 test('delegated host checks and review become request-scoped interim evidence without waking or publishing', async () => {
   const { requestProgressDetail, noticeRequestProgress } = await import('../src/request-status.ts');
@@ -1406,8 +1405,11 @@ test('evidence storage failures preserve successful review and publication outco
   await runtime.requests.update(request.id, current => ({ ...current, status: 'work-running', workItem: item.id }));
   const desk = await ensureDesk(runtime.repositoryOwner('clippy'), runtime.desksRoot);
   await writeFile(join(desk.path, 'change'), 'candidate\n');
-  await writeFile(join(runtime.stateDirectory, 'request-work-evidence'), 'unavailable storage');
-  scriptHires(runtime, async () => verdict);
+  scriptHires(runtime, async () => {
+    await rm(join(runtime.stateDirectory, 'request-work-evidence'), { recursive: true });
+    await writeFile(join(runtime.stateDirectory, 'request-work-evidence'), 'unavailable storage');
+    return verdict;
+  });
   await fakeGithub(root, remote, async () => {
     const outcome = await proposeDeskChanges(runtime, 'clippy', { title: 'Patch', summary: 'Claim', item: item.id });
     assert.equal(outcome.outcome, 'opened');
@@ -1428,4 +1430,49 @@ test('evidence storage failure cannot replace the original reviewer error', asyn
   const original = new Error('fixture_review_transport_failed');
   runtime.hire = async () => { throw original; };
   await assert.rejects(proposeDeskChanges(runtime, 'clippy', { title: 'Patch', summary: 'Claim', item: item.id }), error => error === original);
+});
+
+test('fresh external reconciliation exposes interim host evidence to Odrade and final merged progress without duplicate review', async () => {
+  const { requestProgressDetail, noticeRequestProgress } = await import('../src/request-status.ts');
+  const { readRequestWorkEvidence } = await import('../src/request-work-evidence.ts');
+  const { trackDelegatedWork } = await import('../src/delegation.ts');
+  const { runtime, root, remote, desk, head, item, request, external } = await externalFixture();
+  await runtime.notebook('odrade').ensure('# Fixture');
+  await runtime.requests.update(request.id, current => ({ ...current, from: 'odrade',
+    origin: { sessionID: 'odrade-origin', directory: '/fixture/odrade' } }));
+  await git(desk.path, ['push', '-q', 'origin', 'HEAD:main']);
+  external.merged = true;
+  external.state = 'closed';
+  external.draft = false;
+  external.merge_commit_sha = head;
+  runtime.repositoryOwner('clippy').domain.verify.push(['sh', '-c', 'test -f external']);
+  const fail = (_id: string, error: unknown): never => { throw error; };
+  await noticeRequestProgress(runtime, fail);
+  let reviews = 0;
+  scriptHires(runtime, async hired => {
+    reviews++;
+    const status = await requestProgressDetail(runtime, 'odrade', request.id);
+    assert.match(status, /Host attempt: reviewing/);
+    assert.match(status, /#1 sh exit=0/);
+    assert.match(status, /no completed review/);
+    const evidence = (await readRequestWorkEvidence(runtime, item)).verification!;
+    assert.ok(hired.brief.includes(JSON.stringify(evidence)));
+    assert.equal(await noticeRequestProgress(runtime, fail), 1);
+    return verdict;
+  });
+  await fakeGithub(root, remote, async () => {
+    await writeFile(join(root, 'github.json'), JSON.stringify({ created: 0, state: 'MERGED', external }));
+    await reconcileExternalPublication(runtime, 'clippy', item.id, external.html_url, 'person');
+    await trackDelegatedWork(runtime, await runtime.requests.get(request.id));
+    const status = await requestProgressDetail(runtime, 'odrade', request.id);
+    assert.match(status, /request completed/);
+    assert.match(status, /Review by .*: approve/);
+    assert.match(status, /merged \(recorded; deployment unknown\)/);
+    assert.equal(await noticeRequestProgress(runtime, fail), 1);
+    assert.equal(await noticeRequestProgress(runtime, fail), 0);
+    await reconcileExternalPublication(runtime, 'clippy', item.id, external.html_url, 'person');
+    assert.equal(reviews, 1);
+    assert.equal((await runtime.requests.list()).length, 1);
+    assert.equal((await githubState(root)).created, 0);
+  });
 });

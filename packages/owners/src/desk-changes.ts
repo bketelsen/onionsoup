@@ -233,9 +233,8 @@ async function publicationItem(runtime: Runtime, desk: ReviewedDesk, proposal: D
 
 
 async function requestScopedReview(runtime: Runtime, owner: RepositoryOwner, scope: ReviewScope,
-  target: DeskTarget, proposal: DeskProposal, evidence: ReviewEvidence, criteria: readonly string[]) {
+  target: DeskTarget, proposal: DeskProposal, evidence: ReviewEvidence, criteria: readonly string[], base: string) {
   const item = target.kind === 'new' ? undefined : target.item;
-  const base = await reviewBase(owner, target);
   let review: DeskReview;
   try {
     review = await reviewDesk(runtime, owner, scope, target.path, proposal, base, evidence, criteria);
@@ -251,21 +250,26 @@ async function requestScopedReview(runtime: Runtime, owner: RepositoryOwner, sco
   return review;
 }
 
-async function prepareDeskChanges(runtime: Runtime, owner: RepositoryOwner, proposal: DeskProposal, target: DeskTarget): Promise<DeskChangeResult> {
-  if (!(await git(target.path, ['status', '--porcelain'])).trim()) return { outcome: 'nothing-to-do', summary: `${target.path} has no changes.` };
-  await git(target.path, ['fetch', '-q', 'origin']);
-  const verifiedTree = await snapshotTree(target.path);
-  const item = target.kind === 'new' ? undefined : target.item;
+async function requestScopedVerification(runtime: Runtime, owner: RepositoryOwner, item: WorkItem | undefined, directory: string) {
+  const verifiedTree = await snapshotTree(directory);
   await recordRequestWorkEvidence(runtime, item, { stage: 'verifying' });
-  const { verification, failure } = await verifyDesk(owner, target.path, runtime.toolsDirectory).catch(async error => {
+  const { verification, failure } = await verifyDesk(owner, directory, runtime.toolsDirectory).catch(async error => {
     await recordRequestWorkEvidence(runtime, item, { stage: 'blocked', blocker: 'host_verification_unavailable' });
     throw error;
   });
   const evidence: ReviewEvidence = { observedAt: new Date().toISOString(), tree: verifiedTree,
     verifier: 'host-sandbox', checks: verification.map((check, index) => ({ command: safeProse(check.command.split(/\s+/)[0]!), exitCode: check.exitCode, configurationIndex: index + 1 })) };
-  const changed = await snapshotTree(target.path) !== verifiedTree;
+  const changed = !failure && await snapshotTree(directory) !== verifiedTree;
   const blocker = failure ? 'host_verification_failed' : changed ? 'verification_changed_source' : undefined;
   await recordRequestWorkEvidence(runtime, item, { stage: blocker ? 'blocked' : 'reviewing', verification: evidence, blocker });
+  return { verification, failure, changed, evidence };
+}
+
+async function prepareDeskChanges(runtime: Runtime, owner: RepositoryOwner, proposal: DeskProposal, target: DeskTarget): Promise<DeskChangeResult> {
+  if (!(await git(target.path, ['status', '--porcelain'])).trim()) return { outcome: 'nothing-to-do', summary: `${target.path} has no changes.` };
+  await git(target.path, ['fetch', '-q', 'origin']);
+  const item = target.kind === 'new' ? undefined : target.item;
+  const { verification, failure, changed, evidence } = await requestScopedVerification(runtime, owner, item, target.path);
   if (failure) return failure;
   if (changed) return { outcome: 'needs-work', summary: 'verification_changed_source: host checks changed the proposed tree. Inspect those changes and propose again so verification covers the final source.' };
   const scope = reviewScope(owner, target);
@@ -275,7 +279,7 @@ async function prepareDeskChanges(runtime: Runtime, owner: RepositoryOwner, prop
     return waiting;
   }
   const criteria = target.kind === 'new' ? [] : target.item.proposal.acceptance;
-  const review = await requestScopedReview(runtime, owner, scope, target, proposal, evidence, criteria);
+  const review = await requestScopedReview(runtime, owner, scope, target, proposal, evidence, criteria, await reviewBase(owner, target));
   if (effectiveDecision(review.verdict) !== 'approve') return needsWork(runtime, owner, scope, proposal.title, review);
   await clearDeskReviews(runtime, owner.id, scope.subject);
   await git(target.path, ['add', '-A']);
@@ -544,18 +548,18 @@ async function recordDeskPublication(runtime: Runtime, item: WorkItem) {
 /** Fresh host evidence and required cross-family review for an already committed external PR. No publication effects. */
 export async function reviewExternalPublication(runtime: Runtime, item: WorkItem, directory: string, base: string) {
   const owner = runtime.repositoryFor(item);
-  const verifiedTree = await snapshotTree(directory);
-  const { verification, failure } = await verifyDesk(owner, directory, runtime.toolsDirectory);
+  const { verification, failure, changed, evidence } = await requestScopedVerification(runtime, owner, item, directory);
   if (failure) throw new Error(`external_verification_failed: ${failure.summary}`);
-  if (await snapshotTree(directory) !== verifiedTree) throw new Error('review_evidence_stale');
-  const evidence: ReviewEvidence = { observedAt: new Date().toISOString(), tree: verifiedTree,
-    verifier: 'host-sandbox', checks: verification.map((check, index) => ({ command: safeProse(check.command.split(/\s+/)[0]!), exitCode: check.exitCode, configurationIndex: index + 1 })) };
+  if (changed) throw new Error('review_evidence_stale');
   const target: DeskTarget = { kind: 'plan', item, path: directory };
   const scope = reviewScope(owner, target);
-  if (waitingForPerson(scope, await deskReviewRounds(runtime, owner.id, scope.subject))) throw new Error('external_review_needs_person');
-  const review = await reviewDesk(runtime, owner, scope, directory, {
+  if (waitingForPerson(scope, await deskReviewRounds(runtime, owner.id, scope.subject))) {
+    await recordRequestWorkEvidence(runtime, item, { stage: 'blocked', verification: evidence, blocker: 'review_round_limit' });
+    throw new Error('external_review_needs_person');
+  }
+  const review = await requestScopedReview(runtime, owner, scope, target, {
     title: item.proposal.title, summary: item.proposal.goal, item: item.id,
-  }, base, evidence, item.proposal.acceptance);
+  }, evidence, item.proposal.acceptance, base);
   if (effectiveDecision(review.verdict) !== 'approve') {
     await needsWork(runtime, owner, scope, item.proposal.title, review);
     throw new Error('external_review_needs_work');
