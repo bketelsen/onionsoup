@@ -11,6 +11,10 @@ export const HOST_BUS_TESTS = [
   'a sandboxed npm ci succeeds in a minimal fixture, with private XDG roots and the worktree writable',
   'approved-plan review receives original task criteria and recorded host check outcomes',
   'host checks that modify source require another verification before any paid review',
+  'external merged PR reconciliation verifies exact source, preserves intent/history and completes the real request once',
+  'delegated host checks and review become request-scoped interim evidence without waking or publishing',
+  'failed host verification records its blocker without exposing output or hiring a reviewer',
+  'fresh external reconciliation exposes interim host evidence to Odrade and final merged progress without duplicate review',
 ];
 // NODE_OPTIONS splits unquoted spaces; quote the whole value so the filter cannot become just ^a.
 export const STAGE_TEST_OPTIONS = `--test-skip-pattern=${JSON.stringify(`^(?:${HOST_BUS_TESTS.join('|')})$`)}`;

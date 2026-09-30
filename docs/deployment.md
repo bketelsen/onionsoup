@@ -118,11 +118,12 @@ failed or unverified rollback.
 Staged `npm run verify` excludes the nested sandbox test
 `a sandboxed npm ci succeeds in a minimal fixture, with private XDG roots and the worktree writable`:
 it needs a host user bus to start a nested sandbox, and the isolated release stage has no host bus.
-The two desk-review integration tests that execute configured host checks also require that bus.
-All three still run in ordinary Linux verification and CI; only the isolated stage excludes their
+Six desk-review, external-publication and delegated-evidence integration tests that execute configured
+host checks also require that bus; the exact names are listed in `scripts/deploy-stage.mjs`.
+All seven still run in ordinary Linux verification and CI; only the isolated stage excludes their
 exact names. The filter is quoted so spaces cannot silently exclude other tests.
 The stage prints these exceptions when verifying. It does not depend on `ONIONSOUP_DEPLOY_E2E`
-(which only opts into the outer real-archive test); ordinary `npm run verify` still runs all three tests.
+(which only opts into the outer real-archive test); ordinary `npm run verify` still runs all seven tests.
 
 The drain stops new admitted turns and requires all live leases to finish. The worker reads
 `/session/status`, `/permission`, and `/question` for every declared owner chat/desk, operator
