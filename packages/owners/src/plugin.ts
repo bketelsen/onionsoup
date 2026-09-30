@@ -1414,7 +1414,13 @@ const server: Plugin = async (input, options) => {
       }),
       [REQUEST_REVIEW_TOOL]: tool({
         description: 'Review a direct request you sent to your report under an existing applicable approve-plans grant. Read onionsoup_status request first. Bind the verdict to its exact request/item/digest. Approval requires a factual matched-scope assessment; unresolved assumptions or extra scope require needs-human. This does not grant new authority or merge permission.',
-        args: DirectRequestPlanReviewInput.shape,
+        // OpenCode bundles a different Zod minor; adapt its transport schemas, then parse the canonical host input.
+        args: {
+          request: tool.schema.string(), item: tool.schema.string(), digest: tool.schema.string(),
+          decision: tool.schema.enum(DirectRequestPlanReviewInput.shape.decision.options),
+          scope: tool.schema.enum(DirectRequestPlanReviewInput.shape.scope.options),
+          note: tool.schema.string().describe('Scope evidence, revision feedback, or the exact human decision needed'),
+        },
         async execute(args, context) {
           const reviewer = requireOwner(context.agent);
           const item = await reviewDirectRequestPlan(runtime, reviewer.id, args);
