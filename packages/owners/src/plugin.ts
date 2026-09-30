@@ -1455,6 +1455,7 @@ const server: Plugin = async (input, options) => {
       onionsoup_propose_changes: tool({
         description: 'Turn the changes on your desk, or in an approved plan\'s own worktree (with its item), into a reviewed change: host code verifies them, a reviewer from another model family checks the diff, and only then they are committed, pushed and opened as a PR (merged, and published if you host a site, when the person granted you merge authority). Takes a few minutes.',
         args: {
+          draft: tool.schema.boolean().optional().describe('Create a draft PR and suppress merging/site publication even with a merge grant; retained across retries'),
           title: tool.schema.string(),
           summary: tool.schema.string().describe('What changed and why, for the reviewer and the PR'),
           repository: tool.schema.string().optional().describe('Only if you own several repositories: which desk to propose from (owner/name)'),

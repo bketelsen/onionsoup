@@ -101,6 +101,8 @@ export interface DeskProposal {
   repository?: string;
   origin?: WorkItem['origin'];
   item?: string;
+  /** Suppresses merging and site follow-up even when a merge grant exists. */
+  draft?: boolean;
 }
 
 /**
@@ -195,7 +197,7 @@ function publicationFields(desk: ReviewedDesk, proposal: DeskProposal, reviewedH
     status: 'landing', worktree: desk.path,
     implementations: [{ report, diffStat: desk.patch, verification: desk.verification }],
     verdicts: [desk.verdict],
-    deskPublication: { stage: 'commit', reviewer: desk.reviewer, reviewedHead, reviewedTree },
+    deskPublication: { stage: 'commit', draft: proposal.draft ?? false, reviewer: desk.reviewer, reviewedHead, reviewedTree },
   };
 }
 
@@ -298,7 +300,10 @@ export async function proposeDeskChanges(runtime: Runtime, ownerId: string, prop
   const owner = runtime.repositoryOwner(ownerId, proposal.repository);
   const directory = await proposalDirectory(runtime, owner, item);
   const pending = await pendingPublication(runtime, ownerId, item, directory);
-  if (pending) return continueDeskPublication(runtime, pending.id);
+  if (pending) {
+    if (proposal.draft !== undefined && proposal.draft !== (pending.deskPublication?.draft ?? false)) throw new Error('publication_mode_conflict: retry with the original draft mode');
+    return continueDeskPublication(runtime, pending.id);
+  }
   return prepareDeskChanges(runtime, owner, proposal, await deskTarget(directory, item));
 }
 
@@ -374,6 +379,7 @@ const pushRepair: DeskStep = async (runtime, item) => {
   const { stdout } = await run('gh', ['pr', 'view', target.prUrl, '--json', 'state,headRefOid']);
   const remote = RemoteHead.parse(JSON.parse(stdout));
   if (remote.state !== 'OPEN') throw new Error('repair_pr_not_open');
+  if (item.deskPublication?.draft) await requireDraftPr(target.prUrl);
   const wasPushed = remote.headRefOid === item.landedCommit;
   if (!wasPushed && remote.headRefOid !== target.previousHead) throw new Error('repair_head_changed');
   if (!wasPushed) {
@@ -389,6 +395,12 @@ const pushDesk: DeskStep = (runtime, item) => (item.repairOf ? pushRepair : push
 
 const PullRequest = z.object({ url: z.string(), state: z.enum(['OPEN', 'MERGED', 'CLOSED']) });
 
+async function requireDraftPr(url: string) {
+  const { stdout } = await run('gh', ['pr', 'view', url, '--json', 'isDraft,autoMergeRequest']);
+  const current = z.object({ isDraft: z.boolean(), autoMergeRequest: z.unknown().nullable() }).parse(JSON.parse(stdout));
+  if (!current.isDraft || current.autoMergeRequest !== null) throw new Error('draft_publication_remote_not_draft');
+}
+
 async function openDeskPr(runtime: Runtime, item: WorkItem) {
   const owner = runtime.repositoryFor(item);
   const listed = await run('gh', ['pr', 'list', '--repo', owner.domain.name, '--head', item.branch!, '--state', 'all', '--json', 'url,state']);
@@ -396,7 +408,7 @@ async function openDeskPr(runtime: Runtime, item: WorkItem) {
   if (existing) return existing;
   const created = await run('gh', ['pr', 'create', '--repo', owner.domain.name, '--base', owner.domain.baseBranch,
     '--head', item.branch!, '--title', item.proposal.title,
-    '--body', deskPrBody(item)]);
+    '--body', deskPrBody(item), ...(item.deskPublication?.draft ? ['--draft'] : [])]);
   return PullRequest.parse({ url: created.stdout.trim().split('\n').at(-1), state: 'OPEN' });
 }
 
@@ -414,8 +426,9 @@ function deskPrBody(item: WorkItem) {
 
 const openDesk: DeskStep = async (runtime, item) => {
   const opened = await openDeskPr(runtime, item);
+  if (item.deskPublication?.draft) await requireDraftPr(opened.url);
   const states = { OPEN: 'open', MERGED: 'merged', CLOSED: 'closed' } as const;
-  const shouldMerge = hasMergeGrant(runtime.repositoryFor(item));
+  const shouldMerge = !item.deskPublication?.draft && hasMergeGrant(runtime.repositoryFor(item));
   return {
     publication: { url: opened.url, branch: item.branch!, by: item.owner, at: new Date().toISOString(), state: states[opened.state] },
     deskPublication: checkpoint(item, shouldMerge ? 'merge' : 'complete'),
@@ -424,7 +437,7 @@ const openDesk: DeskStep = async (runtime, item) => {
 
 const mergeDesk: DeskStep = async (runtime, item) => {
   const owner = runtime.repositoryFor(item);
-  if (!hasMergeGrant(owner)) return { deskPublication: checkpoint(item, 'complete') };
+  if (item.deskPublication?.draft || !hasMergeGrant(owner)) return { deskPublication: checkpoint(item, 'complete') };
   const viewed = await run('gh', ['pr', 'view', item.publication!.url, '--json', 'url,state']);
   const current = PullRequest.parse(JSON.parse(viewed.stdout));
   if (current.state === 'CLOSED') throw new Error('desk_pr_closed');
@@ -445,6 +458,7 @@ async function resetMergedDesk(runtime: Runtime, item: WorkItem) {
 }
 
 const finishDesk: DeskStep = async (runtime, item) => {
+  if (item.deskPublication?.draft) return { deskPublication: checkpoint(item, 'complete') };
   // A plan's worktree stays after its merge (its session may carry on there); the plugin's cleanup pass removes it.
   if (!item.planWorktree) await resetMergedDesk(runtime, item);
   const site = [...runtime.declarations.owners.values()]
@@ -493,4 +507,26 @@ async function recordDeskPublication(runtime: Runtime, item: WorkItem) {
     const reason = `desk_publication_journal_failed: ${error instanceof Error ? error.message : String(error)}`;
     return runtime.ledger.update(item.id, current => ({ ...current, reason }));
   }
+}
+
+/** Fresh host evidence and required cross-family review for an already committed external PR. No publication effects. */
+export async function reviewExternalPublication(runtime: Runtime, item: WorkItem, directory: string, base: string) {
+  const owner = runtime.repositoryFor(item);
+  const verifiedTree = await snapshotTree(directory);
+  const { verification, failure } = await verifyDesk(owner, directory, runtime.toolsDirectory);
+  if (failure) throw new Error(`external_verification_failed: ${failure.summary}`);
+  if (await snapshotTree(directory) !== verifiedTree) throw new Error('review_evidence_stale');
+  const evidence: ReviewEvidence = { observedAt: new Date().toISOString(), tree: verifiedTree,
+    verifier: 'host-sandbox', checks: verification.map((check, index) => ({ command: safeProse(check.command.split(/\s+/)[0]!), exitCode: check.exitCode, configurationIndex: index + 1 })) };
+  const target: DeskTarget = { kind: 'plan', item, path: directory };
+  const scope = reviewScope(owner, target);
+  if (waitingForPerson(scope, await deskReviewRounds(runtime, owner.id, scope.subject))) throw new Error('external_review_needs_person');
+  const review = await reviewDesk(runtime, owner, scope, directory, {
+    title: item.proposal.title, summary: item.proposal.goal, item: item.id,
+  }, base, evidence, item.proposal.acceptance);
+  if (effectiveDecision(review.verdict) !== 'approve') {
+    await needsWork(runtime, owner, scope, item.proposal.title, review);
+    throw new Error('external_review_needs_work');
+  }
+  return { ...review, verification };
 }
