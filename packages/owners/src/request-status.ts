@@ -11,6 +11,8 @@ import { describeAsk, type ResourceRequest, type RequestStatus } from './request
 import type { Runtime } from './runtime.ts';
 import { RequestWorkEvidence, readRequestWorkEvidence } from './request-work-evidence.ts';
 import { RequestAcceptance } from './request-closure-types.ts';
+import { getDirectRequestReview } from './direct-request-plan-review.ts';
+import { directRequestReviewWakeStatus } from './direct-request-review-wake.ts';
 
 export const REQUEST_STATUS_LIMITS = { staleMs: 24 * 60 * 60_000, recentMs: 7 * 24 * 60 * 60_000, noticesPerTick: 20, summaryRecords: 12, summaryChars: 12_000, fieldChars: 240 };
 const RequestProgress = z.object({
@@ -193,7 +195,32 @@ export async function requestProgressDetail(runtime: Runtime, owner: string, id:
   });
   if (!request || !requestVisibleTo(runtime, owner, request)) return 'No visible request with that ID.';
   const item = request.workItem ? await runtime.ledger.get(request.workItem).catch(() => undefined) : undefined;
-  return requestProgressText(await recordedProgress(runtime, request, item));
+  const progress = requestProgressText(await recordedProgress(runtime, request, item));
+  return progress + await directPlanReviewDetail(runtime, request, item);
+}
+
+async function directPlanReviewDetail(runtime: Runtime, request: ResourceRequest, item: WorkItem | undefined) {
+  if (request.ask.kind !== 'work' || request.ask.assignment || !item || item.request !== request.id || item.owner !== request.to) return '';
+  const receipts = item.directRequestPlanReviews.map(review => `${review.decision}; scope ${review.scope}; ${review.reviewer} at ${review.at}; binding ${review.digest}: ${review.note}`);
+  const history = receipts.length ? `\nDirect-request plan reviews:\n${receipts.join('\n')}` : '';
+  if (item.status !== 'awaiting-plan-approval') return history;
+  try {
+    const review = await getDirectRequestReview(runtime, request.id);
+    const wake = await directRequestReviewWakeStatus(runtime, request.id, review.digest);
+    return history + [
+      '', `Direct-request plan review: ${review.reviewed ? 'decision recorded; see above' : `eligible requester ${review.reviewer} under existing approve-plans grant`}.`,
+      `Exact binding: request=${request.id}; item=${item.id}; digest=${review.digest}.`,
+      `Review continuation: ${wake ? `${wake.status}${wake.reason ? ` (${wake.reason})` : ''}` : 'not queued yet'}. Informational progress notices do not start review.`,
+      `Original request purpose: ${review.request.ask.purpose}`,
+      `Original requested scope: ${JSON.stringify(review.request.ask)}`,
+      `Submitted proposal: ${JSON.stringify(review.item.proposal)}`,
+      `Submitted plan:\n${review.item.planDocument!.markdown}`,
+      'Compare all constraints and assumptions before onionsoup_review_request_plan. Extra or uncertain scope requires needs-human; the person may approve or revise in the inbox. Merge/draft boundaries are unchanged.',
+    ].join('\n');
+  } catch (error) {
+    if (!(error instanceof Error) || !/^(direct_plan_review_|not_awaiting_plan_approval:)/.test(error.message)) throw error;
+    return history + `\nDirect-request plan review unavailable: ${error.message}. The person can decide in the inbox; do not promise automatic approval.`;
+  }
 }
 
 export async function requestProgressSummary(runtime: Runtime, owner: string, now = new Date(), offset = 0) {

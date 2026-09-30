@@ -178,6 +178,14 @@ each plan (`onionsoup_steer`); without one, every plan waits for you in the inbo
 (`maxAssignments`, `maxOpenPerManager`) and `SUPERVISION_LIMITS.revisionsPerItem` bound the work. A steward may put owners
 in its scope under itself, but only you set any other reporting line or grant.
 
+For direct work requests the manager personally sent, the same applicable grant enables
+`onionsoup_review_request_plan`. Read `onionsoup_status request=<id>` first, then supply its exact `request`, `item`
+and `digest`, a `decision` (`approve`, `revise`, `needs-human`), `scope` (`matched`, `needs-human`) and factual `note`.
+Approve requires matched scope. Unresolved scope remains pending for the person; approval is never inferred from
+request acceptance, a delivered progress notice or an earlier conversational promise. A separate durable review
+continuation wakes the requester in the original chat. The status tool reports missing authority or delivery
+blockers, and human approval remains available in the inbox. These operations add no grants or merge authority.
+
 ## Your operator
 
 An operator is one agent you direct yourself, outside the owners: it runs with nearly every permission, like a

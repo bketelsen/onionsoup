@@ -144,7 +144,7 @@ test('a person sends an owner plan back with feedback; only owner plans are appr
 
 test('survey context says when landed work is not yet on the base branch', async () => {
   const { workSoFarText } = await import('../src/briefs.ts');
-  const base = { owner: 'clippy', workflow: 'desk-publication', implementations: [], verdicts: [], replans: 0, hires: [], humanNotes: [], createdAt: '', updatedAt: '' };
+  const base = { owner: 'clippy', workflow: 'desk-publication', implementations: [], verdicts: [], replans: 0, hires: [], humanNotes: [], directRequestPlanReviews: [], createdAt: '', updatedAt: '' };
   const proposal = { title: 'Alignment tests', goal: 'g', rationale: 'r', acceptance: ['a'], size: 'small' as const };
   const publication = { url: 'https://github.com/x/y/pull/2', branch: 'owners/w-3', by: 'clippy', at: '', state: 'open' as const };
   const text = workSoFarText([
@@ -264,7 +264,7 @@ test('a config that still declares the retired planner and workflows loads, and 
 test('status shows recent outcomes of finished work', async () => {
   const { statusText } = await import('../src/desk.ts');
   const now = new Date('2026-09-23T12:00:00Z');
-  const base = { owner: 'murbella', workflow: 'desk-publication', implementations: [], verdicts: [], replans: 0, hires: [], humanNotes: [], createdAt: '2026-09-23T09:30:00Z', updatedAt: '2026-09-23T09:40:00Z' };
+  const base = { owner: 'murbella', workflow: 'desk-publication', implementations: [], verdicts: [], replans: 0, hires: [], humanNotes: [], directRequestPlanReviews: [], createdAt: '2026-09-23T09:30:00Z', updatedAt: '2026-09-23T09:40:00Z' };
   const proposal = { title: 'Fix vscode sysext', goal: 'g', rationale: 'r', acceptance: ['a'], size: 'small' as const };
   const landed = { ...base, id: 'w-1', proposal, status: 'landed' as const, branch: 'owners/w-1', landedCommit: 'a077b107d06000bd' };
   const rebase = { ...landed, id: 'w-2', rebaseOf: { itemId: 'w-0', branch: 'owners/w-0', prUrl: 'https://github.com/x/y/pull/1', previousHead: 'abc' } };

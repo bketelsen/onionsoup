@@ -8,6 +8,7 @@ import { ChatOrigin } from './chat-origin.ts';
 import { ReviewEvidence } from './desk-reviews.ts';
 import { RequestWorkEvidence } from './request-work-evidence.ts';
 import { AssignmentRef } from './initiatives.ts';
+import { DirectRequestPlanReview } from './direct-request-plan-review-types.ts';
 import { RequestAcceptance, RequestClosureCandidate } from './request-closure-types.ts';
 export { RequestAcceptance, RequestClosureCandidate } from './request-closure-types.ts';
 
@@ -114,6 +115,7 @@ export const WorkItem = z.object({
   plan: Plan.optional(),
   planDocument: PlanDocument.optional(),
   ownerAnswers: OwnerAnswers.optional(),
+  directRequestPlanReviews: z.array(DirectRequestPlanReview).default([]),
   planApproval: z.object({ by: z.string(), at: z.string(), note: z.string().optional() }).optional(),
   implementations: z.array(Implementation).default([]),
   verdicts: z.array(Verdict).default([]),

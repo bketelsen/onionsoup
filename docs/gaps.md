@@ -25,6 +25,13 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
   External/manual work has no such evidence until a supported host proposal or reconciliation runs; between-tick transitions can be missed.
   Status does not independently check live services or prove deployment.
 
+- **Direct-request plan review needs a reachable origin chat.** A requester who is the receiving owner's manager
+  can review under its existing applicable `approve-plans` grant. A separate durable continuation wakes that
+  requester; informational notices remain inert. Missing origin/persona/session blocks delivery and leaves the human
+  inbox available. Pre-send prerequisites retry; an uncertain attempted send is reconciled by its receipt and never
+  blindly repeated. Scope matching is an explicit reviewer assessment, not a host inference from prose. Unresolved
+  scope stays at the human gate. Peer reviewers and blanket coordinator authority remain unsupported.
+
 - **Actionable consultations currently cover repository changes only.** Explicit `onionsoup_ask` follow-up routes one
   proposal to existing gated work. Missing live evidence, wiki edits and household operations still need their
   existing tools. New explicit handoff intents recover through the daemon without replaying old notices. Blocked routing

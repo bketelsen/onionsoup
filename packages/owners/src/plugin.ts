@@ -8,6 +8,8 @@ import { exchangeClient } from './exchange-client.ts';
 import { listAttention, changeAttention } from './attention.ts';
 import { requestProgressDetail, requestProgressSummary } from './request-status.ts';
 import { deliverPlanRevisions, planRevisionStatus } from './plan-revision.ts';
+import { DirectRequestPlanReviewInput, reviewDirectRequestPlan } from './direct-request-plan-review.ts';
+import { deliverDirectRequestReviews } from './direct-request-review-wake.ts';
 import { planRevisionClient } from './plan-revision-client.ts';
 import { requestWork } from './delegation.ts';
 import { ProposedWork } from './artifacts.ts';
@@ -138,8 +140,12 @@ const MANAGER_GUIDE = `
 - You manage direct reports. For cross-repository change, draft an initiative with onionsoup_initiative (assignments to
   your reports, ordered with after), agree it with the person, then submit it. The person approves the breakdown once;
   the runtime then sends each assignment to its report as its dependencies merge, and you hear here how each piece goes.
-  Where a report granted you approve-plans, you are woken here when it submits a plan: read it with onionsoup_status and
-  approve it or send it back with a note using onionsoup_steer. onionsoup_status shows all your reports' work, assigned
+  Where a report granted you approve-plans, initiative plans wake you here: read them with onionsoup_status and
+  approve or send back with onionsoup_steer. For direct requests you personally sent to a report, an applicable grant
+  permits onionsoup_review_request_plan with the exact request/item/digest from onionsoup_status request. A separate
+  actionable continuation requests that review; informational progress notices do not wake you. Compare the original
+  scope and every plan assumption; use needs-human for unresolved scope, never promise approval before checking eligibility.
+  Missing grants or missing origin chats leave approval with the person. onionsoup_status shows all your reports' work, assigned
   or not; onionsoup_steer also cancels the work or leaves the report a note on work your initiatives assigned.
   Reports push back with escalations; answer them and resolve them (onionsoup_initiative resolve-escalation).`;
 
@@ -262,6 +268,7 @@ function conversationPermission(owner: OwnerDeclaration, verify: readonly string
 const STEWARD_TOOL = 'onionsoup_owners';
 const INITIATIVE_TOOL = 'onionsoup_initiative';
 const STEER_TOOL = 'onionsoup_steer';
+const REQUEST_REVIEW_TOOL = 'onionsoup_review_request_plan';
 const RAISE_TOOL = 'onionsoup_raise';
 
 /** Tools only some owners see: hidden from every agent, then allowed for the owners each predicate admits. */
@@ -269,6 +276,7 @@ const RESTRICTED_TOOLS: Record<string, (runtime: Runtime, owner: OwnerDeclaratio
   [STEWARD_TOOL]: (_runtime, owner) => Boolean(owner.manages),
   [INITIATIVE_TOOL]: isManagerOwner,
   [STEER_TOOL]: isManagerOwner,
+  [REQUEST_REVIEW_TOOL]: isManagerOwner,
   [RAISE_TOOL]: hasManagerOwner,
 };
 
@@ -1105,6 +1113,7 @@ const server: Plugin = async (input, options) => {
     try {
       lease = await beginAdmission(runtime.stateDirectory, 'plugin:notices');
       await deliverPlanRevisions(runtime, planRevisionClient(input.client), (itemId, error) => console.warn('plan_revision_delivery_failed', itemId, error));
+      await deliverDirectRequestReviews(runtime, planRevisionClient(input.client), (requestId, error) => console.warn('direct_review_wake_failed', requestId, error));
       await deliverWorkNotices();
       await deliverExchangeNotices(runtime, exchangeClient(input.client));
       await openNeededSessions(runtime, sessionClient(), (itemId, error) => console.warn('owner_session_failed', itemId, error));
@@ -1401,6 +1410,21 @@ const server: Plugin = async (input, options) => {
         async execute(args, context) {
           const owner = requireOwner(context.agent);
           return remindActions[args.action](owner.id, args, { sessionID: context.sessionID, directory: context.directory });
+        },
+      }),
+      [REQUEST_REVIEW_TOOL]: tool({
+        description: 'Review a direct request you sent to your report under an existing applicable approve-plans grant. Read onionsoup_status request first. Bind the verdict to its exact request/item/digest. Approval requires a factual matched-scope assessment; unresolved assumptions or extra scope require needs-human. This does not grant new authority or merge permission.',
+        // OpenCode bundles a different Zod minor; adapt its transport schemas, then parse the canonical host input.
+        args: {
+          request: tool.schema.string(), item: tool.schema.string(), digest: tool.schema.string(),
+          decision: tool.schema.enum(DirectRequestPlanReviewInput.shape.decision.options),
+          scope: tool.schema.enum(DirectRequestPlanReviewInput.shape.scope.options),
+          note: tool.schema.string().describe('Scope evidence, revision feedback, or the exact human decision needed'),
+        },
+        async execute(args, context) {
+          const reviewer = requireOwner(context.agent);
+          const item = await reviewDirectRequestPlan(runtime, reviewer.id, args);
+          return `Review ${args.decision} recorded for ${args.request}, ${item.id}: ${item.status}. ${item.reason ?? ''}`;
         },
       }),
       [STEER_TOOL]: tool({

@@ -3,17 +3,20 @@ import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { ChatOrigin } from './chat-origin.ts';
+import { DirectRequestPlanReview } from './direct-request-plan-review-types.ts';
+import { validateDirectRequestPlanReview } from './direct-request-plan-review.ts';
 import { HumanNote, type WorkItem } from './ledger.ts';
 import { NOTICE_PREFIX } from './notices.ts';
 import { OWNER_CHANGE_WORKFLOW } from './plan-work.ts';
 import { withRecordLock } from './record-lock.ts';
-import { requestRunnerIsAlive } from './requests.ts';
+import { requestRunnerIsAlive, type ResourceRequest } from './requests.ts';
 import type { Runtime } from './runtime.ts';
 
 export const PLAN_REVISION_LIMITS = { perPass: 20, textChars: 8_000 };
 const Revision = z.object({
   id: z.string(), messageID: z.string().optional(), item: z.string(), owner: z.string(), expected: z.string(), plan: z.string(),
   feedback: z.string(), note: HumanNote, origin: ChatOrigin.optional(),
+  directReview: DirectRequestPlanReview.optional(),
   status: z.enum(['prepared', 'pending', 'sending', 'delivered', 'blocked', 'suppressed']),
   reason: z.string().optional(), runner: z.number().optional(), submitted: z.boolean().default(false), journaled: z.boolean().default(false),
 });
@@ -30,7 +33,7 @@ function receiptId(record: Revision) {
   return record.messageID ?? (submissionAttempted(record) ? record.id : undefined);
 }
 /** Native ascending format: https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/id/id.ts */
-function nextMessageId(observed: readonly string[]) {
+export function nextMessageId(observed: readonly string[]) {
   let timestamp = (BigInt(Date.now()) * 0x1000n) & 0xffffffffffffn;
   for (const id of observed) {
     const match = /^msg_([a-f0-9]{12})[a-zA-Z0-9]{14}$/.exec(id);
@@ -69,33 +72,58 @@ async function save(runtime: Runtime, record: Revision) {
   await writeFile(temporary, JSON.stringify(record) + '\n', { mode: 0o600 });
   await rename(temporary, path(runtime, record.item));
 }
-async function apply(runtime: Runtime, record: Revision) {
-  const item = await runtime.ledger.update(record.item, current => {
-    if (wasApplied(current, record)) return current;
+function directReviewDenied(error: unknown) {
+  return error instanceof Error && (error.message.startsWith('direct_plan_review_') || error.message.startsWith('not_awaiting_plan_approval'));
+}
+
+async function applyRevision(runtime: Runtime, record: Revision, request?: ResourceRequest) {
+  return runtime.ledger.updateIfChanged(record.item, async current => {
+    if (wasApplied(current, record)) return undefined;
     if (expected(current) !== record.expected) throw new Error('plan_revision_superseded');
-    return { ...current, status: 'planning', reason: undefined, humanNotes: [...current.humanNotes, record.note] };
+    let directReview = record.directReview;
+    if (directReview) {
+      if (!request) throw new Error('direct_plan_review_binding_mismatch');
+      const binding = await validateDirectRequestPlanReview(runtime, request, current, directReview);
+      directReview = { ...directReview, grantTarget: binding.grant.target };
+    }
+    const directRequestPlanReviews = directReview
+      ? [...current.directRequestPlanReviews, directReview] : current.directRequestPlanReviews;
+    return { ...current, status: 'planning', reason: undefined, directRequestPlanReviews,
+      humanNotes: [...current.humanNotes, record.note] };
   });
+}
+
+async function apply(runtime: Runtime, record: Revision) {
+  const item = record.directReview
+    ? await runtime.requests.inspectLocked(record.directReview.request, request => applyRevision(runtime, record, request))
+    : await applyRevision(runtime, record);
   await save(runtime, { ...record, status: 'pending' });
   return item;
 }
 
 /** Persist feedback delivery intent before changing the work state. Same submission is replayable. */
-export async function queuePlanRevision(runtime: Runtime, itemId: string, by: string, feedback: string) {
+export async function queuePlanRevision(runtime: Runtime, itemId: string, by: string, feedback: string, directReview?: DirectRequestPlanReview) {
   const noteText = z.string().trim().min(1).max(PLAN_REVISION_LIMITS.textChars).parse(feedback);
   return withRecordLock(`${path(runtime, itemId)}.lock`, async () => {
     const item = await runtime.ledger.get(itemId);
     const previous = await read(runtime, itemId);
     if (previous && previous.note.by === by && previous.feedback === noteText && plan(item) === previous.plan
-      && wasApplied(item, previous) && item.status === 'planning') return item;
+      && wasApplied(item, previous) && item.status === 'planning'
+      && (!directReview || item.directRequestPlanReviews.some(review => review.digest === directReview.digest))) return item;
     if (item.status !== 'awaiting-plan-approval' || item.activeRunner) throw new Error(`not_awaiting_plan_approval: ${item.status}`);
     if (item.workflow !== OWNER_CHANGE_WORKFLOW) throw new Error('not_an_owner_plan');
     if (previous?.status === 'sending') throw new Error('plan_revision_delivery_in_progress');
     const record = Revision.parse({ id: `msg_${randomUUID().replaceAll('-', '')}`, item: itemId, owner: item.owner,
       expected: expected(item), plan: plan(item), feedback: noteText,
       note: { kind: 'plan-feedback', by, at: new Date().toISOString(), note: noteText },
-      origin: item.session ?? item.origin, status: 'prepared' });
+      origin: item.session ?? item.origin, status: 'prepared', directReview });
     await save(runtime, record);
-    return apply(runtime, record);
+    try {
+      return await apply(runtime, record);
+    } catch (error) {
+      if (directReview && directReviewDenied(error)) await save(runtime, { ...record, status: 'suppressed', reason: String(error) });
+      throw error;
+    }
   });
 }
 
@@ -124,8 +152,9 @@ async function prepareDelivery(runtime: Runtime, record: Revision) {
       const current = await read(runtime, record.item);
       if (current?.id !== record.id || current.status !== 'prepared') return;
       try { await apply(runtime, current); } catch (error) {
-        if (!(error instanceof Error) || error.message !== 'plan_revision_superseded') throw error;
-        await save(runtime, { ...current, status: 'suppressed', reason: 'plan_revision_superseded' });
+        const superseded = error instanceof Error && error.message === 'plan_revision_superseded';
+        if (!superseded && !(current.directReview && directReviewDenied(error))) throw error;
+        await save(runtime, { ...current, status: 'suppressed', reason: error instanceof Error ? error.message : String(error) });
       }
     });
   }
