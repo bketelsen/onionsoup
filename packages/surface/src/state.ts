@@ -371,11 +371,11 @@ export class SurfaceState {
     return this.directory(ownerId);
   }
 
-  /** An owner's chats across its directories, root sessions and subagents alike, with each directory's session status. */
   async assertHistoryAvailable(ownerId: string) {
     await recordedSessions(this.runtime, ownerId);
   }
 
+  /** An owner's chats across its directories, root sessions and subagents alike, with each directory's session status. */
   async chatSessions(ownerId: string) {
     await this.assertHistoryAvailable(ownerId);
     const [directory, ...planDirectories] = await this.ownerDirectories(ownerId);
