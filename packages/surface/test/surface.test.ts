@@ -832,3 +832,39 @@ test('attention assignment route preserves Seen and exposes linked gated request
     assert.equal(entry.attentionAssignment?.requestID, request.id);
   } finally { server.close(); }
 });
+
+
+test('HTTP friction promotion binds displayed evidence and exposes gated linked work', async () => {
+  const { runtime, server, call } = await start();
+  try {
+    await runtime.notebook('bellonda').ensure('# Test');
+    const report = await reportFriction(runtime, { owner: 'bellonda', submissionID: 'promotion',
+      origin: { sessionID: 'ses_origin', directory: '/private/desk' }, model: 'fixture/model', commit: 'a'.repeat(40), failures: [],
+      input: { summary: 'Missing evidence', expected: 'Reviewer reads facts', actual: 'Reviewer blocked' } });
+    const directory = join(runtime.stateDirectory, 'friction/investigations');
+    await mkdir(directory, { recursive: true });
+    await writeFile(join(directory, `${report.id}.json`), JSON.stringify({ version: 1, id: report.id, state: 'investigated',
+      createdAt: report.firstSeen, updatedAt: report.lastSeen,
+      policy: { version: 1, owner: 'bellonda', repository: 'example/wiki', enabledSince: report.firstSeen },
+      investigation: { disposition: 'propose-fix', observed: ['Checked source'], inferred: [], unknown: [],
+        proposedWork: { title: 'Fix evidence', goal: 'Expose facts', rationale: 'Review blocked', size: 'small',
+          repository: 'example/wiki', acceptance: ['Reviewer sees facts'] } } }));
+    const view = await call('GET', `/api/friction/${report.id}`);
+    assert.match(String(view.body.proposalDigest), /^[a-f0-9]{64}$/);
+    const stale = await call('POST', '/api/decide', { action: 'promote-friction', id: report.id, proposalDigest: '0'.repeat(64) });
+    assert.match(String(stale.body.error), /friction_proposal_stale/);
+    assert.equal((await runtime.requests.list()).length, 0);
+    const decision = { action: 'promote-friction', id: report.id, proposalDigest: view.body.proposalDigest };
+    assert.equal((await call('POST', '/api/decide', decision)).status, 200);
+    assert.equal((await call('POST', '/api/decide', decision)).status, 200);
+    const [request] = await runtime.requests.list();
+    assert.equal(request.status, 'pending-owner');
+    assert.deepEqual(request.approvals, []);
+    assert.equal((await runtime.ledger.list()).length, 0);
+    await runtime.requests.update(request.id, current => ({ ...current, status: 'denied', reason: 'Stop' }));
+    const linked = await call('GET', `/api/friction/${report.id}`);
+    assert.match(JSON.stringify(linked.body.promotion), /denied/);
+    assert.match(JSON.stringify(linked.body.promotion), new RegExp(request.id));
+    assert.doesNotMatch(JSON.stringify(linked.body), /private\/desk/);
+  } finally { server.close(); }
+});

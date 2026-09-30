@@ -50,3 +50,5 @@ export {
 export { readFrictionTriage, type FrictionTriage } from './friction-work.ts';
 export { AttentionAssignmentInput, assignAttention, retryAttentionAssignment, attentionAssignmentView, attentionAssignmentTargets,
   type AttentionAssignmentView } from './attention-assignment.ts';
+
+export { promoteFriction, retryFrictionPromotion, frictionProposalDigest, frictionPromotionView, FrictionProposalDigest, type FrictionPromotionView } from './friction-promotion.ts';

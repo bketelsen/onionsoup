@@ -93,13 +93,23 @@ test('friction details render persisted HTML as inert text and link to the saved
     proposedWork: { title: 'Repair evidence', goal: 'Evidence available', rationale: 'Reviewer blocked',
       repository: 'example/wiki', size: 'small', acceptance: ['Reviewer reads evidence'] },
   } };
+  record.proposalDigest = 'a'.repeat(64);
   const html = renderToStaticMarkup(createElement(FrictionDetail, { record }));
+  assert.match(html, /Request this fix/);
   assert.match(html, /Proposed fix: Repair evidence/);
   assert.match(html, /no work has been dispatched/);
   assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
   assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/);
   assert.doesNotMatch(html, /<script>|<img/);
   assert.match(html, /Open originating chat/);
+  record.promotion = { owner: 'bellonda', by: 'Brian', at: '2026-09-24T00:00:00.000Z', digest: record.proposalDigest,
+    requestID: 'r-handoff-fixture', status: 'denied', workItem: 'w-fixture' };
+  const promoted = renderToStaticMarkup(createElement(FrictionDetail, { record }));
+  assert.doesNotMatch(promoted, /Request this fix|no work has been dispatched/);
+  assert.match(promoted, /View linked work/);
+  assert.match(promoted, /denied/);
+  record.promotion.status = 'blocked';
+  assert.match(renderToStaticMarkup(createElement(FrictionDetail, { record })), /Retry request routing/);
 });
 
 function info(id: string, created: number, role: 'user' | 'assistant' = 'assistant') {

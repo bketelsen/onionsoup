@@ -294,9 +294,21 @@ hire has the existing timeout and structured-output fallback/resend behavior; th
 The Friction list/detail shows processing status and the proposed fix with its evidence; no new inbox item is created.
 `owners friction-investigation <id>` reads the result. `owners friction-triage <id>` explicitly investigates one
 selected eligible wake under the CLI runtime lock (it cannot run beside the daemon). This operator command bypasses
-the daemon cadence but cannot repeat a saved/uncertain investigation. Neither path sends messages, opens requests,
-publishes issues, edits code, or claims a fix completed. Promoting a reviewed proposal uses the ordinary work/plan/effect
-gates. Disabling policy stops new dispatch; it does not cancel an already running read-only hire. No policy is installed
+the daemon cadence but cannot repeat a saved/uncertain investigation. Neither investigation path sends messages, opens requests, publishes issues, edits code, or claims a fix completed.
+
+The person's **Request this fix** action promotes the displayed proposal, bound to its digest, into an ordinary
+human-attributed work request. `owners friction-promote <id> <digest>` does the same; the read command above supplies
+the digest. A durable intent in `state/friction/promotions` stores who requested it and the exact proposal before
+routing. The source friction ID determines one request identity. Repeated clicks, process restarts and lost replies
+adopt that request's current status; cancelled, declined and completed work never reopens. Receiver acceptance,
+plan approval, verification and effect gates remain intact. The Friction view links the responsible owner and work,
+and shows request status separately from verification that the original friction is fixed.
+
+Routing retries only saved human intents, at most three attempts per authorization (up to 20 pending intents per
+tick), then stops with a visible reason. **Retry request routing**, or
+`owners friction-promotion-retry <id> <digest>`, explicitly resets an exhausted routing budget after rechecking the
+captured recipient's current repository scope. It never resets an existing request's execution or terminal status.
+No investigation is automatically promoted, and no historical wakes or attention acknowledgments are backfilled. Disabling policy stops new dispatch; it does not cancel an already running read-only hire. No policy is installed
 by an upgrade; choosing an activation-time cutoff preserves legacy pending wakes for separate approved backfill.
 
 ### Requests between owners

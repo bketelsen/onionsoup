@@ -1,3 +1,4 @@
+import { promoteFriction, retryFrictionPromotion, frictionProposalDigest, frictionPromotionView } from './friction-promotion.ts';
 import { execFile } from 'node:child_process';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -122,7 +123,18 @@ const COMMANDS: Record<string, Command> = {
     console.log(JSON.stringify(await investigateFriction(runtime, required(id, 'friction id')), null, 2));
   },
   async 'friction-investigation'(runtime, [id]) {
-    console.log(JSON.stringify(await readFrictionTriage(runtime, required(id, 'friction id')) ?? null, null, 2));
+    const selected = required(id, 'friction id');
+    const triage = await readFrictionTriage(runtime, selected);
+    console.log(JSON.stringify({ triage, proposalDigest: triage && frictionProposalDigest(triage),
+      promotion: await frictionPromotionView(runtime, selected) }, null, 2));
+  },
+  async 'friction-promotion-retry'(runtime, [id, digest]) {
+    const request = await retryFrictionPromotion(runtime, required(id, 'friction id'), required(digest, 'proposal digest'), userInfo().username);
+    console.log(`${request.id}: ${request.status}`);
+  },
+  async 'friction-promote'(runtime, [id, digest]) {
+    const request = await promoteFriction(runtime, required(id, 'friction id'), required(digest, 'proposal digest'), userInfo().username);
+    console.log(`${request.id}: ${request.status}`);
   },
   async wake(runtime, [ownerId, dutyId = 'survey']) {
     console.log(`waking ${ownerId} for ${dutyId} (${runtime.owner(required(ownerId, 'owner')).model})`);
@@ -318,7 +330,7 @@ const LOCK_FREE = [
   'resume', 'retry', 'cancel', 'desk', 'desk-state', 'retract', 'ask', 'request-publish', 'propose',
   'ship', 'approve-push', 'approve-create', 'approve-delete', 'deny-request',
   'desk-review-reset', 'initiatives', 'initiative', 'approve-initiative', 'revise-initiative', 'cancel-initiative',
-  'wiki', 'friction-investigation',
+  'wiki', 'friction-investigation', 'friction-promote', 'friction-promotion-retry',
 ];
 try {
   // A daemon may restart while the deployment gate is held. Runtime.open only ensures the existing state

@@ -129,6 +129,9 @@ test('model cannot select a different repository for its proposal', async () => 
     const outcome = await investigateFriction(fixtureState.runtime, fixtureState.report.id);
     assert.equal('reason' in outcome && outcome.reason, 'friction_triage_wrong_repository');
     assert.equal('investigation' in outcome, false);
+    const saved = await readFrictionTriage(fixtureState.runtime, fixtureState.report.id);
+    assert.equal(saved?.sessionID, 'fixture');
+    assert.equal(saved?.cost, 0);
     assert.deepEqual(await fixtureState.runtime.requests.list(), []);
   } finally { await fixtureState.cleanup(); }
 });
