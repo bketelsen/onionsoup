@@ -102,6 +102,20 @@ test('failed inference is durable, bounded and does not expose transport secrets
   } finally { await fixtureState.cleanup(); }
 });
 
+test('initial triage rejects already-fixed without saving an investigation', async () => {
+  const state = await fixture();
+  try {
+    await state.enable();
+    state.runtime.hire = async (_owner, request) => ({ value: {
+      observed: ['source.ts:1 contains fix'], inferred: [], unknown: [], disposition: 'already-fixed', fixedBy: 'a'.repeat(40),
+    } as never, sessionID: 'fixture', cost: 0, startedAt: state.report.firstSeen, finishedAt: state.report.firstSeen });
+    const outcome = await investigateFriction(state.runtime, state.report.id);
+    assert.equal(outcome.state, 'blocked');
+    assert.equal(outcome.reason, 'friction_triage_investigation_failed');
+    assert.equal(outcome.investigation, undefined);
+  } finally { await state.cleanup(); }
+});
+
 
 test('daemon honors a maintainer reservation and does not block other scheduling on inference', async () => {
   const fixtureState = await fixture();

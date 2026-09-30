@@ -47,10 +47,13 @@ export {
   beginAdmission, listAdmissions, armDeployment, markDeploymentWaiting, beginDrain, releaseDrain,
   type AdmissionLease,
 } from './deployment-admission.ts';
-export { readFrictionTriage, type FrictionTriage } from './friction-work.ts';
+export { readFrictionTriage, sourceSnapshot, type FrictionTriage } from './friction-work.ts';
+export { revalidateFriction, frictionFreshness, effectiveTriage, readRevisions, writeRevision,
+  Revision, RevalidationClaim, type FrictionFreshness } from './friction-revalidation.ts';
 export { AttentionAssignmentInput, assignAttention, retryAttentionAssignment, attentionAssignmentView, attentionAssignmentTargets,
   type AttentionAssignmentView } from './attention-assignment.ts';
-export { promoteFriction, retryFrictionPromotion, frictionProposalDigest, frictionPromotionView, FrictionProposalDigest, type FrictionPromotionView } from './friction-promotion.ts';
+export { promoteFriction, retryFrictionPromotion, frictionProposalDigest, effectiveProposalDigest, frictionPromotionHistory,
+  frictionPromotionView, FrictionProposalDigest, type FrictionPromotionView } from './friction-promotion.ts';
 export { planRevisionStatus } from './plan-revision.ts';
 
 export { ownerChatAgent } from './owner-chat.ts';

@@ -21,11 +21,21 @@ export const FrictionTriagePolicy = z.object({
 }).strict();
 export const FrictionInvestigation = z.object({
   observed: findings, inferred: findings, unknown: findings,
-  disposition: z.enum(['propose-fix', 'needs-evidence', 'no-action']),
+  disposition: z.enum(['propose-fix', 'needs-evidence', 'no-action', 'already-fixed']),
   proposedWork: AskWorkProposal.optional(),
+  fixedBy: z.string().regex(/^[a-f0-9]{40}$/).optional(),
 }).strict().superRefine((value, context) => {
   if ((value.disposition === 'propose-fix') !== Boolean(value.proposedWork)) {
     context.addIssue({ code: 'custom', message: 'friction_proposal_disposition_mismatch' });
+  }
+  if ((value.disposition === 'already-fixed') !== Boolean(value.fixedBy)) {
+    context.addIssue({ code: 'custom', message: 'friction_fixed_by_disposition_mismatch' });
+  }
+  if (value.disposition === 'already-fixed' && value.observed.length === 0) {
+    context.addIssue({ code: 'custom', message: 'friction_fixed_without_observation' });
+  }
+  if (value.disposition === 'already-fixed' && value.observed.some(entry => !/\b[\w./-]+\.[\w-]+\b/.test(entry))) {
+    context.addIssue({ code: 'custom', message: 'friction_fixed_without_source_citation' });
   }
 });
 export const Triage = z.object({
@@ -39,7 +49,7 @@ export const Triage = z.object({
 export type FrictionTriage = z.infer<typeof Triage>;
 const run = promisify(execFile);
 
-function location(runtime: Runtime, id: string) {
+export function location(runtime: Runtime, id: string) {
   FrictionRecord.shape.id.parse(id);
   return join(runtime.stateDirectory, 'friction', 'investigations', `${id}.json`);
 }
@@ -86,7 +96,7 @@ async function eligible(runtime: Runtime, id: string, policy: z.infer<typeof Fri
   return report;
 }
 
-async function sourceSnapshot(directory: string) {
+export async function sourceSnapshot(directory: string) {
   const { stdout } = await run('git', ['-C', directory, 'rev-parse', 'HEAD'], { timeout: FRICTION_TRIAGE_LIMITS.gitTimeoutMs });
   if (!/^[a-f0-9]{40}$/.test(stdout.trim())) throw new Error('friction_triage_invalid_source');
   const status = await run('git', ['-C', directory, 'status', '--porcelain'], { timeout: FRICTION_TRIAGE_LIMITS.gitTimeoutMs });
@@ -114,19 +124,25 @@ async function investigate(runtime: Runtime, report: FrictionRecord, record: Fri
     extraPermission: { bash: 'deny' },
     title: `Friction investigation ${record.id}`, brief: brief(report, record), schema: FrictionInvestigation });
   record = await updateClaim(runtime, { ...record, sessionID: response.sessionID, cost: response.cost });
-  const investigation = FrictionInvestigation.parse(response.value);
+  const investigation = sanitizeFrictionInvestigation(response.value, record.policy.repository);
+  if (investigation.disposition === 'already-fixed') throw new Error('friction_triage_investigation_failed');
+  if (await sourceSnapshot(owner.workspace) !== sourceCommit) throw new Error('friction_triage_source_changed');
+  return updateClaim(runtime, { ...record, state: 'investigated', updatedAt: new Date().toISOString(),
+    investigation, sessionID: response.sessionID, cost: response.cost });
+}
+
+export function sanitizeFrictionInvestigation(value: unknown, repository: string) {
+  const investigation = FrictionInvestigation.parse(value);
   investigation.observed = investigation.observed.map(safeProse);
   investigation.inferred = investigation.inferred.map(safeProse);
   investigation.unknown = investigation.unknown.map(safeProse);
   if (investigation.proposedWork) {
-    if (investigation.proposedWork.repository !== record.policy.repository) throw new Error('friction_triage_wrong_repository');
+    if (investigation.proposedWork.repository !== repository) throw new Error('friction_triage_wrong_repository');
     const proposal = investigation.proposedWork;
     investigation.proposedWork = { ...proposal, title: safeProse(proposal.title), goal: safeProse(proposal.goal),
       rationale: safeProse(proposal.rationale), acceptance: proposal.acceptance.map(safeProse) };
   }
-  if (await sourceSnapshot(owner.workspace) !== sourceCommit) throw new Error('friction_triage_source_changed');
-  return updateClaim(runtime, { ...record, state: 'investigated', updatedAt: new Date().toISOString(),
-    investigation, sessionID: response.sessionID, cost: response.cost });
+  return investigation;
 }
 
 /** Short claims fence completion; no record lock is held during inference. */

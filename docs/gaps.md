@@ -106,6 +106,8 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
 - **Friction issue publication and verified closure remain manual.** Owners can capture bounded, deduplicated friction reports
   in the surface, with one durable pending wake intent for each new signature. An opt-in daemon worker investigates new reports into durable sidecars (see the design page); automatic proposal
   promotion (explicit human promotion is supported), uncertain-session reconciliation and approved legacy backfill are not implemented.
+  Source freshness compares only with the local checkout (never fetched), and revalidation is manual
+  (`owners friction-revalidate`); a `failed` or `uncertain` revalidation claim for a commit has no reset control.
   The recent-100 discovery window can miss older eligible reports after a burst; explicit ID investigation is available.
   A blocked investigation needs operator review; there is no reset/retry control. Workaround delivery must pin the saved origin, and publishing a draft GitHub issue must have its own
   person approval gate. A missing failure event stays explicit and makes deduplication provisional. The opencode
