@@ -3,9 +3,10 @@ import { promisify } from 'node:util';
 import { z } from 'zod';
 import { canChange } from './declarations.ts';
 import { reviewExternalPublication } from './desk-changes.ts';
-import type { WorkItem } from './ledger.ts';
+import { ExternalPrObservation, type WorkItem } from './ledger.ts';
 import { OWNER_CHANGE_WORKFLOW } from './plan-work.ts';
 import type { Runtime } from './runtime.ts';
+import { readRequestWorkEvidence } from './request-work-evidence.ts';
 import { git, snapshotTree } from './workspace.ts';
 
 const run = promisify(execFile);
@@ -14,7 +15,7 @@ const PullRequestRef = z.object({ ref: z.string(), sha: Commit, repo: z.object({
 const ExternalPullRequest = z.object({
   html_url: z.string().url(), state: z.enum(['open', 'closed']), merged: z.boolean(),
   draft: z.boolean(), auto_merge: z.unknown().nullable(), head: PullRequestRef, base: PullRequestRef,
-  merge_commit_sha: Commit.nullable(),
+  merge_commit_sha: Commit.nullable(), merged_at: z.string().datetime().nullable().optional(),
 });
 type ExternalPullRequest = z.infer<typeof ExternalPullRequest>;
 
@@ -58,6 +59,7 @@ async function requireRequest(runtime: Runtime, item: WorkItem) {
     || request.status !== 'work-running') throw new Error('external_pr_request_mismatch');
   const requestedOwner = runtime.repositoryOwner(item.owner, request.ask.proposal.repository);
   if (requestedOwner.domain.name !== runtime.repositoryFor(item).domain.name) throw new Error('external_pr_request_repository_mismatch');
+  return request;
 }
 
 async function requireSource(directory: string, head: string, tree?: string) {
@@ -159,4 +161,92 @@ export async function reconcileExternalPublication(runtime: Runtime, ownerId: st
   } finally {
     await runtime.ledger.update(itemId, current => current.activeRunner === process.pid ? { ...current, activeRunner: undefined } : current);
   }
+}
+
+
+async function observationEvidence(runtime: Runtime, item: WorkItem, tree: string) {
+  const evidence = await readRequestWorkEvidence(runtime, item).catch(error => {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    return undefined;
+  });
+  if (evidence && (evidence.planDigest !== item.planDocument!.digest || evidence.verification?.tree !== tree)) {
+    throw new Error('external_pr_follow_up_evidence_mismatch');
+  }
+  return evidence;
+}
+
+function sameObservedMerge(observation: ExternalPrObservation, remote: ExternalPullRequest) {
+  return observation.url === remote.html_url && observation.head === remote.head.sha
+    && observation.mergeCommit === remote.merge_commit_sha && observation.mergedAt === remote.merged_at;
+}
+
+function observationSubject(item: WorkItem) {
+  const { updatedAt: _updatedAt, externalPrObservations: _observations, ...subject } = item;
+  return JSON.stringify(subject);
+}
+
+async function commitObservation(runtime: Runtime, initial: WorkItem, observation: ExternalPrObservation,
+  request: Awaited<ReturnType<typeof requireRequest>>) {
+  return runtime.requests.inspectLocked(request.id, async currentRequest => {
+    if (JSON.stringify(currentRequest) !== JSON.stringify(request)) throw new Error('external_pr_request_changed');
+    return runtime.ledger.update(initial.id, current => {
+      requireApprovedWork(current, initial.owner);
+      if (observationSubject(current) !== observationSubject(initial)) throw new Error('external_pr_item_changed');
+      const observations = current.externalPrObservations ?? [];
+      const existing = observations.find(entry => entry.url === observation.url);
+      if (existing) {
+        if (existing.head !== observation.head || existing.mergeCommit !== observation.mergeCommit
+          || existing.mergedAt !== observation.mergedAt) throw new Error('external_pr_observation_conflict');
+        return current;
+      }
+      return { ...current, externalPrObservations: [...observations, observation] };
+    });
+  });
+}
+
+async function replayObservation(runtime: Runtime, initial: WorkItem, request: Awaited<ReturnType<typeof requireRequest>>) {
+  return runtime.requests.inspectLocked(request.id, async currentRequest => {
+    if (JSON.stringify(currentRequest) !== JSON.stringify(request)) throw new Error('external_pr_request_changed');
+    const current = await runtime.ledger.get(initial.id);
+    requireApprovedWork(current, initial.owner);
+    if (observationSubject(current) !== observationSubject(initial)) throw new Error('external_pr_item_changed');
+    return current;
+  });
+}
+
+/** Human CLI only: record a host-verified merged PR fact without review, acceptance, or completion. */
+export async function observeExternalMerge(runtime: Runtime, ownerId: string, itemId: string, url: string, by: string) {
+  const initial = await runtime.ledger.get(itemId);
+  requireApprovedWork(initial, ownerId);
+  const owner = runtime.repositoryFor(initial);
+  if (!canChange(owner)) throw new Error('owner_cannot_change');
+  const request = await requireRequest(runtime, initial);
+  const number = pullNumber(url, owner.domain.name);
+  const remote = await readPullRequest(owner.domain.name, number);
+  validateRemote(remote, owner.domain.name, owner.domain.baseBranch, url);
+  if (!remote.merged || !remote.merged_at) throw new Error('external_pr_requires_merged_observation');
+  const directory = initial.planWorktree!;
+  await requireSource(directory, remote.head.sha);
+  await requireConfiguredBase(runtime, initial, directory, remote);
+  const tree = await snapshotTree(directory);
+  const existing = initial.externalPrObservations?.find(entry => entry.url === url);
+  if (existing) {
+    if (!sameObservedMerge(existing, remote)) throw new Error('external_pr_observation_conflict');
+    return replayObservation(runtime, initial, request);
+  }
+  const followUpEvidence = await observationEvidence(runtime, initial, tree);
+  const baseObserved = (await git(directory, ['rev-parse', `origin/${owner.domain.baseBranch}`])).trim();
+  const observation = ExternalPrObservation.parse({
+    url, repository: owner.domain.name, baseBranch: owner.domain.baseBranch, branch: remote.head.ref,
+    head: remote.head.sha, tree, mergeCommit: remote.merge_commit_sha, mergedAt: remote.merged_at,
+    baseObserved, by, observedAt: new Date().toISOString(), request: request.id,
+    planDigest: initial.planDocument!.digest, acceptance: 'pending', followUpEvidence,
+  });
+  const latest = await readPullRequest(owner.domain.name, number);
+  if (JSON.stringify(latest) !== JSON.stringify(remote)) throw new Error('external_pr_changed_during_observation');
+  await requireSource(directory, remote.head.sha, tree);
+  if (JSON.stringify(await observationEvidence(runtime, initial, tree)) !== JSON.stringify(followUpEvidence)) {
+    throw new Error('external_pr_follow_up_evidence_changed');
+  }
+  return commitObservation(runtime, initial, observation, request);
 }

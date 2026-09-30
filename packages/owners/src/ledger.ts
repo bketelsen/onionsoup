@@ -6,6 +6,7 @@ import { withRecordLock } from './record-lock.ts';
 import { ImplementationReport, OwnerAnswers, Plan, ProposedWork, Verdict } from './artifacts.ts';
 import { ChatOrigin } from './chat-origin.ts';
 import { ReviewEvidence } from './desk-reviews.ts';
+import { RequestWorkEvidence } from './request-work-evidence.ts';
 import { AssignmentRef } from './initiatives.ts';
 
 export const HireRecord = z.object({
@@ -90,6 +91,17 @@ export type PlanWorktreeKept = z.infer<typeof PlanWorktreeKept>;
 
 const PullRequestTarget = z.object({ itemId: z.string(), branch: z.string(), prUrl: z.string(), previousHead: z.string() });
 
+/** A verified historical fact, never publication acceptance or permission to complete work. */
+export const ExternalPrObservation = z.object({
+  url: z.string().url(), repository: z.string(), baseBranch: z.string(), branch: z.string(),
+  head: z.string(), tree: z.string(), mergeCommit: z.string(), mergedAt: z.string().datetime(),
+  baseObserved: z.string(), by: z.string(), observedAt: z.string().datetime(),
+  request: z.string(), planDigest: z.string(), acceptance: z.literal('pending'),
+  /** Immutable snapshot of the existing host attempt; later reviews do not overwrite it. */
+  followUpEvidence: RequestWorkEvidence.optional(),
+});
+export type ExternalPrObservation = z.infer<typeof ExternalPrObservation>;
+
 export const WorkItem = z.object({
   id: z.string(),
   owner: z.string(),
@@ -137,6 +149,7 @@ export const WorkItem = z.object({
     by: z.string(), observedAt: z.string(), head: z.string(), base: z.string(),
     mergeCommit: z.string().optional(), reviewer: z.string(), evidence: ReviewEvidence,
   }).optional(),
+  externalPrObservations: z.array(ExternalPrObservation).optional(),
   /** The chat the work was opened from, so the owner hears there how it went. */
   origin: ChatOrigin.optional(),
   /** The owner session that carries out an approved plan; later notices about the work go there. */

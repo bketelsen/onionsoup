@@ -1,4 +1,4 @@
-import { reconcileExternalPublication } from '../src/external-publication.ts';
+import { observeExternalMerge, reconcileExternalPublication } from '../src/external-publication.ts';
 import { sessionHistory } from '../src/session-history.ts';
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
@@ -74,7 +74,7 @@ const state = JSON.parse(fs.readFileSync(path));
 const remote = ${JSON.stringify(remote)};
 const url = 'https://github.com/example/clippy/pull/1';
 const handlers = {
-  api() { console.log(JSON.stringify(state.external)); },
+  api() { console.log(JSON.stringify(state.external)); if (state.externalNext) state.external = state.externalNext; },
   view() {
     if (args[args.indexOf('--json') + 1] === 'isDraft,autoMergeRequest') { console.log(JSON.stringify({ isDraft: !!state.draft, autoMergeRequest: state.autoMergeRequest || null })); return; }
     if (args[args.indexOf('--json') + 1] === 'state') { state.stateViews = (state.stateViews || 0) + 1; console.log(JSON.stringify({ state: state.state })); return; }
@@ -1475,4 +1475,186 @@ test('fresh external reconciliation exposes interim host evidence to Odrade and 
     assert.equal((await runtime.requests.list()).length, 1);
     assert.equal((await githubState(root)).created, 0);
   });
+});
+
+
+async function mergedObservationFixture() {
+  const setup = await externalFixture();
+  await git(setup.desk.path, ['push', '-q', 'origin', 'HEAD:main']);
+  const external = { ...setup.external, merged: true, state: 'closed', draft: false,
+    merge_commit_sha: setup.head, merged_at: '2026-09-30T13:45:00.000Z' };
+  setup.runtime.hire = async () => { throw new Error('observation_must_not_hire'); };
+  return { ...setup, external };
+}
+
+test('merged observation records a factual link and immutable revise follow-up without accepting or completing the request', async () => {
+  const { recordRequestWorkEvidence, readRequestWorkEvidence } = await import('../src/request-work-evidence.ts');
+  const { requestProgressDetail, requestProgress } = await import('../src/request-status.ts');
+  const { trackDelegatedWork } = await import('../src/delegation.ts');
+  const { runtime, root, remote, desk, item, request, external } = await mergedObservationFixture();
+  const prior = await runtime.ledger.update(item.id, current => ({ ...current,
+    reason: 'review_changes_required', verdicts: [{ decision: 'approve', summary: 'Historical review', findings: [] }] }));
+  const tree = (await git(desk.path, ['rev-parse', 'HEAD^{tree}'])).trim();
+  await recordRequestWorkEvidence(runtime, prior, { stage: 'reviewed',
+    verification: { tree, observedAt: new Date().toISOString(), verifier: 'host-sandbox', checks: [] },
+    review: { reviewer: 'other-family/reviewer', verdict: { decision: 'revise', summary: 'Fresh review needs a correction',
+      findings: [{ severity: 'major', file: 'external', issue: 'Dispatch race', suggestion: 'Synchronize the final check' }] } },
+    blocker: 'review_changes_required' });
+  const evidence = await readRequestWorkEvidence(runtime, prior);
+  const originalRequest = await runtime.requests.get(request.id);
+  assert.equal(Object.hasOwn(requestProgress(originalRequest, prior), 'historicalMerge'), false);
+  await fakeGithub(root, remote, async () => {
+    await writeFile(join(root, 'github.json'), JSON.stringify({ created: 0, external }));
+    const observed = await observeExternalMerge(runtime, 'clippy', item.id, external.html_url, 'person');
+    const observation = observed.externalPrObservations![0]!;
+    assert.equal(observation.head, external.head.sha);
+    assert.equal(observation.tree, tree);
+    assert.equal(observation.mergeCommit, external.merge_commit_sha);
+    assert.equal(observation.mergedAt, external.merged_at);
+    assert.equal(observation.baseObserved, external.head.sha);
+    assert.equal(observation.acceptance, 'pending');
+    assert.deepEqual(observation.followUpEvidence, evidence);
+    const { externalPrObservations: _observations, updatedAt: _now, ...after } = observed;
+    const { updatedAt: _before, ...before } = prior;
+    assert.deepEqual(after, before);
+    assert.deepEqual(await readRequestWorkEvidence(runtime, prior), evidence);
+    assert.deepEqual(await runtime.requests.get(request.id), originalRequest);
+    const replay = await observeExternalMerge(runtime, 'clippy', item.id, external.html_url, 'another-person');
+    assert.deepEqual(replay, observed);
+    assert.equal((await trackDelegatedWork(runtime, originalRequest)).status, 'work-running');
+    const status = await requestProgressDetail(runtime, 'bellonda', request.id);
+    assert.match(status, /Historical PR .*acceptance was pending/);
+    assert.match(status, /Findings remain follow-up/);
+    assert.match(status, /Dispatch race/);
+    assert.match(status, /request work-running/);
+    await recordRequestWorkEvidence(runtime, observed, { stage: 'reviewed', verification: evidence.verification,
+      review: { reviewer: 'later-reviewer', verdict: { decision: 'approve', summary: 'Later review', findings: [] } } });
+    assert.deepEqual((await runtime.ledger.get(item.id)).externalPrObservations![0]!.followUpEvidence, evidence);
+    const laterStatus = await requestProgressDetail(runtime, 'bellonda', request.id);
+    assert.match(laterStatus, /Dispatch race/);
+    assert.match(laterStatus, /Later review/);
+    assert.match(laterStatus, /Review at historical observation: other-family\/reviewer; revise/);
+    assert.equal((await trackDelegatedWork(runtime, await runtime.requests.get(request.id))).status, 'work-running');
+    assert.equal((await githubState(root)).created, 0);
+  });
+});
+
+test('merged observation refuses wrong metadata, source, request, approval, ancestry and evidence without adding a link', async () => {
+  const { recordRequestWorkEvidence } = await import('../src/request-work-evidence.ts');
+  const { runtime, root, remote, desk, item, request, external, base } = await mergedObservationFixture();
+  await fakeGithub(root, remote, async () => {
+    const save = () => writeFile(join(root, 'github.json'), JSON.stringify({ created: 0, external }));
+    const observe = () => observeExternalMerge(runtime, 'clippy', item.id, external.html_url, 'person');
+    await save();
+    await assert.rejects(observeExternalMerge(runtime, 'bellonda', item.id, external.html_url, 'person'), /item_not_yours/);
+    external.base.ref = 'other';
+    await save();
+    await assert.rejects(observe(), /external_pr_repository_mismatch/);
+    external.base.ref = 'main';
+    external.head.repo.full_name = 'fork/clippy';
+    await save();
+    await assert.rejects(observe(), /external_pr_repository_mismatch/);
+    external.head.repo.full_name = 'example/clippy';
+    const head = external.head.sha;
+    external.head.sha = base;
+    await save();
+    await assert.rejects(observe(), /external_pr_head_mismatch/);
+    external.head.sha = head;
+    external.merged = false;
+    external.state = 'open';
+    external.draft = true;
+    await save();
+    await assert.rejects(observe(), /external_pr_requires_merged_observation/);
+    external.merged = true;
+    external.state = 'closed';
+    external.merge_commit_sha = 'f'.repeat(40);
+    await save();
+    await assert.rejects(observe(), /external_pr_merge_not_in_base/);
+    external.merge_commit_sha = head;
+    await save();
+    await writeFile(join(desk.path, 'dirty'), 'dirty');
+    await assert.rejects(observe(), /external_pr_worktree_dirty/);
+    await rm(join(desk.path, 'dirty'));
+    await runtime.ledger.update(item.id, current => ({ ...current, activeRunner: process.pid }));
+    await assert.rejects(observe(), /work_item_active/);
+    await runtime.ledger.update(item.id, current => ({ ...current, activeRunner: undefined, planApproval: undefined }));
+    await assert.rejects(observe(), /external_pr_requires_approved_request/);
+    await runtime.ledger.update(item.id, current => ({ ...current, planApproval: item.planApproval }));
+    await runtime.requests.update(request.id, current => ({ ...current, workItem: 'another-item' }));
+    await assert.rejects(observe(), /external_pr_request_mismatch/);
+    await runtime.requests.update(request.id, current => ({ ...current, workItem: item.id }));
+    await recordRequestWorkEvidence(runtime, item, { stage: 'reviewed',
+      verification: { observedAt: new Date().toISOString(), tree: 'wrong-tree', verifier: 'host-sandbox', checks: [] } });
+    await assert.rejects(observe(), /external_pr_follow_up_evidence_mismatch/);
+    assert.equal((await runtime.ledger.get(item.id)).externalPrObservations, undefined);
+    assert.equal((await runtime.ledger.get(item.id)).publication, undefined);
+    assert.equal((await runtime.requests.get(request.id)).status, 'work-running');
+  });
+});
+
+test('merged observation rejects deterministic concurrent item and request changes and deduplicates simultaneous observation', async () => {
+  const { runtime, root, remote, item, request, external } = await mergedObservationFixture();
+  await fakeGithub(root, remote, async () => {
+    await writeFile(join(root, 'github.json'), JSON.stringify({ created: 0, external }));
+    const observe = () => observeExternalMerge(runtime, 'clippy', item.id, external.html_url, 'person');
+    const inspectLocked = runtime.requests.inspectLocked.bind(runtime.requests);
+    runtime.requests.inspectLocked = async (id, inspect) => {
+      await runtime.ledger.update(item.id, current => ({ ...current, proposal: { ...current.proposal, goal: 'Changed goal' } }));
+      return inspectLocked(id, inspect);
+    };
+    await assert.rejects(observe(), /external_pr_item_changed/);
+    assert.equal((await runtime.ledger.get(item.id)).externalPrObservations, undefined);
+    await runtime.ledger.update(item.id, current => ({ ...current, proposal: item.proposal }));
+    runtime.requests.inspectLocked = async (id, inspect) => {
+      await runtime.requests.update(request.id, current => ({ ...current, ask: { ...current.ask, purpose: 'Different purpose' } }));
+      return inspectLocked(id, inspect);
+    };
+    await assert.rejects(observe(), /external_pr_request_changed/);
+    assert.equal((await runtime.ledger.get(item.id)).externalPrObservations, undefined);
+    runtime.requests.inspectLocked = inspectLocked;
+    const observed = await Promise.all([observe(), observe()]);
+    assert.ok(observed.every(entry => entry.externalPrObservations?.length === 1));
+    assert.equal((await runtime.ledger.get(item.id)).externalPrObservations!.length, 1);
+    assert.equal((await runtime.requests.get(request.id)).status, 'work-running');
+  });
+});
+
+
+test('merged observation refuses metadata changes during observation and lifecycle changes during replay', async () => {
+  const { runtime, root, remote, item, external } = await mergedObservationFixture();
+  await fakeGithub(root, remote, async () => {
+    const observe = () => observeExternalMerge(runtime, 'clippy', item.id, external.html_url, 'person');
+    await writeFile(join(root, 'github.json'), JSON.stringify({ created: 0, external,
+      externalNext: { ...external, merged_at: '2026-09-30T14:00:00.000Z' } }));
+    await assert.rejects(observe(), /external_pr_changed_during_observation/);
+    assert.equal((await runtime.ledger.get(item.id)).externalPrObservations, undefined);
+    await writeFile(join(root, 'github.json'), JSON.stringify({ created: 0, external }));
+    await observe();
+    const inspectLocked = runtime.requests.inspectLocked.bind(runtime.requests);
+    runtime.requests.inspectLocked = async (id, inspect) => {
+      await runtime.ledger.update(item.id, current => ({ ...current, status: 'cancelled' }));
+      return inspectLocked(id, inspect);
+    };
+    await assert.rejects(observe(), /external_pr_item_not_working/);
+    assert.equal((await runtime.ledger.get(item.id)).externalPrObservations!.length, 1);
+    assert.equal((await runtime.ledger.get(item.id)).status, 'cancelled');
+  });
+});
+
+test('historical observation status addition preserves pre-observation fingerprints without backlog notices', async () => {
+  const { createHash } = await import('node:crypto');
+  const { noticeRequestProgress, requestProgress } = await import('../src/request-status.ts');
+  const { runtime, item, request } = await externalFixture();
+  const currentRequest = await runtime.requests.update(request.id, current => ({ ...current,
+    origin: { sessionID: 'request-origin', directory: '/fixture/origin' } }));
+  const progress = requestProgress(currentRequest, item);
+  const { observedAt: _observedAt, lastRecordedAt: _lastRecordedAt, stale: _stale,
+    hostEvidence: _hostEvidence, hostEvidenceState: _hostEvidenceState, historicalMerge: _historicalMerge, ...legacy } = progress;
+  const fingerprint = createHash('sha256').update(JSON.stringify(legacy)).digest('hex');
+  const directory = join(runtime.stateDirectory, 'notices', 'request-progress');
+  await mkdir(directory, { recursive: true });
+  await writeFile(join(directory, 'baseline.json'), JSON.stringify({ version: 1,
+    observedAt: new Date().toISOString(), fingerprints: { [request.id]: fingerprint } }));
+  assert.equal(await noticeRequestProgress(runtime, (_id, error) => { throw error; }), 0);
+  assert.equal(await noticeRequestProgress(runtime, (_id, error) => { throw error; }), 0);
 });

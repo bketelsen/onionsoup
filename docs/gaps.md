@@ -125,7 +125,8 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
 - **Legacy desk PRs remain untracked.** PRs recorded only as `desk-change-opened` journal entries before
   ledger-backed desk publication are not backfilled. They need manual GitHub maintenance; approved request
   items with their clean source worktree can now be explicitly reconciled using `owners reconcile-pr` after
-  fresh verification and review. Newly proposed
+  fresh verification and review, or factually linked with `owners observe-merged-pr` without accepting
+  completion or clearing outstanding review findings. Neither command performs broad backfill. Newly proposed
   desk changes have ledger records, maintenance and originating-chat notices.
 
 - **Sandbox: provider credentials are still readable.** Masking the host opencode config/state closed the plugin

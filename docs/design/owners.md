@@ -244,6 +244,19 @@ on its next pass; reconciliation never creates a PR, pushes, merges, publishes a
 deployment. Closed-unmerged, mismatched, dirty, active or unapproved work is refused. There is no
 bulk backfill or owner tool that can self-attest an external review.
 
+To record only the historical fact of a merged PR, a person can instead use
+`owners observe-merged-pr <owner> <item> <url>`. It accepts an approved, idle, working request
+with a clean plan worktree at the exact PR head. Host metadata must match the configured repository
+and base, and the merge must be in that base history. Source, remote metadata, request and work item
+are checked again before recording. This command neither runs verification nor hires a reviewer.
+It appends an idempotent observation with the observed head/tree, merge/time, base, actor and plan
+binding. Matching current host attempt evidence is preserved as a separate snapshot, including
+revise findings that remain follow-up; historical reviews are never rewritten. Missing evidence
+is not approval, and mismatched evidence is refused. Request-scoped status distinguishes the fact
+from acceptance. Observation leaves publication, blockers, goal, plan and request completion
+unchanged and never creates follow-up work. A later review does not rewrite the observation;
+ordinary acceptance gates still govern completion. There is no bulk historical import.
+
 **Repairs on the desk.** The `maintain-prs` duty keeps published PRs mergeable and green. Failing CI on a new head
 commit hires the owner once for that commit to decide fix, flaky or person; no work item is opened. `fix` wakes the
 owner with a notice in the session or chat the PR came from. `onionsoup_checkout_pr { item }` puts a clean desk on
