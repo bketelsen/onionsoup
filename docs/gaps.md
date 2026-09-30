@@ -21,7 +21,9 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
 - **Cross-owner progress is recorded state, not omniscience.** Request participants and the receiving owner's
   direct manager can read linked progress without relaying it through the person. Origin-pinned updates are
   informational and do not wake a model. Missing origins stay pull-only; there is no historical backfill.
-  Status does not independently check live services or prove deployment, and between-tick transitions can be missed.
+  Request-scoped host proposal attempts expose bounded test/review evidence, with stale and superseded labels.
+  External/manual work has no such evidence until a supported host attempt runs; between-tick transitions can be missed.
+  Status does not independently check live services or prove deployment.
 
 - **Actionable consultations currently cover repository changes only.** Explicit `onionsoup_ask` follow-up routes one
   proposal to existing gated work. Missing live evidence, wiki edits and household operations still need their

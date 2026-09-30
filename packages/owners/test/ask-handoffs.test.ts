@@ -105,6 +105,8 @@ test('ordinary informational ask ignores unsolicited proposed work', async () =>
   runtime.incus = { run: async () => '[]' };
   runtime.hire = async <Output>(_owner: string, request: HireRequest<Output>) => {
     assert.match(request.brief, /informational question/);
+    assert.match(request.brief, /during this interaction/);
+    assert.match(request.brief, /does not cancel a separately accepted work request/);
     const at = new Date().toISOString();
     return { value: request.schema.parse(answer), sessionID: 'fixture-answer', cost: 0, startedAt: at, finishedAt: at };
   };

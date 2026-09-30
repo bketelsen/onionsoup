@@ -20,7 +20,10 @@ function askBrief(asker: OwnerDeclaration, question: string, notebook: string, s
     decisions ? `<recent-person-decisions>\nRaw journal context, including decisions not yet distilled. Retractions cancel earlier matching statements; later decisions can reaffirm them.\n${decisions}\n</recent-person-decisions>` : '',
     evidence ? `<your-incus-snapshot>\n${evidence}\n</your-incus-snapshot>` : '',
     `<roster>\n${roster}\n</roster>`,
-    `Answer from your notebook, your workspace and your evidence; read files as needed. You may not change anything.
+    `Answer from your notebook, your workspace and your evidence; read files as needed.
+This consultation is read-only: you may not change anything during this interaction. A status-only question does not
+authorize follow-up work. This restriction does not cancel a separately accepted work request or its approved plan;
+those continue under their own scope and gates.
 Separate what you observed (with its source) from what you infer, and say plainly what you do not know. If the question
 is about another owner's domain, say whose it is instead of answering for them.`,
   ].filter(Boolean).join('\n\n');

@@ -9,6 +9,7 @@ import type { WorkItem, WorkStatus } from './ledger.ts';
 import { withRecordLock } from './record-lock.ts';
 import { describeAsk, type ResourceRequest, type RequestStatus } from './requests.ts';
 import type { Runtime } from './runtime.ts';
+import { RequestWorkEvidence, readRequestWorkEvidence } from './request-work-evidence.ts';
 
 export const REQUEST_STATUS_LIMITS = { staleMs: 24 * 60 * 60_000, recentMs: 7 * 24 * 60 * 60_000, noticesPerTick: 20, summaryRecords: 12, summaryChars: 12_000, fieldChars: 240 };
 const RequestProgress = z.object({
@@ -18,6 +19,8 @@ const RequestProgress = z.object({
   publication: z.object({ url: z.string(), state: z.string() }).optional(),
   next: z.string(), lastRecordedAt: z.string(), observedAt: z.string(), stale: z.boolean(),
   evidence: z.enum(['recorded', 'linked_work_missing', 'linked_work_mismatch']),
+  hostEvidence: RequestWorkEvidence.optional(),
+  hostEvidenceState: z.enum(['recorded', 'unavailable', 'superseded', 'stale']).default('unavailable'),
 });
 export type RequestProgress = z.infer<typeof RequestProgress>;
 
@@ -57,7 +60,7 @@ export function requestVisibleTo(runtime: Runtime, owner: string, request: Resou
 
 /** A fresh read of durable records, not a live probe of repositories, hosts, or deployments. */
 export function requestProgress(request: ResourceRequest, item: WorkItem | undefined, now = new Date()): RequestProgress {
-  const matches = item?.owner === request.to && item.request === request.id;
+  const matches = item?.owner === request.to && item.request === request.id && item.id === request.workItem;
   const linked = matches ? item : undefined;
   const lastRecordedAt = linked && linked.updatedAt > request.updatedAt ? linked.updatedAt : request.updatedAt;
   const evidence = request.workItem && !linked ? (item ? 'linked_work_mismatch' : 'linked_work_missing') : 'recorded';
@@ -74,7 +77,28 @@ export function requestProgress(request: ResourceRequest, item: WorkItem | undef
   });
 }
 
-export function requestProgressText(progress: RequestProgress) {
+function hostEvidenceText(progress: RequestProgress, compact = false) {
+  const evidence = progress.hostEvidence;
+  if (!evidence) return 'Host tests/review: unavailable; no readable, matching request-scoped host evidence. Model claims do not establish verification.';
+  const checks = evidence.verification;
+  const review = evidence.review;
+  return [
+    `Host attempt: ${evidence.stage}; ${progress.hostEvidenceState}; recorded ${evidence.observedAt}.`,
+    checks ? `Host checks (${checks.verifier}) at ${checks.observedAt}, tree ${checks.tree}: ${checks.checks.length
+      ? compact ? `${checks.checks.length} configured results, ${checks.checks.filter(check => check.exitCode !== 0).length} failed (details on request)`
+        : checks.checks.map(check => `#${check.configurationIndex} ${check.command} exit=${check.exitCode}`).join(', ')
+      : 'none configured; no host checks ran'}.` : 'Host checks: unknown; no completed results recorded for this attempt.',
+    review ? `Review by ${review.reviewer}: ${review.verdict.decision}; ${review.verdict.summary}\n${(compact ? review.verdict.findings.slice(0, 1) : review.verdict.findings)
+      .map(finding => `[${finding.severity}] ${finding.file}: ${finding.issue}; ${finding.suggestion}`).join('\n')}`
+      : 'Review: unknown; no completed review recorded for this attempt.',
+    evidence.blocker && `Host blocker: ${evidence.blocker}.`,
+    evidence.abbreviated && 'Host evidence abbreviated; additional findings/checks may be omitted. Inspect the receiving owner’s review record before deciding.',
+    compact ? 'Attempt evidence only; current workspace/deployment unknown. Read request detail for full recorded findings.'
+      : 'Evidence describes that attempt only; current workspace, deployment and goal completion are unknown. Superseded evidence does not verify the current plan.',
+  ].filter(Boolean).join('\n');
+}
+
+export function requestProgressText(progress: RequestProgress, compact = false) {
   return [
     `${progress.id}: ${progress.from} → ${progress.to}; ${progress.title}; request ${progress.status}`,
     `Goal: ${progress.purpose}`,
@@ -82,6 +106,7 @@ export function requestProgressText(progress: RequestProgress) {
     progress.reason && `Request reason: ${progress.reason}`,
     progress.workItem && `Linked work ${progress.workItem}: ${progress.workStatus ?? 'unknown'}${progress.workReason ? `; ${progress.workReason}` : ''}`,
     progress.publication && `PR ${progress.publication.url}: ${progress.publication.state} (recorded; deployment unknown).`,
+    hostEvidenceText(progress, compact),
     `Next: ${progress.next}`,
     `Records read at ${progress.observedAt}; last recorded change ${progress.lastRecordedAt}${progress.stale ? ' (stale)' : ''}; ${progress.evidence}. Live state not probed.`,
   ].filter(Boolean).join('\n');
@@ -89,7 +114,7 @@ export function requestProgressText(progress: RequestProgress) {
 
 function compactProgress(progress: RequestProgress) {
   const maximum = REQUEST_STATUS_LIMITS.fieldChars;
-  const hasAbbreviation = [progress.purpose, progress.title, progress.reason, progress.workReason, progress.decision, progress.publication?.url]
+  const hasAbbreviation = [hostEvidenceText(progress), progress.purpose, progress.title, progress.reason, progress.workReason, progress.decision, progress.publication?.url]
     .some(value => value && value.length > maximum);
   const compact = { ...progress, purpose: clipped(progress.purpose, maximum), title: clipped(progress.title, maximum),
     reason: progress.reason ? clipped(progress.reason, maximum) : undefined,
@@ -97,7 +122,23 @@ function compactProgress(progress: RequestProgress) {
     decision: progress.decision ? clipped(progress.decision, maximum) : undefined,
     publication: progress.publication ? { ...progress.publication, url: clipped(progress.publication.url, maximum) } : undefined };
   const note = hasAbbreviation ? `\nDetails abbreviated (including any long blocker); use onionsoup_status request=${progress.id}.` : '';
-  return requestProgressText(compact) + note;
+  return requestProgressText(compact, true) + note;
+}
+
+/** Exact linked identities only; unavailable/corrupt sidecars cannot widen request access. */
+async function recordedProgress(runtime: Runtime, request: ResourceRequest, item: WorkItem | undefined, now = new Date()) {
+  const progress = requestProgress(request, item, now);
+  if (!item || item.owner !== request.to || item.request !== request.id || item.id !== request.workItem) return progress;
+  const evidence = await readRequestWorkEvidence(runtime, item).catch(() => undefined);
+  if (!evidence) return progress;
+  progress.hostEvidence = evidence;
+  progress.hostEvidenceState = evidence.planDigest !== item.planDocument?.digest ? 'superseded'
+    : now.getTime() - Date.parse(evidence.observedAt) > REQUEST_STATUS_LIMITS.staleMs ? 'stale' : 'recorded';
+  if (evidence.observedAt > progress.lastRecordedAt) {
+    progress.lastRecordedAt = evidence.observedAt;
+    progress.stale = now.getTime() - Date.parse(evidence.observedAt) > REQUEST_STATUS_LIMITS.staleMs;
+  }
+  return progress;
 }
 
 /** Exact request lookup uses the same visibility boundary as summaries. */
@@ -109,7 +150,7 @@ export async function requestProgressDetail(runtime: Runtime, owner: string, id:
   });
   if (!request || !requestVisibleTo(runtime, owner, request)) return 'No visible request with that ID.';
   const item = request.workItem ? await runtime.ledger.get(request.workItem).catch(() => undefined) : undefined;
-  return requestProgressText(requestProgress(request, item));
+  return requestProgressText(await recordedProgress(runtime, request, item));
 }
 
 export async function requestProgressSummary(runtime: Runtime, owner: string, now = new Date(), offset = 0) {
@@ -122,7 +163,7 @@ export async function requestProgressSummary(runtime: Runtime, owner: string, no
   const sections = [`Cross-owner progress (records read ${now.toISOString()}):`];
   let count = 0;
   for (const request of requests.slice(offset, offset + REQUEST_STATUS_LIMITS.summaryRecords)) {
-    const entry = compactProgress(requestProgress(request, request.workItem ? items.get(request.workItem) : undefined, now));
+    const entry = compactProgress(await recordedProgress(runtime, request, request.workItem ? items.get(request.workItem) : undefined, now));
     if (sections.join('\n\n').length + entry.length + REQUEST_STATUS_LIMITS.fieldChars > REQUEST_STATUS_LIMITS.summaryChars) break;
     sections.push(entry);
     count++;
@@ -136,8 +177,11 @@ export async function requestProgressSummary(runtime: Runtime, owner: string, no
 const Cursor = z.object({ sequence: z.number().int().nonnegative(), fingerprint: z.string(), pending: ExchangeNotice.optional() });
 type Cursor = z.infer<typeof Cursor>;
 function fingerprint(progress: RequestProgress) {
-  const { observedAt: _observedAt, lastRecordedAt: _lastRecordedAt, stale: _stale, ...significant } = progress;
-  return createHash('sha256').update(JSON.stringify(significant)).digest('hex');
+  const { observedAt: _observedAt, lastRecordedAt: _lastRecordedAt, stale: _stale, hostEvidence, hostEvidenceState, ...significant } = progress;
+  // Preserve pre-evidence fingerprints: upgrading must not replay every historical request.
+  const evidenceState = hostEvidenceState === 'stale' ? 'recorded' : hostEvidenceState;
+  const current = hostEvidence ? { ...significant, hostEvidence, hostEvidenceState: evidenceState } : significant;
+  return createHash('sha256').update(JSON.stringify(current)).digest('hex');
 }
 async function saveCursor(path: string, cursor: Cursor) {
   const temporary = `${path}.${randomUUID()}.tmp`;
@@ -196,7 +240,7 @@ async function noticeRequest(runtime: Runtime, request: ResourceRequest, progres
     // Existing delivery sorts message IDs: preserve transition order within each request.
     const id = `msg_${key.slice(0, 16)}${sequence.toString(16).padStart(16, '0')}`;
     const pending = ExchangeNotice.parse({ id, owner: request.from, target: request.origin,
-      text: `Request progress (informational; no new authorization):\n${requestProgressText(progress)}`,
+      text: `Request progress (informational; no new authorization):\n${compactProgress(progress)}`,
       at: progress.observedAt });
     const next = { sequence, fingerprint: nextFingerprint, pending };
     await saveCursor(path, next);
@@ -209,8 +253,8 @@ async function noticeRequest(runtime: Runtime, request: ResourceRequest, progres
 export async function noticeRequestProgress(runtime: Runtime, onError: (id: string, error: unknown) => void) {
   const requests = (await runtime.requests.list()).filter(request => request.origin);
   const items = new Map((await runtime.ledger.list()).map(item => [item.id, item]));
-  const projections = new Map(requests.map(request => [request.id,
-    requestProgress(request, request.workItem ? items.get(request.workItem) : undefined)]));
+  const projections = new Map(await Promise.all(requests.map(async request => [request.id,
+    await recordedProgress(runtime, request, request.workItem ? items.get(request.workItem) : undefined)] as const)));
   const baseline = await noticeBaseline(runtime, [...projections.values()]);
   let processed = 0;
   for (const request of requests) {

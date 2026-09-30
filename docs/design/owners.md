@@ -422,7 +422,18 @@ older than 24 hours as stale, and treats absent/mismatched linked work as unknow
 live services, and repository merge never claims deployment. Recently finished requests stay visible for seven days.
 Injected cross-owner progress summaries (not all other chat-context sections) prioritize active requests and are bounded to 12 records and 12,000 characters. Omitted records
 and abbreviated blocker details are explicitly labeled; `onionsoup_status offset=<next>` pages through them,
-and `onionsoup_status request=<id>` reads full details under the same visibility check.
+and `onionsoup_status request=<id>` reads details under the same visibility check.
+
+Host proposal attempts for delegated work also write a request/item/owner-scoped view in
+`state/request-work-evidence`: verification stage, exact source tree, host check exit codes, cross-family review
+and blockers. Command arguments/output are excluded; review prose is redacted and bounded, prioritizing blocker
+findings and labeling omissions. This is attempt evidence, not proof of current workspace state, deployment or goal
+completion. Missing/unreadable evidence is unknown; old evidence is stale and a changed plan digest supersedes it.
+The same informational notice path exposes new attempt evidence without model wakes; adding this view does not
+replay historical requests or import past reviewer/model claims. The next host attempt replaces the view; existing
+review history remains with its original records. External work without a host proposal attempt stays unknown.
+Consultation/status-only instructions apply to that interaction. A separately accepted work handoff follows its
+own goal and existing plan/effect gates; it never inherits permission to bypass those gates.
 
 New direct work requests and actionable asks retain the exact requester chat origin. The admitted daemon queues
 significant request/work/PR changes there as **informational `noReply` notices**, never model wakes, approvals or
