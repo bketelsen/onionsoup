@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import { z } from 'zod';
 import {
-  approveCreate, approveDelete, approvePlan, approvePush, chatDirectory, denyRequest, deskState, describeAsk,
+  planRevisionStatus, approveCreate, approveDelete, approvePlan, approvePush, chatDirectory, denyRequest, deskState, describeAsk,
   domainSummary, itemText, revisePlan, resumeItem, retryItem, cancelItem, memoryFingerprint, type ResourceRequest, type Runtime,
   promoteFriction, retryFrictionPromotion, frictionProposalDigest, frictionPromotionView, FrictionProposalDigest,
   AttentionAssignmentInput, assignAttention, retryAttentionAssignment, attentionAssignmentView, attentionAssignmentTargets, type AttentionAssignmentView,
@@ -85,6 +85,7 @@ export interface InboxEntry {
   attentionStatus?: string;
   attentionAssignment?: AttentionAssignmentView;
   assignmentTargets?: ReturnType<typeof attentionAssignmentTargets>;
+  revisionBlocked?: boolean;
   /** For permission and question entries: the chat they came from. */
   sessionID?: string;
   permission?: PendingPermission;
@@ -259,9 +260,15 @@ export class SurfaceState {
     const items = await this.runtime.ledger.list();
     const requests = await this.runtime.requests.list();
     const attention = await listAttention(this.runtime);
+    const revisions = await Promise.all(items.map(async item => ({ item, delivery: await planRevisionStatus(this.runtime, item.id) })));
     const initiatives = await this.runtime.initiatives.list();
     const providerHealth = await providerHealthViews(this.runtime);
     const entries: InboxEntry[] = [
+      ...revisions.filter(({ delivery }) => delivery?.status === 'blocked').map(({ item, delivery }) => ({
+        kind: 'attention' as const, id: `plan-revision-${item.id}`, owner: item.owner, title: `Revision delivery blocked: ${item.proposal.title}`,
+        detail: `${delivery!.reason}. Check the existing plan session before taking further action; do not blindly resubmit. Work ${item.id}.`,
+        revisionBlocked: true,
+      })),
       ...providerHealth.filter(view => view.status === 'failing').map(providerAuthEntry),
       ...await Promise.all(attention.filter(entry => entry.status !== 'resolved').map(async entry => ({
         kind: 'attention' as const, id: entry.id, owner: entry.owner, title: entry.note,

@@ -1,6 +1,7 @@
 import { advanceDeskPublication, DESK_WORKFLOW } from './desk-changes.ts';
 import type { HumanNote, WorkItem, WorkStatus } from './ledger.ts';
-import { OWNER_CHANGE_WORKFLOW, tellOwner } from './plan-work.ts';
+import { queuePlanRevision } from './plan-revision.ts';
+import { OWNER_CHANGE_WORKFLOW } from './plan-work.ts';
 import { advanceRebase, REBASE_WORKFLOW } from './rebase.ts';
 import type { Runtime } from './runtime.ts';
 
@@ -73,14 +74,7 @@ export async function approvePlan(runtime: Runtime, itemId: string, by: string, 
 
 /** Send a plan back: the owner hears it in the session it planned in, revises, and submits again. */
 export async function revisePlan(runtime: Runtime, itemId: string, by: string, feedback: string) {
-  const revised = await runtime.ledger.update(itemId, item => {
-    requireAwaitingApproval(item);
-    return { ...item, status: 'planning', reason: undefined, humanNotes: [...item.humanNotes, humanNote('plan-feedback', by, feedback)] };
-  });
-  await runtime.notebook(revised.owner).journal({ kind: 'plan-feedback', workItem: itemId, note: `${by}: ${feedback}` });
-  await tellOwner(runtime, revised, 'plan-revise',
-    `${by} sent your plan ${revised.id} "${revised.proposal.title}" back: ${feedback}. Revise it and submit it again with onionsoup_submit_plan with item "${revised.id}".`);
-  return revised;
+  return queuePlanRevision(runtime, itemId, by, feedback);
 }
 
 /** Where stopped work continues: the step it stopped in, else each workflow's first step. */

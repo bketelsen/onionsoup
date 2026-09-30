@@ -740,3 +740,24 @@ per tick; each assignment stops after three routing failures or one invalid-scop
 Assignment does not acknowledge, resolve or cancel the attention entry, and resolving attention does not cancel
 its independently gated work request. This first version supports one immutable assignment per attention item;
 reassignment/generations remain follow-ups. Stop existing work through its normal controls.
+
+
+### Durable plan revision delivery
+
+**Revise approach** retains the existing owner-plan ID, goal and approval gates. For inbox/manager revisions,
+`state/plan-revisions` persists a prepared delivery record before changing the ledger to `planning` with the
+person's feedback. A plugin pass under deployment admission recovers that transition, checks the current plan,
+owner and exact original session, and submits one prompt with a stable message ID. Short cross-process claims
+prevent concurrent submissions; no filesystem lock spans a network/model call. The goal and method are not canceled
+by revision. Explicit cancellation or a superseding plan observed before dispatch suppresses old delivery.
+
+An observed transcript message reconciles acceptance after a crash. A lost response, or an abandoned sending claim
+with no transcript receipt, is **delivery uncertain**: the runtime never blindly sends again. It may subsequently
+recognize the stable receipt, but otherwise requires inspection of the existing session. Missing origin, missing
+persona and retired owner have separate blocker codes. Blockers are visible in the inbox and owner/manager status;
+use the item's normal cancel controls when stopping work. Delivery status is not evidence of revised-plan completion.
+
+Already in-flight submissions cannot be recalled; cancellation prevents future dispatch and never rewinds external
+work. The latest revision outbox is retained per item; prior human feedback stays on the work item. This is an
+additive sidecar, with no old-notice backfill. Existing legacy work-notice delivery is otherwise unchanged.
+Direct-chat plan feedback already returns to the active caller and keeps its existing synchronous path.

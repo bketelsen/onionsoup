@@ -108,3 +108,14 @@ test('an initiative waiting on the person offers approve, send back and cancel, 
   assert.ok(html.includes('Breakdown'));
   assert.ok(html.includes('Note (sent with approval, required to send back or cancel)'));
 });
+
+test('revision delivery blockers explain uncertainty without offering unrelated attention decisions', () => {
+  const html = renderToStaticMarkup(createElement(Decision, {
+    entry: { kind: 'attention', id: 'plan-revision-w-fixture', owner: 'clippy', title: 'Revision delivery blocked',
+      detail: 'plan_revision_delivery_uncertain. Inspect the existing plan session.', revisionBlocked: true },
+    onDone: () => undefined,
+  }));
+  assert.match(html, /plan_revision_delivery_uncertain/);
+  assert.doesNotMatch(html, />Acknowledge<|>Seen<|>Resolve</);
+  assert.doesNotMatch(html, /Reason or observed outcome/);
+});

@@ -281,7 +281,7 @@ test('a pending plan approval gets the plan card: approve or send back with a no
   assert.equal(pendingCardKind(entry), 'plan');
   const actions = renderToStaticMarkup(createElement(PlanApprovalActions, { entry, onDone: () => {} }));
   assert.match(actions, /Approve plan<\/button>/);
-  assert.match(actions, /Send back<\/button>/);
+  assert.match(actions, /Revise approach<\/button>/);
   assert.match(actions, /What should change\?/);
   assert.doesNotMatch(actions, /Always/);
   const generic = { ...entry, planApproval: undefined, permission: { ...permission, permission: 'bash', metadata: { command: 'ls' } } };

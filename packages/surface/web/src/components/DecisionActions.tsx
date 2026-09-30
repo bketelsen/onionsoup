@@ -18,7 +18,7 @@ function PlanActions(props: DecisionActionProps) {
   const { entry, busy, text, decide } = props;
   return <>
     <Button variant="primary" disabled={busy} onClick={() => void decide('approve-plan', { note: text || undefined })}>Approve plan</Button>
-    <Button disabled={busy || !text.trim()} onClick={() => void decide('revise-plan', { note: text })}>Send back</Button>
+    <Button disabled={busy || !text.trim()} onClick={() => void decide('revise-plan', { note: text })}>Revise approach</Button>
     <ItemLink entry={entry} label="Full plan" />
   </>;
 }
@@ -63,6 +63,7 @@ function PermissionActions(props: DecisionActionProps) {
 
 function AttentionActions(props: DecisionActionProps) {
   const { entry, busy, text, decide } = props;
+  if (entry.revisionBlocked) return null;
   return <>
     {entry.attentionStatus !== 'acknowledged' && <Button disabled={busy || !text.trim()}
       onClick={() => void decide('acknowledge-attention', { reason: text })}>Seen</Button>}

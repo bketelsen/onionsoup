@@ -8,6 +8,11 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
   without resolving the attention entry. Assignment generations, reassignment and a blocked-routing recovery UI
   remain follow-ups. Existing acknowledged notes are never automatically interpreted as assignments.
 
+- **Uncertain revision delivery requires inspection.** New inbox/manager plan revisions have durable delivery
+  intent and stable receipt reconciliation; an uncertain send is not automatically retried. There is no delivery
+  repair/resend UI yet. In-flight model submissions cannot be recalled, and old work notices retain their existing
+  delivery mechanism. Revision is distinct from cancellation, not a new goal-management layer.
+
 - **Cross-owner progress is recorded state, not omniscience.** Request participants and the receiving owner's
   direct manager can read linked progress without relaying it through the person. Origin-pinned updates are
   informational and do not wake a model. Missing origins stay pull-only; there is no historical backfill.

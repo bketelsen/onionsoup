@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import { processRequest } from '../src/brokering.ts';
 import { drain, tick, type TickLog } from '../src/daemon.ts';
 import { INITIATIVE_LIMITS, type InitiativeDraft } from '../src/initiatives.ts';
+import { deliverPlanRevisions } from '../src/plan-revision.ts';
 import { pendingNotices } from '../src/notices.ts';
 import {
   approveInitiative, cancelAssignment, cancelInitiative, draftInitiative, initiativeView, raiseToManager, resolveEscalation,
@@ -353,10 +354,16 @@ test('a report escalation wakes the manager and blocks her approvals until resol
   await steerReportItem(runtime, 'odrade', itemId, 'note', 'Keep it small');
   assert.ok((await journalOf(runtime, 'clippy')).some(entry => entry.kind === 'manager-note' && entry.note?.includes('Keep it small')));
   assert.equal(await steerReportItem(runtime, 'odrade', itemId, 'revise-plan', 'Drop step 2'), 'planning');
-  const sentBack = (await pendingNotices(runtime)).find(notice => notice.change === 'plan-revise');
-  assert.equal(sentBack?.owner, 'clippy');
-  assert.deepEqual(sentBack?.origin, { sessionID: 'ses_clippy_plan', directory: '/desk' }, 'the report hears it where it planned');
-  assert.match(sentBack!.text, /Drop step 2/);
+  const delivered: string[] = [];
+  await deliverPlanRevisions(runtime, {
+    exists: async () => true, idle: async () => true, messages: async () => delivered,
+    prompt: async (target, _agent, text, id) => {
+      assert.deepEqual(target, { sessionID: 'ses_clippy_plan', directory: '/desk' });
+      assert.match(text, /Drop step 2/);
+      delivered.push(id);
+    },
+  }, (_id, error) => { throw error; });
+  assert.equal(delivered.length, 1);
   await setPlan(runtime, itemId, 'Core plan, smaller');
   assert.equal(await steerReportItem(runtime, 'odrade', itemId, 'approve-plan', ''), 'working');
   assert.equal((await runtime.ledger.get(itemId)).planApproval?.by, 'owner:odrade (standing grant approve-plans in clippy)');
