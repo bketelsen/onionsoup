@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
-import { mkdtemp, mkdir, readFile, readdir, writeFile, lstat, symlink } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, writeFile, lstat, symlink, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -103,4 +103,48 @@ test('CLI preview bypasses admission, runtime creation and model configuration',
   assert.equal(preview.policy.state, 'disabled');
   assert.match(preview.selectionDigest, /^[a-f0-9]{64}$/);
   assert.deepEqual(await readdir(paths.root), []);
+});
+
+
+test('FIFO metadata cannot block preview; directories are not accepted as JSON files', async () => {
+  const paths = await setup();
+  await mkdir(paths.declarations);
+  const policyPath = join(paths.declarations, 'friction-triage.json');
+  execFileSync('mkfifo', [policyPath]);
+  const stdout = execFileSync(process.execPath, ['--conditions=onionsoup-source', '--import', 'tsx', 'packages/owners/src/cli.ts',
+    'continuity-preview', '--state', paths.state, '--declarations', paths.declarations], { encoding: 'utf8', timeout: 5000 });
+  assert.equal(JSON.parse(stdout).policy.state, 'invalid');
+  await rm(policyPath);
+  await mkdir(policyPath);
+  const preview = await continuityPreview(paths);
+  assert.equal(preview.policy.state, 'invalid');
+  assert.ok(preview.issues.some(issue => issue.section === 'policy' && issue.reason === 'unreadable'));
+});
+
+test('named queue symlinks are unavailable, and absent queues are not asserted exhaustively empty', async () => {
+  const paths = await setup();
+  await mkdir(paths.state);
+  await save(paths.root, `private/${firstID}.json`, { token: 'PRIVATE' });
+  await mkdir(join(paths.state, 'friction'));
+  await symlink(join(paths.root, 'private'), join(paths.state, 'friction/promotions'));
+  const preview = await continuityPreview(paths);
+  assert.equal(preview.stateDirectory, 'present');
+  assert.equal(preview.promotions.scope.availability, 'unavailable');
+  assert.equal(preview.promotions.scope.complete, false);
+  assert.equal(preview.promotions.scope.examined, 0);
+  assert.equal(preview.handoffs.scope.availability, 'absent');
+  assert.equal(preview.handoffs.scope.complete, false);
+  assert.doesNotMatch(JSON.stringify(preview), /PRIVATE/);
+  const absent = await continuityPreview({ ...paths, state: join(paths.root, 'missing') });
+  assert.equal(absent.stateDirectory, 'absent');
+});
+
+test('selection digest ordering does not depend on locale collation', async () => {
+  const paths = await setup();
+  const baseline = await continuityPreview(paths);
+  const original = String.prototype.localeCompare;
+  String.prototype.localeCompare = () => { throw new Error('locale-sensitive sorting called'); };
+  try {
+    assert.equal((await continuityPreview(paths)).selectionDigest, baseline.selectionDigest);
+  } finally { String.prototype.localeCompare = original; }
 });

@@ -801,8 +801,10 @@ account for all live chats.
 Reads are limited to 200 directory entries per category and 1 MiB per file. A larger file or truncated category is
 reported, never interpreted as an empty queue. Attention coverage is its cached index and cutoff, with no transcript
 or journal scan. Friction counts describe indexed captures, not every file on disk. Malformed metadata and missing
-indices are named as unknown without echoing their contents; terminal symlink files are not followed. Directories
-must be the operator-selected state/configuration trees. The snapshot is non-atomic. Its stable selection digest
+indices are named as unknown without echoing their contents; terminal symlink files and named queue-directory symlinks are not followed. Files are opened nonblocking and must
+be regular files, so a FIFO or device cannot stall preview. Queue scope distinguishes present, absent and unavailable;
+an absent queue is not reported as a completed exhaustive scan, and the state root's availability is separate. Directories
+must be the operator-selected state/configuration trees. The snapshot is non-atomic. Its stable selection digest uses code-unit ordering independent of locale and
 excludes sample time and identifies the displayed metadata selection only: it is neither consent nor a backfill
 manifest. Repeat it before reviewing any future explicit selection.
 
