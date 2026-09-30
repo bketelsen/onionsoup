@@ -1,3 +1,5 @@
+import { childStore } from './fixtures/child-recovery.ts';
+import { childRecoverySnapshot, recordChildAbandonment } from '../src/child-recovery.ts';
 import assert from 'node:assert/strict';
 import { mkdtemp, cp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -22,6 +24,7 @@ async function setup(operator = false) {
   const messages: Record<string, unknown[]> = {};
   let nextMessageID = 0;
   const statusDirectories: string[] = [];
+  const messageErrors = new Set<string>();
   let failMessages = false;
   let pauseMessages = false;
   let pauseFinalChatMessages = false;
@@ -73,7 +76,7 @@ async function setup(operator = false) {
       }
       return failSessionLookup
         ? { error: new Error('session unavailable') }
-        : { data: { id: path.id, directory: '/chats', parentID: ['child', 'watcher'].includes(path.id) ? 'parent' : undefined } };
+        : { data: { id: path.id, directory: '/chats', parentID: Object.entries(children).find(([, ids]) => ids.includes(path.id))?.[0] ?? (['child', 'watcher'].includes(path.id) ? 'parent' : undefined) } };
     },
     messages: async ({ path }: { path: { id: string } }) => {
       if (['chat', 'parent'].includes(path.id) && ++chatMessageReads === 4 && pauseFinalChatMessages) {
@@ -93,6 +96,7 @@ async function setup(operator = false) {
         messagesStarted?.();
         await new Promise<void>(resolve => { resumeMessages = resolve; });
       }
+      if (messageErrors.has(path.id)) return { error: { name: 'BadRequest', data: { message: 'Expected OutputFormatJsonSchema' } } };
       if (failMessages) throw new Error('messages unavailable');
       if (failWatcher && !messages[path.id]) throw new Error('watcher unavailable');
       if (messages[path.id]) return { data: messages[path.id] };
@@ -166,6 +170,7 @@ async function setup(operator = false) {
     requireScopedChildren: () => { requireScopedChildren = true; },
     requireScopedStatus: () => { requireScopedStatus = true; },
     reconcile: async () => { for (const tick of timers.slice(1)) await tick(); },
+    failMessagesFor: (id: string) => { messageErrors.add(id); },
     failMessages: () => { failMessages = true; },
     pauseNextMessages: () => { pauseMessages = true; },
     pauseFinalChatMessages: () => { pauseFinalChatMessages = true; },
@@ -1077,4 +1082,36 @@ test('a child final disappearing after initial proof retains the parent at final
   resumeMessages();
   await checking;
   assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 1);
+});
+
+
+test('approved inactive child releases only its completed parent; active child, changed evidence and new prompts remain blocked', async context => {
+  const { state, say, statuses, children, reconcile, failMessagesFor, hooks } = await setup();
+  const database = join(state, 'child-history.db');
+  const db = childStore(database);
+  const previous = process.env.OPENCODE_DB;
+  process.env.OPENCODE_DB = database;
+  context.after(() => { db.close(); if (previous === undefined) delete process.env.OPENCODE_DB; else process.env.OPENCODE_DB = previous; });
+  await say('ses_parent');
+  await say('ses_unrelated');
+  statuses.ses_unrelated = { type: 'busy' };
+  children.ses_parent = ['ses_child'];
+  failMessagesFor('ses_child');
+  await reconcile();
+  assert.equal((await listAdmissions(state)).length, 2, 'HTTP 400 cannot manufacture a finished child');
+  const identity = { childID: 'ses_child', parentID: 'ses_parent', directory: '/chats' };
+  await recordChildAbandonment(state, { ...identity, version: 1, state: 'abandoned',
+    digest: childRecoverySnapshot(identity, database).digest, recordedBy: 'fixture-operator', approvedBy: 'person', approvedAt: new Date().toISOString(), reason: 'Abandon the inactive watcher' }, database);
+  statuses.ses_child = { type: 'busy' };
+  await reconcile();
+  assert.equal((await listAdmissions(state)).length, 2, 'an approval cannot override current activity');
+  delete statuses.ses_child;
+  await reconcile();
+  assert.deepEqual((await listAdmissions(state)).map(lease => lease.kind), ['chat:ses_unrelated']);
+  await assert.rejects(say('ses_child'), /child_session_abandoned/);
+  await assert.rejects(hooks['tool.execute.before']!({ sessionID: 'ses_child', callID: 'blocked', tool: 'read' }, { args: {} }), /child_session_abandoned/);
+  await say('ses_parent');
+  db.prepare('update message set data=? where id=?').run(JSON.stringify({ role: 'user', time: { created: 5 } }), 'msg_user');
+  await reconcile();
+  assert.equal((await listAdmissions(state)).length, 2, 'new evidence invalidates the old receipt');
 });

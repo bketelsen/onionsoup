@@ -215,6 +215,15 @@ export function surfaceServer(state: SurfaceState, options: { webRoot: string; b
       const { directory } = await ownedSession(params.owner!, params.session!);
       return state.opencode.renameSession(directory, params.session!, text((await body()).title, 'title'));
     }),
+    route('GET', '/api/owners/:owner/sessions/:session/abandoned-children', async params => {
+      requireKnownChat(params.owner!);
+      return codedRoute({ session_not_owned: 404 }, () => state.childRecoveries(params.owner!, params.session!));
+    }),
+    route('GET', '/api/owners/:owner/sessions/:session/abandoned-children/:child/messages', async params => {
+      requireKnownChat(params.owner!);
+      return codedRoute({ session_not_owned: 404, child_abandonment_not_found: 404 },
+        () => state.abandonedChildTranscript(params.owner!, params.session!, params.child!));
+    }),
     route('GET', '/api/owners/:owner/sessions/:session/messages', async params => {
       requireKnownChat(params.owner!);
       return codedRoute({ session_not_owned: 404, history_transcript_unavailable: 410, history_directory_mismatch: 403 }, () => state.sessionMessages(params.owner!, params.session!));
