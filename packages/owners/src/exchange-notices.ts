@@ -123,9 +123,11 @@ export async function deliveredExchangeNoticeProof(runtime: Runtime, target: z.i
   try { raw = await readFile(join(paths(runtime).delivered, `${parsed.data.info.id}.json`), 'utf8'); }
   catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
-    throw error;
+    throw new Error('exchange_notice_proof_unavailable');
   }
-  const notice = ExchangeNotice.parse(JSON.parse(raw));
+  let notice: ExchangeNotice;
+  try { notice = ExchangeNotice.parse(JSON.parse(raw)); }
+  catch { throw new Error('exchange_notice_proof_invalid'); }
   if (notice.id !== parsed.data.info.id || notice.target?.sessionID !== target.sessionID
     || notice.target.directory !== target.directory) return undefined;
   let delivery = notice.delivery;

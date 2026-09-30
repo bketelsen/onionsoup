@@ -48,7 +48,7 @@ async function fixture() {
     messages.push(message);
     return message;
   }
-  let afterReceive: (() => Promise<void>) | undefined;
+  let afterReceive: ((body: Parameters<ExchangeClient['post']>[1]) => Promise<void>) | undefined;
   let failAfter = false;
   let posts = 0;
   const transport: ExchangeClient = {
@@ -58,7 +58,7 @@ async function fixture() {
       assert.equal((await listAdmissions(state)).some(lease => lease.kind === `notice:${body.messageID}`), true);
       posts++;
       await receive(body);
-      await afterReceive?.();
+      await afterReceive?.(body);
       if (failAfter) throw new Error('lost_acknowledgement');
     },
   };
@@ -74,7 +74,7 @@ async function fixture() {
   return { runtime, state, hooks, second, messages, queue, deliver, person, receive, posts: () => posts,
     reconcile: () => timers[3]!(),
     setLookup: (callback: () => Promise<void>) => { lookup = callback; }, setParent: (id: string) => { parentID = id; },
-    setAfterReceive: (callback: () => Promise<void>) => { afterReceive = callback; }, setFailAfter: (value: boolean) => { failAfter = value; } };
+    setAfterReceive: (callback: (body: Parameters<ExchangeClient['post']>[1]) => Promise<void>) => { afterReceive = callback; }, setFailAfter: (value: boolean) => { failAfter = value; } };
 }
 
 test('host noReply delivery crosses plugin instances without creating a chat turn; durable receipt or copied text cannot authorize a genuine message', async () => {
@@ -180,8 +180,9 @@ test('expired authorization after asynchronous ancestry lookup fails closed and 
   NOTICE_DELIVERY_LIMITS.timeoutMs = 1;
   context.setLookup(() => new Promise(resolve => setTimeout(resolve, 10)));
   try {
-    assert.deepEqual(await context.deliver(), []);
-    assert.deepEqual((await listAdmissions(context.state)).map(lease => lease.kind), ['chat:chat']);
+    assert.match(String((await context.deliver())[0]), /exchange_notice_delivery_unverified/);
+    assert.deepEqual(await listAdmissions(context.state), []);
+    assert.deepEqual(context.messages, []);
   } finally { NOTICE_DELIVERY_LIMITS.timeoutMs = previous; }
   const drained = await fixture();
   await drained.queue();
@@ -189,4 +190,19 @@ test('expired authorization after asynchronous ancestry lookup fails closed and 
   await beginDrain(drained.state, 'target');
   assert.match(String((await drained.deliver())[0]), /deployment_draining/);
   assert.equal(drained.posts(), 0);
+});
+
+test('consumed or unknown delivery capabilities reject before message persistence or chat bookkeeping', async () => {
+  const context = await fixture();
+  const notice = await context.queue();
+  context.setAfterReceive(async body => {
+    await assert.rejects(context.receive(body), /exchange_notice_delivery_unverified/);
+  });
+  assert.deepEqual(await context.deliver(), []);
+  assert.equal(context.messages.length, 1);
+  assert.deepEqual(await listAdmissions(context.state), []);
+  await assert.rejects(context.receive({ agent: 'Miles Teg', noReply: true, messageID: notice.id,
+    parts: [{ type: 'text', text: 'Unknown token', metadata: { onionsoupNoticeDelivery: 'copied-or-forged' } }] }), /exchange_notice_delivery_unverified/);
+  assert.equal(context.messages.length, 1);
+  assert.deepEqual(await listAdmissions(context.state), []);
 });

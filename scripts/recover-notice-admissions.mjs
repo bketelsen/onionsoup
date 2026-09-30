@@ -17,7 +17,8 @@ const exec = promisify(execFile);
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
 const Checkpoint = z.object({ version: z.literal(1), bootstrap: z.literal('old-surface-restart'),
   recovery: z.literal('notice-admissions'), digest, proof: RecoveryProof,
-  approvedBy: z.string().trim().min(1), approvedAt: z.string().datetime() }).strict();
+  approvedBy: z.string().trim().min(1), recordedBy: z.string().trim().min(1),
+  approvedAt: z.string().datetime() }).strict();
 const Receipt = Checkpoint.extend({ state: z.literal('completed'), completedAt: z.string().datetime(),
   nextEndpoint: EndpointIdentity });
 const LIMITS = { readinessMs: 60_000, readinessIntervalMs: 1000 };
@@ -160,7 +161,8 @@ async function applyRecovery(input, selection, paths, approvedDigest) {
     const checked = await probeNoticeAdmissions(selection, input.admissionEffects, ['draining']);
     if (checked.digest !== approvedDigest) throw fail('notice_recovery_evidence_changed');
     const saved = Checkpoint.parse({ version: 1, bootstrap: 'old-surface-restart', recovery: 'notice-admissions',
-      digest: approvedDigest, proof: checked.proof, approvedBy: input.approvedBy, approvedAt: new Date().toISOString() });
+      digest: approvedDigest, proof: checked.proof, approvedBy: input.approvedBy,
+      recordedBy: userInfo().username, approvedAt: new Date().toISOString() });
     // An incomplete checkpoint also blocks old workers and pauseDrain; never remove it on uncertainty.
     checkpointed = true;
     await durableExclusive(paths.checkpoint, saved);
@@ -184,7 +186,9 @@ export async function recoverNoticeAdmissions(input) {
     await healthy(effectsFor(input, selection));
     return probeNoticeAdmissions(selection, input.admissionEffects);
   }
-  z.string().trim().min(1).parse(input.approvedBy);
+  if (typeof input.approvedBy !== 'string' || !input.approvedBy.trim()) {
+    throw fail('notice_recovery_approver_required');
+  }
   return withRecordLock(paths.workerLock, () => applyRecovery(input, selection, paths, approvedDigest));
 }
 
@@ -194,10 +198,11 @@ async function main() {
       root: { type: 'string' }, state: { type: 'string' }, config: { type: 'string' },
       'surface-url': { type: 'string' }, 'expected-old': { type: 'string' }, 'expected-target': { type: 'string' },
       session: { type: 'string', multiple: true }, 'approve-digest': { type: 'string' },
+      'approved-by': { type: 'string' },
     } });
     const outcome = await recoverNoticeAdmissions({ ...values, surfaceUrl: values['surface-url'],
       expectedOld: values['expected-old'], expectedTarget: values['expected-target'], sessions: values.session ?? [],
-      approveDigest: values['approve-digest'], approvedBy: userInfo().username });
+      approveDigest: values['approve-digest'], approvedBy: values['approved-by'] });
     console.log(JSON.stringify(outcome, null, 2));
   } catch (error) {
     console.error(typeof error.code === 'string' && error.code.startsWith('notice_recovery_')

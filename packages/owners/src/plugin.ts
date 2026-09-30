@@ -2,7 +2,7 @@ import { isAbandonedChild, readChildAbandonment } from './child-recovery.ts';
 import { ownerChatAgent, ownerChatVoice, observationChatPermission, observationChatPrompt } from './owner-chat.ts';
 import { recentActivityContext } from './chat-context.ts';
 import { deliveredExchangeNoticeProof, deliverExchangeNotices } from './exchange-notices.ts';
-import { consumeExchangeNoticeDelivery, hasPendingExchangeNoticeDelivery } from './exchange-notice-delivery.ts';
+import { consumeExchangeNoticeDelivery, isExchangeNoticeDeliveryAttempt } from './exchange-notice-delivery.ts';
 import { exchangeClient } from './exchange-client.ts';
 import { listAttention, changeAttention } from './attention.ts';
 import { requestProgressDetail, requestProgressSummary } from './request-status.ts';
@@ -1189,12 +1189,13 @@ const server: Plugin = async (input, options) => {
 
     async 'chat.message'(message, output) {
       const messageID = message.messageID ?? output.message?.id;
-      if (hasPendingExchangeNoticeDelivery(runtime.stateDirectory, messageID)) {
+      if (isExchangeNoticeDeliveryAttempt(runtime.stateDirectory, messageID, output.parts ?? [])) {
         const session = await input.client.session.get({ path: { id: message.sessionID } }).catch(() => undefined);
         if (session?.data?.directory && !session.error && !session.data.parentID
           && output.message?.id === messageID && consumeExchangeNoticeDelivery(runtime.stateDirectory,
             { sessionID: message.sessionID, directory: session.data.directory },
             { id: messageID, role: output.message.role, agent: message.agent, parts: output.parts })) return;
+        throw new Error('exchange_notice_delivery_unverified');
       }
       if (await readChildAbandonment(runtime.stateDirectory, message.sessionID)) throw new Error('child_session_abandoned: open a new session to continue');
       const pending = Symbol(message.sessionID);

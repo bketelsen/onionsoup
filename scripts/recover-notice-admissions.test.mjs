@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { tmpdir, userInfo } from 'node:os';
 import { join, resolve } from 'node:path';
 import { Runtime } from '../packages/owners/src/runtime.ts';
 import { chatPath } from '../packages/owners/src/chats.ts';
@@ -131,6 +131,9 @@ test('exact notice preview and approval restart only old surface, retain history
   const [receipt, concurrent] = await Promise.all([recoverNoticeAdmissions(apply), recoverNoticeAdmissions(apply)]);
   assert.deepEqual(receipt, concurrent);
   assert.equal(receipt.state, 'completed');
+  assert.equal(receipt.approvedBy, 'fixture-person');
+  assert.equal(receipt.recordedBy, userInfo().username);
+  assert.deepEqual(await recoverNoticeAdmissions({ ...apply, approvedBy: 'different-person' }), receipt);
   assert.deepEqual(state.restarts, ['onionsoup-surface.service']);
   assert.deepEqual(await recoverNoticeAdmissions(apply), receipt);
   assert.equal((await state.pending()).status, 'draining');
@@ -223,6 +226,8 @@ test('uncertain restart holds an old-worker-compatible checkpoint and never repe
   assert.equal((await state.pending()).status, 'draining');
   const marker = JSON.parse(await readFile(join(state.deploy, 'rollback.json')));
   assert.equal(marker.bootstrap, 'old-surface-restart');
+  assert.equal(marker.approvedBy, 'fixture-person');
+  assert.equal(marker.recordedBy, userInfo().username);
   await assert.rejects(worker(state.input), /bootstrap_old_health_unverified_gate_held/);
   await assert.rejects(recoverNoticeAdmissions(apply));
   assert.equal(state.restarts.length, 1);
@@ -325,4 +330,16 @@ test('same digest resumes an interrupted drain before any restart checkpoint', a
   assert.equal(receipt.state, 'completed');
   assert.deepEqual(state.restarts, ['onionsoup-surface.service']);
   assert.equal((await state.pending()).status, 'draining');
+});
+
+
+test('digest approval requires an explicitly named approver before recovery effects', async context => {
+  const state = await fixture(context);
+  const { apply } = await previewAndApprove(state);
+  for (const approvedBy of [undefined, '', '   ']) {
+    await assert.rejects(recoverNoticeAdmissions({ ...apply, approvedBy }), /notice_recovery_approver_required/);
+  }
+  assert.equal((await state.pending()).status, 'armed');
+  assert.equal(state.restarts.length, 0);
+  await assert.rejects(readFile(join(state.deploy, 'rollback.json')), { code: 'ENOENT' });
 });

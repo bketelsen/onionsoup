@@ -143,8 +143,9 @@ Host exchange notices use a bounded delivery admission rather than a chat-turn a
 plugin recognizes only a one-use, expiring delivery capability from the running host publisher,
 matched to the message, agent, directory and top-level session. The capability is removed before
 the message is persisted. A copied prefix, delivered notice ID, ordinary `noReply` API call, or
-message from another process does not authorize this bypass. A delayed callback after expiry
-falls back to the normal admission rules; a client timeout does not prove the server stopped.
+message from another process does not authorize this bypass. A callback carrying an expired,
+consumed or unknown delivery capability is rejected before chat bookkeeping; a client timeout
+does not prove the server stopped. Ordinary messages without a capability retain normal gates.
 Exact delivered notice evidence may be ignored when checking a genuine turn's final reply. A
 later human message, changed notice, pending delivery or unknown entry remains blocking.
 
@@ -275,7 +276,8 @@ Legacy delivery records can be reconstructed only for the pinned affected build
 `b2db85b5fa46b1d8f6608ab6e1c3e29a75da0f95`; other builds need recorded delivery evidence.
 
 After the person approves the returned digest and exact selection, repeat the command with
-`--approve-digest <digest>`. The digest binds both manifests, current pointer, endpoint identity,
+`--approve-digest <digest> --approved-by <person>`. The receipt separately records the approving
+person and the OS user running the command. The digest binds both manifests, current pointer, endpoint identity,
 selected leases, transcript and notice evidence. Apply takes the worker lock, starts the drain,
 and repeats the evidence and quiet checks. It writes a durable recovery checkpoint before
 restarting only the old surface. Both services must then be healthy on the unchanged old build,

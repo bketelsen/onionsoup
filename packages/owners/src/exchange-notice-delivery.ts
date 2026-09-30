@@ -18,7 +18,10 @@ export async function postExchangeNotice(state: string, target: Target, body: Bo
   const identity = key(state, body.messageID);
   if (permits.has(identity)) throw new Error('notice_delivery_already_pending');
   const lease = await beginAdmission(state, `notice:${body.messageID}`);
-  const permit: Permit = { target, body, nonce: randomUUID(), expires: performance.now() + NOTICE_DELIVERY_LIMITS.timeoutMs, consumed: false };
+  const permit: Permit = {
+    target, body, nonce: randomUUID(),
+    expires: performance.now() + NOTICE_DELIVERY_LIMITS.timeoutMs, consumed: false,
+  };
   try {
     if (permits.has(identity)) throw new Error('notice_delivery_already_pending');
     permits.set(identity, permit);
@@ -31,8 +34,9 @@ export async function postExchangeNotice(state: string, target: Target, body: Bo
 
 type HookMessage = { id?: string; role?: string; agent?: string; parts: { type: string; text?: string; synthetic?: boolean; ignored?: boolean; metadata?: Record<string, unknown> }[] };
 
-export function hasPendingExchangeNoticeDelivery(state: string, id: string | undefined) {
-  return !!id && permits.has(key(state, id));
+export function isExchangeNoticeDeliveryAttempt(state: string, id: string | undefined, parts: HookMessage['parts']) {
+  return (!!id && permits.has(key(state, id)))
+    || parts.some(part => part.metadata && Object.hasOwn(part.metadata, DELIVERY_METADATA));
 }
 
 /** Call only after resolving the actual top-level session, then consume without another await. */
@@ -40,12 +44,13 @@ export function consumeExchangeNoticeDelivery(state: string, target: Target, mes
   if (!message.id) return false;
   const permit = permits.get(key(state, message.id));
   const part = message.parts[0];
-  if (!permit || permit.consumed || performance.now() >= permit.expires || message.role !== 'user'
-    || message.agent !== permit.body.agent || target.sessionID !== permit.target.sessionID
-    || target.directory !== permit.target.directory || message.parts.length !== 1 || part?.type !== 'text'
-    || part.synthetic || part.ignored || part.text !== permit.body.parts[0]?.text
-    || part.metadata?.[DELIVERY_METADATA] !== permit.nonce) return false;
+  if (!permit || permit.consumed || performance.now() >= permit.expires) return false;
+  const matchesTarget = target.sessionID === permit.target.sessionID && target.directory === permit.target.directory;
+  const matchesAuthor = message.role === 'user' && message.agent === permit.body.agent;
+  const matchesBody = message.parts.length === 1 && part?.type === 'text' && !part.synthetic && !part.ignored
+    && part.text === permit.body.parts[0]?.text && part.metadata?.[DELIVERY_METADATA] === permit.nonce;
+  if (!matchesTarget || !matchesAuthor || !matchesBody) return false;
   permit.consumed = true;
-  delete part.metadata[DELIVERY_METADATA];
+  delete part!.metadata![DELIVERY_METADATA];
   return true;
 }
