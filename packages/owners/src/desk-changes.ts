@@ -44,7 +44,7 @@ function reviewBrief(owner: RepositoryOwner, title: string, summary: string, bas
     `<diff against="${base}">\n${patch}\n</diff>`,
     `<host-verification>\n${JSON.stringify(evidence)}\n</host-verification>`,
     `<task-acceptance>\n${JSON.stringify(criteria)}\n</task-acceptance>`,
-    'Host verification above applies only to the recorded tree and commands. An empty checks list means no configured checks ran. It does not prove deployment, live environment behavior, or every acceptance criterion. Check each task criterion against available evidence. If required evidence is inaccessible, name the missing prerequisite precisely; do not invent a defect or claim that unavailable tests passed. You need not repeat host commands solely to establish their recorded exit status.',
+    'Host verification above applies only to the recorded tree and configured checks (one-based configurationIndex). Command arguments and output are withheld to avoid exposing credentials. An empty checks list means no configured checks ran. An empty task-acceptance list means no approved task criteria are available; assess the author claim separately. This evidence does not prove deployment, live environment behavior, or every acceptance criterion. Check each task criterion against available evidence. If required evidence is inaccessible, name the missing prerequisite precisely; do not invent a defect or claim that unavailable tests passed. You need not repeat host commands solely to establish their recorded exit status.',
     previousReview,
     `Approve only if the diff does what the owner says and nothing else, is correct, and keeps to the repository's
 conventions. Revise, with specific findings, otherwise. Replan is not available here; use revise. Only blocker
@@ -236,11 +236,11 @@ async function prepareDeskChanges(runtime: Runtime, owner: RepositoryOwner, prop
   if (failure) return failure;
   if (await snapshotTree(target.path) !== verifiedTree) return { outcome: 'needs-work', summary: 'verification_changed_source: host checks changed the proposed tree. Inspect those changes and propose again so verification covers the final source.' };
   const evidence: ReviewEvidence = { observedAt: new Date().toISOString(), tree: verifiedTree,
-    verifier: 'host-sandbox', checks: verification.map(check => ({ command: safeProse(check.command), exitCode: check.exitCode })) };
+    verifier: 'host-sandbox', checks: verification.map((check, index) => ({ command: safeProse(check.command.split(/\s+/)[0]!), exitCode: check.exitCode, configurationIndex: index + 1 })) };
   const scope = reviewScope(owner, target);
   const waiting = waitingForPerson(scope, await deskReviewRounds(runtime, owner.id, scope.subject));
   if (waiting) return waiting;
-  const criteria = target.kind === 'new' ? [proposal.summary] : target.item.proposal.acceptance;
+  const criteria = target.kind === 'new' ? [] : target.item.proposal.acceptance;
   const review = await reviewDesk(runtime, owner, scope, target.path, proposal, await reviewBase(owner, target), evidence, criteria);
   if (effectiveDecision(review.verdict) !== 'approve') return needsWork(runtime, owner, scope, proposal.title, review);
   await clearDeskReviews(runtime, owner.id, scope.subject);

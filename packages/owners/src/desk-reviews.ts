@@ -7,7 +7,7 @@ import type { Runtime } from './runtime.ts';
 /** Host-observed command results for one exact tree; raw output is intentionally excluded. */
 export const ReviewEvidence = z.object({
   observedAt: z.string().datetime(), tree: z.string(), verifier: z.literal('host-sandbox'),
-  checks: z.array(z.object({ command: z.string(), exitCode: z.number() })),
+  checks: z.array(z.object({ command: z.string(), exitCode: z.number(), configurationIndex: z.number().int().positive() })),
 });
 export type ReviewEvidence = z.infer<typeof ReviewEvidence>;
 
