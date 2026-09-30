@@ -1,0 +1,41 @@
+import { existsSync } from 'node:fs';
+import { z } from 'zod';
+import { itemSessionHistory, rememberSession, rememberedSession, sessionHistory, SessionHistory, type Runtime } from '@onionsoup/owners';
+import type { OpencodeApi } from './opencode.ts';
+
+const ObservedSession = SessionHistory.omit({ owner: true, item: true, archived: true }).extend({ directory: z.string().optional() });
+export type HistoricalSession = SessionHistory & { archived: boolean };
+
+/** Merge explicit records only; a shared repository title or arbitrary requested ID never establishes ownership. */
+export async function recordedSessions(runtime: Runtime, owner: string) {
+  const items = (await runtime.ledger.list()).filter(item => item.owner === owner);
+  const remembered = await sessionHistory(runtime, owner);
+  return [...new Map([...items.flatMap(itemSessionHistory), ...remembered].map(record => [record.id, record])).values()];
+}
+
+export async function rememberObservedSessions(runtime: Runtime, owner: string, directory: string, sessions: unknown[]) {
+  for (const value of sessions) {
+    const parsed = ObservedSession.safeParse(value);
+    if (!parsed.success) { console.warn('session_history_observation_invalid', owner); continue; }
+    const record = parsed.data;
+    if (record.directory && record.directory !== directory) continue;
+    try { await rememberSession(runtime, { ...record, owner, directory }); }
+    catch { console.warn('session_history_observation_not_recorded', owner, record.id); }
+  }
+}
+
+export async function authorizedSession(runtime: Runtime, api: OpencodeApi, owner: string, id: string, resolveDirectory: () => Promise<string>) {
+  const identity = await rememberedSession(runtime, id).catch(() => { throw new Error('session_not_owned'); });
+  if (identity && identity.owner !== owner) throw new Error('session_not_owned');
+  const recorded = (await recordedSessions(runtime, owner)).find(record => record.id === id);
+  if (recorded) return recorded;
+  const directory = await resolveDirectory();
+  await rememberObservedSessions(runtime, owner, directory, await api.listSessions(directory));
+  const discovered = (await recordedSessions(runtime, owner)).find(record => record.id === id);
+  if (!discovered) throw new Error('session_not_owned');
+  return discovered;
+}
+
+export function historyView(record: SessionHistory, workspaceExists: (directory: string) => boolean = existsSync): HistoricalSession {
+  return { ...record, archived: Boolean(record.archived) || !workspaceExists(record.directory) };
+}

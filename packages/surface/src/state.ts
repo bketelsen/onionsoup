@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import {
@@ -14,13 +15,14 @@ import {
 } from '@onionsoup/owners';
 import type { OpencodeApi, PendingPermission, PendingQuestion } from './opencode.ts';
 import { planApprovalOf, type PlanApprovalRequest } from './plan-approval-request.ts';
-import { readSessionMessages, readSessionsTitled } from './hire-store.ts';
+import { readSessionMessages, readSessionsTitled, readArchivedSessionMessages } from './hire-store.ts';
 import { ordered, SettingsStore } from './settings.ts';
 import type { PublicFrictionRecord } from './friction-public.ts';
 import type { InitiativeSummary, OrgEntry, PublicAssignment, PublicInitiative } from './initiative-public.ts';
 import { InboxReadError } from './inbox-errors.ts';
 import type { ItemSession } from './item-session-public.ts';
 import { hasBusySession, ownerActivity, type OwnerActivity } from './activity.ts';
+import { authorizedSession, recordedSessions, rememberObservedSessions, historyView } from './session-history.ts';
 import type { RuntimeWork } from './runtime-work-public.ts';
 
 interface OpencodeSession { id: string; title: string; directory: string; parentID?: string; time: { created: number; updated: number } }
@@ -212,6 +214,8 @@ export class SurfaceState {
     /** How hire sessions' messages are read (opencode's store; replaceable in tests). */
     readonly hireMessages: (sessionID: string) => unknown[] = sessionID => readSessionMessages(sessionID),
     readonly hireSessions: (prefix: string) => { id: string; title: string; directory: string; time: { created: number; updated: number } }[] = prefix => readSessionsTitled(prefix),
+    readonly archivedMessages: (sessionID: string, directory: string) => unknown[] = readArchivedSessionMessages,
+    readonly workspaceExists: (directory: string) => boolean = existsSync,
   ) {
     this.settings = new SettingsStore(settingsFile);
   }
@@ -332,10 +336,26 @@ export class SurfaceState {
     return [...new Set([await this.directory(ownerId), ...plans.map(item => item.planWorktree!)])];
   }
 
-  /** Where one of an owner's sessions runs: a plan's session where the item records it, any other in the chat directory. */
-  async sessionDirectory(ownerId: string, sessionID: string) {
-    const item = (await this.runtime.ledger.list()).find(candidate => candidate.owner === ownerId && candidate.session?.sessionID === sessionID);
-    return item?.session?.directory ?? this.directory(ownerId);
+  /** Resolve exact owner membership before any read or write; never fall back for an unknown ID. */
+  async sessionDirectory(ownerId: string, sessionID: string, requireWorkspace = true) {
+    const session = await authorizedSession(this.runtime, this.opencode, ownerId, sessionID, () => this.directory(ownerId));
+    if (requireWorkspace && (session.archived || !this.workspaceExists(session.directory))) throw new Error('session_workspace_unavailable');
+    return session.directory;
+  }
+
+  async sessionMessages(ownerId: string, sessionID: string) {
+    const session = await authorizedSession(this.runtime, this.opencode, ownerId, sessionID, () => this.directory(ownerId));
+    const directory = session.directory;
+    if (session.archived || !this.workspaceExists(directory)) return this.archivedMessages(sessionID, directory);
+    return this.opencode.messages(directory, sessionID);
+  }
+
+  async rememberCreatedSession(ownerId: string, directory: string, created: unknown) {
+    // Creation responses may omit timestamps; fill them at the host boundary.
+    const response = z.object({ id: z.string(), title: z.string().optional(), time: z.object({ created: z.number(), updated: z.number() }).optional() }).parse(created);
+    const now = Date.now();
+    await rememberObservedSessions(this.runtime, ownerId, directory, [{ ...response, title: response.title ?? 'New chat', time: response.time ?? { created: now, updated: now } }]);
+    return created;
   }
 
   /** The owner's directory a prompt or question waits in; the chat directory when none lists it. */
@@ -355,17 +375,18 @@ export class SurfaceState {
   async chatSessions(ownerId: string) {
     const [directory, ...planDirectories] = await this.ownerDirectories(ownerId);
     const listed = await Promise.all([
-      this.directorySessions(directory!),
-      ...planDirectories.map(planDirectory => this.directorySessions(planDirectory).catch(() => ({ sessions: [], status: {} }))),
+      this.directorySessions(ownerId, directory!),
+      ...planDirectories.map(planDirectory => this.directorySessions(ownerId, planDirectory).catch(() => ({ sessions: [], status: {} }))),
     ]);
     return {
       directory: directory!, directories: [directory!, ...planDirectories],
-      sessions: listed.flatMap(entry => entry.sessions), status: Object.assign({}, ...listed.map(entry => entry.status)) as Record<string, unknown>,
+      sessions: (await recordedSessions(this.runtime, ownerId)).map(record => historyView(record, this.workspaceExists)), status: Object.assign({}, ...listed.map(entry => entry.status)) as Record<string, unknown>,
     };
   }
 
-  private async directorySessions(directory: string) {
+  private async directorySessions(ownerId: string, directory: string) {
     const [sessions, status] = await Promise.all([this.opencode.listSessions(directory), this.opencode.status(directory).catch(() => ({}))]);
+    await rememberObservedSessions(this.runtime, ownerId, directory, sessions);
     return { sessions, status };
   }
 
@@ -495,13 +516,19 @@ export class SurfaceState {
 
   /** The owner session carrying out an item's plan, and the subagent sessions it started. */
   private async ownerSessions(item: WorkItem): Promise<ItemSession[]> {
-    if (!item.session) return [];
-    const { sessionID, directory } = item.session;
-    const sessions = await this.opencode.listSessions(directory).catch(() => []) as OpencodeSession[];
-    const related = sessions.filter(session => session.id === sessionID || session.parentID === sessionID);
-    return related.map(session => ({
-      ...session, kind: 'owner' as const, label: session.id === sessionID ? 'work session' : session.title,
-    }));
+    const roots = [item.origin, item.session].filter(origin => origin !== undefined);
+    const remembered = await recordedSessions(this.runtime, item.owner);
+    for (const origin of roots) {
+      if (remembered.some(session => session.id === origin.sessionID && session.archived) || !this.workspaceExists(origin.directory)) continue;
+      const sessions = await this.opencode.listSessions(origin.directory).catch(() => []) as OpencodeSession[];
+      const related = sessions.filter(session => session.id === origin.sessionID || session.parentID === origin.sessionID);
+      await rememberObservedSessions(this.runtime, item.owner, origin.directory, related);
+    }
+    const rootsByID = new Set(roots.map(origin => origin.sessionID));
+    return (await recordedSessions(this.runtime, item.owner))
+      .filter(session => rootsByID.has(session.id) || (session.parentID && rootsByID.has(session.parentID)))
+      .map(session => ({ ...historyView(session, this.workspaceExists), kind: 'owner' as const,
+        label: session.id === item.session?.sessionID ? 'work session' : session.id === item.origin?.sessionID ? 'planning session' : session.title }));
   }
 
   /**
@@ -520,7 +547,7 @@ export class SurfaceState {
     if (!session) return undefined;
     const readers: Record<ItemSession['kind'], () => Promise<unknown[]> | unknown[]> = {
       hire: () => this.hireMessages(session.id),
-      owner: () => this.opencode.messages(session.directory, session.id),
+      owner: () => !session.archived && this.workspaceExists(session.directory) ? this.opencode.messages(session.directory, session.id) : this.archivedMessages(session.id, session.directory),
     };
     return readers[session.kind]();
   }

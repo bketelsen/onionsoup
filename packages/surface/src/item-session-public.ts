@@ -4,6 +4,7 @@
  */
 export interface ItemSession {
   id: string;
+  archived?: boolean;
   title: string;
   /** What the activity rail calls it: the hire's stage, "work session", or the subagent's task. */
   label: string;

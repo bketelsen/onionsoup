@@ -5,6 +5,7 @@ import { deskSyncText, syncOwnerDesk, type DeskSyncReport } from './desk-sync.ts
 import type { WorkItem } from './ledger.ts';
 import { executionPrompt, OWNER_CHANGE_WORKFLOW, planningPrompt } from './plan-work.ts';
 import { ensurePlanWorktree, syncPlanWorktree } from './plan-worktrees.ts';
+import { rememberSession, itemSessionHistory } from './session-history.ts';
 import type { Runtime } from './runtime.ts';
 
 /**
@@ -133,6 +134,9 @@ export async function openOwnerSession(runtime: Runtime, client: OwnerSessionCli
   if (!claimed) {
     await client.remove(origin).catch(() => undefined);
     return undefined;
+  }
+  for (const session of itemSessionHistory(claimed)) {
+    await rememberSession(runtime, session).catch(() => console.warn('owner_session_history_not_recorded', item.id, session.id));
   }
   try {
     await client.prompt(origin, persona.name, `${kind.prompt(claimed)}${note}`);

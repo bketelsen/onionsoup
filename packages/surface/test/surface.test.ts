@@ -193,7 +193,7 @@ async function start(
     { id: 'ses_x', title: 'w-2: plan', directory: '/checkouts/clippy', time: { created: 1, updated: 1 } },
   ].filter(session => session.title.startsWith(prefix));
   const state = new SurfaceState(runtime, api, directory, undefined,
-    sessionID => [{ info: { id: 'msg_1', sessionID, role: 'assistant' }, parts: [] }], hireSessions);
+    sessionID => [{ info: { id: 'msg_1', sessionID, role: 'assistant' }, parts: [] }], hireSessions, undefined, () => true);
   const buildId = await readReleaseBuildId(manifestPath ?? DEFAULT_RELEASE_MANIFEST);
   const { server } = surfaceServer(state, { webRoot: '/nonexistent', by: 'tester', buildId });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));

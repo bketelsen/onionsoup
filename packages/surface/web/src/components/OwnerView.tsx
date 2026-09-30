@@ -116,7 +116,7 @@ export function OwnerView({ owner, inbox, sessionId, refresh }: { owner: OwnerSu
       <div className="flex-1 flex min-h-0">
         <main className="flex-1 flex flex-col min-w-0 min-h-0">
           {!owner.chat && <div className="p-6"><Empty>{owner.name} is unavailable for chat. Its work and notebook are on the right.</Empty></div>}
-          {owner.chat && current && directory && <ChatPane key={current} owner={owner} sessionId={current} directory={currentDirectory} pending={waiting.filter(entry => entry.sessionID === current && (entry.kind === 'permission' || entry.kind === 'question'))} onPendingDone={refresh}
+          {owner.chat && current && directory && <ChatPane archived={sessions.find(session => session.id === current)?.archived} key={current} owner={owner} sessionId={current} directory={currentDirectory} pending={waiting.filter(entry => entry.sessionID === current && (entry.kind === 'permission' || entry.kind === 'question'))} onPendingDone={refresh}
             autoAccept={Boolean(autoAccept[current])}
             onToggleAutoAccept={() => {
               const enabled = !autoAccept[current];
@@ -150,15 +150,15 @@ export function OwnerView({ owner, inbox, sessionId, refresh }: { owner: OwnerSu
                     className="rounded-md border border-interactive-border-focus bg-background px-2 py-1 typography-meta outline-none" />
                 ) : (
                   <div key={session.id} className="flex items-center gap-1">
-                  <button onClick={() => navigate('owner', owner.id, 'chat', session.id)} onDoubleClick={() => { setRenaming(session.id); setTitle(session.title); }}
-                    title="Double-click to rename"
+                  <button onClick={() => navigate('owner', owner.id, 'chat', session.id)} onDoubleClick={() => { if (!session.archived) { setRenaming(session.id); setTitle(session.title); } }}
+                    title={session.archived ? "Archived conversation (read-only)" : "Double-click to rename"}
                     className={cx('flex flex-1 min-w-0 items-center gap-2 rounded-md px-2 py-1 pointer-coarse:min-h-11 text-left typography-meta', session.id === current ? 'bg-interactive-active text-foreground' : 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground')}>
                     {session.id !== current && session.time.updated > (seen[session.id] ?? BASELINE) && <span className="size-1.5 shrink-0 rounded-full bg-primary" title="New since you last looked" />}
-                    <span className={cx('truncate flex-1', session.id !== current && session.time.updated > (seen[session.id] ?? BASELINE) && 'text-foreground font-medium')}>{session.title || 'Untitled'}</span>
+                    <span className={cx('truncate flex-1', session.id !== current && session.time.updated > (seen[session.id] ?? BASELINE) && 'text-foreground font-medium')}>{session.title || 'Untitled'}{session.archived ? ' · archived' : ''}</span>
                     {busySessions[session.id] ? <BusyDots className="text-status-info" /> : <span className="shrink-0 text-[0.7rem]">{timeAgo(session.time.updated)}</span>}
                   </button>
                   {/* Touch screens have no double-click: the open chat gets a rename button. */}
-                  {session.id === current && (
+                  {session.id === current && !session.archived && (
                     <button aria-label="Rename this chat" onClick={() => { setRenaming(session.id); setTitle(session.title); }}
                       className="pointer-fine:hidden flex size-11 shrink-0 items-center justify-center rounded-md text-muted-foreground">
                       <RiEditLine className="size-4" />
@@ -175,7 +175,7 @@ export function OwnerView({ owner, inbox, sessionId, refresh }: { owner: OwnerSu
               {showEngine && engine.map(session => (
                 <button key={session.id} onClick={() => navigate('owner', owner.id, 'chat', session.id)}
                   className="flex items-center gap-2 rounded-md px-2 py-1 pointer-coarse:min-h-11 text-left typography-micro text-muted-foreground hover:bg-interactive-hover">
-                  <span className="truncate flex-1">{session.title}</span><span className="shrink-0">{timeAgo(session.time.updated)}</span>
+                  <span className="truncate flex-1">{session.title}{session.archived ? ' · archived' : ''}</span><span className="shrink-0">{timeAgo(session.time.updated)}</span>
                 </button>
               ))}
             </Section>

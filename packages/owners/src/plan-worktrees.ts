@@ -4,6 +4,7 @@ import type { RepositoryOwner } from './declarations.ts';
 import { recordSync, syncDesk } from './desk-sync.ts';
 import { PlanWorktreeKept, type WorkItem, type WorkStatus } from './ledger.ts';
 import type { OwnerSessionClient } from './owner-sessions.ts';
+import { rememberSession, itemSessionHistory, sessionHistory } from './session-history.ts';
 import type { Runtime } from './runtime.ts';
 import { ensureClone, git } from './workspace.ts';
 
@@ -64,10 +65,17 @@ async function keepReason(path: string, landedCommit: string | undefined): Promi
 
 /** Forget the worktree on the item. Its session keeps its real directory: that is where opencode knows it. */
 async function forgetPlanWorktree(runtime: Runtime, item: WorkItem) {
+  const known = await sessionHistory(runtime, item.owner);
+  const records = new Map([...itemSessionHistory(item), ...known.filter(session => session.directory === item.planWorktree || itemSessionHistory(item).some(reference => reference.id === session.id))].map(session => [session.id, session]));
+  for (const session of records.values()) {
+    await rememberSession(runtime, { ...session, archived: session.directory === item.planWorktree || session.archived });
+  }
   await runtime.ledger.update(item.id, current => ({ ...current, planWorktree: undefined, planWorktreeKept: undefined }));
 }
 
 async function detachPlanWorktree(runtime: Runtime, item: WorkItem, path: string): Promise<PlanWorktreeRemoval> {
+  const known = new Set((await sessionHistory(runtime, item.owner)).map(session => session.id));
+  for (const session of itemSessionHistory(item)) if (!known.has(session.id)) await rememberSession(runtime, session);
   if (!existsSync(path)) {
     await forgetPlanWorktree(runtime, item);
     return 'absent';

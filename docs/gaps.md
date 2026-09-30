@@ -4,6 +4,11 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
 
 ## Owners and their authority
 
+- **History preserves identity, not an independent transcript backup.** Archived owner conversations remain
+  discoverable after plan cleanup; transcripts still depend on OpenCode's store. Unobserved children and deleted
+  transcripts cannot be reconstructed. New chat uses a fresh workspace but does not automatically carry selected
+  historical context. Existing explicit ledger references are readable without a bulk backfill.
+
 - **Attention assignment is repository-only.** Seen remains inert; explicit assignment creates one gated request
   without resolving the attention entry. Assignment generations, reassignment and a blocked-routing recovery UI
   remain follow-ups. Existing acknowledged notes are never automatically interpreted as assignments.

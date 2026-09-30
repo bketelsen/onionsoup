@@ -61,7 +61,7 @@ import type { ProviderHealthView, ReminderSummary } from '@onionsoup/owners';
 export type { ProviderHealthView, ReminderSummary, WorkItem } from '@onionsoup/owners';
 
 // opencode's session and message shapes, trimmed to what the chat reads.
-export interface Session { id: string; title: string; directory: string; parentID?: string; time: { created: number; updated: number } }
+export interface Session { archived?: boolean; id: string; title: string; directory: string; parentID?: string; time: { created: number; updated: number } }
 export interface MessageInfo {
   id: string; sessionID: string; role: 'user' | 'assistant'; agent?: string; modelID?: string; providerID?: string;
   time: { created: number; completed?: number }; error?: { name?: string; data?: { message?: string } }; cost?: number;
