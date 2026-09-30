@@ -16,9 +16,6 @@ jobs:
   verify:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    env:
-      ONIONSOUP_HOME: ${{ runner.temp }}/onionsoup-home
-      ONIONSOUP_CONFIG: ${{ runner.temp }}/onionsoup-config
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -27,3 +24,6 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run verify
+        env:
+          ONIONSOUP_HOME: ${{ runner.temp }}/onionsoup-home
+          ONIONSOUP_CONFIG: ${{ runner.temp }}/onionsoup-config
