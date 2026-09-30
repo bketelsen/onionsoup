@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import {
+  listChildAbandonments, abandonedChildMessages,
   planRevisionStatus, approveCreate, approveDelete, approvePlan, approvePush, chatDirectory, denyRequest, deskState, describeAsk,
   domainSummary, itemText, revisePlan, resumeItem, retryItem, cancelItem, memoryFingerprint, type ResourceRequest, type Runtime,
   promoteFriction, retryFrictionPromotion, frictionProposalDigest, frictionPromotionView, FrictionProposalDigest,
@@ -20,6 +21,7 @@ import { ordered, SettingsStore } from './settings.ts';
 import type { PublicFrictionRecord } from './friction-public.ts';
 import type { InitiativeSummary, OrgEntry, PublicAssignment, PublicInitiative } from './initiative-public.ts';
 import { InboxReadError } from './inbox-errors.ts';
+import type { ChildRecoveryNotice } from './child-recovery-public.ts';
 import type { ItemSession } from './item-session-public.ts';
 import { hasBusySession, ownerActivity, type OwnerActivity } from './activity.ts';
 import { authorizedSession, recordedSessions, rememberObservedSessions, historyView } from './session-history.ts';
@@ -348,6 +350,21 @@ export class SurfaceState {
     const directory = session.directory;
     if (session.archived || !this.workspaceExists(directory)) return this.archivedMessages(sessionID, directory);
     return this.opencode.messages(directory, sessionID);
+  }
+
+  /** The parent session establishes both owner membership and exact historical directory scope. */
+  async childRecoveries(ownerId: string, parentID: string): Promise<ChildRecoveryNotice[]> {
+    const parent = await authorizedSession(this.runtime, this.opencode, ownerId, parentID, () => this.directory(ownerId));
+    const receipts = await listChildAbandonments(this.runtime.stateDirectory, parentID, parent.directory);
+    return receipts.map(receipt => ({ state: receipt.state, childID: receipt.childID, parentID: receipt.parentID,
+      reason: receipt.reason, approvedBy: receipt.approvedBy, approvedAt: receipt.approvedAt, digest: receipt.digest }));
+  }
+
+  async abandonedChildTranscript(ownerId: string, parentID: string, childID: string) {
+    const parent = await authorizedSession(this.runtime, this.opencode, ownerId, parentID, () => this.directory(ownerId));
+    const messages = await abandonedChildMessages(this.runtime.stateDirectory, childID, parentID, parent.directory);
+    if (messages === undefined) throw new Error('child_abandonment_not_found');
+    return messages;
   }
 
   async rememberCreatedSession(ownerId: string, directory: string, created: unknown) {

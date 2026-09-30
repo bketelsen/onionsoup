@@ -74,3 +74,5 @@ export interface Part {
   time?: { start: number; end?: number };
 }
 export interface Message { info: MessageInfo; parts: Part[] }
+
+export type { ChildRecoveryNotice } from '../../src/child-recovery-public.ts';

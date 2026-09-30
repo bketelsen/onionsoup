@@ -209,3 +209,29 @@ the timer. If activation or rollback fails, inspect `ONIONSOUP_STATE/deploy/pend
 `rollback.json`, `current`, the unit journals, and actual API readiness before any manual
 recovery; preserve the checkpoint and held gate until the old build is verified. Do not hand-edit
 the pending record to force release of the gate.
+
+## Explicit inactive child recovery
+
+A historical child with an unfinished reply can keep its parent's admission held even when the
+server reports idle. A structured-output HTTP 400 is not evidence that the child completed.
+`scripts/recover-child.mjs` is an operator-only, explicit abandonment path; it is not a model tool
+and never deletes history, synthesizes a final answer, edits upstream records, or clears leases.
+Run it with absolute `--state`, `--config`, `--directory`, `--parent` and `--child` to preview.
+After the person approves that exact inactive child, repeat with the returned `--approve-digest`
+and a `--reason`. No other child is authorized by that approval.
+
+The command checks all known session directories for activity and pending prompts, refuses independent
+opencode processes, requires a completed parent and a child with no descendants, and repeats its
+checks while holding the admission lock against new turns. An immutable receipt and recoverable
+original-row backup live in `state/child-recovery/`. Changed history or ancestry invalidates the
+receipt. Busy children remain blocking. Abandoned child prompts/tools are refused; continuing work
+requires a new session. The parent chat displays the abandonment and a read-only preserved transcript.
+Only that approved, unchanged child's transcript uses the SQLite read projection for incompatible
+structured-output formats; original formats and unfinished markers remain untouched.
+
+Normal plugin reconciliation and deployment quiescence recognize a valid abandonment as a terminal
+operator decision, separately from success. A runtime predating this support must be upgraded through
+the guarded deployment procedure; approval is not permission to delete its live lease. Keep any
+restart under the existing drain, activity checks, checkpoints and rollback health checks.
+
+Recovery receipts identify both the approving person (`--approved-by`) and the recording OS user. The command, state and live surface must belong to the same OS user. Receipts bind the canonical database path and full original child rows; changed, unavailable or newly extended evidence retains the admission. Every additional child requires its own explicit approval.

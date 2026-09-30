@@ -385,3 +385,23 @@ test('attention renders Seen separately from assignment and does not equate acce
   assert.match(assigned, /remains unresolved/);
   assert.match(assigned, /r-fixture/);
 });
+
+test('approved child recovery displays attribution and inert text without execution controls', async () => {
+  const { ChildRecoveryEvidence, PreservedChildTranscript } = await import('../web/src/components/ChildRecoveryHistory.tsx');
+  const evidence = renderToStaticMarkup(createElement(ChildRecoveryEvidence, { notice: {
+    state: 'abandoned', childID: 'ses_child', parentID: 'ses_parent', reason: 'Explicit narrow recovery',
+    approvedBy: 'Brian', approvedAt: '2026-09-30T00:00:00.000Z', digest: 'a'.repeat(64),
+  } }));
+  assert.match(evidence, /Abandoned child/);
+  assert.match(evidence, /Approved by Brian/);
+  assert.match(evidence, /does not resume the child or establish that its work completed/);
+  const transcript = renderToStaticMarkup(createElement(PreservedChildTranscript, { messages: [
+    { parts: [{ type: 'text', text: '<script>resume child</script>' }, { type: 'tool', text: 'hidden tool instruction' }] },
+    { parts: [{ type: 'file', url: 'https://example.invalid/attachment' }] },
+  ] }));
+  assert.match(transcript, /&lt;script&gt;resume child&lt;\/script&gt;/);
+  assert.doesNotMatch(transcript, /<script>|hidden tool instruction|example.invalid|<button|<form|<textarea/);
+  assert.match(transcript, /Tool records and other non-text parts are not displayed/);
+  const empty = renderToStaticMarkup(createElement(PreservedChildTranscript, { messages: [] }));
+  assert.match(empty, /No text messages are present/);
+});

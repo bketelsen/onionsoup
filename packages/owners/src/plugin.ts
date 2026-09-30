@@ -1,3 +1,4 @@
+import { isAbandonedChild, readChildAbandonment } from './child-recovery.ts';
 import { ownerChatAgent, ownerChatVoice, observationChatPermission, observationChatPrompt } from './owner-chat.ts';
 import { recentActivityContext } from './chat-context.ts';
 import { deliverExchangeNotices } from './exchange-notices.ts';
@@ -503,7 +504,11 @@ const server: Plugin = async (input, options) => {
     if (statuses[sessionID] && statuses[sessionID].type !== 'idle') return false;
     if (activeMessages.has(sessionID)) return false;
     if (activeTools.get(sessionID)?.size) return false;
-    if (pendingChildren.get(sessionID)?.size) return false;
+    for (const childID of pendingChildren.get(sessionID) ?? []) {
+      if (statuses[childID]?.type === 'busy' || statuses[childID]?.type === 'retry' || activeMessages.has(childID)
+        || activeTools.get(childID)?.size || !await isAbandonedChild(runtime.stateDirectory,
+          { childID, parentID: sessionID, directory })) return false;
+    }
     for (const child of joinedChildren.get(sessionID) ?? []) {
       if (statuses[child] && statuses[child].type !== 'idle') return false;
     }
@@ -511,7 +516,8 @@ const server: Plugin = async (input, options) => {
     if (!children || children.error || !children.data) return false;
     for (const child of children.data) {
       knownParents.set(child.id, sessionID);
-      if (!statuses[child.id] && !await childHasFinalAnswer(child.id, directory)) return false;
+      if (!statuses[child.id] && !await isAbandonedChild(runtime.stateDirectory, { childID: child.id, parentID: sessionID, directory })
+        && !await childHasFinalAnswer(child.id, directory)) return false;
       if (!await isIdleWithChildren(child.id, statuses, directory, requireFinalProof, visited)) return false;
     }
     return true;
@@ -652,6 +658,8 @@ const server: Plugin = async (input, options) => {
       const ancestry = await input.client.session.get({ path: { id: child.id }, query: { directory } }).catch(() => undefined);
       if (!ancestry?.data || ancestry.error || ancestry.data.parentID !== sessionID || ancestry.data.directory !== directory) return false;
       knownParents.set(child.id, sessionID);
+      if (statuses[child.id]?.type === 'busy' || statuses[child.id]?.type === 'retry') return false;
+      if (await isAbandonedChild(runtime.stateDirectory, { childID: child.id, parentID: sessionID, directory })) continue;
       if (!await childHasFinalAnswer(child.id, directory)) return false;
       if (!await childrenHaveFinalAnswers(child.id, directory, statuses)) return false;
     }
@@ -1065,6 +1073,7 @@ const server: Plugin = async (input, options) => {
 
   return {
     async 'tool.execute.before'(input, output) {
+      if (await readChildAbandonment(runtime.stateDirectory, input.sessionID)) throw new Error('child_session_abandoned: preserved history is read-only');
       const key = `${input.sessionID}:${input.callID}`;
       const pending = Symbol(key);
       pendingAncestry.add(pending);
@@ -1173,6 +1182,7 @@ const server: Plugin = async (input, options) => {
     },
 
     async 'chat.message'(message, output) {
+      if (await readChildAbandonment(runtime.stateDirectory, message.sessionID)) throw new Error('child_session_abandoned: open a new session to continue');
       const pending = Symbol(message.sessionID);
       pendingAncestry.add(pending);
       markChatActive(message.sessionID);

@@ -1,3 +1,4 @@
+import { isAbandonedChild, childRecoverySnapshot } from '../packages/owners/src/child-recovery.ts';
 import { basename, isAbsolute, join, resolve } from 'node:path';
 import { readFile, lstat, stat, readdir } from 'node:fs/promises';
 import { Runtime } from '../packages/owners/src/runtime.ts';
@@ -46,6 +47,8 @@ export async function readOpencodeEndpoint(state, unit = SURFACE_UNIT) {
       !Number.isSafeInteger(record.surfacePid) || !Number.isSafeInteger(record.opencodePid)) {
       throw fail('deployment_endpoint_invalid');
     }
+    const [surfaceOwner, childOwner] = await Promise.all([stat(`/proc/${record.surfacePid}`), stat(`/proc/${record.opencodePid}`)]);
+    if (surfaceOwner.uid !== process.getuid() || childOwner.uid !== process.getuid()) throw fail('deployment_endpoint_invalid');
     const [surface, child, surfaceCgroup, childCgroup, command] = await Promise.all([
       identity(record.surfacePid), identity(record.opencodePid),
       readFile(`/proc/${record.surfacePid}/cgroup`, 'utf8'),
@@ -134,10 +137,18 @@ export async function createAdmission(input) {
     opencodeRequest(endpoint.url, path, directory, `${endpoint.username}:${endpoint.password}`));
   const processes = checks.processes ?? independentOpencode;
   const sleep = checks.sleep ?? (milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds)));
-  async function completedTree(endpoint, session, directory, status, visited) {
+  async function completedTree(endpoint, session, directory, status, visited, candidate) {
     if (!session || typeof session.id !== 'string' || visited.has(session.id)) return false;
     if (session.directory !== directory || status[session.id]) return false;
     visited.add(session.id);
+    if (session.parentID) {
+      const identity = { childID: session.id, parentID: session.parentID, directory };
+      if (await isAbandonedChild(input.state, identity)) return true;
+      if (candidate?.childID === session.id && candidate.parentID === session.parentID && candidate.directory === directory) {
+        const snapshot = childRecoverySnapshot(identity);
+        return !snapshot.completed && snapshot.digest === candidate.digest;
+      }
+    }
     const messages = await request(endpoint, `/session/${encodeURIComponent(session.id)}/message`, directory);
     if (!Array.isArray(messages) || !messages.length) return false;
     const latestUser = messages.findLastIndex(message => message?.info?.role === 'user');
@@ -149,11 +160,11 @@ export async function createAdmission(input) {
     const children = await request(endpoint, `/session/${encodeURIComponent(session.id)}/children`, directory);
     if (!Array.isArray(children)) return false;
     for (const child of children) {
-      if (child?.parentID !== session.id || !await completedTree(endpoint, child, directory, status, visited)) return false;
+      if (child?.parentID !== session.id || !await completedTree(endpoint, child, directory, status, visited, candidate)) return false;
     }
     return true;
   }
-  async function probe({ ignoreLeases = false, chatSessions = [], expectedEndpoint } = {}) {
+  async function probe({ ignoreLeases = false, chatSessions = [], expectedEndpoint, candidate } = {}) {
     if (!ignoreLeases && (await listAdmissions(input.state)).some(lease => lease.alive)) return false;
     await runtime.reloadDeclarations();
     const endpoint = await endpointProbe(input.state);
@@ -179,7 +190,7 @@ export async function createAdmission(input) {
         if (!chatSessions.includes(session?.id)) continue;
         if (session.parentID || session.directory !== directory) throw fail('bootstrap_session_unverified');
         found.add(session.id);
-        if (!await completedTree(endpoint, session, directory, status, new Set())) return false;
+        if (!await completedTree(endpoint, session, directory, status, new Set(), candidate)) return false;
       }
     }
     if (found.size !== chatSessions.length) throw fail('bootstrap_session_unverified');
@@ -199,6 +210,15 @@ export async function createAdmission(input) {
       const pending = JSON.parse(await readFile(join(input.state, 'deploy', 'pending.json'), 'utf8'));
       if (pending.status !== 'draining' || pending.targetBuildId !== target) return false;
       return probe();
+    },
+    async childRecoveryQuiet(candidate, expectedEndpoint) {
+      const options = { ignoreLeases: true, chatSessions: [candidate.parentID], expectedEndpoint, candidate };
+      if (!await probe(options)) return false;
+      for (let sample = 0; sample < QUIET_SAMPLES; sample++) {
+        await sleep(QUIET_SAMPLE_MS);
+        if (!await probe(options)) return false;
+      }
+      return true;
     },
     async bootstrapQuiet(chatSessions, expectedEndpoint) {
       if (!await probe({ ignoreLeases: true, chatSessions, expectedEndpoint })) return false;
