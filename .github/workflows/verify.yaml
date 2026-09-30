@@ -1,0 +1,39 @@
+name: Verify
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Prepare Git and the real Linux sandbox
+        run: |
+          git config --global user.name 'Onionsoup CI'
+          git config --global user.email 'onionsoup-ci@example.invalid'
+          sudo apt-get update -qq
+          sudo apt-get install -y bubblewrap
+          sudo loginctl enable-linger "$USER"
+          sudo systemctl start "user@$(id -u).service"
+          echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> "$GITHUB_ENV"
+          mkdir -p ~/.config/opencode ~/.local/state/opencode ~/.local/share/opencode ~/.cache ~/.npm ~/go
+      - run: npm ci
+      - run: timeout 180s npm run verify
+        env:
+          ONIONSOUP_HOME: ${{ runner.temp }}/onionsoup-home
+          ONIONSOUP_CONFIG: ${{ runner.temp }}/onionsoup-config
