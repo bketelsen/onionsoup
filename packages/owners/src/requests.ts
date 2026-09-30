@@ -4,6 +4,7 @@ import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { ProposedWork } from './artifacts.ts';
+import { ChatOrigin } from './chat-origin.ts';
 import { AssignmentRef } from './initiatives.ts';
 
 export const REQUEST_LIMITS = { decisionAttempts: 3, retryBaseMs: 60_000, retryMaxMs: 15 * 60_000, reconcileMs: 5 * 60_000 };
@@ -121,6 +122,7 @@ export type RequestCheckpoint = z.infer<typeof RequestCheckpoint>;
 
 export const ResourceRequest = z.object({
   id: z.string(),
+  origin: ChatOrigin.optional(),
   from: z.string(),
   to: z.string(),
   ask: ResourceAsk,
@@ -155,6 +157,26 @@ export class Requests {
     const now = new Date().toISOString();
     const request = ResourceRequest.parse({ id: `r-${now.slice(0, 10).replaceAll('-', '')}-${randomUUID().slice(0, 6)}`, from, to, ask, followUp, status: 'pending-owner', createdAt: now, updatedAt: now });
     return this.save(request);
+  }
+
+  /** Create once under a caller-derived identity; replay never rewinds a progressed request. */
+  async openIdentified(id: string, from: string, to: string, ask: ResourceAsk, followUp: string, origin?: ChatOrigin, beforeCreate?: () => void) {
+    if (!/^r-handoff-[a-f0-9]{64}$/.test(id)) throw new Error('request_identity_invalid');
+    const input = { from, to, ask: ResourceAsk.parse(ask), followUp, origin };
+    return withRecordLock(`${this.path(id)}.lock`, async () => {
+      const existing = await this.get(id).catch(error => {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        return undefined;
+      });
+      if (existing) {
+        const original = { from: existing.from, to: existing.to, ask: existing.ask, followUp: existing.followUp, origin: existing.origin };
+        if (JSON.stringify(original) !== JSON.stringify(input)) throw new Error('request_identity_conflict');
+        return existing;
+      }
+      beforeCreate?.();
+      const now = new Date().toISOString();
+      return this.write(ResourceRequest.parse({ id, ...input, status: 'pending-owner', createdAt: now, updatedAt: now }));
+    });
   }
 
   async get(id: string) {

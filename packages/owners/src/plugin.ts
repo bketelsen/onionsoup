@@ -1401,16 +1401,19 @@ const server: Plugin = async (input, options) => {
         },
       }),
       onionsoup_ask: tool({
-        description: 'Ask another owner a question about its domain. It answers from its own notebook and fresh evidence, separating observed, inferred and unknown. Takes a minute or two.',
+        description: 'Ask another owner about its domain. Set followUp only when requesting action: its read-only consultation may propose one repository change, which host code queues through ordinary receiver acceptance and plan approvals. Missing evidence remains explicit. Takes a minute or two.',
         args: {
           owner: tool.schema.string().describe('The owner id or persona name, e.g. Miles Teg'),
           question: tool.schema.string(),
+          followUp: tool.schema.boolean().optional().describe('Explicitly request a proposed repository fix and durable gated work request; omit for information only'),
         },
         async execute(args, context) {
           const asker = requireOwner(context.agent);
           context.metadata({ title: `asking ${args.owner}` });
-          const { answerer, answer } = await askOwner(runtime, asker.id, args.owner, args.question);
-          return formatAnswer(answerer, answer);
+          const followUp = args.followUp ? { origin: { sessionID: context.sessionID, messageID: context.messageID, directory: context.directory } } : undefined;
+          const { answerer, answer, request, handoffStatus } = await askOwner(runtime, asker.id, args.owner, args.question, followUp);
+          const status = request ? `\nFollow-up request ${request.id}: ${request.status}. Receiver acceptance and ordinary plan/effect gates still apply.` : handoffStatus ? `\nFollow-up ${handoffStatus.state}: ${handoffStatus.reason ?? 'no work proposed'}.` : '';
+          return formatAnswer(answerer, answer) + status;
         },
       }),
       onionsoup_propose_changes: tool({

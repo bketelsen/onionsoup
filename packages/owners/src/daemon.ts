@@ -1,3 +1,4 @@
+import { recoverAskHandoffs } from './ask-handoffs.ts';
 import { canReconcileRequest, reconcileRequest } from './request-recovery.ts';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -264,6 +265,7 @@ async function tickAdmitted(runtime: Runtime, log: TickLog) {
     log.error('publications', error);
   }
   try {
+    await recoverAskHandoffs(runtime, log.error);
     await runtime.requests.markInterrupted();
     await runRequests(runtime, log);
   } catch (error) {
