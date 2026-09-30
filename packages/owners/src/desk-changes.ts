@@ -7,7 +7,8 @@ import { OWNER_CHANGE_WORKFLOW } from './plan-work.ts';
 import { effectiveDecision, Verdict } from './artifacts.ts';
 import { requestPublish } from './brokering.ts';
 import { findingsSection, findingsText, previousReviewText } from './briefs.ts';
-import { clearDeskReviews, deskReviewRounds, recordDeskReview, reviewSubject, type DeskReviewRound } from './desk-reviews.ts';
+import { clearDeskReviews, deskReviewRounds, recordDeskReview, reviewSubject, type DeskReviewRound, type ReviewEvidence } from './desk-reviews.ts';
+import { safeProse } from './friction.ts';
 import { requireFreelancer, type RepositoryOwner } from './declarations.ts';
 import { pickModel } from './families.ts';
 import type { Runtime } from './runtime.ts';
@@ -34,13 +35,16 @@ function hasMergeGrant(owner: RepositoryOwner) {
   return owner.grants.some(grant => grant.to === owner.id && grant.action === 'merge' && (grant.target === owner.domain.name || grant.target === '*'));
 }
 
-function reviewBrief(owner: RepositoryOwner, title: string, summary: string, base: string, patch: string, previousReview?: string) {
+function reviewBrief(owner: RepositoryOwner, title: string, summary: string, base: string, patch: string, evidence: ReviewEvidence, criteria: readonly string[], previousReview?: string) {
   return [
     `You have been hired to review a change ${owner.persona?.name ?? owner.id} made in ${owner.domain.name}. Do not edit anything.`,
     REPOSITORY_REVIEW,
     `<title>${title}</title>`,
     `<what-the-owner-says-it-does>\n${summary}\n</what-the-owner-says-it-does>`,
     `<diff against="${base}">\n${patch}\n</diff>`,
+    `<host-verification>\n${JSON.stringify(evidence)}\n</host-verification>`,
+    `<task-acceptance>\n${JSON.stringify(criteria)}\n</task-acceptance>`,
+    'Host verification above applies only to the recorded tree and configured checks (one-based configurationIndex). Command arguments and output are withheld to avoid exposing credentials. An empty checks list means no configured checks ran. An empty task-acceptance list means no approved task criteria are available; assess the author claim separately. This evidence does not prove deployment, live environment behavior, or every acceptance criterion. Check each task criterion against available evidence. If required evidence is inaccessible, name the missing prerequisite precisely; do not invent a defect or claim that unavailable tests passed. You need not repeat host commands solely to establish their recorded exit status.',
     previousReview,
     `Approve only if the diff does what the owner says and nothing else, is correct, and keeps to the repository's
 conventions. Revise, with specific findings, otherwise. Replan is not available here; use revise. Only blocker
@@ -86,7 +90,7 @@ async function recordNeedsWork(runtime: Runtime, owner: RepositoryOwner, scope: 
 }
 
 async function needsWork(runtime: Runtime, owner: RepositoryOwner, scope: ReviewScope, title: string, review: DeskReview): Promise<DeskChangeResult> {
-  await recordNeedsWork(runtime, owner, scope, title, { at: new Date().toISOString(), reviewer: review.reviewer, ...review.verdict, tree: review.tree });
+  await recordNeedsWork(runtime, owner, scope, title, { at: new Date().toISOString(), reviewer: review.reviewer, ...review.verdict, tree: review.tree, evidence: review.evidence });
   return { outcome: 'needs-work', summary: `${review.reviewer} asked for changes; nothing was committed.\n${review.verdict.summary}\n${findingsText(review.verdict.findings)}` };
 }
 
@@ -168,19 +172,21 @@ async function verifyDesk(owner: RepositoryOwner, deskPath: string, toolsDirecto
   return { verification, failure: { outcome: 'needs-work' as const, summary: failedVerificationSummary(verification) } };
 }
 
-interface DeskReview { verdict: Verdict; reviewer: string; patch: string; tree: string }
+interface DeskReview { verdict: Verdict; reviewer: string; patch: string; tree: string; evidence: ReviewEvidence }
 interface ReviewedDesk extends DeskReview { owner: RepositoryOwner; path: string; verification: Verification[] }
 
 /** Hire the required reviewer from another family, with the previous round when there was one. */
-async function reviewDesk(runtime: Runtime, owner: RepositoryOwner, scope: ReviewScope, deskPath: string, proposal: DeskProposal, base: string): Promise<DeskReview> {
+async function reviewDesk(runtime: Runtime, owner: RepositoryOwner, scope: ReviewScope, deskPath: string, proposal: DeskProposal, base: string, evidence: ReviewEvidence, criteria: readonly string[]): Promise<DeskReview> {
   const rounds = await deskReviewRounds(runtime, owner.id, scope.subject);
   await git(deskPath, ['add', '-A', '--intent-to-add']);
   const patch = (await git(deskPath, ['diff', base])).slice(0, DESK_CHANGE_LIMITS.diffChars);
   const tree = await snapshotTree(deskPath);
-  const brief = reviewBrief(owner, proposal.title, proposal.summary, base, patch, await previousReviewSection(deskPath, rounds, tree));
+  if (tree !== evidence.tree) throw new Error('review_evidence_stale: source changed after host verification');
+  const brief = reviewBrief(owner, proposal.title, proposal.summary, base, patch, evidence, criteria, await previousReviewSection(deskPath, rounds, tree));
   const reviewer = pickModel(runtime.declarations.families, requireFreelancer(runtime.declarations, 'review').models, [runtime.family(owner.model)]);
   const hired = await runtime.hire(owner.id, { role: 'reviewer', model: reviewer.model, directory: deskPath, title: `${owner.id}: review desk change`, brief, schema: Verdict });
-  return { verdict: hired.value, reviewer: reviewer.model, patch, tree };
+  if (await snapshotTree(deskPath) !== tree) throw new Error('review_evidence_stale: source changed during review');
+  return { verdict: hired.value, reviewer: reviewer.model, patch, tree, evidence };
 }
 
 function publicationFields(desk: ReviewedDesk, proposal: DeskProposal, reviewedHead: string, reviewedTree: string): Partial<WorkItem> {
@@ -206,7 +212,7 @@ type PublicationItem = (runtime: Runtime, desk: ReviewedDesk, proposal: DeskProp
 const PUBLICATION_ITEMS: Record<DeskTarget['kind'], PublicationItem> = {
   new: newPublication,
   plan: (runtime, _desk, proposal, fields) => runtime.ledger.update(proposal.item!, current => ({
-    ...current, ...fields, proposal: { ...current.proposal, title: proposal.title, goal: proposal.summary },
+    ...current, ...fields, proposal: { ...current.proposal, title: proposal.title },
   })),
   repair: (runtime, desk, proposal, fields, target) => {
     const { item, head } = target as Extract<DeskTarget, { kind: 'repair' }>;
@@ -225,12 +231,17 @@ async function publicationItem(runtime: Runtime, desk: ReviewedDesk, proposal: D
 async function prepareDeskChanges(runtime: Runtime, owner: RepositoryOwner, proposal: DeskProposal, target: DeskTarget): Promise<DeskChangeResult> {
   if (!(await git(target.path, ['status', '--porcelain'])).trim()) return { outcome: 'nothing-to-do', summary: `${target.path} has no changes.` };
   await git(target.path, ['fetch', '-q', 'origin']);
+  const verifiedTree = await snapshotTree(target.path);
   const { verification, failure } = await verifyDesk(owner, target.path, runtime.toolsDirectory);
   if (failure) return failure;
+  if (await snapshotTree(target.path) !== verifiedTree) return { outcome: 'needs-work', summary: 'verification_changed_source: host checks changed the proposed tree. Inspect those changes and propose again so verification covers the final source.' };
+  const evidence: ReviewEvidence = { observedAt: new Date().toISOString(), tree: verifiedTree,
+    verifier: 'host-sandbox', checks: verification.map((check, index) => ({ command: safeProse(check.command.split(/\s+/)[0]!), exitCode: check.exitCode, configurationIndex: index + 1 })) };
   const scope = reviewScope(owner, target);
   const waiting = waitingForPerson(scope, await deskReviewRounds(runtime, owner.id, scope.subject));
   if (waiting) return waiting;
-  const review = await reviewDesk(runtime, owner, scope, target.path, proposal, await reviewBase(owner, target));
+  const criteria = target.kind === 'new' ? [] : target.item.proposal.acceptance;
+  const review = await reviewDesk(runtime, owner, scope, target.path, proposal, await reviewBase(owner, target), evidence, criteria);
   if (effectiveDecision(review.verdict) !== 'approve') return needsWork(runtime, owner, scope, proposal.title, review);
   await clearDeskReviews(runtime, owner.id, scope.subject);
   await git(target.path, ['add', '-A']);

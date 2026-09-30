@@ -4,12 +4,20 @@ import { z } from 'zod';
 import { Finding, Verdict } from './artifacts.ts';
 import type { Runtime } from './runtime.ts';
 
+/** Host-observed command results for one exact tree; raw output is intentionally excluded. */
+export const ReviewEvidence = z.object({
+  observedAt: z.string().datetime(), tree: z.string(), verifier: z.literal('host-sandbox'),
+  checks: z.array(z.object({ command: z.string(), exitCode: z.number(), configurationIndex: z.number().int().positive() })),
+});
+export type ReviewEvidence = z.infer<typeof ReviewEvidence>;
+
 /**
  * The review rounds of one owner's desk change in one repository. Each round keeps the tree it reviewed, so the
  * next reviewer sees what changed since and checks the earlier findings first instead of starting over.
  */
 export const DeskReviewRound = z.object({
   at: z.string(), reviewer: z.string(), decision: Verdict.shape.decision, summary: z.string(), findings: z.array(Finding), tree: z.string(),
+  evidence: ReviewEvidence.optional(),
 });
 export type DeskReviewRound = z.infer<typeof DeskReviewRound>;
 const DeskReviewHistory = z.object({ rounds: z.array(DeskReviewRound) });

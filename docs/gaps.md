@@ -165,3 +165,5 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
   loaded, and hires are created by the daemon's own servers, so the surface's opencode never listed a hire that
   started after the surface did. The activity rail finds an item's hire sessions by title in opencode's store
   (`readSessionsTitled` in `packages/surface/src/hire-store.ts`) instead.
+
+- Desk reviewers now receive tree-bound host check metadata and original task criteria. A general evidence-unavailable workflow, live-environment evidence adapters, and task-specific closure attestations remain future work; command success alone is not deployment or goal completion.
