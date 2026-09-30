@@ -35,6 +35,8 @@ export const RepositoryDomain = z.object({
   name: z.string(),
   remote: z.string(),
   baseBranch: z.string(),
+  /** Maximum age of host verification for explicit request closure; defaults to 24 hours. */
+  requestClosureEvidenceMaxAgeMs: z.number().int().positive().optional(),
   /** Host-run verification after every implementation. Freelancer claims are not evidence. */
   verify: z.array(z.array(z.string()).min(1)).min(1),
 });

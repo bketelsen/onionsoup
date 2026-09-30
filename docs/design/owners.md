@@ -255,7 +255,31 @@ revise findings that remain follow-up; historical reviews are never rewritten. M
 is not approval, and mismatched evidence is refused. Request-scoped status distinguishes the fact
 from acceptance. Observation leaves publication, blockers, goal, plan and request completion
 unchanged and never creates follow-up work. A later review does not rewrite the observation;
-ordinary acceptance gates still govern completion. There is no bulk historical import.
+explicit acceptance still governs completion. There is no bulk historical import.
+
+**Closure after follow-up fixes.** `owners prepare-request-closure` verifies a separate clean checkout
+at the configured base tip, the original observed merges and the explicitly selected merged follow-up
+PRs. It binds the original request, goal, plan approval, review history, configured checks and exact
+integrated commit/tree. Host verification and a fresh cross-family review assess the original acceptance
+criteria and give every historical finding an explicit evidence-backed disposition: fixed, or outside
+the original approved scope. Review failure cannot be accepted. The new review has its own history;
+it never changes the old verdict, historical merge observation or request-scoped attempt evidence.
+
+Preparation produces a durable candidate, not completion. The person inspects it and runs
+`owners accept-request <owner> <item> <digest> --note <rationale>`. Acceptance rechecks freshness,
+scope, configuration, source and GitHub facts before committing under request then ledger locks.
+Verification and model execution happen outside those locks. A competing plan revision, cancellation,
+runner or changed request invalidates the candidate. Evidence has a 24-hour default lifetime, controlled
+by the repository’s optional `requestClosureEvidenceMaxAgeMs`; advancing the configured base also requires fresh preparation.
+
+The append-only acceptance receipt records the person, rationale, exact candidate and timestamp.
+It moves the work to landed without inventing a publication or replacing old findings. The linked
+request becomes completed from that receipt; if interrupted between those writes, the same acceptance
+command or normal delegated-work tracking repairs only the matching request projection. Identical retries
+preserve the receipt and completion timestamp; conflicting acceptance is refused. Coordinator and surface
+views distinguish current acceptance from historical revise evidence. This is a host CLI capability with
+the existing trusted-person boundary, not a model tool, persistent grant or general outcome system.
+See the [closure commands](../extending.md) for invocation and operational prerequisites.
 
 **Repairs on the desk.** The `maintain-prs` duty keeps published PRs mergeable and green. Failing CI on a new head
 commit hires the owner once for that commit to decide fix, flaky or person; no work item is opened. `fix` wakes the

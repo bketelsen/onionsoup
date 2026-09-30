@@ -408,3 +408,32 @@ review requirements. For a historical merged-PR fact without accepted completion
 `owners observe-merged-pr <owner> <item> <url>`. It preserves current review findings as
 follow-up and leaves the request open; it does not run another review or dispatch work.
 None of these operations establishes deployment.
+
+For a historically merged request whose outstanding findings were fixed by later merged PRs,
+the person can prepare and explicitly accept closure:
+
+```sh
+owners prepare-request-closure <owner> <item> --directory /path/to/clean-integrated-checkout --follow-up https://github.com/org/repo/pull/107
+owners accept-request <owner> <item> <printed-closure-digest> --note "Why the original scoped goal is satisfied"
+```
+
+Repeat `--follow-up` for each relevant merged fix. Use a separate clean worktree at the fetched
+configured base tip; keep the original plan worktree and review history intact. Preparation verifies
+GitHub merge facts and local ancestry, runs every configured verification command, and hires the
+configured reviewer from another model family against the original goal, approved plan and historical
+findings. It prints the evidence and digest; it does not complete the request. Inspect that evidence
+before accepting. Missing evidence, unresolved findings or an unmerged follow-up block preparation.
+Repeating unchanged preparation reuses its still-fresh candidate without another review.
+
+Acceptance requires that exact digest, a nonempty rationale and unchanged scope, configuration,
+source and merge facts. Evidence expires after the repository’s `requestClosureEvidenceMaxAgeMs` (default 24 hours);
+changed or expired evidence needs fresh preparation. The command records the local account as the
+person accepting, retains the original records, marks the work landed and completes its linked request.
+An identical acceptance retry repairs the request projection after interruption without recording a
+second acceptance. A different digest or rationale cannot replace an existing acceptance.
+
+These are trusted host CLI actions under the existing runtime/admission lock, not owner MCP tools or
+new standing grants. A running daemon's runtime lock can require the normal guarded maintenance window;
+do not interrupt active work to run them. The surface and coordinator show the acceptance receipt,
+verified follow-ups and original historical review separately. Repository acceptance does not attest
+deployment, close unrelated friction reports or dispatch more work.

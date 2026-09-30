@@ -250,7 +250,7 @@ async function requestScopedReview(runtime: Runtime, owner: RepositoryOwner, sco
   return review;
 }
 
-async function requestScopedVerification(runtime: Runtime, owner: RepositoryOwner, item: WorkItem | undefined, directory: string) {
+export async function requestScopedVerification(runtime: Runtime, owner: RepositoryOwner, item: WorkItem | undefined, directory: string) {
   const verifiedTree = await snapshotTree(directory);
   await recordRequestWorkEvidence(runtime, item, { stage: 'verifying' });
   const { verification, failure } = await verifyDesk(owner, directory, runtime.toolsDirectory).catch(async error => {

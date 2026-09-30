@@ -47,7 +47,7 @@ export function ItemView({ itemId }: { itemId: string }) {
             {cost > 0 && <span>${cost.toFixed(3)}</span>}
           </div>
           <h1 className="typography-h text-xl font-semibold [overflow-wrap:anywhere]">{item.proposal.title}</h1>
-          {item.reason && <div className="typography-meta text-status-error">{item.reason}</div>}
+          {item.reason && <div className="typography-meta text-status-error">{item.requestAcceptance && 'Historical work reason: '}{item.reason}</div>}
           {item.publication && (
             <a className="inline-flex items-center gap-1 typography-meta text-primary hover:underline break-all" href={item.publication.url} target="_blank" rel="noreferrer">
               <RiExternalLinkLine className="size-3.5" />{item.publication.url} ({item.publication.state})

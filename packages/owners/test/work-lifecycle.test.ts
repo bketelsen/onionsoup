@@ -1227,6 +1227,20 @@ test('external merged PR reconciliation verifies exact source, preserves intent/
     assert.equal((await trackDelegatedWork(runtime, await runtime.requests.get(request.id))).status, 'completed');
     assert.equal((await githubState(root)).created, 0);
   });
+  // The same supported host verification boundary also gates follow-up closure; this fixture runs the
+  // configured check against the integrated source without modifying the original historical plan.
+  const closure = await import('./request-closure-fixture.ts');
+  await closure.withFixture(async fixture => {
+    fixture.runtime.repositoryOwner('clippy').domain.verify.push(['node', '--input-type=module', '-e',
+      "import {dispatch} from './friction.mjs'; if (dispatch({status:'already-fixed'}) !== null) process.exit(1)"]);
+    closure.scriptReview(fixture);
+    const candidate = await closure.prepare(fixture);
+    assert.equal(candidate.verification.checks.length, 1);
+    assert.equal(candidate.verification.checks[0]!.exitCode, 0);
+    assert.equal(candidate.verification.verifier, 'host-sandbox');
+    assert.equal((await closure.accept(fixture, candidate.digest)).status, 'landed');
+    assert.equal((await fixture.runtime.requests.get(fixture.request.id)).status, 'completed');
+  });
 });
 
 test('external linkage rejects wrong authority, remote scope, dirty/head changes and unmet review without altering goal or completion', async () => {
