@@ -193,7 +193,7 @@ async function start(
     { id: 'ses_x', title: 'w-2: plan', directory: '/checkouts/clippy', time: { created: 1, updated: 1 } },
   ].filter(session => session.title.startsWith(prefix));
   const state = new SurfaceState(runtime, api, directory, undefined,
-    sessionID => [{ info: { id: 'msg_1', sessionID, role: 'assistant' }, parts: [] }], hireSessions);
+    sessionID => [{ info: { id: 'msg_1', sessionID, role: 'assistant' }, parts: [] }], hireSessions, undefined, () => true);
   const buildId = await readReleaseBuildId(manifestPath ?? DEFAULT_RELEASE_MANIFEST);
   const { server } = surfaceServer(state, { webRoot: '/nonexistent', by: 'tester', buildId });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -339,10 +339,13 @@ test('chats go to the owner\'s directory with its persona as the agent; bad inpu
     assert.equal((await call('POST', '/api/owners/bellonda/permissions/per_1', { reply: 'sure' })).status, 400);
     const clippy = runtime.declarations.owners.get('clippy')!;
     runtime.declarations.owners.set('clippy', { ...clippy, persona: undefined });
-    assert.equal((await call('POST', '/api/owners/clippy/sessions', {})).status, 200);
-    assert.equal((await call('POST', '/api/owners/clippy/sessions/ses_1/prompt', { text: 'What do you know?' })).status, 200);
+    const created = await call('POST', '/api/owners/clippy/sessions', {});
+    assert.equal(created.status, 200);
+    assert.equal(created.body.id, 'ses_2');
+    assert.equal((await call('POST', '/api/owners/clippy/sessions/ses_1/prompt', { text: 'Wrong owner' })).status, 404);
+    assert.equal((await call('POST', '/api/owners/clippy/sessions/ses_2/prompt', { text: 'What do you know?' })).status, 200);
     // start() injects the /desks/<id> resolver: this checks agent mapping, not filesystem workspace creation.
-    assert.deepEqual(calls.at(-1), ['prompt', '/desks/clippy', 'ses_1', 'onionsoup-owner-clippy', 'What do you know?']);
+    assert.deepEqual(calls.at(-1), ['prompt', '/desks/clippy', 'ses_2', 'onionsoup-owner-clippy', 'What do you know?']);
     assert.equal((await call('GET', '/api/owners/nobody/sessions')).status, 404);
     assert.match(String((await call('POST', '/api/decide', { action: 'launch', id: 'x' })).body.error), /unknown_decision|not found|ENOENT/);
   } finally {
@@ -353,6 +356,11 @@ test('chats go to the owner\'s directory with its persona as the agent; bad inpu
 test('the operator has a chat of its own in its directory, apart from the owners, with its prompts in the inbox', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'surface-operator-'));
   const { server, call, calls, runtime } = await start(api => {
+    const createSession = api.createSession;
+    api.createSession = async (...args) => {
+      const created = await createSession(...args);
+      return args[0] === directory ? { ...(created as object), id: 'ses_op' } : created;
+    };
     api.permissions = async candidate => candidate === directory
       ? [{ id: 'per_op', sessionID: 'ses_op', permission: 'bash', patterns: ['git push --force'], metadata: {}, always: [] }]
       : [];
@@ -368,9 +376,11 @@ test('the operator has a chat of its own in its directory, apart from the owners
     });
     assert.ok(!state.owners.some(owner => owner.id === OPERATOR_ID), 'the operator is not an owner');
     assert.ok(state.inbox.some(entry => entry.id === 'per_op' && entry.owner === OPERATOR_ID));
-    await call('POST', '/api/owners/operator/sessions', {});
+    const created = await call('POST', '/api/owners/operator/sessions', {});
+    assert.equal(created.status, 200);
+    assert.equal(created.body.id, 'ses_op');
     assert.deepEqual(calls.at(-1), ['create', directory, undefined, 'Operator']);
-    await call('POST', '/api/owners/operator/sessions/ses_op/prompt', { text: 'check the daemon' });
+    assert.equal((await call('POST', '/api/owners/operator/sessions/ses_op/prompt', { text: 'check the daemon' })).status, 200);
     assert.deepEqual(calls.at(-1), ['prompt', directory, 'ses_op', 'Operator', 'check the daemon']);
     assert.equal((await call('GET', '/api/owners/operator/sessions')).body.directory, directory);
     await call('POST', '/api/owners/operator/permissions/per_op', { reply: 'reject' });

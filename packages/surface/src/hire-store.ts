@@ -14,23 +14,27 @@ export function opencodeDatabase() {
 export function readSessionMessages(sessionID: string, database = opencodeDatabase()) {
   const db = new DatabaseSync(database, { readOnly: true });
   try {
-    const messages = db.prepare('select id, data from message where session_id = ? order by time_created, id').all(sessionID) as { id: string; data: string }[];
-    const parts = db.prepare('select id, message_id, data from part where session_id = ? order by time_created, id').all(sessionID) as { id: string; message_id: string; data: string }[];
-    const byMessage = new Map<string, unknown[]>();
-    for (const part of parts) {
-      const list = byMessage.get(part.message_id) ?? [];
-      list.push({ ...(JSON.parse(part.data) as object), id: part.id, messageID: part.message_id, sessionID });
-      byMessage.set(part.message_id, list);
-    }
-    return messages.map(message => {
-      const info = JSON.parse(message.data) as Record<string, unknown>;
-      // The brief's structured-output schema is noise to a reader.
-      delete info.format;
-      return { info: { ...info, id: message.id, sessionID }, parts: byMessage.get(message.id) ?? [] };
-    });
+    return messagesFromStore(db, sessionID);
   } finally {
     db.close();
   }
+}
+
+function messagesFromStore(db: DatabaseSync, sessionID: string) {
+  const messages = db.prepare('select id, data from message where session_id = ? order by time_created, id').all(sessionID) as { id: string; data: string }[];
+  const parts = db.prepare('select id, message_id, data from part where session_id = ? order by time_created, id').all(sessionID) as { id: string; message_id: string; data: string }[];
+  const byMessage = new Map<string, unknown[]>();
+  for (const part of parts) {
+    const list = byMessage.get(part.message_id) ?? [];
+    list.push({ ...(JSON.parse(part.data) as object), id: part.id, messageID: part.message_id, sessionID });
+    byMessage.set(part.message_id, list);
+  }
+  return messages.map(message => {
+    const info = JSON.parse(message.data) as Record<string, unknown>;
+    // The brief's structured-output schema is noise to a reader.
+    delete info.format;
+    return { info: { ...info, id: message.id, sessionID }, parts: byMessage.get(message.id) ?? [] };
+  });
 }
 
 /**
@@ -47,4 +51,20 @@ export function readSessionsTitled(prefix: string, database = opencodeDatabase()
   } finally {
     db.close();
   }
+}
+
+/** Archived owner transcripts require both an authorized ID and its immutable creation directory. */
+export function readArchivedSessionMessages(sessionID: string, directory: string, database = opencodeDatabase()) {
+  let db: DatabaseSync | undefined;
+  try {
+    db = new DatabaseSync(database, { readOnly: true });
+    db.exec('BEGIN');
+    const row = db.prepare('select directory from session where id = ?').get(sessionID) as { directory: string } | undefined;
+    if (!row) throw new Error('history_transcript_unavailable');
+    if (row.directory !== directory) throw new Error('history_directory_mismatch');
+    return messagesFromStore(db, sessionID);
+  } catch (error) {
+    if (error instanceof Error && error.message === 'history_directory_mismatch') throw error;
+    throw new Error('history_transcript_unavailable');
+  } finally { db?.close(); }
 }

@@ -54,3 +54,5 @@ export { promoteFriction, retryFrictionPromotion, frictionProposalDigest, fricti
 export { planRevisionStatus } from './plan-revision.ts';
 
 export { ownerChatAgent } from './owner-chat.ts';
+
+export { SessionHistory, rememberSession, rememberedSession, sessionHistory, itemSessionHistory } from './session-history.ts';

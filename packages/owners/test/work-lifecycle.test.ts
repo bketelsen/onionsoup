@@ -1,3 +1,4 @@
+import { sessionHistory } from '../src/session-history.ts';
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
@@ -997,6 +998,7 @@ test('a plan merged under its grant keeps its worktree and session; the cleanup 
   const cleaned = await runtime.ledger.get(plan!.id);
   assert.equal(existsSync(path), false);
   assert.equal(cleaned.planWorktree, undefined);
+  assert.ok((await sessionHistory(runtime, 'clippy')).some(session => session.id === 'ses_plan_1' && session.directory === path));
   assert.deepEqual(cleaned.session, { sessionID: 'ses_plan_1', directory: path }, 'the session keeps its real directory');
   const { workspace } = runtime.repositoryOwner('clippy');
   assert.equal((await git(workspace, ['branch', '--list', `plan/${plan!.id}`])).trim(), '', 'its branch goes with it');
@@ -1076,4 +1078,16 @@ test('a desk whose commits were squash-merged moves to the base even though no r
   const synced = await syncOwnerDesk(runtime, 'clippy');
   assert.equal(synced.outcome, 'updated');
   assert.equal((await git(desk.path, ['rev-parse', 'HEAD'])).trim(), squashed);
+});
+
+
+test('session index failure cannot prevent an approved plan from starting', async () => {
+  const { runtime } = await fixture();
+  await mkdir(runtime.stateDirectory, { recursive: true });
+  await writeFile(join(runtime.stateDirectory, 'session-history'), 'unavailable index');
+  const { items: [item], opened } = await openPlans(runtime, ['Approved work survives metadata failure']);
+  assert.equal(opened.length, 1);
+  assert.ok(opened[0].text?.includes(item.id));
+  assert.equal(item.session?.sessionID, 'ses_plan_1');
+  assert.equal(item.status, 'working');
 });

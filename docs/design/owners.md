@@ -854,3 +854,38 @@ facts Brian must relay between owners; fewer eligible obligations stalled across
 answer that names current evidence, uncertainty, blockers and next action. Compare duplicate request identities,
 uncertain/blocked counts and observed inference cost alongside those user outcomes. The preview provides metadata
 counts, not automatic measurements of conversational burden or verified business outcomes.
+
+
+### Durable owner conversation history
+
+Host-created and observed owner sessions are indexed in `state/session-history` by exact session identity, owner
+and creation directory. Plan cleanup records those identities before removing the workspace and marks its
+execution sessions archived afterward. Ledger origins and execution-session references also provide a read-only
+fallback for older items; there is no title-based owner inference or automatic historical backfill. Only sessions
+observed in an owner's exact directory and explicit item references are eligible. Conflicting identity claims
+fail closed. The index contains metadata, not a transcript copy, and has no automatic retention deletion.
+
+The surface discovers archived conversations after cleanup and restart. Existing workspaces use the supported
+OpenCode API. Archived transcripts use the existing read-only SQLite adapter, first checking exact session ID
+and stored directory. A missing transcript produces `history_transcript_unavailable`; ledger outcomes remain
+available. This does not recover transcripts deleted from OpenCode or never-observed child sessions. The SQLite
+fallback depends on the same versioned table layout as the existing hire reader.
+
+Archived conversations cannot receive prompts, renames, aborts or auto-accept changes. Recreating the same path
+does not reactivate a record marked archived by cleanup. Older ledger-only references have no durable archive
+marker: their missing directories are read-only, but path reuse cannot be distinguished from the original workspace. The UI shows the conversation as read-only; **New chat** creates a fresh
+session in the valid owner workspace. Automatic context-linked continuation remains a later improvement.
+Ownership is checked before transcript access; an unknown session ID never falls back to an owner's desk.
+
+Corrupt individual index records are skipped with metadata-only warnings; malformed or conflicting session
+observations are not claimed. Exact authorization rejects an unreadable identity record rather than treating it
+as absent. Index writes are best-effort when starting already-approved work: the ledger retains its session
+reference, and metadata failure cannot stop its prompt. Cleanup still fails closed if it cannot preserve identity
+before removing a workspace. Missing or incompatible transcript stores return the unavailable tombstone.
+
+Surface session access requires an available history index. A whole-index read or write failure reports HTTP 503
+`session_history_unavailable`, rather than silently hiding conversations or treating storage failure as missing
+ownership. Malformed individual identities remain denied; directory ownership fallback is never widened by an
+index error. Session creation checks index readability before contacting OpenCode, but a later storage failure
+can still occur after creation and requires inspection. Approved engine dispatch keeps its durable ledger fallback
+and does not depend on successful index writes. Recorded chat views are ordered by most recently updated.

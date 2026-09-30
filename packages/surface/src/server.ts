@@ -110,7 +110,7 @@ export function surfaceServer(state: SurfaceState, options: { webRoot: string; b
   /** One of an owner's sessions, addressed where it runs: a plan's session in the plan's worktree. */
   const ownedSession = async (ownerId: string, sessionID: string) => {
     requireKnownChat(ownerId);
-    return { directory: await state.sessionDirectory(ownerId, sessionID), agent: () => state.agentOf(ownerId) };
+    return { directory: await codedRoute({ session_not_owned: 404, session_workspace_unavailable: 409 }, () => state.sessionDirectory(ownerId, sessionID)), agent: () => state.agentOf(ownerId) };
   };
 
   /** A waiting prompt or question of an owner's, addressed in the directory it waits in. */
@@ -204,17 +204,20 @@ export function surfaceServer(state: SurfaceState, options: { webRoot: string; b
       return { enabled, answered };
     }),
     route('POST', '/api/owners/:owner/sessions', async (params, body) => {
+      requireKnownChat(params.owner!);
+      await state.assertHistoryAvailable(params.owner!);
       const { directory, agent } = await owned(params.owner!);
       const input = await body();
-      return state.opencode.createSession(directory, typeof input.title === 'string' ? input.title : undefined, agent());
+      const created = await state.opencode.createSession(directory, typeof input.title === 'string' ? input.title : undefined, agent());
+      return state.rememberCreatedSession(params.owner!, directory, created);
     }),
     route('PATCH', '/api/owners/:owner/sessions/:session', async (params, body) => {
       const { directory } = await ownedSession(params.owner!, params.session!);
       return state.opencode.renameSession(directory, params.session!, text((await body()).title, 'title'));
     }),
     route('GET', '/api/owners/:owner/sessions/:session/messages', async params => {
-      const { directory } = await ownedSession(params.owner!, params.session!);
-      return state.opencode.messages(directory, params.session!);
+      requireKnownChat(params.owner!);
+      return codedRoute({ session_not_owned: 404, history_transcript_unavailable: 410, history_directory_mismatch: 403 }, () => state.sessionMessages(params.owner!, params.session!));
     }),
     route('POST', '/api/owners/:owner/sessions/:session/prompt', async (params, body) => {
       const { directory, agent } = await ownedSession(params.owner!, params.session!);
@@ -297,7 +300,8 @@ export function surfaceServer(state: SurfaceState, options: { webRoot: string; b
         }
         await serveStatic(url.pathname, response);
       } catch (error) {
-        const status = error instanceof HttpError ? error.status : 500;
+        const status = error instanceof HttpError ? error.status
+          : error instanceof Error && error.message === 'session_history_unavailable' ? 503 : 500;
         if (!response.headersSent) send(response, status, { error: error instanceof Error ? error.message : String(error) });
         else response.end();
       }

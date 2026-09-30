@@ -46,8 +46,8 @@ export function AssistantMessage({ message, directory, streaming }: { message: M
 }
 
 /** One chat with an owner, drawn like OpenChamber's: bubbles for the person, a timeline of parts for the owner. */
-export function ChatPane({ owner, sessionId, directory, pending, onPendingDone, autoAccept, onToggleAutoAccept }: {
-  owner: OwnerSummary; sessionId: string; directory: string; pending: InboxEntry[]; onPendingDone: () => void; autoAccept: boolean; onToggleAutoAccept: () => void;
+export function ChatPane({ owner, sessionId, directory, pending, onPendingDone, autoAccept, onToggleAutoAccept, archived = false }: {
+  archived?: boolean; owner: OwnerSummary; sessionId: string; directory: string; pending: InboxEntry[]; onPendingDone: () => void; autoAccept: boolean; onToggleAutoAccept: () => void;
 }) {
   const chat = useChat(owner.id, sessionId, directory);
   const scroller = useRef<HTMLDivElement>(null);
@@ -73,7 +73,7 @@ export function ChatPane({ owner, sessionId, directory, pending, onPendingDone, 
         <div className="relative min-h-0 flex-1">
           <div ref={scroller} onScroll={onScroll} className="absolute inset-0 overflow-y-auto overflow-x-hidden overscroll-contain z-0 chat-scroll" data-scroll-shadow="true" data-orientation="vertical">
             {!chat.loaded && <div className="chat-message-column pt-6"><Empty>Loading…</Empty></div>}
-            {chat.loaded && !chat.messages.length && <div className="chat-message-column pt-6"><Empty>Say something to {owner.name}.</Empty></div>}
+            {chat.loaded && !chat.messages.length && <div className="chat-message-column pt-6"><Empty>{archived ? "No transcript messages are available for this archived conversation." : `Say something to ${owner.name}.`}</Empty></div>}
             {hidden > 0 && (
               <div className="chat-message-column pt-4 flex justify-center">
                 <button className="typography-meta text-muted-foreground hover:text-foreground rounded-md px-2 py-1 pointer-coarse:min-h-11 hover:bg-interactive-hover"
@@ -115,7 +115,7 @@ export function ChatPane({ owner, sessionId, directory, pending, onPendingDone, 
               </div>
             </div>
           )}
-          <Composer agent={owner.name} busy={chat.busy} onSend={chat.send} onStop={() => void chat.abort()} autoAccept={autoAccept} onToggleAutoAccept={onToggleAutoAccept} />
+          {archived ? <div className="chat-input-column p-3 text-muted-foreground">Archived conversation: its workspace has been removed. Open a new chat to continue; this history is read-only.</div> : <Composer agent={owner.name} busy={chat.busy} onSend={chat.send} onStop={() => void chat.abort()} autoAccept={autoAccept} onToggleAutoAccept={onToggleAutoAccept} />}
         </div>
       </div>
     </div>
