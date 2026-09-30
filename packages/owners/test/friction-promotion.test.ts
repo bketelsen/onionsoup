@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Runtime } from '../src/runtime.ts';
-import { type FrictionTriage } from '../src/friction-work.ts';
+import { readFrictionTriage, type FrictionTriage } from '../src/friction-work.ts';
 import { frictionPromotionView, frictionProposalDigest, promoteFriction, recoverFrictionPromotions, retryFrictionPromotion } from '../src/friction-promotion.ts';
 
 const id = 'fr_012345678901234567890123';
@@ -21,6 +21,13 @@ async function fixture() {
   return { runtime, triage, save, digest: frictionProposalDigest(triage)! };
 }
 function fail(_id: string, error: unknown): never { throw error; }
+
+test('proposal digest survives schema parsing and property order changes', async () => {
+  const { runtime, triage, digest } = await fixture();
+  assert.equal(frictionProposalDigest((await readFrictionTriage(runtime, id))!), digest);
+  triage.investigation!.proposedWork = Object.fromEntries(Object.entries(triage.investigation!.proposedWork!).reverse()) as NonNullable<FrictionTriage['investigation']>['proposedWork'];
+  assert.equal(frictionProposalDigest(triage), digest);
+});
 
 test('investigation alone is inert; explicit concurrent promotion creates one gated human request', async () => {
   const { runtime, digest } = await fixture();

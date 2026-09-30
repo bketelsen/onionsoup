@@ -49,8 +49,12 @@ async function save(runtime: Runtime, promotion: Promotion) {
 export function frictionProposalDigest(triage: FrictionTriage) {
   if (triage.state !== 'investigated' || triage.investigation?.disposition !== 'propose-fix'
     || !triage.investigation.proposedWork) return undefined;
-  return createHash('sha256').update(JSON.stringify({ id: triage.id, owner: triage.policy.owner,
-    repository: triage.policy.repository, sourceCommit: triage.sourceCommit, investigation: triage.investigation })).digest('hex');
+  const content = { id: triage.id, owner: triage.policy.owner,
+    repository: triage.policy.repository, sourceCommit: triage.sourceCommit, investigation: triage.investigation };
+  // Schema parsing can reorder object keys after persistence; ordering is not a changed proposal.
+  const serialized = JSON.stringify(content, (_key, value) => value && typeof value === 'object' && !Array.isArray(value)
+    ? Object.fromEntries(Object.entries(value).sort(([left], [right]) => left.localeCompare(right))) : value);
+  return createHash('sha256').update(serialized).digest('hex');
 }
 
 const INVALID = new Set(['owner_cannot_change', 'not_your_repository', 'not_a_repository_owner', 'which_repository',
