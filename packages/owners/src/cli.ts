@@ -1,3 +1,4 @@
+import { continuityPreview } from './continuity-preview.ts';
 import { promoteFriction, retryFrictionPromotion, frictionProposalDigest, frictionPromotionView } from './friction-promotion.ts';
 import { execFile } from 'node:child_process';
 import { rm } from 'node:fs/promises';
@@ -320,8 +321,8 @@ function required(value: string | undefined, name: string) {
 
 const [commandName, ...args] = positionals;
 const command = COMMANDS[commandName ?? ''];
-if (!command && commandName !== 'init') {
-  console.error(`usage: owners <${Object.keys(COMMANDS).join('|')}> …`);
+if (!command && !['init', 'continuity-preview'].includes(commandName ?? '')) {
+  console.error(`usage: owners <${[...Object.keys(COMMANDS), 'continuity-preview'].join('|')}> …`);
   process.exit(2);
 }
 /** Commands that only read, or only record a person's decision, never take the runtime lock. */
@@ -336,9 +337,11 @@ try {
   // A daemon may restart while the deployment gate is held. Runtime.open only ensures the existing state
   // directory and reads declarations; daemon startup and every tick take their own admissions.
   // All other commands still acquire before Runtime.open, including direct CLI effects.
-  const lease = commandName === 'daemon' ? undefined : await beginAdmission(options.state!, `cli-${commandName}`);
+  const lease = ['daemon', 'continuity-preview'].includes(commandName ?? '') ? undefined : await beginAdmission(options.state!, `cli-${commandName}`);
   try {
-    if (commandName === 'init') {
+    if (commandName === 'continuity-preview') {
+      console.log(JSON.stringify(await continuityPreview({ declarations: options.declarations!, state: options.state! }), null, 2));
+    } else if (commandName === 'init') {
       await initConfig(options.declarations!);
     } else {
       const runtime = await Runtime.open({ declarations: options.declarations!, state: options.state! });

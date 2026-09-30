@@ -11,7 +11,7 @@ export const DeploymentIntent = z.object({
 });
 export type DeploymentIntent = z.infer<typeof DeploymentIntent>;
 
-const AdmissionRecord = z.object({
+export const AdmissionRecord = z.object({
   id: z.uuid(),
   kind: z.string().trim().min(1),
   pid: z.number().int().positive(),

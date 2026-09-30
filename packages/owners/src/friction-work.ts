@@ -28,7 +28,7 @@ export const FrictionInvestigation = z.object({
     context.addIssue({ code: 'custom', message: 'friction_proposal_disposition_mismatch' });
   }
 });
-const Triage = z.object({
+export const Triage = z.object({
   version: z.literal(1), id: FrictionRecord.shape.id, policy: FrictionTriagePolicy,
   state: z.enum(['running', 'investigated', 'blocked']),
   runner: z.number().int().positive().optional(), token: z.string().optional(),

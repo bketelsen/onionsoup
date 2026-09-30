@@ -13,7 +13,7 @@ import type { Runtime } from './runtime.ts';
 export const FRICTION_PROMOTION_LIMITS = { retries: 3, perTick: 20, actorChars: 200 };
 export const FrictionProposalDigest = z.string().regex(/^[a-f0-9]{64}$/);
 const actor = z.string().trim().min(1).max(FRICTION_PROMOTION_LIMITS.actorChars);
-const Promotion = z.object({ version: z.literal(1), id: FrictionRecord.shape.id, digest: FrictionProposalDigest,
+export const Promotion = z.object({ version: z.literal(1), id: FrictionRecord.shape.id, digest: FrictionProposalDigest,
   by: actor, at: z.string().datetime(), owner: z.string().min(1), proposal: AskWorkProposal,
   requestID: z.string().regex(/^r-handoff-[a-f0-9]{64}$/),
   retry: z.object({ by: actor, at: z.string().datetime() }).optional(),

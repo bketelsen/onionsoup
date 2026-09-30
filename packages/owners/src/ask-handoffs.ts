@@ -30,7 +30,7 @@ export const AskOrigin = ChatOrigin.extend({ sessionID: z.string().min(1), direc
 export type AskOrigin = z.infer<typeof AskOrigin>;
 const HandoffInput = z.object({ from: z.string(), to: z.string(), question: z.string(), origin: AskOrigin });
 export type HandoffInput = z.infer<typeof HandoffInput>;
-const Handoff = z.object({ version: z.literal(1), input: HandoffInput, answer: Answer, createdAt: z.string(),
+export const Handoff = z.object({ version: z.literal(1), input: HandoffInput, answer: Answer, createdAt: z.string(),
   journal: z.object({ done: z.boolean(), attempts: z.number().int().nonnegative(), reason: z.string().optional() })
     .default({ done: false, attempts: 0 }),
   routing: z.object({ state: z.enum(['pending', 'routed', 'blocked']), attempts: z.number().int().nonnegative(),
