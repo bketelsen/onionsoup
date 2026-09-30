@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { RepositoryOwner } from './declarations.ts';
@@ -37,8 +38,12 @@ async function addPlanWorktree(owner: RepositoryOwner, path: string, itemId: str
 export async function ensurePlanWorktree(runtime: Runtime, item: WorkItem) {
   const path = planWorktreePath(runtime, item);
   const isNew = !existsSync(path);
+  // Persist identity before the filesystem effect: a crash after creation cannot reuse a resolved generation.
+  if (isNew || item.planWorktree !== path) await runtime.ledger.update(item.id, current => ({
+    ...current, planWorktree: path,
+    planWorktreeGeneration: isNew || current.planWorktree !== path ? randomUUID() : current.planWorktreeGeneration,
+  }));
   if (isNew) await addPlanWorktree(runtime.repositoryFor(item), path, item.id);
-  if (item.planWorktree !== path) await runtime.ledger.update(item.id, current => ({ ...current, planWorktree: path }));
   return { path, isNew };
 }
 
@@ -70,6 +75,13 @@ async function forgetPlanWorktree(runtime: Runtime, item: WorkItem) {
   for (const session of records.values()) {
     await rememberSession(runtime, { ...session, archived: session.directory === item.planWorktree || session.archived });
   }
+  await runtime.notebook(item.owner).ensureJournal();
+  // Journal before forgetting: a failed append leaves the item available for a safe absent-path retry.
+  await runtime.notebook(item.owner).journal({
+    kind: 'attention-condition', workItem: item.id,
+    condition: { key: `plan-worktree:${item.id}:${item.planWorktreeGeneration ?? 'legacy'}`, state: 'resolved' },
+    note: `Plan worktree for ${item.id} is no longer present; cleanup is complete.`,
+  });
   await runtime.ledger.update(item.id, current => ({ ...current, planWorktree: undefined, planWorktreeKept: undefined }));
 }
 
@@ -120,7 +132,10 @@ async function removePlanWorktree(runtime: Runtime, item: WorkItem, path: string
     }));
   const isRepeat = outcome === item.planWorktreeKept;
   const entry = isRepeat ? undefined : REMOVAL_JOURNAL[outcome]?.(path, detail);
-  if (entry) await runtime.notebook(item.owner).journal({ ...entry, workItem: item.id, outcome });
+  if (entry) await runtime.notebook(item.owner).journal({
+    ...entry, workItem: item.id, outcome,
+    ...(entry.kind === 'attention' ? { kind: 'attention-condition', condition: { key: `plan-worktree:${item.id}:${item.planWorktreeGeneration ?? 'legacy'}`, state: 'open' as const } } : {}),
+  });
   await recordKept(runtime, item, outcome);
   return outcome;
 }

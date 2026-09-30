@@ -22,7 +22,7 @@ export const ChatContextPolicy = z.object({
 });
 export type ChatContextPolicy = z.infer<typeof ChatContextPolicy>;
 
-const ACTIVITY = new Set(['asked', 'answered', 'work-status', 'ci-triage', 'attention',
+const ACTIVITY = new Set(['asked', 'answered', 'work-status', 'ci-triage', 'attention', 'attention-condition',
   'owner-created', 'owner-updated', 'owner-retired', 'chat-decision', 'retracted', 'attention-decision',
   'plan-approved', 'plan-feedback', 'push-approved', 'work-cancelled', 'published', 'friction', 'fact', ...INITIATIVE_JOURNAL_KINDS, ...REMINDER_JOURNAL_KINDS,
   ...WIKI_JOURNAL_KINDS]);

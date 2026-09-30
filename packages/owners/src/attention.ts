@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, open, readFile, readdir, rename, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { parseJournalRecord } from './journal-record.ts';
+import { AttentionCondition, parseJournalRecord, type JournalRecord } from './journal-record.ts';
 import { withRecordLock } from './record-lock.ts';
 import type { Runtime } from './runtime.ts';
 
@@ -10,6 +10,7 @@ export const ATTENTION_LIMITS = { initialHistoryDays: 7, scanBytesPerFile: 1_048
 export const Attention = z.object({
   id: z.string(), owner: z.string(), note: z.string(), at: z.string(),
   status: z.enum(['open', 'acknowledged', 'resolved']).default('open'),
+  condition: AttentionCondition.extend({ observedAt: z.string().datetime() }).optional(),
   decision: z.object({ by: z.string(), reason: z.string(), at: z.string() }).optional(),
 });
 export type Attention = z.infer<typeof Attention>;
@@ -72,12 +73,28 @@ async function writeIndex(runtime: Runtime, index: AttentionIndex) {
   }
 }
 
+/** One generation of a host condition has one inbox identity, including a terminal tombstone. */
+function ingestCondition(index: AttentionIndex, owner: string, event: JournalRecord) {
+  const condition = event.condition!;
+  const digest = createHash('sha256').update(JSON.stringify([owner, condition.key])).digest('hex').slice(0, 24);
+  const id = `a-condition-${digest}`;
+  const previous = index.entries[id];
+  if (previous?.condition?.state === 'resolved' || (previous?.condition && previous.condition.observedAt > event.at)) return;
+  const status = condition.state === 'resolved' ? 'resolved' : previous?.status ?? 'open';
+  index.entries[id] = Attention.parse({
+    ...previous, id, owner, note: event.note ?? previous?.note ?? '', at: previous?.at ?? event.at,
+    status, condition: { ...condition, observedAt: event.at },
+  });
+}
+
 function ingestLine(index: AttentionIndex, owner: string, file: string, number: number, line: string) {
   if (!line.trim()) return;
   try {
     const event = parseJournalRecord(line);
     if (!event) throw new Error('journal_record_invalid');
-    if (event.kind !== 'attention' || event.at < index.cutoff) return;
+    if (event.at < index.cutoff) return;
+    if (event.kind === 'attention-condition' && event.condition) return ingestCondition(index, owner, event);
+    if (event.kind !== 'attention') return;
     const digest = createHash('sha256').update(`${owner}/${file}/${number}/${line}`).digest('hex').slice(0, 24);
     const id = `a-${digest}`;
     index.entries[id] ??= Attention.parse({ id, owner, note: event.note ?? '', at: event.at });
