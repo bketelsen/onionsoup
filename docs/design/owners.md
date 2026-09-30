@@ -320,7 +320,7 @@ it does not expose unrelated owners' work. Each row names the goal, accountable 
 blocker, recorded PR evidence and next step. It gives the record-read time and last-change time, labels records
 older than 24 hours as stale, and treats absent/mismatched linked work as unknown. Reading status does not probe
 live services, and repository merge never claims deployment. Recently finished requests stay visible for seven days.
-Injected summaries prioritize active requests and are bounded to 12 records and 12,000 characters. Omitted records
+Injected cross-owner progress summaries (not all other chat-context sections) prioritize active requests and are bounded to 12 records and 12,000 characters. Omitted records
 and abbreviated blocker details are explicitly labeled; `onionsoup_status offset=<next>` pages through them,
 and `onionsoup_status request=<id>` reads full details under the same visibility check.
 
@@ -329,7 +329,11 @@ significant request/work/PR changes there as **informational `noReply` notices**
 new work. Timestamp-only refreshes are suppressed. A persisted per-request outbox in
 `state/notices/request-progress` holds each notice before enqueueing; a stable ID lets the existing exchange
 transport reconcile posts accepted before a crash. Transition IDs preserve per-request delivery order. At most
-20 new transitions are queued per tick. Origin-less legacy requests remain visible through status but receive
+20 new transitions are queued per tick. On first observation an atomic `baseline.json` records the complete
+preexisting request snapshot before any notices are queued. That snapshot stays silent across restarts; requests
+created after it and subsequent significant changes can notify. A crash during baseline creation cannot create
+partial historical delivery. Existing pending outbox intents are flushed even if the owner has retired, so the
+exchange transport can retain an explicit undeliverable record. Origin-less legacy requests remain visible through status but receive
 no guessed-chat delivery or backfill. Missing/unavailable origin chats retain pending notices; retiring an owner
 uses the exchange transport's undeliverable record. The status summary remains useful even when delivery fails.
 

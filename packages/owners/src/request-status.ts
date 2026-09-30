@@ -102,6 +102,7 @@ function compactProgress(progress: RequestProgress) {
 
 /** Exact request lookup uses the same visibility boundary as summaries. */
 export async function requestProgressDetail(runtime: Runtime, owner: string, id: string) {
+  if (!/^r-[a-zA-Z0-9-]+$/.test(id)) return 'request_id_invalid';
   const request = await runtime.requests.get(id).catch(error => {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     return undefined;
@@ -151,8 +152,31 @@ async function enqueuePending(runtime: Runtime, path: string, cursor: Cursor) {
   return queued;
 }
 
-async function noticeRequest(runtime: Runtime, request: ResourceRequest, progress: RequestProgress) {
-  if (!request.origin || !runtime.declarations.owners.has(request.from)) return false;
+const Baseline = z.object({ version: z.literal(1), observedAt: z.string(),
+  fingerprints: z.record(z.string(), z.string()) });
+
+/** Persist the entire first snapshot before queueing anything; an interrupted bootstrap has no partial effects. */
+async function noticeBaseline(runtime: Runtime, progress: readonly RequestProgress[]) {
+  const directory = join(runtime.stateDirectory, 'notices', 'request-progress');
+  await mkdir(directory, { recursive: true });
+  const path = join(directory, 'baseline.json');
+  return withRecordLock(`${path}.lock`, async () => {
+    const previous = await readFile(path, 'utf8').catch(error => {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      return undefined;
+    });
+    if (previous) return Baseline.parse(JSON.parse(previous));
+    const baseline = Baseline.parse({ version: 1, observedAt: new Date().toISOString(),
+      fingerprints: Object.fromEntries(progress.map(entry => [entry.id, fingerprint(entry)])) });
+    const temporary = `${path}.${randomUUID()}.tmp`;
+    await writeFile(temporary, JSON.stringify(baseline) + '\n', { mode: 0o600 });
+    await rename(temporary, path);
+    return baseline;
+  });
+}
+
+async function noticeRequest(runtime: Runtime, request: ResourceRequest, progress: RequestProgress, baselineFingerprint = '') {
+  if (!request.origin) return false;
   const directory = join(runtime.stateDirectory, 'notices', 'request-progress');
   await mkdir(directory, { recursive: true });
   const key = createHash('sha256').update(request.id).digest('hex');
@@ -162,9 +186,10 @@ async function noticeRequest(runtime: Runtime, request: ResourceRequest, progres
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       return undefined;
     });
-    let cursor = contents ? Cursor.parse(JSON.parse(contents)) : { sequence: 0, fingerprint: '' };
+    let cursor = contents ? Cursor.parse(JSON.parse(contents)) : { sequence: 0, fingerprint: baselineFingerprint };
     const hadPending = Boolean(cursor.pending);
     cursor = await enqueuePending(runtime, path, cursor);
+    if (!runtime.declarations.owners.has(request.from)) return hadPending;
     const nextFingerprint = fingerprint(progress);
     if (cursor.fingerprint === nextFingerprint) return hadPending;
     const sequence = cursor.sequence + 1;
@@ -184,11 +209,14 @@ async function noticeRequest(runtime: Runtime, request: ResourceRequest, progres
 export async function noticeRequestProgress(runtime: Runtime, onError: (id: string, error: unknown) => void) {
   const requests = (await runtime.requests.list()).filter(request => request.origin);
   const items = new Map((await runtime.ledger.list()).map(item => [item.id, item]));
+  const projections = new Map(requests.map(request => [request.id,
+    requestProgress(request, request.workItem ? items.get(request.workItem) : undefined)]));
+  const baseline = await noticeBaseline(runtime, [...projections.values()]);
   let processed = 0;
   for (const request of requests) {
     try {
       if (processed >= REQUEST_STATUS_LIMITS.noticesPerTick) break;
-      if (await noticeRequest(runtime, request, requestProgress(request, request.workItem ? items.get(request.workItem) : undefined))) processed++;
+      if (await noticeRequest(runtime, request, projections.get(request.id)!, baseline.fingerprints[request.id])) processed++;
     } catch (error) { onError(request.id, error); }
   }
   return processed;

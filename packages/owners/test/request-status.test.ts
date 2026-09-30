@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readdir, readFile, writeFile, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -9,8 +9,10 @@ import { deliverExchangeNotices, type ExchangeClient, type NoticeMessage } from 
 
 const proposal = { title: 'Repair svu', goal: 'Fix the version check', rationale: 'CI evidence', acceptance: ['Check succeeds'], size: 'small' as const };
 const origin = { sessionID: 'odrade-origin', directory: '/fixture/chat/odrade' };
-async function setup() {
-  return Runtime.open({ declarations: 'packages/owners/test/fixtures/owners', state: await mkdtemp(join(tmpdir(), 'request-progress-')) });
+async function setup(initialize = true) {
+  const runtime = await Runtime.open({ declarations: 'packages/owners/test/fixtures/owners', state: await mkdtemp(join(tmpdir(), 'request-progress-')) });
+  if (initialize) await noticeRequestProgress(runtime, fail);
+  return runtime;
 }
 async function open(runtime: Runtime, withOrigin = true) {
   return runtime.requests.open('odrade', 'clippy', { kind: 'work', purpose: proposal.goal, proposal }, 'none', withOrigin ? origin : undefined);
@@ -124,7 +126,7 @@ test('outbox crash before cursor completion adopts the same notice identity', as
   await noticeRequestProgress(runtime, fail);
   const [notice] = await notices(runtime);
   const directory = join(runtime.stateDirectory, 'notices', 'request-progress');
-  const [file] = (await readdir(directory)).filter(name => name.endsWith('.json'));
+  const [file] = (await readdir(directory)).filter(name => /^[a-f0-9]{64}\.json$/.test(name));
   const cursor = JSON.parse(await readFile(join(directory, file), 'utf8'));
   await writeFile(join(directory, file), JSON.stringify({ ...cursor, pending: notice }));
   await noticeRequestProgress(runtime, fail);
@@ -148,4 +150,60 @@ test('context bounds are explicit, retain blocker labels, and offer paginated fu
   assert.match(next, /Cross-owner progress/);
   assert.ok((await requestProgressDetail(runtime, 'odrade', newest.id)).includes(reason));
   assert.equal(await requestProgressDetail(runtime, 'moneo', newest.id), 'No visible request with that ID.');
+});
+
+test('request detail rejects traversal before attempting any filesystem lookup', async () => {
+  const runtime = await setup();
+  runtime.requests.get = async () => { throw new Error('unexpected_filesystem_lookup'); };
+  for (const id of ['../private', 'r-../private', '/tmp/request', 'r-example/file', 'r-example\\file', 'r-.']) {
+    assert.equal(await requestProgressDetail(runtime, 'odrade', id), 'request_id_invalid');
+  }
+});
+
+test('first observation baselines historical origin-bearing requests without backfill across restart', async () => {
+  const runtime = await setup(false);
+  const historical = await open(runtime);
+  await runtime.requests.update(historical.id, request => ({ ...request, status: 'completed' }));
+  assert.equal(await noticeRequestProgress(runtime, fail), 0);
+  const reopened = await Runtime.open({ declarations: 'packages/owners/test/fixtures/owners', state: runtime.stateDirectory });
+  assert.equal(await noticeRequestProgress(reopened, fail), 0);
+  assert.equal((await notices(runtime)).length, 0);
+  await open(reopened);
+  assert.equal(await noticeRequestProgress(reopened, fail), 1);
+  await reopened.requests.update(historical.id, request => ({ ...request, reason: 'New evidence recorded after baseline' }));
+  assert.equal(await noticeRequestProgress(reopened, fail), 1);
+  assert.equal((await notices(runtime)).length, 2);
+});
+
+test('a pending outbox survives owner retirement and reaches the undeliverable record', async () => {
+  const runtime = await setup();
+  await open(runtime);
+  await noticeRequestProgress(runtime, fail);
+  const [notice] = await notices(runtime);
+  const directory = join(runtime.stateDirectory, 'notices', 'request-progress');
+  const [file] = (await readdir(directory)).filter(name => /^[a-f0-9]{64}\.json$/.test(name));
+  const cursor = JSON.parse(await readFile(join(directory, file), 'utf8'));
+  await writeFile(join(directory, file), JSON.stringify({ ...cursor, pending: notice }));
+  await unlink(join(runtime.stateDirectory, 'notices', 'exchanges', 'pending', `${notice.id}.json`));
+  runtime.declarations.owners.delete('odrade');
+  runtime.reloadDeclarations = async () => undefined;
+  assert.equal(await noticeRequestProgress(runtime, fail), 1);
+  assert.equal((await notices(runtime)).length, 1);
+  await deliverExchangeNotices(runtime, transport().client, fail);
+  const [undeliverable] = await notices(runtime, 'undeliverable');
+  assert.equal(undeliverable.undeliverableReason, 'owner_retired');
+  assert.equal(await noticeRequestProgress(runtime, fail), 0);
+});
+
+test('interrupted baseline write cannot partially backfill historical requests', async () => {
+  const runtime = await setup(false);
+  await open(runtime);
+  const directory = join(runtime.stateDirectory, 'notices', 'request-progress');
+  await mkdir(directory, { recursive: true });
+  await writeFile(join(directory, 'baseline.json.crashed.tmp'), '{partial');
+  assert.equal(await noticeRequestProgress(runtime, fail), 0);
+  const stored = await readFile(join(directory, 'baseline.json'), 'utf8');
+  assert.equal(await noticeRequestProgress(runtime, fail), 0);
+  assert.equal(await readFile(join(directory, 'baseline.json'), 'utf8'), stored);
+  assert.equal((await notices(runtime)).length, 0);
 });
