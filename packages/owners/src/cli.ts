@@ -17,6 +17,7 @@ import { approveCreate, approveDelete, denyRequest, processRequests, requestPubl
 import { DAEMON_LIMITS, daemon, drain, recordDutyRun, tick, type TickLog } from './daemon.ts';
 import { approvePush } from './rebase.ts';
 import { describeAsk, type ResourceRequest } from './requests.ts';
+import { reconcileExternalPublication } from './external-publication.ts';
 import { proposeDeskChanges, resetDeskReviews } from './desk-changes.ts';
 import { shipEngine } from './ship.ts';
 import { deskState, initiativesText, initiativeText } from './desk.ts';
@@ -45,6 +46,7 @@ const { values: options, positionals } = parseArgs({
     owner: { type: 'string' },
     repository: { type: 'string' },
     item: { type: 'string' },
+    draft: { type: 'boolean' },
   },
 });
 
@@ -230,8 +232,12 @@ const COMMANDS: Record<string, Command> = {
   },
   async propose(runtime, [ownerId]) {
     const title = required(options.note, '--note (title)');
-    const result = await proposeDeskChanges(runtime, required(ownerId, 'owner'), { title, summary: options.reason ?? title, repository: options.repository });
+    const result = await proposeDeskChanges(runtime, required(ownerId, 'owner'), { title, summary: options.reason ?? title, repository: options.repository, item: options.item, draft: options.draft });
     console.log(`${result.outcome}: ${result.summary}`);
+  },
+  async 'reconcile-pr'(runtime, [ownerId, itemId, url]) {
+    const item = await reconcileExternalPublication(runtime, required(ownerId, 'owner'), required(itemId, 'item'), required(url, 'PR URL'), userInfo().username);
+    console.log(`${item.id}: ${item.publication!.state} ${item.publication!.url}; deployment not assessed`);
   },
   async 'desk-state'(runtime) {
     console.log(JSON.stringify(await deskState(runtime, { agent: options.agent, directory: options.directory, owner: options.owner })));

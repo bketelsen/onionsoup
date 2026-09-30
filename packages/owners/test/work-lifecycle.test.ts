@@ -1,3 +1,4 @@
+import { reconcileExternalPublication } from '../src/external-publication.ts';
 import { sessionHistory } from '../src/session-history.ts';
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
@@ -73,15 +74,28 @@ const state = JSON.parse(fs.readFileSync(path));
 const remote = ${JSON.stringify(remote)};
 const url = 'https://github.com/example/clippy/pull/1';
 const handlers = {
+  api() { console.log(JSON.stringify(state.external)); },
   view() {
+    if (args[args.indexOf('--json') + 1] === 'isDraft,autoMergeRequest') { console.log(JSON.stringify({ isDraft: !!state.draft, autoMergeRequest: state.autoMergeRequest || null })); return; }
     if (args[args.indexOf('--json') + 1] === 'state') { state.stateViews = (state.stateViews || 0) + 1; console.log(JSON.stringify({ state: state.state })); return; }
     const branch = state.branch || 'original'; const headRefOid = cp.execFileSync('git', ['-C', remote, 'rev-parse', branch]).toString().trim(); console.log(JSON.stringify({ url, state: state.state, mergeable: state.mergeable || 'MERGEABLE', headRefOid })); },
   checks() { console.log(JSON.stringify(state.failing === false ? [] : [{ name: 'test', bucket: 'fail', link: '' }])); },
   list() { console.log(JSON.stringify(state.created ? [{ url, state: state.state }] : [])); },
-  create() { if (state.failCreate) { state.failCreate = false; fs.writeFileSync(path, JSON.stringify(state)); process.exit(1); } state.created++; state.branch = args[args.indexOf('--head') + 1]; state.body = args[args.indexOf('--body') + 1]; console.log(url); },
+  create() {
+    if (state.failCreate) {
+      state.failCreate = false;
+      fs.writeFileSync(path, JSON.stringify(state));
+      process.exit(1);
+    }
+    state.created++;
+    state.draft = args.includes('--draft');
+    state.branch = args[args.indexOf('--head') + 1];
+    state.body = args[args.indexOf('--body') + 1];
+    console.log(url);
+  },
   merge() { state.state = 'MERGED'; },
 };
-handlers[args[1]]();
+handlers[args[0] === 'api' ? 'api' : args[1]]();
 fs.writeFileSync(path, JSON.stringify(state));
 `, { mode: 0o755 });
   const previous = process.env.PATH;
@@ -1119,4 +1133,196 @@ test('session index failure cannot prevent an approved plan from starting', asyn
   assert.ok(opened[0].text?.includes(item.id));
   assert.equal(item.session?.sessionID, 'ses_plan_1');
   assert.equal(item.status, 'working');
+});
+
+
+test('draft publication stays draft under a merge grant, across create and merge checkpoint retries', async () => {
+  const { runtime, root, remote } = await fixture();
+  runtime.declarations.owners.get('clippy')!.grants.push({ to: 'clippy', action: 'merge', target: 'example/clippy' });
+  const desk = await ensureDesk(runtime.repositoryOwner('clippy'), runtime.desksRoot);
+  await writeFile(join(desk.path, 'draft'), 'requires human merge');
+  scriptHires(runtime, async () => verdict);
+  await fakeGithub(root, remote, async () => {
+    await writeFile(join(root, 'github.json'), JSON.stringify({ created: 0, failCreate: true, state: 'OPEN' }));
+    assert.equal((await proposeDeskChanges(runtime, 'clippy', { title: 'Draft', summary: 'Draft', draft: true })).outcome, 'publication-failed');
+    await assert.rejects(proposeDeskChanges(runtime, 'clippy', { title: 'Retry', summary: 'Retry', draft: false }), /publication_mode_conflict/);
+    assert.equal((await proposeDeskChanges(runtime, 'clippy', { title: 'Retry', summary: 'Retry' })).outcome, 'opened');
+    const [published] = await runtime.ledger.list();
+    assert.equal(published!.deskPublication!.draft, true);
+    assert.equal(published!.publication!.state, 'open');
+    assert.equal((await githubState(root)).state, 'OPEN');
+    assert.equal((await runtime.requests.list()).length, 0);
+    await runtime.ledger.update(published!.id, current => ({ ...current, status: 'failed', deskPublication: { ...current.deskPublication!, stage: 'merge' } }));
+    const { advanceDeskPublication } = await import('../src/desk-changes.ts');
+    await advanceDeskPublication(runtime, published!.id);
+    assert.equal((await githubState(root)).state, 'OPEN');
+    assert.equal((await runtime.ledger.get(published!.id)).deskPublication!.publishRequest, undefined);
+  });
+});
+
+async function externalFixture() {
+  const setup = await fixture();
+  const { runtime } = setup;
+  const desk = await ensureDesk(runtime.repositoryOwner('clippy'), runtime.desksRoot);
+  const base = (await git(desk.path, ['rev-parse', 'HEAD'])).trim();
+  await writeFile(join(desk.path, 'external'), 'externally published change');
+  await git(desk.path, ['add', '.']);
+  await git(desk.path, ['commit', '-qm', 'External change']);
+  const head = (await git(desk.path, ['rev-parse', 'HEAD'])).trim();
+  await git(desk.path, ['push', '-q', 'origin', 'HEAD:external']);
+  await runtime.notebook('bellonda').ensure('# Charter\n');
+  const request = await runtime.requests.open('bellonda', 'clippy', { kind: 'work', purpose: proposal.goal, proposal }, 'none');
+  const item = await runtime.ledger.create('clippy', 'owner-change', proposal, {
+    status: 'working', planWorktree: desk.path, request: request.id,
+    planApproval: { by: 'person', at: new Date().toISOString() }, planDocument: { markdown: 'Preserve this plan', digest: 'original' },
+    humanNotes: [{ kind: 'approval', by: 'person', at: '', note: 'Keep original goal' }],
+    implementations: [{ report, diffStat: 'earlier evidence', verification: [] }],
+  });
+  await runtime.requests.save({ ...request, workItem: item.id, status: 'work-running' });
+  const external = { html_url: 'https://github.com/example/clippy/pull/1', state: 'open', merged: false, draft: true, auto_merge: null,
+    head: { ref: 'external', sha: head, repo: { full_name: 'example/clippy' } },
+    base: { ref: 'main', sha: base, repo: { full_name: 'example/clippy' } }, merge_commit_sha: null as string | null };
+  return { ...setup, desk, head, base, item, request, external };
+}
+
+test('external merged PR reconciliation verifies exact source, preserves intent/history and completes the real request once', async () => {
+  const { runtime, root, remote, desk, head, base, item, request, external } = await externalFixture();
+  await git(desk.path, ['push', '-q', 'origin', 'HEAD:main']);
+  external.merged = true;
+  external.state = 'closed';
+  external.draft = false;
+  external.merge_commit_sha = head;
+  runtime.repositoryOwner('clippy').domain.verify.push(['sh', '-c', 'test -f external']);
+  let reviews = 0;
+  scriptHires(runtime, async hired => {
+    reviews += 1;
+    assert.match(hired.brief, /Complete the change/);
+    assert.match(hired.brief, /It completes/);
+    assert.match(hired.brief, /externally published change/);
+    assert.match(hired.brief, /host-sandbox/);
+    assert.match(hired.brief, /no configured checks ran/);
+    assert.match(hired.brief, /does not prove deployment/);
+    return verdict;
+  });
+  await fakeGithub(root, remote, async () => {
+    await writeFile(join(root, 'github.json'), JSON.stringify({ created: 0, state: 'MERGED', external }));
+    const linked = await reconcileExternalPublication(runtime, 'clippy', item.id, external.html_url, 'person');
+    assert.equal(linked.publication!.state, 'merged');
+    assert.equal(linked.status, 'landed');
+    assert.deepEqual(linked.proposal, item.proposal);
+    assert.deepEqual(linked.planDocument, item.planDocument);
+    assert.deepEqual(linked.humanNotes, item.humanNotes);
+    assert.deepEqual(linked.implementations[0], item.implementations[0]);
+    assert.equal(linked.implementations.length, 2);
+    assert.equal(linked.externalPublication!.head, head);
+    assert.equal(linked.externalPublication!.base, base);
+    assert.equal(linked.externalPublication!.evidence.tree, (await git(desk.path, ['rev-parse', 'HEAD^{tree}'])).trim());
+    assert.equal(linked.externalPublication!.evidence.checks[0]!.exitCode, 0);
+    assert.equal(linked.externalPublication!.evidence.checks[0]!.command, 'sh');
+    assert.equal(linked.deskPublication, undefined);
+    const retried = await reconcileExternalPublication(runtime, 'clippy', item.id, external.html_url, 'person');
+    assert.equal(reviews, 1);
+    assert.equal(retried.implementations.length, 2);
+    const { trackDelegatedWork } = await import('../src/delegation.ts');
+    assert.equal((await trackDelegatedWork(runtime, await runtime.requests.get(request.id))).status, 'completed');
+    assert.equal((await githubState(root)).created, 0);
+  });
+});
+
+test('external linkage rejects wrong authority, remote scope, dirty/head changes and unmet review without altering goal or completion', async () => {
+  const { runtime, root, remote, desk, item, external } = await externalFixture();
+  await fakeGithub(root, remote, async () => {
+    const save = async () => writeFile(join(root, 'github.json'), JSON.stringify({ created: 0, state: 'OPEN', external }));
+    await save();
+    const reconcile = () => reconcileExternalPublication(runtime, 'clippy', item.id, external.html_url, 'person');
+    await assert.rejects(reconcileExternalPublication(runtime, 'bellonda', item.id, external.html_url, 'person'), /item_not_yours/);
+    await assert.rejects(reconcileExternalPublication(runtime, 'clippy', item.id, 'https://github.com/elsewhere/repo/pull/1', 'person'), /external_pr_repository_mismatch/);
+    external.draft = false;
+    await save();
+    await assert.rejects(reconcile(), /external_pr_requires_draft/);
+    external.draft = true;
+    await save();
+    await writeFile(join(desk.path, 'dirty'), 'dirty');
+    await assert.rejects(reconcile(), /external_pr_worktree_dirty/);
+    await rm(join(desk.path, 'dirty'));
+    const head = external.head.sha;
+    external.head.sha = external.base.sha;
+    await save();
+    await assert.rejects(reconcile(), /external_pr_head_mismatch/);
+    external.head.sha = head;
+    await save();
+    scriptHires(runtime, async () => ({ decision: 'revise', summary: 'Needs correction', findings: [{ severity: 'blocker', file: 'external', issue: 'Missing behavior', suggestion: 'Implement it' }] }));
+    await assert.rejects(reconcile(), /external_review_needs_work/);
+    const unchanged = await runtime.ledger.get(item.id);
+    assert.equal(unchanged.status, 'working');
+    assert.equal(unchanged.activeRunner, undefined);
+    assert.equal(unchanged.publication, undefined);
+    assert.deepEqual(unchanged.proposal, item.proposal);
+  });
+});
+
+
+test('external reconciliation refuses approval/runner races and changed PR evidence, then links a draft without completing the request', async () => {
+  const { runtime, root, remote, item, request, external } = await externalFixture();
+  await fakeGithub(root, remote, async () => {
+    const save = () => writeFile(join(root, 'github.json'), JSON.stringify({ created: 0, state: 'OPEN', external }));
+    const reconcile = () => reconcileExternalPublication(runtime, 'clippy', item.id, external.html_url, 'person');
+    await save();
+    await runtime.ledger.update(item.id, current => ({ ...current, activeRunner: process.pid }));
+    await assert.rejects(reconcile(), /work_item_active/);
+    await runtime.ledger.update(item.id, current => ({ ...current, activeRunner: undefined, planApproval: undefined }));
+    await assert.rejects(reconcile(), /external_pr_requires_approved_request/);
+    await runtime.ledger.update(item.id, current => ({ ...current, planApproval: item.planApproval }));
+    scriptHires(runtime, async () => {
+      external.head.sha = external.base.sha;
+      await save();
+      return verdict;
+    });
+    const head = external.head.sha;
+    await assert.rejects(reconcile(), /external_pr_changed_during_review/);
+    assert.equal((await runtime.ledger.get(item.id)).publication, undefined);
+    external.head.sha = head;
+    await save();
+    scriptHires(runtime, async () => verdict);
+    const linked = await reconcile();
+    assert.equal(linked.publication!.state, 'open');
+    const { trackDelegatedWork } = await import('../src/delegation.ts');
+    assert.equal((await trackDelegatedWork(runtime, await runtime.requests.get(request.id))).status, 'work-running');
+    external.merged = true;
+    external.state = 'closed';
+    external.draft = false;
+    external.merge_commit_sha = head;
+    await save();
+    const beforeRefusal = await runtime.ledger.get(item.id);
+    await assert.rejects(reconcile(), /external_pr_merge_not_in_base/);
+    assert.deepEqual(await runtime.ledger.get(item.id), beforeRefusal);
+    await git(runtime.repositoryOwner('clippy').workspace, ['push', '-q', 'origin', `${head}:main`]);
+    const merged = await reconcile();
+    assert.equal(merged.publication!.state, 'merged');
+    assert.equal(merged.externalPublication!.mergeCommit, head);
+    assert.equal(merged.implementations.length, linked.implementations.length);
+    assert.deepEqual(linked.proposal, item.proposal);
+    assert.equal((await githubState(root)).created, 0);
+  });
+});
+
+
+test('first external reconciliation refuses an unreachable merge without changing the request or work item', async () => {
+  const { runtime, root, remote, head, item, request, external } = await externalFixture();
+  external.merged = true;
+  external.state = 'closed';
+  external.draft = false;
+  external.merge_commit_sha = head;
+  scriptHires(runtime, async () => { throw new Error('ancestry refusal must precede review'); });
+  await fakeGithub(root, remote, async () => {
+    await writeFile(join(root, 'github.json'), JSON.stringify({ created: 0, state: 'MERGED', external }));
+    const priorItem = await runtime.ledger.get(item.id);
+    const priorRequest = await runtime.requests.get(request.id);
+    await assert.rejects(
+      reconcileExternalPublication(runtime, 'clippy', item.id, external.html_url, 'person'),
+      /external_pr_merge_not_in_base/,
+    );
+    assert.deepEqual(await runtime.ledger.get(item.id), priorItem);
+    assert.deepEqual(await runtime.requests.get(request.id), priorRequest);
+  });
 });

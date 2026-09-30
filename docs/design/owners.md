@@ -223,6 +223,27 @@ a session, or whose session is gone, counts from the item's own last update. A w
 commits no remote holds, is never removed: it stays, the item records why (`planWorktreeKept`), and the person's
 attention is raised once per reason, not every pass. Each removal is journaled (`plan-worktree-removed`).
 
+**Draft publication and external PR recovery.** `onionsoup_propose_changes` accepts `draft: true`
+(`owners propose <owner> --draft --item <item> --note <title>` in the CLI). The saved publication
+mode survives retries; a conflicting retry is refused. Draft mode creates a draft PR, checks that
+GitHub still reports draft with auto-merge disabled, and suppresses grant-based merge and site
+follow-up, including resumed checkpoints. It does not grant merge authority or make a PR ready.
+
+A person can reconcile an already published PR with
+`owners reconcile-pr <owner> <item> <https://github.com/owner/repo/pull/number>`.
+This command only accepts an approved, working request item with its existing clean plan worktree.
+It binds the configured repository and base branch, the request and item, and the exact local/remote
+head. An open PR must be draft with auto-merge disabled; a merged PR must have a merge commit in
+the configured base history. Host verification runs afresh on that source, and the ordinary
+cross-family reviewer receives the original goal, acceptance criteria and tree-bound check evidence.
+For merged PRs, the review base precedes the merge so the change cannot disappear from the diff.
+Only after a second source and GitHub check does the command append implementation/review evidence
+and link the PR. It preserves original intent, plan, approvals and history. Repeating the same
+link does not duplicate evidence or publication. Existing request tracking observes merged state
+on its next pass; reconciliation never creates a PR, pushes, merges, publishes a site, or claims
+deployment. Closed-unmerged, mismatched, dirty, active or unapproved work is refused. There is no
+bulk backfill or owner tool that can self-attest an external review.
+
 **Repairs on the desk.** The `maintain-prs` duty keeps published PRs mergeable and green. Failing CI on a new head
 commit hires the owner once for that commit to decide fix, flaky or person; no work item is opened. `fix` wakes the
 owner with a notice in the session or chat the PR came from. `onionsoup_checkout_pr { item }` puts a clean desk on

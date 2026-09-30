@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { withRecordLock } from './record-lock.ts';
 import { ImplementationReport, OwnerAnswers, Plan, ProposedWork, Verdict } from './artifacts.ts';
 import { ChatOrigin } from './chat-origin.ts';
+import { ReviewEvidence } from './desk-reviews.ts';
 import { AssignmentRef } from './initiatives.ts';
 
 export const HireRecord = z.object({
@@ -125,11 +126,16 @@ export const WorkItem = z.object({
   rebaseOf: PullRequestTarget.optional(),
   repairOf: PullRequestTarget.optional(),
   deskPublication: z.object({
+    draft: z.boolean().optional(),
     stage: z.enum(['commit', 'push', 'open', 'merge', 'finish', 'complete']),
     reviewedHead: z.string(),
     reviewedTree: z.string(),
     reviewer: z.string(),
     publishRequest: z.string().optional(),
+  }).optional(),
+  externalPublication: z.object({
+    by: z.string(), observedAt: z.string(), head: z.string(), base: z.string(),
+    mergeCommit: z.string().optional(), reviewer: z.string(), evidence: ReviewEvidence,
   }).optional(),
   /** The chat the work was opened from, so the owner hears there how it went. */
   origin: ChatOrigin.optional(),
