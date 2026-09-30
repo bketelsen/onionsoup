@@ -78,10 +78,14 @@ export const UpdateAppAsk = z.object({
 });
 export type UpdateAppAsk = z.infer<typeof UpdateAppAsk>;
 
+export const OperatorAssignmentSource = z.object({ kind: z.enum(['attention', 'friction']), id: z.string().min(1) });
+export type OperatorAssignmentSource = z.infer<typeof OperatorAssignmentSource>;
+
 export const WorkAsk = z.object({
   kind: z.literal('work'), purpose: z.string(), proposal: ProposedWork,
   /** Set when the work carries out an initiative's assignment. */
   assignment: AssignmentRef.optional(),
+  operatorAssignment: z.object({ by: z.string().min(1), source: OperatorAssignmentSource }).optional(),
 });
 export type WorkAsk = z.infer<typeof WorkAsk>;
 

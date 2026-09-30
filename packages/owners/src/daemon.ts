@@ -1,3 +1,4 @@
+import { recoverAttentionAssignments } from './attention-assignment.ts';
 import { noticeRequestProgress } from './request-status.ts';
 import { consumeFrictionWake, nextFrictionInvestigation } from './friction-work.ts';
 import { recoverAskHandoffs } from './ask-handoffs.ts';
@@ -290,6 +291,11 @@ async function tickAdmitted(runtime: Runtime, log: TickLog) {
     if (unreadable.length) log.error('publications', new Error(`pr_state_unreadable: ${unreadable.join(', ')}`));
   } catch (error) {
     log.error('publications', error);
+  }
+  try {
+    await recoverAttentionAssignments(runtime, log.error);
+  } catch (error) {
+    log.error('attention assignments', error);
   }
   try {
     await recoverAskHandoffs(runtime, log.error);

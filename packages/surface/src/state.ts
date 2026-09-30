@@ -3,6 +3,7 @@ import { z } from 'zod';
 import {
   approveCreate, approveDelete, approvePlan, approvePush, chatDirectory, denyRequest, deskState, describeAsk,
   domainSummary, itemText, revisePlan, resumeItem, retryItem, cancelItem, memoryFingerprint, type ResourceRequest, type Runtime,
+  AttentionAssignmentInput, assignAttention, retryAttentionAssignment, attentionAssignmentView, attentionAssignmentTargets, type AttentionAssignmentView,
   listAttention, changeAttention, recoverRequest, reconcileRequest,
   listFriction, frictionDetail, readFrictionTriage, type FrictionRecord,
   approveInitiative, reviseInitiative, cancelInitiative, initiativeViews, managerOf, planGrantFor, cancelReminder,
@@ -68,6 +69,7 @@ export const Decision = z.object({
   note: z.string().optional(),
   reason: z.string().optional(),
   withDelete: z.boolean().optional(),
+  assignment: AttentionAssignmentInput.optional(),
 });
 export type Decision = z.infer<typeof Decision>;
 
@@ -79,6 +81,8 @@ export interface InboxEntry {
   detail: string;
   at?: string;
   attentionStatus?: string;
+  attentionAssignment?: AttentionAssignmentView;
+  assignmentTargets?: ReturnType<typeof attentionAssignmentTargets>;
   /** For permission and question entries: the chat they came from. */
   sessionID?: string;
   permission?: PendingPermission;
@@ -257,11 +261,13 @@ export class SurfaceState {
     const providerHealth = await providerHealthViews(this.runtime);
     const entries: InboxEntry[] = [
       ...providerHealth.filter(view => view.status === 'failing').map(providerAuthEntry),
-      ...attention.filter(entry => entry.status !== 'resolved').map(entry => ({
+      ...await Promise.all(attention.filter(entry => entry.status !== 'resolved').map(async entry => ({
         kind: 'attention' as const, id: entry.id, owner: entry.owner, title: entry.note,
         detail: entry.decision ? `${entry.status}: ${entry.decision.reason} (${entry.decision.by})` : 'Needs attention',
         attentionStatus: entry.status, at: entry.decision?.at ?? entry.at,
-      })),
+        attentionAssignment: await attentionAssignmentView(this.runtime, entry.id),
+        assignmentTargets: attentionAssignmentTargets(this.runtime),
+      }))),
       ...requests.filter(request => request.status === 'interrupted').map(request => ({
         kind: 'request-recovery' as const, id: request.id, owner: request.to, title: describeAsk(request.ask),
         detail: requestRecoveryDetail(request), at: request.updatedAt,
@@ -528,6 +534,12 @@ export class SurfaceState {
       'reconcile-request': async () => (await reconcileRequest(this.runtime, decision.id)).status,
       'retry-request': async () => (await recoverRequest(this.runtime, decision.id, 'retry', by, required(reason, 'reason'))).status,
       'cancel-request': async () => (await recoverRequest(this.runtime, decision.id, 'cancel', by, required(reason, 'reason'))).status,
+      'retry-attention-assignment': async () => (await retryAttentionAssignment(this.runtime, decision.id, by)).status,
+      'assign-attention': async () => {
+        if (!decision.assignment) throw new Error('attention_assignment_required');
+        const request = await assignAttention(this.runtime, decision.id, decision.assignment, by);
+        return `${request.id}: ${request.status}`;
+      },
       'acknowledge-attention': async () => (await changeAttention(this.runtime, decision.id, 'acknowledged', by, required(reason, 'reason'))).status,
       'resolve-attention': async () => (await changeAttention(this.runtime, decision.id, 'resolved', by, required(reason, 'reason'))).status,
       'approve-initiative': async () => (await approveInitiative(this.runtime, decision.id, by, decision.note)).status,

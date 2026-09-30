@@ -86,7 +86,7 @@ test('attention and interrupted requests retain their decision controls after th
     onDone: () => undefined,
   }));
   const attention = render('attention');
-  assert.match(attention, /disabled=""[^>]*>Acknowledge/);
+  assert.match(attention, /disabled=""[^>]*>Seen/);
   assert.match(attention, /disabled=""[^>]*>Resolve/);
   const recovery = render('request-recovery');
   assert.ok(recovery.includes('Check outcome'));
