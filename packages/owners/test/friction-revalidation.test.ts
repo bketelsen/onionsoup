@@ -509,6 +509,10 @@ test('explicit retry preserves original bytes and allows one additional hire wit
     if (retried.state !== 'done') throw new Error('expected completed retry');
     assert.equal(retried.retry?.failedToken, initial.failed.token);
     assert.equal(retried.retry?.authorizedBy, 'fixture-person');
+    assert.equal(retried.retry?.referenceCommit, state.second);
+    assert.equal(retried.retry?.at, retried.at);
+    assert.deepEqual(JSON.parse(await readFile(initial.path, 'utf8')).retry,
+      { ...initial.approval, at: retried.at });
     assert.notEqual(retried.token, initial.failed.token);
     assert.equal(retried.revision?.investigation.disposition, 'already-fixed');
     assert.equal(await readFile(initial.path + '.failed-attempt.json', 'utf8'), initial.bytes);
@@ -622,7 +626,7 @@ test('dead retry remains uncertain and cannot start a third attempt', async () =
     const initial = await failInitial(state);
     await writeFile(initial.path + '.failed-attempt.json', initial.bytes);
     await writeFile(initial.path, JSON.stringify({ state: 'running', runner: 2147483647, token: 'retry-token', at,
-      retry: { failedToken: initial.failed.token, authorizedBy: 'fixture-person', at } }));
+      retry: { ...initial.approval, at } }));
     const calls = scriptedHire(state);
     assert.equal((await retryFrictionRevalidation(state.runtime, id, initial.approval)).state, 'uncertain');
     assert.equal((await retryFrictionRevalidation(state.runtime, id, initial.approval)).state, 'uncertain');
@@ -639,7 +643,7 @@ test('missing executable preflight consumes neither initial claim nor human retr
     await mkdir(executable);
     state.runtime.preflightHire = directory => preflightHireExecutable(directory, executable);
     const calls = scriptedHire(state);
-    await assert.rejects(revalidateFriction(state.runtime, id), /executable_unavailable/);
+    await assert.rejects(revalidateFriction(state.runtime, id), /hire_executable_unavailable/);
     assert.equal(calls(), 0);
     const claimPath = join(investigationDirectory(state.runtime, id), `claim-${state.second}.json`);
     await assert.rejects(readFile(claimPath), { code: 'ENOENT' });
@@ -649,7 +653,7 @@ test('missing executable preflight consumes neither initial claim nor human retr
     await chmod(binary, 0o755);
     const initial = await failInitial(state);
     await rm(binary);
-    await assert.rejects(retryFrictionRevalidation(state.runtime, id, initial.approval), /executable_unavailable/);
+    await assert.rejects(retryFrictionRevalidation(state.runtime, id, initial.approval), /hire_executable_unavailable/);
     assert.equal(await readFile(initial.path, 'utf8'), initial.bytes);
     await assert.rejects(readFile(initial.path + '.failed-attempt.json'), { code: 'ENOENT' });
     await writeFile(binary, '#!/bin/sh\nexit 77\n');
@@ -665,10 +669,10 @@ test('executable preflight rejects nonexecutable files and directories and resol
   try {
     await mkdir(join(root, 'bin'));
     await writeFile(join(root, 'bin', 'opencode'), 'not executable');
-    await assert.rejects(preflightHireExecutable(root, 'bin'), /executable_unavailable/);
+    await assert.rejects(preflightHireExecutable(root, 'bin'), /hire_executable_unavailable/);
     await rm(join(root, 'bin', 'opencode'));
     await mkdir(join(root, 'bin', 'opencode'));
-    await assert.rejects(preflightHireExecutable(root, 'bin'), /executable_unavailable/);
+    await assert.rejects(preflightHireExecutable(root, 'bin'), /hire_executable_unavailable/);
     await rm(join(root, 'bin', 'opencode'), { recursive: true });
     await writeFile(join(root, 'bin', 'opencode'), '#!/bin/sh\nexit 77\n');
     await chmod(join(root, 'bin', 'opencode'), 0o755);

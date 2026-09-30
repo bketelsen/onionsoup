@@ -130,10 +130,13 @@ const COMMANDS: Record<string, Command> = {
     console.log(JSON.stringify(await revalidateFriction(runtime, required(id, 'friction id')), null, 2));
   },
   async 'friction-revalidation-retry'(runtime, [id, referenceCommit, failedToken]) {
-    console.log(JSON.stringify(await retryFrictionRevalidation(runtime, required(id, 'friction id'), {
-      referenceCommit: required(referenceCommit, 'reference commit'), failedToken: required(failedToken, 'failed claim token'),
+    const approval = {
+      referenceCommit: required(referenceCommit, 'reference commit'),
+      failedToken: required(failedToken, 'failed claim token'),
       authorizedBy: userInfo().username,
-    }), null, 2));
+    };
+    const retried = await retryFrictionRevalidation(runtime, required(id, 'friction id'), approval);
+    console.log(JSON.stringify(retried, null, 2));
   },
   async 'friction-investigation'(runtime, [id]) {
     const selected = required(id, 'friction id');

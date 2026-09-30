@@ -21,8 +21,8 @@ export const Revision = z.object({
 }).strict();
 export type Revision = z.infer<typeof Revision>;
 
-const RetryAuthorization = z.object({
-  failedToken: z.string().min(1), authorizedBy: z.string().trim().min(1),
+const RetryApproval = z.object({
+  referenceCommit: commit, failedToken: z.string().min(1), authorizedBy: z.string().trim().min(1),
 }).strict();
 
 export const RevalidationClaim = z.object({
@@ -31,7 +31,7 @@ export const RevalidationClaim = z.object({
   reason: z.enum(['friction_revalidation_uncertain', 'friction_revalidation_failed',
     'friction_triage_source_changed']).optional(),
   revision: Revision.optional(),
-  retry: RetryAuthorization.extend({ at: z.string().datetime() }).optional(),
+  retry: RetryApproval.extend({ at: z.string().datetime() }).optional(),
 }).strict().superRefine((claim, context) => {
   if (claim.state === 'running' && (!claim.runner || !claim.token || !claim.at)) {
     context.addIssue({ code: 'custom', message: 'friction_revalidation_invalid_running_claim' });
@@ -331,7 +331,6 @@ export async function revalidateFriction(runtime: Runtime, id: string) {
   return performRevalidation(runtime, triage, claim, path, freshness.investigatedCommit!, referenceCommit);
 }
 
-const RetryApproval = RetryAuthorization.extend({ referenceCommit: commit });
 type RetryApproval = z.infer<typeof RetryApproval>;
 
 async function archiveFailedClaim(path: string, bytes: string) {
@@ -349,7 +348,8 @@ async function acquireRetry(runtime: Runtime, id: string, path: string, approval
   return withRecordLock(`${path}.lock`, async () => {
     const bytes = await readFile(path, 'utf8');
     const claim = RevalidationClaim.parse(JSON.parse(bytes));
-    if (claim.retry?.failedToken === approval.failedToken) return { claim, acquired: false };
+    if (claim.retry?.failedToken === approval.failedToken
+      && claim.retry.referenceCommit === approval.referenceCommit) return { claim, acquired: false };
     if (claim.retry) throw new Error('friction_revalidation_retry_exhausted');
     if (claim.state !== 'failed' || claim.token !== approval.failedToken) {
       throw new Error('friction_revalidation_retry_not_eligible');
@@ -359,9 +359,9 @@ async function acquireRetry(runtime: Runtime, id: string, path: string, approval
       throw new Error('friction_revalidation_revision_exists');
     }
     await archiveFailedClaim(path, bytes);
+    const at = new Date().toISOString();
     const retry: RevalidationClaim = { state: 'running', runner: process.pid, token: randomUUID(),
-      at: new Date().toISOString(), retry: { failedToken: approval.failedToken,
-        authorizedBy: approval.authorizedBy, at: new Date().toISOString() } };
+      at, retry: { ...approval, at } };
     await replaceClaim(path, retry);
     return { claim: retry, acquired: true };
   });
@@ -384,7 +384,8 @@ export async function retryFrictionRevalidation(runtime: Runtime, id: string, in
   }
   const path = claimPath(runtime, id, approval.referenceCommit);
   const saved = await existingClaim(path);
-  if (saved?.retry?.failedToken === approval.failedToken) return saved;
+  if (saved?.retry?.failedToken === approval.failedToken
+    && saved.retry.referenceCommit === approval.referenceCommit) return saved;
   if (!freshness.stale || freshness.reason !== 'source_stale') throw new Error('friction_revalidation_not_stale');
   if (!saved || saved.state !== 'failed' || saved.token !== approval.failedToken || saved.retry) {
     throw new Error('friction_revalidation_retry_not_eligible');

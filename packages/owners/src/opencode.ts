@@ -25,7 +25,7 @@ export async function preflightHireExecutable(directory: string, searchPath = pr
       if (!['ENOENT', 'ENOTDIR', 'EACCES'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error;
     }
   }
-  throw new Error('friction_revalidation_executable_unavailable');
+  throw new Error('hire_executable_unavailable');
 }
 
 export const HIRE_LIMITS = { heartbeatMs: 30_000, timeoutMs: 20 * 60_000, serverStartMs: 30_000, permissionPollMs: 2_000, serverOutputChars: 500 };

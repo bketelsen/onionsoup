@@ -367,7 +367,7 @@ A person may authorize one additional attempt with
 `owners friction-revalidation-retry <id> <reference-commit> <failed-claim-token>`. Read the token from the saved
 failed claim returned by `friction-revalidate`; this command acknowledges that a generic failure does **not**
 prove the earlier hire made no inference. The command binds that token to the current clean reference commit,
-records the local person's username, and archives the exact failed claim bytes before replacing the claim under
+records that commit and the local person's username, and archives the exact failed claim bytes before replacing the claim under
 a lock. Repeating the same command returns its saved retry; a failed retry cannot gain another attempt. A crash
 between archive and replacement resumes only when the archive exactly matches the failed claim. Running,
 uncertain, malformed claims and existing revisions for the commit block new hires. A dead retry becomes uncertain.
