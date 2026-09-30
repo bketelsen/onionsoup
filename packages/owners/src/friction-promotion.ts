@@ -53,7 +53,7 @@ export function frictionProposalDigest(triage: FrictionTriage) {
     repository: triage.policy.repository, sourceCommit: triage.sourceCommit, investigation: triage.investigation };
   // Schema parsing can reorder object keys after persistence; ordering is not a changed proposal.
   const serialized = JSON.stringify(content, (_key, value) => value && typeof value === 'object' && !Array.isArray(value)
-    ? Object.fromEntries(Object.entries(value).sort(([left], [right]) => left.localeCompare(right))) : value);
+    ? Object.fromEntries(Object.entries(value).sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)) : value);
   return createHash('sha256').update(serialized).digest('hex');
 }
 

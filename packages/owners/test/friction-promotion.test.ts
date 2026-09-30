@@ -27,6 +27,14 @@ test('proposal digest survives schema parsing and property order changes', async
   assert.equal(frictionProposalDigest((await readFrictionTriage(runtime, id))!), digest);
   triage.investigation!.proposedWork = Object.fromEntries(Object.entries(triage.investigation!.proposedWork!).reverse()) as NonNullable<FrictionTriage['investigation']>['proposedWork'];
   assert.equal(frictionProposalDigest(triage), digest);
+  triage.investigation = Object.fromEntries(Object.entries(triage.investigation!).reverse()) as FrictionTriage['investigation'];
+  assert.equal(frictionProposalDigest(triage), digest);
+  triage.investigation!.proposedWork!.acceptance.push('Second criterion');
+  const ordered = frictionProposalDigest(triage);
+  triage.investigation!.proposedWork!.acceptance.reverse();
+  assert.notEqual(frictionProposalDigest(triage), ordered);
+  triage.investigation!.proposedWork!.goal = 'Changed goal';
+  assert.notEqual(frictionProposalDigest(triage), digest);
 });
 
 test('investigation alone is inert; explicit concurrent promotion creates one gated human request', async () => {
