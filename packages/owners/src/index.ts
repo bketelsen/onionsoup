@@ -52,3 +52,5 @@ export { AttentionAssignmentInput, assignAttention, retryAttentionAssignment, at
   type AttentionAssignmentView } from './attention-assignment.ts';
 export { promoteFriction, retryFrictionPromotion, frictionProposalDigest, frictionPromotionView, FrictionProposalDigest, type FrictionPromotionView } from './friction-promotion.ts';
 export { planRevisionStatus } from './plan-revision.ts';
+
+export { ownerChatAgent } from './owner-chat.ts';

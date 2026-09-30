@@ -274,7 +274,7 @@ test('a later explicit decision can reaffirm a retracted statement without reviv
   assert.doesNotMatch(decisions, /original choice/);
 });
 
-test('retired and personless owners archive pending notices with a reason instead of retrying forever', async () => {
+test('retired notices remain quarantined while new personless exchanges reach observation chat', async () => {
   const { runtime } = await fixture();
   const fake = transport();
   runtime.declarations.owners.set('retired-owner', { ...runtime.declarations.owners.get('homelab')!, id: 'retired-owner' });
@@ -285,10 +285,13 @@ test('retired and personless owners archive pending notices with a reason instea
   assert.equal((await records(runtime, 'undeliverable'))[0]!.undeliverableReason, 'owner_retired');
   const clippy = runtime.declarations.owners.get('clippy')!;
   runtime.declarations.owners.set('clippy', { ...clippy, persona: undefined });
-  await queueExchangeNotice(runtime, 'clippy', 'Legacy personless notice');
+  fake.chat('observation-chat', Date.now(), Date.now(), undefined, 'onionsoup-owner-clippy');
+  await queueExchangeNotice(runtime, 'clippy', 'New observation exchange');
   await deliverExchangeNotices(runtime, fake.client);
-  assert.ok((await records(runtime, 'undeliverable')).some(notice => notice.undeliverableReason === 'owner_has_no_persona'));
-  assert.equal(fake.posted.length, 0);
+  assert.equal((await records(runtime, 'undeliverable')).length, 1);
+  assert.equal(fake.posted.length, 1);
+  assert.equal(fake.posted[0].body.agent, 'onionsoup-owner-clippy');
+  assert.equal(fake.posted[0].body.noReply, true);
 });
 
 test('unreadable optional journal context is diagnosed without breaking a chat turn', async context => {

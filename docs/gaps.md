@@ -172,3 +172,7 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
   (`readSessionsTitled` in `packages/surface/src/hire-store.ts`) instead.
 
 - Desk reviewers now receive tree-bound host check metadata and original task criteria. A general evidence-unavailable workflow, live-environment evidence adapters, and task-specific closure attestations remain future work; command success alone is not deployment or goal completion.
+
+- **Persona-free owners have observation chat only.** They can inspect recorded state and consult other owners,
+  but cannot execute domain changes or reminders. Migrating the legacy persona requirement in `canChange` to an
+  explicit capability would require a separate compatibility/authority decision; adding chat does not perform it.

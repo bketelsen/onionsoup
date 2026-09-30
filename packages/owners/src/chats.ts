@@ -6,6 +6,7 @@ import { ensureDesk } from './workspace.ts';
 
 export function chatPath(runtime: Runtime, ownerId: string) {
   const owner = runtime.owner(ownerId);
+  if (!owner.persona) return owner.workspace;
   return isRepositoryOwner(owner) ? owner.desk ?? join(runtime.desksRoot, owner.id)
     : owner.domain.kind === 'repository-group' ? join(runtime.desksRoot, owner.id) : runtime.evidenceDirectory(owner.id);
 }
@@ -17,6 +18,10 @@ export function chatPath(runtime: Runtime, ownerId: string) {
  */
 export async function chatDirectory(runtime: Runtime, ownerId: string) {
   const owner = runtime.owner(ownerId);
+  if (!owner.persona) {
+    await mkdir(owner.workspace, { recursive: true });
+    return owner.workspace;
+  }
   for (const view of runtime.repositoryViews(owner.id)) if (owner.domain.kind === 'repository-group') await ensureDesk(view, runtime.desksRoot);
   if (isRepositoryOwner(owner)) await ensureDesk(owner, runtime.desksRoot);
   const path = chatPath(runtime, owner.id);

@@ -84,7 +84,7 @@ async function answerOwner(runtime: Runtime, fromId: string, toName: string, que
 
 async function recordExchange(runtime: Runtime, asker: OwnerDeclaration, answerer: OwnerDeclaration,
   question: string, answer: Answer, followUpStatus: string) {
-  if (answerer.persona) await queueExchangeNotice(runtime, answerer.id, `${who(asker)} asked:\n${question}\n\nYou answered:\n${formatAnswer(answerer, answer)}${followUpStatus}`);
+  await queueExchangeNotice(runtime, answerer.id, `${who(asker)} asked:\n${question}\n\nYou answered:\n${formatAnswer(answerer, answer)}${followUpStatus}`);
   for (const [ownerId, kind] of [[asker.id, 'asked'], [answerer.id, 'answered']] as const) {
     const book = runtime.notebook(ownerId);
     await book.journal({ kind, note: `${asker.id} → ${answerer.id}: ${clipped(question, answerer.chatContext.entryChars)}`,
