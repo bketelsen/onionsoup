@@ -112,6 +112,8 @@ export const WorkItem = z.object({
   worktree: z.string().optional(),
   /** An approved plan's own worktree while it exists; unset once the cleanup pass removes it (finished and idle). */
   planWorktree: z.string().optional(),
+  /** Changes when a worktree is created again for the same item. */
+  planWorktreeGeneration: z.string().optional(),
   /** Why the last cleanup pass kept the plan's worktree, so the person hears of it once, not every pass. */
   planWorktreeKept: PlanWorktreeKept.optional(),
   branch: z.string().optional(),

@@ -11,7 +11,7 @@ import { git, refreshCheckout, ensureDesk, createWorktree } from '../src/workspa
 import { REBASE_WORKFLOW, maintainPullRequests, refreshPublications } from '../src/rebase.ts';
 import { deskSyncText } from '../src/desk-sync.ts';
 import { openOwnerSession, type OwnerSessionClient, type SessionActivity } from '../src/owner-sessions.ts';
-import { PLAN_WORKTREE_LIMITS, removeIdlePlanWorktrees, syncPlanWorktree } from '../src/plan-worktrees.ts';
+import { PLAN_WORKTREE_LIMITS, ensurePlanWorktree, removeIdlePlanWorktrees, syncPlanWorktree } from '../src/plan-worktrees.ts';
 import { checkoutPullRequest, DESK_CHANGE_LIMITS, proposeDeskChanges, resetDeskReviews } from '../src/desk-changes.ts';
 import { deskReviewRounds } from '../src/desk-reviews.ts';
 import type { HireRequest } from '../src/opencode.ts';
@@ -1049,7 +1049,7 @@ test('a cancelled plan\'s worktree waits for its idle session, and is never remo
   const kinds = await journalKinds(runtime, 'clippy');
   assert.equal(kinds.filter(kind => kind === 'plan-worktree-removed').length, 1);
   assert.equal(kinds.filter(kind => kind === 'attention-condition').length, 2, 'one kept condition and one clean completion');
-  const attention = (await listAttention(runtime)).find(entry => entry.condition?.key === `plan-worktree:${dirty!.id}`)!;
+  const attention = (await listAttention(runtime)).find(entry => entry.condition?.key.startsWith(`plan-worktree:${dirty!.id}:`))!;
   assert.equal(attention.status, 'open');
   await changeAttention(runtime, attention.id, 'acknowledged', 'person', 'Will clean later');
   await rm(join(dirty!.planWorktree!, 'dirty.txt'));
@@ -1058,6 +1058,15 @@ test('a cancelled plan\'s worktree waits for its idle session, and is never remo
   assert.equal(cleared.status, 'resolved', 'positive filesystem evidence clears even acknowledged condition');
   assert.equal(cleared.decision?.reason, 'Will clean later', 'human acknowledgment history survives');
   assert.equal(cleared.condition?.state, 'resolved');
+  const priorGeneration = (await runtime.ledger.get(dirty!.id)).planWorktreeGeneration;
+  await ensurePlanWorktree(runtime, await runtime.ledger.get(dirty!.id));
+  const recreated = await runtime.ledger.get(dirty!.id);
+  assert.notEqual(recreated.planWorktreeGeneration, priorGeneration);
+  await writeFile(join(recreated.planWorktree!, 'new-work.txt'), 'new unfinished work');
+  await cleanUp(runtime, sessions.client, pastIdleLimit());
+  const later = (await listAttention(runtime)).filter(entry => entry.condition?.key.startsWith(`plan-worktree:${dirty!.id}:`));
+  assert.equal(later.length, 2);
+  assert.equal(later.filter(entry => entry.status === 'open').length, 1, 'a new workspace generation can raise attention again');
 });
 
 test('a plan\'s worktree syncs with its base on its own, keeping its uncommitted work', async () => {

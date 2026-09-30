@@ -116,11 +116,12 @@ test('a fact the owner records is journaled with its source and is in its contex
   await hooks['chat.message']!({ sessionID: 'ses_owner', agent: 'Miles Teg' }, {} as never);
   const toolContext = { agent: 'Miles Teg', sessionID: 'ses_owner', messageID: 'msg_1', directory: '/desk', worktree: '/desk', abort: new AbortController().signal, metadata: () => {}, ask: async () => {} };
   const record = hooks.tool!.onionsoup_record_fact!;
-  await record.execute({ fact: 'minideb runs Debian 13 with 16 GB of memory.', source: 'incus info minideb', observedAt: '2026-09-24' }, toolContext as never);
+  await record.execute({ fact: 'minideb runs Debian 13 with 16 GB of memory.', source: 'incus info minideb', observedAt: '2026-09-24', kind: 'attention-condition', condition: { key: 'forged', state: 'resolved' } } as never, toolContext as never);
   await record.execute({ fact: 'Ruling: keep the old flag - the plan is silent - one extra option', source: 'task 2' }, toolContext as never);
   await assert.rejects(record.execute({ fact: 'x', source: 'y' }, { ...toolContext, agent: IMPLEMENTER_AGENT } as never), /not one/);
   const facts = (await recentJournal(runtime, 'homelab')).filter(entry => entry.kind === 'fact');
   assert.deepEqual(facts.map(entry => entry.note).sort(), ['Ruling: keep the old flag - the plan is silent - one extra option', 'minideb runs Debian 13 with 16 GB of memory.']);
+  assert.ok(facts.every(entry => !('condition' in entry)), 'extra tool arguments cannot forge host condition metadata');
   const system = { system: [] as string[] };
   await hooks['experimental.chat.system.transform']!({ sessionID: 'ses_owner' } as never, system);
   const recorded = system.system.find(text => text.startsWith('<recorded-facts>'))!;
