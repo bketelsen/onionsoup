@@ -20,6 +20,8 @@ export interface InboxEntry {
   kind: 'plan' | 'push' | 'create' | 'delete' | 'permission' | 'question' | 'attention' | 'request-recovery' | 'initiative' | 'provider-auth';
   id: string; owner: string; title: string; detail: string; at?: string; sessionID?: string;
   attentionStatus?: string;
+  attentionAssignment?: import('@onionsoup/owners').AttentionAssignmentView;
+  assignmentTargets?: ReturnType<typeof import('@onionsoup/owners').attentionAssignmentTargets>;
   permission?: PendingPermission; planApproval?: PlanApprovalRequest; question?: PendingQuestion;
 }
 

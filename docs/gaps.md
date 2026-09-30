@@ -4,6 +4,10 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
 
 ## Owners and their authority
 
+- **Attention assignment is repository-only.** Seen remains inert; explicit assignment creates one gated request
+  without resolving the attention entry. Assignment generations, reassignment and a blocked-routing recovery UI
+  remain follow-ups. Existing acknowledged notes are never automatically interpreted as assignments.
+
 - **Cross-owner progress is recorded state, not omniscience.** Request participants and the receiving owner's
   direct manager can read linked progress without relaying it through the person. Origin-pinned updates are
   informational and do not wake a model. Missing origins stay pull-only; there is no historical backfill.

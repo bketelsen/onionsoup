@@ -6,6 +6,8 @@ import { FrictionDetail } from '../web/src/components/FrictionView.tsx';
 import { InitiativeView } from '../web/src/components/InitiativeView.tsx';
 import { OrgTree } from '../web/src/components/OrgView.tsx';
 import { InboxErrors } from '../web/src/components/InboxErrors.tsx';
+import { AttentionAssignment } from '../web/src/components/AttentionAssignment.tsx';
+import { DecisionActions } from '../web/src/components/DecisionActions.tsx';
 import { WorkRecovery } from '../web/src/components/WorkRecovery.tsx';
 import { ReminderCard } from '../web/src/components/ReminderCard.tsx';
 import { ITEM_SECTIONS } from '../web/src/components/ItemSections.tsx';
@@ -358,4 +360,18 @@ test('the composer clears the home indicator, labels its buttons, and on a touch
   } finally {
     globalThis.matchMedia = original;
   }
+});
+
+test('attention renders Seen separately from assignment and does not equate acceptance with resolution', () => {
+  const entry = { kind: 'attention' as const, id: 'a-fixture', owner: 'homelab', title: 'Fix check', detail: '', attentionStatus: 'open' };
+  const actions = renderToStaticMarkup(createElement(DecisionActions, { entry, busy: false, text: '', withDelete: false,
+    setWithDelete: () => undefined, decide: async () => undefined, permission: async () => undefined }));
+  assert.match(actions, />Seen</);
+  assert.doesNotMatch(actions, />Acknowledge</);
+  const assigned = renderToStaticMarkup(createElement(AttentionAssignment, { entry: { ...entry,
+    attentionAssignment: { by: 'Brian', owner: 'clippy', requestID: 'r-fixture', status: 'pending-owner' } },
+    busy: false, decide: async () => undefined }));
+  assert.match(assigned, /awaiting owner acceptance/);
+  assert.match(assigned, /remains unresolved/);
+  assert.match(assigned, /r-fixture/);
 });

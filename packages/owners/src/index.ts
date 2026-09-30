@@ -47,5 +47,6 @@ export {
   beginAdmission, listAdmissions, armDeployment, markDeploymentWaiting, beginDrain, releaseDrain,
   type AdmissionLease,
 } from './deployment-admission.ts';
-
 export { readFrictionTriage, type FrictionTriage } from './friction-work.ts';
+export { AttentionAssignmentInput, assignAttention, attentionAssignmentView, attentionAssignmentTargets,
+  type AttentionAssignmentView } from './attention-assignment.ts';

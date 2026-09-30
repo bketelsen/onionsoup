@@ -806,3 +806,26 @@ test('a provider failing authentication is in /api/state and the inbox with its 
     server.close();
   }
 });
+
+test('attention assignment route preserves Seen and exposes linked gated request without spoofed actor', async () => {
+  const { runtime, server, call } = await start();
+  try {
+    await runtime.notebook('bellonda').ensure('# Test');
+    await runtime.notebook('bellonda').journal({ kind: 'attention', note: 'Repair the check' });
+    const inbox = (await call('GET', '/api/state')).body.inbox as { id: string; kind: string }[];
+    const attention = inbox.find(entry => entry.kind === 'attention')!;
+    const assignment = { owner: 'clippy', repository: 'example/clippy', title: 'Fix check', goal: 'Correct check', acceptance: ['Regression passes'], by: 'spoofed' };
+    const first = await call('POST', '/api/decide', { action: 'assign-attention', id: attention.id, assignment });
+    assert.match(String(first.body.outcome), /pending-owner/);
+    await call('POST', '/api/decide', { action: 'assign-attention', id: attention.id, assignment });
+    const requests = await runtime.requests.list();
+    assert.equal(requests.length, 1);
+    const request = requests[0];
+    assert.equal(request.ask.kind, 'work');
+    if (request.ask.kind === 'work') assert.notEqual(request.ask.operatorAssignment?.by, 'spoofed');
+    const current = (await call('GET', '/api/state')).body.inbox as { id: string; attentionStatus?: string; attentionAssignment?: { requestID: string } }[];
+    const entry = current.find(candidate => candidate.id === attention.id)!;
+    assert.equal(entry.attentionStatus, 'open');
+    assert.equal(entry.attentionAssignment?.requestID, request.id);
+  } finally { server.close(); }
+});

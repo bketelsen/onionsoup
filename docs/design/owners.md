@@ -709,3 +709,22 @@ the implementer or reviewer loop can make or corroborate.
   the sandboxed plugin is loaded as an absolute `file://` URL, not a path relative to the sandbox's cwd.
 - TrueNAS details that bit: `truenas_app_get` answers with a list, and an app is `STOPPED` between its old and
   new containers, so updates follow the upgrade job, not snapshots of the app's state.
+
+
+### Explicit attention assignment
+
+Attention **Seen** only records acknowledgment; neither its note nor old acknowledged records start work.
+**Assign repository fix** is a separate human action selecting a declared capable repository owner, repository,
+title, outcome and acceptance criteria. The host validates that scope and persists the human author and source
+in `state/attention/assignments` before creating one deterministic regular work request. The request is attributed
+to the person through `operatorAssignment`; its from/to owner is the recipient, so it does not impersonate a manager.
+The receiver still accepts or declines, and ordinary plan/review/publication gates apply. No consultation hire is
+needed to submit this concrete request. The inbox displays its request status and linked work.
+
+Repeated identical submissions adopt the request without reopening completed/denied work; changed input conflicts.
+A daemon recovery pass handles only new explicit assignment sidecars, with current configuration checked before
+new request creation and existing identities adopted after a crash. It attempts at most 20 pending assignments
+per tick and stops after three transient failures or one invalid-scope failure. There is no legacy backfill.
+Assignment does not acknowledge, resolve or cancel the attention entry, and resolving attention does not cancel
+its independently gated work request. This first version supports one immutable assignment per attention item;
+reassignment/generations and an assignment recovery UI are follow-ups. Stop existing work through its normal controls.

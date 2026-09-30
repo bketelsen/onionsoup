@@ -65,7 +65,7 @@ function AttentionActions(props: DecisionActionProps) {
   const { entry, busy, text, decide } = props;
   return <>
     {entry.attentionStatus !== 'acknowledged' && <Button disabled={busy || !text.trim()}
-      onClick={() => void decide('acknowledge-attention', { reason: text })}>Acknowledge</Button>}
+      onClick={() => void decide('acknowledge-attention', { reason: text })}>Seen</Button>}
     <Button variant="primary" disabled={busy || !text.trim()}
       onClick={() => void decide('resolve-attention', { reason: text })}>Resolve</Button>
   </>;

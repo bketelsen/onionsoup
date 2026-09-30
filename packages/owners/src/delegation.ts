@@ -1,9 +1,10 @@
+import { createHash } from 'node:crypto';
 import type { ChatOrigin } from './chat-origin.ts';
 import { ProposedWork } from './artifacts.ts';
 import { canChange, isDirectReport } from './declarations.ts';
 import { OWNER_CHANGE_WORKFLOW } from './plan-work.ts';
 import type { AssignmentRef } from './initiatives.ts';
-import { PublishDecision, requireStatus, type ResourceRequest, type WorkAsk } from './requests.ts';
+import { PublishDecision, requireStatus, type ResourceRequest, type WorkAsk, type OperatorAssignmentSource } from './requests.ts';
 import type { Runtime } from './runtime.ts';
 
 export async function journalRequest(runtime: Runtime, request: ResourceRequest, kind: string, note: string) {
@@ -25,6 +26,21 @@ export async function requestWork(runtime: Runtime, from: string, to: string, pr
   return request;
 }
 
+export function operatorWorkRequestId(source: OperatorAssignmentSource) {
+  return `r-handoff-${createHash('sha256').update(JSON.stringify(['operator-assignment-v1', source.kind, source.id])).digest('hex')}`;
+}
+
+/** Caller persists explicit human intent first. Self-request avoids impersonating a manager or another owner. */
+export function openOperatorWorkRequest(runtime: Runtime, source: OperatorAssignmentSource, by: string,
+  to: string, proposal: ProposedWork) {
+  return runtime.requests.openIdentified(operatorWorkRequestId(source), to, to,
+    { kind: 'work', purpose: proposal.goal, proposal, operatorAssignment: { by, source } }, 'none', undefined, () => {
+      const receiver = runtime.owner(to);
+      if (!canChange(receiver)) throw new Error(`owner_cannot_change: ${to}`);
+      runtime.repositoryOwner(to, proposal.repository);
+    });
+}
+
 type Acceptance = (runtime: Runtime, request: ResourceRequest, ask: WorkAsk) => Promise<PublishDecision>;
 
 /** Who decides: work from the receiver's declared manager is accepted as assigned; a peer's is weighed by the receiver. */
@@ -35,9 +51,12 @@ const ACCEPTANCE: Record<'manager' | 'peer', Acceptance> = {
   peer: async (runtime, request, ask) => {
     const owner = runtime.owner(request.to);
     const notebook = runtime.notebook(owner.id);
+    const requester = ask.operatorAssignment
+      ? `The person ${ask.operatorAssignment.by} explicitly assigned this work from ${ask.operatorAssignment.source.kind} ${ask.operatorAssignment.source.id}.`
+      : `Owner ${request.from} requests this work in your declared domain.`;
     return (await runtime.hire(owner.id, {
       role: 'owner', model: owner.model, directory: owner.workspace, title: `${request.id}: decide work`,
-      brief: `Owner ${request.from} requests this work in your declared domain. Accept if appropriate, or decline with a reason. If you accept, you plan it yourself and the plan waits for approval like any other.\n${JSON.stringify(ask.proposal)}\n${await notebook.orientation()}`,
+      brief: `${requester} Accept if appropriate, or decline with a reason. If you accept, you plan it yourself and the plan waits for approval like any other.\n${JSON.stringify(ask.proposal)}\n${await notebook.orientation()}`,
       schema: PublishDecision,
     })).value;
   },
