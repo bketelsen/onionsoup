@@ -4,6 +4,11 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
 
 ## Owners and their authority
 
+- **Cross-owner progress is recorded state, not omniscience.** Request participants and the receiving owner's
+  direct manager can read linked progress without relaying it through the person. Origin-pinned updates are
+  informational and do not wake a model. Missing origins stay pull-only; there is no historical backfill.
+  Status does not independently check live services or prove deployment, and between-tick transitions can be missed.
+
 - **Actionable consultations currently cover repository changes only.** Explicit `onionsoup_ask` follow-up routes one
   proposal to existing gated work. Missing live evidence, wiki edits and household operations still need their
   existing tools. New explicit handoff intents recover through the daemon without replaying old notices. Blocked routing

@@ -1,3 +1,4 @@
+import { noticeRequestProgress } from './request-status.ts';
 import { recoverAskHandoffs } from './ask-handoffs.ts';
 import { canReconcileRequest, reconcileRequest } from './request-recovery.ts';
 import { readFile, writeFile } from 'node:fs/promises';
@@ -272,6 +273,7 @@ async function tickAdmitted(runtime: Runtime, log: TickLog) {
   try {
     await runtime.requests.markInterrupted();
     await runRequests(runtime, log);
+    await noticeRequestProgress(runtime, log.error);
   } catch (error) {
     log.error('requests', error);
   }
