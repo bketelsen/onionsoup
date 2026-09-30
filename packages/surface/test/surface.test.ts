@@ -339,10 +339,13 @@ test('chats go to the owner\'s directory with its persona as the agent; bad inpu
     assert.equal((await call('POST', '/api/owners/bellonda/permissions/per_1', { reply: 'sure' })).status, 400);
     const clippy = runtime.declarations.owners.get('clippy')!;
     runtime.declarations.owners.set('clippy', { ...clippy, persona: undefined });
-    assert.equal((await call('POST', '/api/owners/clippy/sessions', {})).status, 200);
-    assert.equal((await call('POST', '/api/owners/clippy/sessions/ses_1/prompt', { text: 'What do you know?' })).status, 200);
+    const created = await call('POST', '/api/owners/clippy/sessions', {});
+    assert.equal(created.status, 200);
+    assert.equal(created.body.id, 'ses_2');
+    assert.equal((await call('POST', '/api/owners/clippy/sessions/ses_1/prompt', { text: 'Wrong owner' })).status, 404);
+    assert.equal((await call('POST', '/api/owners/clippy/sessions/ses_2/prompt', { text: 'What do you know?' })).status, 200);
     // start() injects the /desks/<id> resolver: this checks agent mapping, not filesystem workspace creation.
-    assert.deepEqual(calls.at(-1), ['prompt', '/desks/clippy', 'ses_1', 'onionsoup-owner-clippy', 'What do you know?']);
+    assert.deepEqual(calls.at(-1), ['prompt', '/desks/clippy', 'ses_2', 'onionsoup-owner-clippy', 'What do you know?']);
     assert.equal((await call('GET', '/api/owners/nobody/sessions')).status, 404);
     assert.match(String((await call('POST', '/api/decide', { action: 'launch', id: 'x' })).body.error), /unknown_decision|not found|ENOENT/);
   } finally {
