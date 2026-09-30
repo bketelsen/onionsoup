@@ -204,6 +204,8 @@ export function surfaceServer(state: SurfaceState, options: { webRoot: string; b
       return { enabled, answered };
     }),
     route('POST', '/api/owners/:owner/sessions', async (params, body) => {
+      requireKnownChat(params.owner!);
+      await state.assertHistoryAvailable(params.owner!);
       const { directory, agent } = await owned(params.owner!);
       const input = await body();
       const created = await state.opencode.createSession(directory, typeof input.title === 'string' ? input.title : undefined, agent());
@@ -298,7 +300,8 @@ export function surfaceServer(state: SurfaceState, options: { webRoot: string; b
         }
         await serveStatic(url.pathname, response);
       } catch (error) {
-        const status = error instanceof HttpError ? error.status : 500;
+        const status = error instanceof HttpError ? error.status
+          : error instanceof Error && error.message === 'session_history_unavailable' ? 503 : 500;
         if (!response.headersSent) send(response, status, { error: error instanceof Error ? error.message : String(error) });
         else response.end();
       }

@@ -353,6 +353,11 @@ test('chats go to the owner\'s directory with its persona as the agent; bad inpu
 test('the operator has a chat of its own in its directory, apart from the owners, with its prompts in the inbox', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'surface-operator-'));
   const { server, call, calls, runtime } = await start(api => {
+    const createSession = api.createSession;
+    api.createSession = async (...args) => {
+      const created = await createSession(...args);
+      return args[0] === directory ? { ...(created as object), id: 'ses_op' } : created;
+    };
     api.permissions = async candidate => candidate === directory
       ? [{ id: 'per_op', sessionID: 'ses_op', permission: 'bash', patterns: ['git push --force'], metadata: {}, always: [] }]
       : [];
@@ -368,9 +373,11 @@ test('the operator has a chat of its own in its directory, apart from the owners
     });
     assert.ok(!state.owners.some(owner => owner.id === OPERATOR_ID), 'the operator is not an owner');
     assert.ok(state.inbox.some(entry => entry.id === 'per_op' && entry.owner === OPERATOR_ID));
-    await call('POST', '/api/owners/operator/sessions', {});
+    const created = await call('POST', '/api/owners/operator/sessions', {});
+    assert.equal(created.status, 200);
+    assert.equal(created.body.id, 'ses_op');
     assert.deepEqual(calls.at(-1), ['create', directory, undefined, 'Operator']);
-    await call('POST', '/api/owners/operator/sessions/ses_op/prompt', { text: 'check the daemon' });
+    assert.equal((await call('POST', '/api/owners/operator/sessions/ses_op/prompt', { text: 'check the daemon' })).status, 200);
     assert.deepEqual(calls.at(-1), ['prompt', directory, 'ses_op', 'Operator', 'check the daemon']);
     assert.equal((await call('GET', '/api/owners/operator/sessions')).body.directory, directory);
     await call('POST', '/api/owners/operator/permissions/per_op', { reply: 'reject' });

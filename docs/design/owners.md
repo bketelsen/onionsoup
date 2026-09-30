@@ -882,3 +882,10 @@ observations are not claimed. Exact authorization rejects an unreadable identity
 as absent. Index writes are best-effort when starting already-approved work: the ledger retains its session
 reference, and metadata failure cannot stop its prompt. Cleanup still fails closed if it cannot preserve identity
 before removing a workspace. Missing or incompatible transcript stores return the unavailable tombstone.
+
+Surface session access requires an available history index. A whole-index read or write failure reports HTTP 503
+`session_history_unavailable`, rather than silently hiding conversations or treating storage failure as missing
+ownership. Malformed individual identities remain denied; directory ownership fallback is never widened by an
+index error. Session creation checks index readability before contacting OpenCode, but a later storage failure
+can still occur after creation and requires inspection. Approved engine dispatch keeps its durable ledger fallback
+and does not depend on successful index writes. Recorded chat views are ordered by most recently updated.

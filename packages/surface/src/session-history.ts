@@ -10,7 +10,8 @@ export type HistoricalSession = SessionHistory & { archived: boolean };
 export async function recordedSessions(runtime: Runtime, owner: string) {
   const items = (await runtime.ledger.list()).filter(item => item.owner === owner);
   const remembered = await sessionHistory(runtime, owner);
-  return [...new Map([...items.flatMap(itemSessionHistory), ...remembered].map(record => [record.id, record])).values()];
+  return [...new Map([...items.flatMap(itemSessionHistory), ...remembered].map(record => [record.id, record])).values()]
+    .sort((left, right) => right.time.updated - left.time.updated || left.id.localeCompare(right.id));
 }
 
 export async function rememberObservedSessions(runtime: Runtime, owner: string, directory: string, sessions: unknown[]) {
@@ -20,12 +21,18 @@ export async function rememberObservedSessions(runtime: Runtime, owner: string, 
     const record = parsed.data;
     if (record.directory && record.directory !== directory) continue;
     try { await rememberSession(runtime, { ...record, owner, directory }); }
-    catch { console.warn('session_history_observation_not_recorded', owner, record.id); }
+    catch (error) {
+      if (!(error instanceof Error) || !['session_history_identity_conflict', 'session_history_invalid'].includes(error.message)) throw error;
+      console.warn('session_history_observation_not_recorded', owner, record.id);
+    }
   }
 }
 
 export async function authorizedSession(runtime: Runtime, api: OpencodeApi, owner: string, id: string, resolveDirectory: () => Promise<string>) {
-  const identity = await rememberedSession(runtime, id).catch(() => { throw new Error('session_not_owned'); });
+  const identity = await rememberedSession(runtime, id).catch(error => {
+    if (error instanceof Error && error.message === 'session_history_unavailable') throw error;
+    throw new Error('session_not_owned');
+  });
   if (identity && identity.owner !== owner) throw new Error('session_not_owned');
   const recorded = (await recordedSessions(runtime, owner)).find(record => record.id === id);
   if (recorded) return recorded;

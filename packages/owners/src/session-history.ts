@@ -22,11 +22,7 @@ export async function rememberSession(runtime: Runtime, input: SessionHistory) {
   const record = SessionHistory.parse(input);
   const path = file(runtime, record.id);
   await withRecordLock(`${path}.lock`, async () => {
-    const previous = await readFile(path, 'utf8').catch(error => {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      return undefined;
-    });
-    const existing = previous ? SessionHistory.parse(JSON.parse(previous)) : undefined;
+    const existing = await rememberedSession(runtime, record.id);
     if (existing && (existing.owner !== record.owner || existing.directory !== record.directory || existing.parentID !== record.parentID)) {
       throw new Error('session_history_identity_conflict');
     }
@@ -36,6 +32,9 @@ export async function rememberSession(runtime: Runtime, input: SessionHistory) {
     const temporary = `${path}.${randomUUID()}.tmp`;
     await writeFile(temporary, JSON.stringify(saved) + '\n', { mode: 0o600 });
     await rename(temporary, path);
+  }).catch(error => {
+    if (error instanceof Error && ['session_history_identity_conflict', 'session_history_invalid'].includes(error.message)) throw error;
+    throw new Error('session_history_unavailable');
   });
 }
 
@@ -55,7 +54,7 @@ export async function rememberedSession(runtime: Runtime, id: string) {
 
 export async function sessionHistory(runtime: Runtime, owner: string) {
   const names = await readdir(directory(runtime)).catch(error => {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new Error('session_history_unavailable');
     return [];
   });
   const records = await Promise.all(names.filter(name => /^[a-f0-9]{64}\.json$/.test(name)).map(async name => {

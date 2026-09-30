@@ -143,3 +143,39 @@ test('missing and incompatible SQLite stores report unavailable without leaking 
   new DatabaseSync(incompatible).close();
   assert.throws(() => readArchivedSessionMessages('ses_history', '/fixture', incompatible), /^Error: history_transcript_unavailable$/);
 });
+
+test('an unavailable whole index returns HTTP 503 before transcript or session transport effects', async () => {
+  const { runtime, makeState } = await fixture();
+  await writeFile(join(runtime.stateDirectory, 'session-history'), 'not a directory');
+  const state = makeState();
+  let transportCalls = 0;
+  state.opencode.listSessions = async () => { transportCalls++; return []; };
+  state.opencode.createSession = async () => { transportCalls++; return { id: 'ses_new' }; };
+  state.opencode.prompt = async () => { transportCalls++; };
+  const { server } = surfaceServer(state, { webRoot: '/nonexistent', by: 'tester', buildId: null });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  try {
+    for (const [method, path] of [
+      ['GET', '/api/owners/clippy/sessions'], ['POST', '/api/owners/clippy/sessions'],
+      ['GET', '/api/owners/clippy/sessions/ses_history/messages'],
+      ['POST', '/api/owners/clippy/sessions/ses_history/prompt'],
+    ]) {
+      const response = await fetch(`${base}${path}`, { method,
+        ...(method === 'POST' ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: 'Continue' }) } : {}),
+      });
+      assert.equal(response.status, 503);
+      assert.deepEqual(await response.json(), { error: 'session_history_unavailable' });
+    }
+    assert.equal(transportCalls, 0);
+  } finally { server.close(); }
+});
+
+test('recorded chat views sort by most recently updated', async () => {
+  const { runtime, directory, makeState } = await fixture();
+  for (const [id, updated] of [['ses_old', 10], ['ses_new', 20]] as const) {
+    await rememberSession(runtime, { id, owner: 'clippy', directory, title: id, time: { created: 1, updated } });
+  }
+  const sessions = (await makeState().chatSessions('clippy')).sessions.filter(session => ['ses_old', 'ses_new'].includes(session.id));
+  assert.deepEqual(sessions.map(session => session.id), ['ses_new', 'ses_old']);
+});

@@ -372,11 +372,19 @@ export class SurfaceState {
   }
 
   /** An owner's chats across its directories, root sessions and subagents alike, with each directory's session status. */
+  async assertHistoryAvailable(ownerId: string) {
+    await recordedSessions(this.runtime, ownerId);
+  }
+
   async chatSessions(ownerId: string) {
+    await this.assertHistoryAvailable(ownerId);
     const [directory, ...planDirectories] = await this.ownerDirectories(ownerId);
     const listed = await Promise.all([
       this.directorySessions(ownerId, directory!),
-      ...planDirectories.map(planDirectory => this.directorySessions(ownerId, planDirectory).catch(() => ({ sessions: [], status: {} }))),
+      ...planDirectories.map(planDirectory => this.directorySessions(ownerId, planDirectory).catch(error => {
+        if (error instanceof Error && error.message === 'session_history_unavailable') throw error;
+        return { sessions: [], status: {} };
+      })),
     ]);
     return {
       directory: directory!, directories: [directory!, ...planDirectories],
