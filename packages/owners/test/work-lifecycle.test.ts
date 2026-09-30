@@ -1059,6 +1059,16 @@ test('a cancelled plan\'s worktree waits for its idle session, and is never remo
   assert.equal(cleared.decision?.reason, 'Will clean later', 'human acknowledgment history survives');
   assert.equal(cleared.condition?.state, 'resolved');
   const priorGeneration = (await runtime.ledger.get(dirty!.id)).planWorktreeGeneration;
+  const update = runtime.ledger.update.bind(runtime.ledger);
+  runtime.ledger.update = async (...args) => {
+    await update(...args);
+    throw new Error('generation_persisted_reply_lost');
+  };
+  try {
+    await assert.rejects(ensurePlanWorktree(runtime, await runtime.ledger.get(dirty!.id)), /generation_persisted_reply_lost/);
+  } finally { runtime.ledger.update = update; }
+  assert.equal(existsSync(dirty!.planWorktree!), false, 'identity is persisted before the filesystem effect');
+  assert.notEqual((await runtime.ledger.get(dirty!.id)).planWorktreeGeneration, priorGeneration);
   await ensurePlanWorktree(runtime, await runtime.ledger.get(dirty!.id));
   const recreated = await runtime.ledger.get(dirty!.id);
   assert.notEqual(recreated.planWorktreeGeneration, priorGeneration);

@@ -38,10 +38,12 @@ async function addPlanWorktree(owner: RepositoryOwner, path: string, itemId: str
 export async function ensurePlanWorktree(runtime: Runtime, item: WorkItem) {
   const path = planWorktreePath(runtime, item);
   const isNew = !existsSync(path);
-  if (isNew) await addPlanWorktree(runtime.repositoryFor(item), path, item.id);
+  // Persist identity before the filesystem effect: a crash after creation cannot reuse a resolved generation.
   if (isNew || item.planWorktree !== path) await runtime.ledger.update(item.id, current => ({
-    ...current, planWorktree: path, planWorktreeGeneration: isNew ? randomUUID() : current.planWorktreeGeneration,
+    ...current, planWorktree: path,
+    planWorktreeGeneration: isNew || current.planWorktree !== path ? randomUUID() : current.planWorktreeGeneration,
   }));
+  if (isNew) await addPlanWorktree(runtime.repositoryFor(item), path, item.id);
   return { path, isNew };
 }
 
