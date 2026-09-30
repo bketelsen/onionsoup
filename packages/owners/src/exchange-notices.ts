@@ -1,3 +1,4 @@
+import { ownerChatAgent } from './owner-chat.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -80,7 +81,6 @@ function personMessage(message: NoticeMessage, agent: string) {
 
 async function latestPersonChat(runtime: Runtime, ownerId: string, client: ExchangeClient, onError: NoticeError) {
   const owner = runtime.owner(ownerId);
-  if (!owner.persona) return undefined;
   const directories = new Set([owner.workspace, chatPath(runtime, owner.id)]);
   for (const view of runtime.repositoryViews(ownerId)) if (view.desk) directories.add(view.desk);
   const sessions = (await Promise.all([...directories].map(directory => client.sessions(directory)))).flat();
@@ -93,7 +93,7 @@ async function latestPersonChat(runtime: Runtime, ownerId: string, client: Excha
       onError(`session:${session.id}`, error);
       return [];
     });
-    const at = Math.max(-1, ...messages.filter(message => personMessage(message, owner.persona!.name)).map(message => message.info.time.created));
+    const at = Math.max(-1, ...messages.filter(message => personMessage(message, ownerChatAgent(owner))).map(message => message.info.time.created));
     if (at >= 0 && (!selected || at > selected.at)) selected = { target, at };
   }
   return selected?.target;
@@ -117,8 +117,8 @@ async function deliverOne(runtime: Runtime, file: string, client: ExchangeClient
     const notice = ExchangeNotice.parse(JSON.parse(contents));
     if (!runtime.declarations.owners.has(notice.owner)) await runtime.reloadDeclarations();
     const configured = runtime.declarations.owners.get(notice.owner);
-    if (!configured?.persona) {
-      const undeliverableReason = configured ? 'owner_has_no_persona' : 'owner_retired';
+    if (!configured) {
+      const undeliverableReason = 'owner_retired';
       await save(path, { ...notice, undeliverableReason });
       await mkdir(paths(runtime).undeliverable, { recursive: true });
       await rename(path, join(paths(runtime).undeliverable, file));
@@ -130,7 +130,7 @@ async function deliverOne(runtime: Runtime, file: string, client: ExchangeClient
     await save(path, { ...notice, target });
     const messages = await client.messages(target);
     if (!messages.some(message => message.info.id === notice.id)) {
-      await client.post(target, { agent: configured.persona.name, noReply: true, messageID: notice.id,
+      await client.post(target, { agent: ownerChatAgent(configured), noReply: true, messageID: notice.id,
         parts: [{ type: 'text', text: noticeText(runtime, notice, owner.chatContext.noticeChars) }] });
     }
     await mkdir(delivered, { recursive: true });

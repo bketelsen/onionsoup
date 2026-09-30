@@ -1,3 +1,4 @@
+import { ownerChatAgent, ownerChatVoice, observationChatPermission, observationChatPrompt } from './owner-chat.ts';
 import { recentActivityContext } from './chat-context.ts';
 import { deliverExchangeNotices } from './exchange-notices.ts';
 import { exchangeClient } from './exchange-client.ts';
@@ -322,9 +323,10 @@ async function commitQuietly(notebook: Notebook, message: string, paths?: readon
 const server: Plugin = async (input, options) => {
   if (process.env.ONIONSOUP_SANDBOX === '1') return {};
   const runtime = await Runtime.open({ declarations: String(options?.declarations ?? configDirectory()), state: String(options?.state ?? stateDirectory()) });
-  const owners = [...runtime.declarations.owners.values()].filter(owner => owner.persona);
-  const ownerByAgent = new Map(owners.map(owner => [owner.persona!.name, runtime.owner(owner.id)]));
-  // Persona owners can be chatted with before their first duty ever runs, so their notebooks must exist.
+  const owners = [...runtime.declarations.owners.values()];
+  const personaOwners = owners.filter(owner => owner.persona);
+  const ownerByAgent = new Map(owners.map(owner => [ownerChatAgent(owner), runtime.owner(owner.id)]));
+  // Owners can be chatted with before their first duty ever runs, so their notebooks must exist.
   for (const owner of owners) {
     const charter = await runtime.text(`charters/${owner.id}.md`).catch(() => `# Charter: ${owner.id}\n`);
     await runtime.notebook(owner.id).ensure(charter).catch(() => undefined);
@@ -802,9 +804,15 @@ const server: Plugin = async (input, options) => {
     return value;
   }
 
-  function requireOwner(agent: string) {
+  function requireObservationOwner(agent: string) {
     const owner = ownerByAgent.get(agent);
     if (!owner) throw new Error(`onionsoup tools are for owners; ${agent} is not one`);
+    return owner;
+  }
+
+  function requireOwner(agent: string) {
+    const owner = requireObservationOwner(agent);
+    if (!owner.persona) throw new Error('owner_chat_observation_only');
     return owner;
   }
 
@@ -863,7 +871,7 @@ const server: Plugin = async (input, options) => {
     const ownerFamily = runtime.family(owner.model);
     const { model } = pickModel(runtime.declarations.families, WATCHER_MODELS, [ownerFamily]);
     const [providerID, ...modelParts] = model.split('/');
-    const child = await input.client.session.create({ body: { title: `${owner.persona!.name}: decision watcher`, parentID: sessionID } });
+    const child = await input.client.session.create({ body: { title: `${ownerChatAgent(owner)}: decision watcher`, parentID: sessionID } });
     const childID = child.data?.id;
     if (!childID) return;
     watcherSessions.set(childID, owner.id);
@@ -874,7 +882,7 @@ const server: Plugin = async (input, options) => {
           agent: WATCHER_AGENT,
           model: { providerID: providerID!, modelID: modelParts.join('/') },
           format: { type: 'json_schema', schema: tool.schema.toJSONSchema(WatcherRecords) },
-          parts: [{ type: 'text', text: watcherBrief(owner.persona!, userText, assistantText) }],
+          parts: [{ type: 'text', text: watcherBrief(ownerChatVoice(owner), userText, assistantText) }],
         } as never,
       });
       const parsed = WatcherRecords.safeParse((reply.data?.info as { structured?: unknown } | undefined)?.structured);
@@ -1108,7 +1116,7 @@ const server: Plugin = async (input, options) => {
       const servers = (config.mcp ??= {}) as Record<string, unknown>;
       const hiddenFromEveryone: Record<string, string> = {};
       const ownerToolRules = new Map<string, Record<string, string>>();
-      for (const owner of owners) {
+      for (const owner of personaOwners) {
         const rules: Record<string, string> = {};
         for (const [name, server] of Object.entries(owner.mcp)) {
           const key = toolServerKey(owner.id, name);
@@ -1120,7 +1128,7 @@ const server: Plugin = async (input, options) => {
         ownerToolRules.set(owner.id, rules);
       }
       // A NAS owner reaches its NAS through truenas-mcp (read-only in chats), visible to that owner alone.
-      const nasOwner = owners.find(owner => owner.domain.kind === 'truenas');
+      const nasOwner = personaOwners.find(owner => owner.domain.kind === 'truenas');
       if (nasOwner && nasOwner.domain.kind === 'truenas') {
         // Write mode, with per-tool rules below: reads run freely, app lifecycle asks, destructive tools are denied.
         const environment = await truenasMcpEnvironment(nasOwner.domain, true).catch(() => undefined);
@@ -1131,22 +1139,25 @@ const server: Plugin = async (input, options) => {
         }
       }
       for (const owner of owners) {
-        const persona = owner.persona!;
+        const persona = ownerChatVoice(owner);
         const charter = await runtime.text(`charters/${owner.id}.md`).catch(() => '(no charter yet)');
         const verify = verifyCommands(owner, runtime.toolsDirectory);
-        const permission = { ...conversationPermission(owner, verify), ...(owner.domain.kind === 'truenas' ? NAS_CHAT_RULES : {}), ...ownerToolRules.get(owner.id), ...restrictedToolPermission(runtime, owner) };
-        agents[persona.name] = {
+        const permission = owner.persona
+          ? { ...conversationPermission(owner, verify), ...(owner.domain.kind === 'truenas' ? NAS_CHAT_RULES : {}), ...ownerToolRules.get(owner.id), ...restrictedToolPermission(runtime, owner) }
+          : observationChatPermission();
+        agents[ownerChatAgent(owner)] = {
           mode: 'primary',
           description: `${persona.title} (${persona.source})`,
           model: owner.model,
-          prompt: agentPrompt(owner, persona, charter, rosterText(runtime.declarations, owner.id), orgText(runtime.declarations, owner.id), verify, orgGuides(runtime, owner) + wikiGuide(runtime, owner)),
+          prompt: owner.persona ? agentPrompt(owner, persona, charter, rosterText(runtime.declarations, owner.id), orgText(runtime.declarations, owner.id), verify, orgGuides(runtime, owner) + wikiGuide(runtime, owner))
+            : observationChatPrompt(owner, charter, rosterText(runtime.declarations, owner.id)),
           permission,
         };
       }
       // Restricted tools (owner management, initiatives) are shown only to the owners they are for.
       for (const name of Object.keys(RESTRICTED_TOOLS)) hiddenFromEveryone[name] = 'deny';
       // Owner tool servers are denied to every agent; each owner's own rules re-allow its servers (last match wins).
-      Object.assign(agents, subagents(runtime.declarations, owners));
+      Object.assign(agents, subagents(runtime.declarations, personaOwners));
       if (operator) agents[operator.name] = operatorAgent(operator, { config: runtime.declarations.root, home: dirname(runtime.stateDirectory), memory: memoryDirectory });
       registerSkills(config as Parameters<typeof registerSkills>[0], operator ? [SKILLS_DIRECTORY, OPERATOR_SKILLS_DIRECTORY] : [SKILLS_DIRECTORY]);
       addDeclaredProviders(config, runtime.declarations.providers);
@@ -1193,7 +1204,7 @@ const server: Plugin = async (input, options) => {
     async 'experimental.chat.messages.transform'(_input, output) {
       const firstUser = output.messages.find(message => message.info.role === 'user');
       const part = firstUser?.parts[0];
-      if (!firstUser || !part || firstUser.info.role !== 'user' || !ownerByAgent.has(firstUser.info.agent)) return;
+      if (!firstUser || !part || firstUser.info.role !== 'user' || !ownerByAgent.get(firstUser.info.agent)?.persona) return;
       if (firstUser.parts.some(candidate => candidate.type === 'text' && candidate.text.includes(BOOTSTRAP_MARKER))) return;
       if (await sessions.isChild(firstUser.info.sessionID)) return;
       firstUser.parts.unshift({ ...part, type: 'text', text: bootstrapText(), synthetic: true } as typeof part);
@@ -1384,7 +1395,7 @@ const server: Plugin = async (input, options) => {
           offset: tool.schema.number().int().nonnegative().optional().describe('Next cross-owner progress page offset shown by status'),
         },
         async execute(args, context) {
-          const owner = requireOwner(context.agent);
+          const owner = requireObservationOwner(context.agent);
           if (args.request) return requestProgressDetail(runtime, owner.id, args.request);
           if (!args.item) return workSummary(owner.id, args.offset);
           const item = await runtime.ledger.get(args.item).catch(() => undefined);
@@ -1398,7 +1409,7 @@ const server: Plugin = async (input, options) => {
         description: 'Read your notebook: the whole orientation, or one register (CHARTER, MAP, WISDOM, FAILURES, decisions, open-questions).',
         args: { register: tool.schema.enum(['all', 'CHARTER', 'MAP', 'WISDOM', 'FAILURES', 'decisions', 'open-questions']).default('all') },
         async execute(args, context) {
-          const notebook = runtime.notebook(requireOwner(context.agent).id);
+          const notebook = runtime.notebook(requireObservationOwner(context.agent).id);
           if (args.register === 'all') return notebook.orientation();
           return args.register === 'CHARTER' ? notebook.charterText() : readFile(join(notebook.directory, `${args.register}.md`), 'utf8');
         },
@@ -1407,7 +1418,7 @@ const server: Plugin = async (input, options) => {
         description: "Another owner's latest recorded observations: its incus snapshot if it holds incus, and its notebook MAP.",
         args: { owner: tool.schema.string().describe('The owner id or persona name, e.g. homelab or Miles Teg') },
         async execute(args, context) {
-          requireOwner(context.agent);
+          requireObservationOwner(context.agent);
           const other = resolveOwner(args.owner);
           const snapshot = hasIncus(other) ? await readFile(join(runtime.evidenceDirectory(other.id), 'SNAPSHOT.md'), 'utf8').catch(() => '') : '';
           const map = await readFile(join(runtime.notebook(other.id).directory, 'MAP.md'), 'utf8').catch(() => '');
@@ -1422,7 +1433,8 @@ const server: Plugin = async (input, options) => {
           followUp: tool.schema.boolean().optional().describe('Explicitly request a proposed repository fix and durable gated work request; omit for information only'),
         },
         async execute(args, context) {
-          const asker = requireOwner(context.agent);
+          const asker = requireObservationOwner(context.agent);
+          if (!asker.persona && args.followUp) throw new Error('owner_chat_observation_only');
           context.metadata({ title: `asking ${args.owner}` });
           const followUp = args.followUp ? { origin: { sessionID: context.sessionID, messageID: context.messageID, directory: context.directory } } : undefined;
           const { answerer, answer, request, handoffStatus } = await askOwner(runtime, asker.id, args.owner, args.question, followUp);

@@ -4,7 +4,7 @@ import {
   planRevisionStatus, approveCreate, approveDelete, approvePlan, approvePush, chatDirectory, denyRequest, deskState, describeAsk,
   domainSummary, itemText, revisePlan, resumeItem, retryItem, cancelItem, memoryFingerprint, type ResourceRequest, type Runtime,
   promoteFriction, retryFrictionPromotion, frictionProposalDigest, frictionPromotionView, FrictionProposalDigest,
-  AttentionAssignmentInput, assignAttention, retryAttentionAssignment, attentionAssignmentView, attentionAssignmentTargets, type AttentionAssignmentView,
+  ownerChatAgent, AttentionAssignmentInput, assignAttention, retryAttentionAssignment, attentionAssignmentView, attentionAssignmentTargets, type AttentionAssignmentView,
   listAttention, changeAttention, recoverRequest, reconcileRequest,
   listFriction, frictionDetail, readFrictionTriage, type FrictionRecord,
   approveInitiative, reviseInitiative, cancelInitiative, initiativeViews, managerOf, planGrantFor, cancelReminder,
@@ -126,7 +126,7 @@ export interface OwnerSummary {
   color: string;
   model: string;
   domain: string;
-  /** Owners without a persona have no chat agent. */
+  /** All owners have chat; owners without a persona receive observation-only agents. */
   chat: boolean;
   /** The operator has chats but no desk: no work, notebook or activity. */
   hasDesk: boolean;
@@ -240,13 +240,12 @@ export class SurfaceState {
     const operator = this.operatorOf(chatId);
     if (operator) return operator.name;
     const owner = this.runtime.owner(chatId);
-    if (!owner.persona) throw new Error(`no_chat: ${chatId} has no persona, so no chat agent`);
-    return owner.persona.name;
+    return ownerChatAgent(owner);
   }
 
-  /** Every chat the person can have: owners with a persona, then the operator if declared. */
+  /** Every chat the person can have: all declared owners, then the operator if declared. */
   private chatIds() {
-    const owners = [...this.runtime.declarations.owners.values()].filter(owner => owner.persona).map(owner => owner.id);
+    const owners = [...this.runtime.declarations.owners.keys()];
     return this.runtime.declarations.operator ? [...owners, OPERATOR_ID] : owners;
   }
 
@@ -403,7 +402,7 @@ export class SurfaceState {
   /** Every owner with its manager, for the org chart. */
   org(): OrgEntry[] {
     return [...this.runtime.declarations.owners.values()].map(owner => ({
-      id: owner.id, name: owner.persona?.name ?? owner.id, title: owner.persona?.title ?? '', icon: owner.persona?.icon ?? 'briefcase',
+      id: owner.id, name: owner.persona?.name ?? owner.id, title: owner.persona?.title ?? 'Observation-only chat', icon: owner.persona?.icon ?? 'briefcase',
       domain: domainSummary(owner), manager: managerOf(this.runtime.declarations, owner.id)?.id,
     }));
   }
@@ -430,13 +429,13 @@ export class SurfaceState {
     return {
       id: owner.id,
       name: owner.persona?.name ?? owner.id,
-      title: owner.persona?.title ?? '',
+      title: owner.persona?.title ?? 'Observation-only chat',
       source: owner.persona?.source ?? '',
       icon: owner.persona?.icon ?? 'briefcase',
       color: owner.persona?.color ?? 'primary',
       model: owner.model,
       domain: domainSummary(owner),
-      chat: Boolean(owner.persona),
+      chat: true,
       hasDesk: true,
       waiting: chats.inbox.filter(entry => entry.owner === owner.id).length,
       running: items.filter(item => item.owner === owner.id && RUNNING.has(item.status)).length,

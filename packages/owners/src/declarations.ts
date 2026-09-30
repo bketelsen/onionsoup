@@ -1,3 +1,4 @@
+import { checkOwnerChatNames } from './owner-chat.ts';
 import { ChatContextPolicy } from './chat-context.ts';
 import { Span } from './span.ts';
 import { readdir, readFile } from 'node:fs/promises';
@@ -387,6 +388,7 @@ export async function loadDeclarations(root: string): Promise<Declarations> {
   const ownersById = new Map(owners.map(owner => [owner.id, owner]));
   checkOrgChart(ownersById);
   checkOperatorReserved(ownersById, operator);
+  checkOwnerChatNames(ownersById, operator);
   checkWikiKeeper(new Set(ownersById.keys()), wiki);
   return {
     root: base,

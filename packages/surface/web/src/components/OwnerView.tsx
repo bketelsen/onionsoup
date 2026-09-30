@@ -115,7 +115,7 @@ export function OwnerView({ owner, inbox, sessionId, refresh }: { owner: OwnerSu
       </header>
       <div className="flex-1 flex min-h-0">
         <main className="flex-1 flex flex-col min-w-0 min-h-0">
-          {!owner.chat && <div className="p-6"><Empty>{owner.name} has no persona, so there is no one to chat with. Its work and notebook are on the right.</Empty></div>}
+          {!owner.chat && <div className="p-6"><Empty>{owner.name} is unavailable for chat. Its work and notebook are on the right.</Empty></div>}
           {owner.chat && current && directory && <ChatPane key={current} owner={owner} sessionId={current} directory={currentDirectory} pending={waiting.filter(entry => entry.sessionID === current && (entry.kind === 'permission' || entry.kind === 'question'))} onPendingDone={refresh}
             autoAccept={Boolean(autoAccept[current])}
             onToggleAutoAccept={() => {

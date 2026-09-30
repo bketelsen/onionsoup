@@ -115,6 +115,27 @@ An owner is declared once (`owners/<id>.yaml`) and keeps one identity across ses
 - **Desk**: a worktree on a `desk/<id>` branch (or the evidence folder for non-repository owners) where chat
   work happens. Desk changes become a verified, reviewed PR through `onionsoup_propose_changes`; only blocker findings send them back. The review diffs the desk against where it meets its base branch (the merge base), so a desk that fell behind shows only its own change. `onionsoup_sync_desk` (with a plan's `item`, that plan's worktree) brings a desk up to date in host code: uncommitted work (intent-to-add entries included) is set aside under a unique stash, the desk moves to `origin/<base>`, and the work comes back; a conflict keeps the stash and names the files, and commits no remote holds are never moved (`desk_has_unpublished_commits`). A desk put on an open PR with `onionsoup_checkout_pr` is not synced (`desk_on_pull_request`): moving it would drop the PR's commits, and the PR's conflicts with its base are the `maintain-prs` rebase's to resolve, which the refusal names when one is open. Planning sessions start from a synced desk; an approved plan works in its own worktree, not the desk (see Execution sessions). Required desk reviews receive sanitized host command exit statuses tied to the exact source tree and observation time, plus the original approved task acceptance criteria. No configured commands is explicitly reported as no checks; sandbox evidence never implies live deployment. Source changes during verification or review invalidate that evidence before publication. Approved-plan publication retains its original goal instead of replacing it with the implementation summary. Review converges: each round with blockers is kept (`state/desk-reviews/`), and the next reviewer gets its findings and the diff since, checks those first, and blocks new points in already-reviewed text only for real errors. After `DESK_CHANGE_LIMITS.reviewRoundsBeforePerson` rounds (6) no reviewer is hired: the person reads the diff, and `owners desk-review-reset <owner> [repository] [--item <plan>]` starts afresh (a plan's worktree keeps its own rounds). An approval clears the history. Publication is a ledger workflow: commit, push, PR creation, merge and site follow-up have durable checkpoints. Retrying a clean desk continues its unfinished publication, and its PR participates in maintenance. An active publication reports its progress; permanent failures name the cancellation needed before a new proposal. Journal failures remain visible without changing a completed publication back to failed.
 
+### Chat identity without a persona
+
+Every declared owner has a chat identity. Existing persona names remain the opencode agent names, preserving
+existing chats. An owner without a persona uses `onionsoup-owner-<owner-id>` and appears as **Observation-only chat**.
+Configuration rejects collisions involving these new fallback agent names, including the operator and internal
+reviewer/watcher names. Existing persona-name validation remains unchanged.
+
+The fallback can read its existing workspace, notebook, recorded evidence and status, and ask another owner an
+informational question. It has no shell, edits, subagent dispatch, configured MCP capabilities, scheduling, plan
+submission, publication or deployment tools. Host handlers also refuse effect tools and `onionsoup_ask` follow-up
+requests from this identity. Opening chat creates its workspace folder if missing, but does not clone, refresh or
+create a desk. Normal conversation history, context and decision journaling still work; this is observation-only
+with respect to domain effects, not a promise that chat creates no runtime records.
+
+New exchange notices can reach its latest human chat through the same no-reply delivery path. Previously
+quarantined notices remain quarantined. Reminder dispatch remains persona-gated, including already pending reminders;
+this change never wakes them. `canChange` and plan execution retain their existing persona requirement. This is a
+compatible chat-availability change, not an automatic migration to new repository-write authority. The operator
+remains a separately configured identity. Registering the new agents requires the normal surface restart procedure;
+changing or removing an existing persona is not a history migration.
+
 ### Owners run their work
 
 An owner that owns repositories and has a persona changes them itself (`canChange` in `declarations.ts`); other
