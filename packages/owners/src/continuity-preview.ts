@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import { open, opendir, lstat } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { z } from 'zod';
 import { AttentionIndex } from './attention.ts';
 import { Assignment } from './attention-assignment.ts';
@@ -23,10 +23,36 @@ const frictionName = /^fr_[a-f0-9]{24}\.json$/;
 
 class Reader {
   readonly issues: Issue[] = [];
-  constructor(readonly limits: z.infer<typeof Limits>) {}
+  constructor(readonly limits: z.infer<typeof Limits>, private readonly roots: string[]) {}
+
+  /** Reject named root/ancestor symlinks before dependent reads. Best-effort, not a race-proof openat walk. */
+  private async directoryPath(path: string) {
+    const target = resolve(path);
+    const root = this.roots.filter(candidate => {
+      const suffix = relative(candidate, target);
+      return !isAbsolute(suffix) && suffix !== '..' && !suffix.startsWith('../');
+    }).sort((left, right) => left.length - right.length)[0];
+    if (!root) throw new Error('preview_path_outside_roots');
+    let current = root;
+    if (!(await lstat(current)).isDirectory()) throw new Error('preview_directory_not_regular');
+    for (const component of relative(root, target).split('/').filter(Boolean)) {
+      current = join(current, component);
+      if (!(await lstat(current)).isDirectory()) throw new Error('preview_directory_not_regular');
+    }
+  }
+
+  async directoryAvailability(path: string) {
+    try {
+      await this.directoryPath(path);
+      return 'present';
+    } catch (error) {
+      return (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'absent' : 'unavailable';
+    }
+  }
 
   async json<T>(path: string, schema: z.ZodType<T>, section: string, id?: string, optional = false): Promise<T | undefined> {
     try {
+      await this.directoryPath(dirname(path));
       const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
       try {
         if (!(await file.stat()).isFile()) {
@@ -53,7 +79,7 @@ class Reader {
     const entries: SummaryEntry[] = [];
     const scope: Scope = { availability: 'unavailable', visited: 0, examined: 0, valid: 0, truncated: false, complete: true };
     try {
-      if (!(await lstat(directory)).isDirectory()) throw new Error('preview_directory_not_regular');
+      await this.directoryPath(directory);
       scope.availability = 'present';
       for await (const file of await opendir(directory)) {
         if (scope.visited >= this.limits.files) {
@@ -94,20 +120,21 @@ function counts(entries: SummaryEntry[]) {
 
 async function frictionPreview(reader: Reader, state: string, policy: z.infer<typeof FrictionTriagePolicy> | undefined) {
   const index = await reader.json(join(state, 'friction/index.json'), FrictionIndex, 'friction-index');
+  // FrictionIndex validates every key against FrictionRecord.shape.id before any key becomes a path.
   const ordered = Object.entries(index ?? {}).sort((left, right) => compare(right[1].lastSeen, left[1].lastSeen) || compare(left[0], right[0]));
   const selected = ordered.slice(0, Math.min(FRICTION_LIMITS.list, reader.limits.files));
   const entries: SummaryEntry[] = [];
   for (const [id] of selected) {
     const report = await reader.json(join(state, 'friction/records', `${id}.json`), FrictionRecord, 'friction-record', id);
     if (!report || report.id !== id) { entries.push({ id, status: 'unknown-record' }); continue; }
+    const before = reader.issues.length;
+    const triage = await reader.json(join(state, 'friction/investigations', `${id}.json`), Triage, 'friction-triage', id, true);
+    if (reader.issues.length > before || (triage && triage.id !== id)) { entries.push({ id, status: 'unknown-triage' }); continue; }
+    if (triage) { entries.push({ id, status: `existing-${triage.state}` }); continue; }
     if (!policy) { entries.push({ id, status: 'excluded-policy-unavailable' }); continue; }
     if (Date.parse(report.firstSeen) < Date.parse(policy.enabledSince)) { entries.push({ id, status: 'excluded-before-cutoff' }); continue; }
     const wake = await reader.json(join(state, 'friction/wakes', `${id}.json`), Wake, 'friction-wake', id);
-    if (!wake || wake.id !== id || wake.at !== report.firstSeen) { entries.push({ id, status: 'unknown-wake' }); continue; }
-    const before = reader.issues.length;
-    const triage = await reader.json(join(state, 'friction/investigations', `${id}.json`), Triage, 'friction-triage', id, true);
-    const status = reader.issues.length > before || (triage && triage.id !== id) ? 'unknown-triage'
-      : triage ? `existing-${triage.state}` : 'eligible-candidate';
+    const status = !wake || wake.id !== id || wake.at !== report.firstSeen ? 'unknown-wake' : 'eligible-candidate';
     entries.push({ id, status });
   }
   return { indexedCount: index ? ordered.length : null, recentWindowLimit: FRICTION_LIMITS.list,
@@ -134,17 +161,9 @@ async function attentionPreview(reader: Reader, state: string) {
     automaticallyEligible: false, counts: counts(entries), entries };
 }
 
-async function directoryAvailability(path: string) {
-  try {
-    return (await lstat(path)).isDirectory() ? 'present' : 'unavailable';
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'absent' : 'unavailable';
-  }
-}
-
 /** Read-only, non-atomic metadata snapshot. No Runtime.open, locks, index discovery, hires or network calls. */
 export async function continuityPreview(paths: { state: string; declarations: string }, overrides: Partial<z.infer<typeof Limits>> = {}) {
-  const reader = new Reader(Limits.parse({ ...CONTINUITY_PREVIEW_LIMITS, ...overrides }));
+  const reader = new Reader(Limits.parse({ ...CONTINUITY_PREVIEW_LIMITS, ...overrides }), [resolve(paths.state), resolve(paths.declarations)]);
   const policy = await reader.json(join(paths.declarations, 'friction-triage.json'), FrictionTriagePolicy, 'policy', undefined, true);
   const policyInvalid = reader.issues.some(issue => issue.section === 'policy');
   const friction = await frictionPreview(reader, paths.state, policy);
@@ -157,7 +176,7 @@ export async function continuityPreview(paths: { state: string; declarations: st
   const work = await reader.scan(join(paths.state, 'items'), /^w-[a-zA-Z0-9-]+\.json$/, WorkItem, 'work', entry =>
     entry.activeRunner !== undefined ? { id: entry.id, status: 'persisted-runner-liveness-unknown' } : undefined);
   const intent = await reader.json(join(paths.state, 'deploy/pending.json'), DeploymentIntent, 'deployment-intent', undefined, true);
-  const selection = { stateDirectory: await directoryAvailability(paths.state), policy: policy ? { state: 'configured', ...policy } : { state: policyInvalid ? 'invalid' : 'disabled' },
+  const selection = { stateDirectory: await reader.directoryAvailability(paths.state), policy: policy ? { state: 'configured', ...policy } : { state: policyInvalid ? 'invalid' : 'disabled' },
     friction, attention, handoffs, assignments, promotions, investigations, deployment: { intent: intent?.status,
       admissions, work, readiness: 'not-certified', note: 'Persisted leases/runners may be stale; live chats and deployment admission must be checked separately.' },
     limits: reader.limits, issues: reader.issues.sort((left, right) => compare(JSON.stringify(left), JSON.stringify(right))) };

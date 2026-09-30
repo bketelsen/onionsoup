@@ -5,6 +5,14 @@ import { mkdtemp, mkdir, readFile, readdir, writeFile, lstat, symlink, rm } from
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { Runtime } from '../src/runtime.ts';
+import { reportFriction } from '../src/friction.ts';
+import { investigateFriction } from '../src/friction-work.ts';
+import { frictionProposalDigest, promoteFriction } from '../src/friction-promotion.ts';
+import { assignAttention } from '../src/attention-assignment.ts';
+import { changeAttention, listAttention } from '../src/attention.ts';
+import { saveAskHandoff } from '../src/ask-handoffs.ts';
+import { beginAdmission } from '../src/deployment-admission.ts';
 import { continuityPreview } from '../src/continuity-preview.ts';
 
 async function setup() {
@@ -147,4 +155,93 @@ test('selection digest ordering does not depend on locale collation', async () =
   try {
     assert.equal((await continuityPreview(paths)).selectionDigest, baseline.selectionDigest);
   } finally { String.prototype.localeCompare = original; }
+});
+
+
+test('root and intermediate metadata symlinks block every dependent read', async () => {
+  for (const named of ['friction', 'attention', 'deploy']) {
+    const paths = await setup();
+    await mkdir(paths.state);
+    const outside = join(paths.root, 'outside');
+    await save(outside, 'index.json', named === 'friction' ? { [firstID]: { lastSeen: '2026-01-01T00:00:00.000Z' } }
+      : { cutoff: '2026-01-01', cursors: {}, entries: {} });
+    await save(outside, 'pending.json', { status: 'draining', targetBuildId: 'PRIVATE_BUILD' });
+    await symlink(outside, join(paths.state, named));
+    const preview = await continuityPreview(paths);
+    assert.ok(preview.issues.some(issue => issue.section.startsWith(named === 'deploy' ? 'deployment' : named) && issue.reason === 'unreadable'));
+    assert.equal(preview.deployment.intent, undefined);
+    assert.doesNotMatch(JSON.stringify(preview), /PRIVATE_BUILD/);
+  }
+  const paths = await setup();
+  const outside = join(paths.root, 'outside');
+  await save(outside, 'friction/index.json', { [firstID]: { lastSeen: '2026-01-01T00:00:00.000Z' } });
+  await symlink(outside, paths.state);
+  const preview = await continuityPreview(paths);
+  assert.equal(preview.stateDirectory, 'unavailable');
+  assert.equal(preview.friction.indexedCount, null);
+  assert.equal(preview.promotions.scope.availability, 'unavailable');
+});
+
+test('corrupt index traversal keys fail schema validation before record path construction', async () => {
+  const paths = await setup();
+  await save(paths.state, 'friction/index.json', { '../PRIVATE_FILE': { lastSeen: '2026-01-01T00:00:00.000Z' } });
+  const preview = await continuityPreview(paths);
+  assert.equal(preview.friction.indexAvailable, false);
+  assert.equal(preview.friction.examined, 0);
+  assert.ok(preview.issues.some(issue => issue.section === 'friction-index' && issue.reason === 'unreadable'));
+  assert.doesNotMatch(JSON.stringify(preview), /PRIVATE_FILE/);
+});
+
+test('actual writer records appear with matching status and preview makes no subsequent changes', async () => {
+  const paths = await setup();
+  const runtime = await Runtime.open({ declarations: 'packages/owners/test/fixtures/owners', state: paths.state });
+  runtime.declarations.root = paths.declarations;
+  const source = join(paths.root, 'source');
+  await mkdir(source);
+  execFileSync('git', ['init', source], { stdio: 'ignore' });
+  execFileSync('git', ['-C', source, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+    'commit', '--allow-empty', '-m', 'fixture'], { stdio: 'ignore' });
+  runtime.declarations.owners.get('clippy')!.workspace = source;
+  await runtime.notebook('clippy').ensure('# Fixture');
+  await save(paths.declarations, 'friction-triage.json', { ...policy, enabledSince: '2020-01-01T00:00:00.000Z' });
+  const record = await reportFriction(runtime, { owner: 'clippy', submissionID: 'actual-writer',
+    origin: { sessionID: 'fixture', directory: source }, model: 'fixture/model', commit: 'a'.repeat(40), failures: [],
+    input: { summary: 'Missing review evidence', expected: 'Reviewer reads source', actual: 'No evidence available' } });
+  const proposal = { title: 'Repair evidence', goal: 'Expose facts', rationale: 'Review blocked', acceptance: ['Reviewer sees facts'],
+    repository: 'example/clippy', size: 'small' as const };
+  let hires = 0;
+  runtime.hire = async (_owner, request) => {
+    hires++;
+    return { value: request.schema.parse({ observed: ['Source inspected'], inferred: [], unknown: [], disposition: 'propose-fix', proposedWork: proposal }),
+      sessionID: 'fixture-hire', cost: 0, startedAt: record.firstSeen, finishedAt: record.firstSeen };
+  };
+  const triage = await investigateFriction(runtime, record.id);
+  assert.ok('investigation' in triage);
+  await promoteFriction(runtime, record.id, frictionProposalDigest(triage)!, 'Fixture person');
+  await runtime.notebook('clippy').journal({ kind: 'attention', note: 'A distinct check is broken' });
+  const attention = (await listAttention(runtime))[0];
+  await changeAttention(runtime, attention.id, 'acknowledged', 'Fixture person', 'Seen');
+  await assignAttention(runtime, attention.id, { owner: 'clippy', repository: 'example/clippy', title: proposal.title,
+    goal: proposal.goal, acceptance: proposal.acceptance }, 'Fixture person');
+  await saveAskHandoff(runtime, { from: 'homelab', to: 'clippy', question: 'Check evidence',
+    origin: { directory: source, sessionID: 'fixture', messageID: 'fixture-message' } },
+  { answer: 'Ready to inspect', observed: [], inferred: [], unknown: [] });
+  const item = await runtime.ledger.create('clippy', 'owner-change', proposal, { activeRunner: process.pid });
+  const lease = process.platform === 'linux' ? await beginAdmission(paths.state, 'fixture-preview') : undefined;
+  try {
+    // Processing state remains authoritative even if the original wake disappears.
+    await rm(join(paths.state, 'friction/wakes', `${record.id}.json`));
+    const before = await snapshot(paths.root);
+    const preview = await continuityPreview(paths);
+    assert.equal(preview.friction.counts['existing-investigated'], 1);
+    assert.equal(preview.investigations.counts.investigated, 1);
+    assert.equal(preview.promotions.counts.routed, 1);
+    assert.equal(preview.assignments.counts.routed, 1);
+    assert.equal(preview.attention.counts['has-assignment'], 1);
+    assert.equal(preview.handoffs.counts.pending, 1);
+    assert.equal(preview.deployment.work.entries[0].id, item.id);
+    if (lease) assert.equal(preview.deployment.admissions.entries[0].id, lease.id);
+    assert.deepEqual(await snapshot(paths.root), before);
+    assert.equal(hires, 1);
+  } finally { await lease?.release(); runtime.close(); }
 });
