@@ -325,6 +325,30 @@ adopt that request's current status; cancelled, declined and completed work neve
 plan approval, verification and effect gates remain intact. The Friction view links the responsible owner and work,
 and shows request status separately from verification that the original friction is fixed.
 
+An investigation records the source commit it read. Before promotion, and again before routing a saved intent, host
+code compares that commit with `HEAD` of the policy owner's clean local checkout. The comparison is local only: it
+never fetches, and the Friction view labels it "local checkout, not fetched". A different commit means the proposal
+needs revalidation, never that it is fixed. A dirty or unreadable checkout is `source_unavailable`:
+promotion refuses it without saving an intent, while a saved pending intent consumes a bounded routing attempt
+and retries on the normal recovery cadence without opening a request. A changed commit or proposal blocks a
+pending intent with `friction_source_stale` until revalidation and fresh approval. An existing request is never replaced.
+
+`owners friction-revalidate <id>` explicitly re-investigates a stale report against the current commit, under the
+same CLI admission as `friction-triage` and never from the daemon. A write-once claim per report and reference commit
+allows at most one read-only hire for that commit; a failed hire or a dead runner leaves the claim `failed` or
+`uncertain`, and it is not retried. Results are appended as write-once revisions under
+`state/friction/investigations/<id>/`, published atomically; the original investigation is never rewritten. The
+latest `revised` revision is the effective proposal, and its digest includes the revision number, so a revised
+proposal needs fresh approval. A blocked intent that never routed is archived as superseded history before the new
+approval routes; the report still has one request identity.
+
+Only revalidation may answer `already-fixed`. That answer needs a `fixedBy` commit that exists and is an ancestor of
+the reference commit, and every cited source path must carry a line or range that exists at that commit. Otherwise the
+revision is saved `blocked` (`friction_fixed_by_unknown`, `friction_fixed_by_unreachable`,
+`friction_citation_unverified`) and does not take effect. An effective already-fixed result offers no
+**Request this fix**. The Friction view shows both commits, every revision including blocked ones, the original
+investigation, superseded intents, and any history that could not be read.
+
 Routing retries only saved human intents, at most three attempts per authorization (up to 20 pending intents per
 tick), then stops with a visible reason. **Retry request routing**, or
 `owners friction-promotion-retry <id> <digest>`, explicitly resets an exhausted routing budget after rechecking the

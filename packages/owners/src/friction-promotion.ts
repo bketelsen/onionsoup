@@ -6,7 +6,8 @@ import { AskWorkProposal } from './ask-handoffs.ts';
 import { canChange } from './declarations.ts';
 import { openOperatorWorkRequest, operatorWorkRequestId } from './delegation.ts';
 import { FrictionRecord } from './friction.ts';
-import { readFrictionTriage, type FrictionTriage } from './friction-work.ts';
+import type { FrictionTriage } from './friction-work.ts';
+import { effectiveTriage, frictionFreshness, writeOnceLinked } from './friction-revalidation.ts';
 import { withRecordLock } from './record-lock.ts';
 import type { Runtime } from './runtime.ts';
 
@@ -28,6 +29,10 @@ function path(runtime: Runtime, id: string) {
   FrictionRecord.shape.id.parse(id);
   return join(directory(runtime), `${id}.json`);
 }
+function historyDirectory(runtime: Runtime, id: string) {
+  FrictionRecord.shape.id.parse(id);
+  return join(directory(runtime), id);
+}
 async function read(runtime: Runtime, id: string) {
   const contents = await readFile(path(runtime, id), 'utf8').catch((error: NodeJS.ErrnoException) => {
     if (error.code !== 'ENOENT') throw error;
@@ -46,10 +51,10 @@ async function save(runtime: Runtime, promotion: Promotion) {
 }
 
 /** Binds a human decision to exactly the displayed investigation and its configured recipient. */
-export function frictionProposalDigest(triage: FrictionTriage) {
+export function frictionProposalDigest(triage: FrictionTriage, revision = 0) {
   if (triage.state !== 'investigated' || triage.investigation?.disposition !== 'propose-fix'
     || !triage.investigation.proposedWork) return undefined;
-  const content = { id: triage.id, owner: triage.policy.owner,
+  const content = { id: triage.id, ...(revision ? { revision } : {}), owner: triage.policy.owner,
     repository: triage.policy.repository, sourceCommit: triage.sourceCommit, investigation: triage.investigation };
   // Schema parsing can reorder object keys after persistence; ordering is not a changed proposal.
   const serialized = JSON.stringify(content, (_key, value) => value && typeof value === 'object' && !Array.isArray(value)
@@ -57,30 +62,91 @@ export function frictionProposalDigest(triage: FrictionTriage) {
   return createHash('sha256').update(serialized).digest('hex');
 }
 
+export async function effectiveProposalDigest(runtime: Runtime, id: string) {
+  const effective = await effectiveTriage(runtime, id);
+  if (!effective || (await frictionFreshness(runtime, id))?.stale) return undefined;
+  return frictionProposalDigest(effective.triage, effective.revision);
+}
+
+export async function frictionPromotionHistory(runtime: Runtime, id: string): Promise<Promotion[]> {
+  const folder = historyDirectory(runtime, id);
+  const names = await readdir(folder).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return [];
+    throw error;
+  });
+  return Promise.all(names.filter(name => /^superseded-[1-9]\d*\.json$/.test(name)).sort((left, right) =>
+    Number(left.slice(11, -5)) - Number(right.slice(11, -5))).map(async name => {
+    const promotion = Promotion.parse(JSON.parse(await readFile(join(folder, name), 'utf8')));
+    if (promotion.id !== id) throw new Error('friction_promotion_identity_mismatch');
+    return promotion;
+  }));
+}
+
+async function archive(runtime: Runtime, previous: Promotion) {
+  const folder = historyDirectory(runtime, previous.id);
+  const history = await frictionPromotionHistory(runtime, previous.id);
+  if (JSON.stringify(history.at(-1)) === JSON.stringify(previous)) return;
+  const number = history.length + 1;
+  await mkdir(folder, { recursive: true });
+  const destination = join(folder, `superseded-${number}.json`);
+  await writeOnceLinked(destination, JSON.stringify(Promotion.parse(previous)) + '\n');
+}
+
+async function existingRequest(runtime: Runtime, promotion: Promotion) {
+  return runtime.requests.get(promotion.requestID).catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== 'ENOENT') throw error;
+    return undefined;
+  });
+}
+
+async function assertCurrent(runtime: Runtime, id: string, digest: string) {
+  const freshness = await frictionFreshness(runtime, id);
+  if (freshness?.reason === 'source_unavailable') throw new Error('friction_source_unavailable');
+  if (freshness?.stale) throw new Error('friction_source_stale');
+  const effective = await effectiveTriage(runtime, id);
+  if (!effective || !frictionProposalDigest(effective.triage, effective.revision)) {
+    throw new Error('friction_proposal_unavailable');
+  }
+  if (frictionProposalDigest(effective.triage, effective.revision) !== digest) {
+    throw new Error('friction_proposal_stale');
+  }
+  return effective.triage;
+}
+
 const INVALID = new Set(['owner_cannot_change', 'not_your_repository', 'not_a_repository_owner', 'which_repository',
   'unknown owner', 'request_identity_conflict']);
+async function failRouting(runtime: Runtime, promotion: Promotion, error: unknown): Promise<never> {
+  const code = error instanceof Error ? error.message.split(':')[0] : '';
+  const reason = INVALID.has(code) || code === 'friction_source_unavailable'
+    ? code : 'friction_promotion_routing_failed';
+  const attempts = promotion.attempts + 1;
+  await save(runtime, { ...promotion, attempts, reason,
+    state: INVALID.has(code) || attempts >= FRICTION_PROMOTION_LIMITS.retries ? 'blocked' : 'pending' });
+  throw new Error(reason);
+}
 async function route(runtime: Runtime, id: string) {
   return withRecordLock(`${path(runtime, id)}.lock`, async () => {
     const promotion = await read(runtime, id);
     if (!promotion) throw new Error('friction_promotion_missing');
-    const existing = await runtime.requests.get(promotion.requestID).catch((error: NodeJS.ErrnoException) => {
-      if (error.code !== 'ENOENT') throw error;
-      return undefined;
-    });
+    const existing = await existingRequest(runtime, promotion);
     if (!existing && promotion.state === 'routed') throw new Error('friction_promotion_request_missing');
     if (!existing && promotion.state === 'blocked') throw new Error(promotion.reason ?? 'friction_promotion_blocked');
+    const freshness = !existing
+      ? await frictionFreshness(runtime, id).catch(error => failRouting(runtime, promotion, error)) : undefined;
+    const effective = !existing && freshness?.reason !== 'source_unavailable'
+      ? await effectiveTriage(runtime, id) : undefined;
+    const currentDigest = effective && frictionProposalDigest(effective.triage, effective.revision);
+    if (!existing && freshness?.reason !== 'source_unavailable'
+      && (freshness?.stale || promotion.digest !== currentDigest)) {
+      await save(runtime, { ...promotion, state: 'blocked', reason: 'friction_source_stale' });
+      throw new Error('friction_source_stale');
+    }
     try {
+      if (!existing && freshness?.reason === 'source_unavailable') throw new Error('friction_source_unavailable');
       const request = await openOperatorWorkRequest(runtime, { kind: 'friction', id }, promotion.by, promotion.owner, promotion.proposal);
       await save(runtime, { ...promotion, state: 'routed', reason: undefined });
       return request;
-    } catch (error) {
-      const code = error instanceof Error ? error.message.split(':')[0] : '';
-      const reason = INVALID.has(code) ? code : 'friction_promotion_routing_failed';
-      const attempts = promotion.attempts + 1;
-      await save(runtime, { ...promotion, attempts, reason,
-        state: INVALID.has(code) || attempts >= FRICTION_PROMOTION_LIMITS.retries ? 'blocked' : 'pending' });
-      throw new Error(reason);
-    }
+    } catch (error) { return failRouting(runtime, promotion, error); }
   });
 }
 
@@ -90,17 +156,21 @@ export async function promoteFriction(runtime: Runtime, id: string, expectedDige
   const person = actor.parse(by);
   await withRecordLock(`${path(runtime, id)}.lock`, async () => {
     const previous = await read(runtime, id);
-    if (previous) {
-      if (previous.digest !== digest) throw new Error('friction_promotion_conflict');
+    if (previous?.digest === digest) {
+      if (previous.state === 'blocked' && !await existingRequest(runtime, previous)) {
+        await assertCurrent(runtime, id, digest);
+      }
       return;
     }
-    const triage = await readFrictionTriage(runtime, id);
-    if (!triage || !frictionProposalDigest(triage)) throw new Error('friction_proposal_unavailable');
-    if (frictionProposalDigest(triage) !== digest) throw new Error('friction_proposal_stale');
+    if (previous && (previous.state !== 'blocked' || await existingRequest(runtime, previous))) {
+      throw new Error('friction_promotion_conflict');
+    }
+    const triage = await assertCurrent(runtime, id, digest);
     const proposal = AskWorkProposal.parse(triage.investigation!.proposedWork);
     if (proposal.repository !== triage.policy.repository) throw new Error('friction_triage_wrong_repository');
     if (!canChange(runtime.owner(triage.policy.owner))) throw new Error('owner_cannot_change');
     runtime.repositoryOwner(triage.policy.owner, proposal.repository);
+    if (previous) await archive(runtime, previous);
     await save(runtime, { version: 1, id, digest, by: person, at: new Date().toISOString(), owner: triage.policy.owner,
       proposal, requestID: operatorWorkRequestId({ kind: 'friction', id }), state: 'pending', attempts: 0 });
   });

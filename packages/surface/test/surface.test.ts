@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, rename, symlink, writeFile } from 'node:fs/promises';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -7,10 +8,13 @@ import { test } from 'node:test';
 import {
   OPERATOR_ID, OperatorDeclaration, Runtime, approveInitiative, armDeployment, beginDrain, draftInitiative, listAdmissions,
   recordProviderFailure, recordProviderSuccess, releaseDrain, reportFriction, setReminder,
+  effectiveProposalDigest, writeRevision,
+  readFrictionTriage, sourceSnapshot,
   submitInitiative,
 } from '@onionsoup/owners';
 import { SurfaceState, surfaceServer, type OpencodeApi } from '@onionsoup/surface';
 import { DEFAULT_RELEASE_MANIFEST, readReleaseBuildId } from '../src/deployment-view.ts';
+import { publicFrictionDigest } from '../src/friction-public.ts';
 
 test('state API reads pending deployment dynamically while retaining the installed build', async () => {
   const root = await mkdtemp(join(tmpdir(), 'surface-build-'));
@@ -183,6 +187,7 @@ async function start(
   configure?: (api: OpencodeApi) => void,
   directory: (runtime: Runtime, ownerId: string) => Promise<string> = async (_runtime, ownerId) => `/desks/${ownerId}`,
   manifestPath?: string,
+  snapshot?: (workspace: string) => Promise<string>,
 ) {
   const runtime = await Runtime.open({ declarations: 'packages/owners/test/fixtures/owners', state: await mkdtemp(join(tmpdir(), 'surface-')) });
   const { api, calls } = fakeOpencode();
@@ -193,7 +198,7 @@ async function start(
     { id: 'ses_x', title: 'w-2: plan', directory: '/checkouts/clippy', time: { created: 1, updated: 1 } },
   ].filter(session => session.title.startsWith(prefix));
   const state = new SurfaceState(runtime, api, directory, undefined,
-    sessionID => [{ info: { id: 'msg_1', sessionID, role: 'assistant' }, parts: [] }], hireSessions, undefined, () => true);
+    sessionID => [{ info: { id: 'msg_1', sessionID, role: 'assistant' }, parts: [] }], hireSessions, undefined, () => true, snapshot);
   const buildId = await readReleaseBuildId(manifestPath ?? DEFAULT_RELEASE_MANIFEST);
   const { server } = surfaceServer(state, { webRoot: '/nonexistent', by: 'tester', buildId });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -202,7 +207,7 @@ async function start(
     const response = await fetch(base + path, { method, headers: { 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
     return { status: response.status, body: await response.json() as Record<string, unknown> };
   };
-  return { runtime, server, call, calls };
+  return { runtime, server, call, calls, state };
 }
 
 test('the surface lists owners with what waits on the person, and chat permissions land in the inbox', async () => {
@@ -850,6 +855,12 @@ test('attention assignment route preserves Seen and exposes linked gated request
 test('HTTP friction promotion binds displayed evidence and exposes gated linked work', async () => {
   const { runtime, server, call } = await start();
   try {
+    const workspace = await mkdtemp(join(tmpdir(), 'surface-friction-source-'));
+    runtime.declarations.owners.get('bellonda')!.workspace = workspace;
+    execFileSync('git', ['init', '--quiet', workspace]);
+    execFileSync('git', ['-C', workspace, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid',
+      'commit', '--quiet', '--allow-empty', '-m', 'source']);
+    const sourceCommit = execFileSync('git', ['-C', workspace, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
     await runtime.notebook('bellonda').ensure('# Test');
     const report = await reportFriction(runtime, { owner: 'bellonda', submissionID: 'promotion',
       origin: { sessionID: 'ses_origin', directory: '/private/desk' }, model: 'fixture/model', commit: 'a'.repeat(40), failures: [],
@@ -858,6 +869,7 @@ test('HTTP friction promotion binds displayed evidence and exposes gated linked 
     await mkdir(directory, { recursive: true });
     await writeFile(join(directory, `${report.id}.json`), JSON.stringify({ version: 1, id: report.id, state: 'investigated',
       createdAt: report.firstSeen, updatedAt: report.lastSeen,
+      sourceCommit,
       policy: { version: 1, owner: 'bellonda', repository: 'example/wiki', enabledSince: report.firstSeen },
       investigation: { disposition: 'propose-fix', observed: ['Checked source'], inferred: [], unknown: [],
         proposedWork: { title: 'Fix evidence', goal: 'Expose facts', rationale: 'Review blocked', size: 'small',
@@ -879,6 +891,200 @@ test('HTTP friction promotion binds displayed evidence and exposes gated linked 
     assert.match(JSON.stringify(linked.body.promotion), /denied/);
     assert.match(JSON.stringify(linked.body.promotion), new RegExp(request.id));
     assert.doesNotMatch(JSON.stringify(linked.body), /private\/desk/);
+  } finally { server.close(); }
+});
+
+async function frictionSourceFixture(runtime: Runtime) {
+  const workspace = await mkdtemp(join(tmpdir(), 'surface-friction-freshness-'));
+  runtime.declarations.owners.get('bellonda')!.workspace = workspace;
+  execFileSync('git', ['init', '--quiet', workspace]);
+  const commit = (message: string) => {
+    execFileSync('git', ['-C', workspace, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid',
+      'commit', '--quiet', '--allow-empty', '-m', message]);
+    return execFileSync('git', ['-C', workspace, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  };
+  const originalCommit = commit('original');
+  await runtime.notebook('bellonda').ensure('# Test');
+  const report = await reportFriction(runtime, { owner: 'bellonda', submissionID: 'freshness',
+    origin: { sessionID: 'ses_origin', directory: '/private/desk' }, model: 'fixture/model', commit: originalCommit,
+    failures: [], input: { summary: 'Original issue', expected: 'Works', actual: 'Fails' } });
+  const investigation = { disposition: 'propose-fix' as const, observed: ['Original observation'], inferred: [], unknown: [],
+    proposedWork: { title: 'Original fix', goal: 'Original goal', rationale: 'Observed failure', size: 'small' as const,
+      repository: 'example/wiki', acceptance: ['Works'] } };
+  const directory = join(runtime.stateDirectory, 'friction/investigations');
+  await mkdir(directory, { recursive: true });
+  await writeFile(join(directory, `${report.id}.json`), JSON.stringify({ version: 1, id: report.id, state: 'investigated',
+    createdAt: report.firstSeen, updatedAt: report.lastSeen, sourceCommit: originalCommit,
+    policy: { version: 1, owner: 'bellonda', repository: 'example/wiki', enabledSince: report.firstSeen }, investigation }));
+  return { report, investigation, originalCommit, commit, workspace };
+}
+
+test('one friction list pass shares a workspace snapshot without caching across polls', async () => {
+  let snapshots = 0;
+  const { runtime, server, state } = await start(undefined, undefined, undefined, async workspace => {
+    snapshots++;
+    return sourceSnapshot(workspace);
+  });
+  try {
+    const fixture = await frictionSourceFixture(runtime);
+    for (let index = 0; index < 5; index++) {
+      const report = await reportFriction(runtime, { owner: 'bellonda', submissionID: `shared-${index}`,
+        origin: { sessionID: `ses_${index}`, directory: '/private/desk' }, model: 'fixture/model',
+        commit: fixture.originalCommit, failures: [],
+        input: { summary: `Distinct issue ${'abcdefghij'[index]} in checkout`, expected: 'Works', actual: 'Fails' } });
+      const triage = await readFrictionTriage(runtime, fixture.report.id);
+      await writeFile(join(runtime.stateDirectory, 'friction/investigations', `${report.id}.json`),
+        JSON.stringify({ ...triage, id: report.id }));
+    }
+    const entries = await state.friction();
+    assert.equal(entries.length, 6);
+    assert.ok(entries.every(entry => entry.freshness?.stale === false && entry.proposalDigest));
+    assert.equal(snapshots, 1);
+    await state.fingerprint();
+    assert.equal(snapshots, 2);
+  } finally { server.close(); }
+});
+
+test('HTTP friction view marks changed local checkout stale without proposing or promoting', async () => {
+  const { runtime, server, call, state } = await start();
+  try {
+    const fixture = await frictionSourceFixture(runtime);
+    const before = await state.fingerprint();
+    const referenceCommit = fixture.commit('changed source');
+    const response = await call('GET', `/api/friction/${fixture.report.id}`);
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body.freshness, {
+      investigatedCommit: fixture.originalCommit, referenceCommit, stale: true,
+      reason: 'source_stale', scope: 'local-checkout-not-fetched',
+    });
+    assert.deepEqual(response.body.revisions, []);
+    assert.deepEqual(response.body.originalInvestigation, fixture.investigation);
+    assert.equal(response.body.effectiveRevision, 0);
+    assert.equal('proposalDigest' in response.body, false);
+    assert.deepEqual((response.body.triage as { investigation: unknown }).investigation, fixture.investigation);
+    assert.deepEqual(response.body.promotionHistory, []);
+    assert.notEqual(await state.fingerprint(), before, 'freshness changes trigger the stream');
+    assert.equal((await runtime.requests.list()).length, 0);
+  } finally { server.close(); }
+});
+
+test('HTTP friction view preserves investigation and withholds digest when a revision is unreadable', async () => {
+  const { runtime, server, call } = await start();
+  try {
+    const fixture = await frictionSourceFixture(runtime);
+    const revisions = join(runtime.stateDirectory, 'friction', 'investigations', fixture.report.id);
+    await mkdir(revisions, { recursive: true });
+    await writeFile(join(revisions, 'rev-1.json'), '{broken');
+    const response = await call('GET', `/api/friction/${fixture.report.id}`);
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body.originalInvestigation, fixture.investigation);
+    assert.deepEqual((response.body.triage as { investigation: unknown }).investigation, fixture.investigation);
+    assert.deepEqual(response.body.unreadable, ['friction_revisions_unreadable']);
+    assert.equal('proposalDigest' in response.body, false);
+    assert.equal(response.body.triageError, undefined);
+  } finally { server.close(); }
+});
+
+test('HTTP friction view reports unreadable promotion history without hiding its investigation', async () => {
+  const { runtime, server, call } = await start();
+  try {
+    const fixture = await frictionSourceFixture(runtime);
+    const history = join(runtime.stateDirectory, 'friction', 'promotions', fixture.report.id);
+    await mkdir(history, { recursive: true });
+    await writeFile(join(history, 'superseded-1.json'), '{broken');
+    const response = await call('GET', `/api/friction/${fixture.report.id}`);
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body.originalInvestigation, fixture.investigation);
+    assert.deepEqual((response.body.triage as { investigation: unknown }).investigation, fixture.investigation);
+    assert.deepEqual(response.body.unreadable, ['friction_promotion_history_unreadable']);
+    assert.match(String(response.body.proposalDigest), /^[a-f0-9]{64}$/);
+    assert.equal(response.body.triageError, undefined);
+  } finally { server.close(); }
+});
+
+test('a mismatched freshness view cannot offer a digest for a different effective revision', async () => {
+  const { runtime, server } = await start();
+  try {
+    const fixture = await frictionSourceFixture(runtime);
+    const triage = (await readFrictionTriage(runtime, fixture.report.id))!;
+    assert.equal(publicFrictionDigest({ triage, revision: 0 }, {
+      investigatedCommit: 'b'.repeat(40), referenceCommit: 'b'.repeat(40),
+      stale: false, scope: 'local-checkout-not-fetched',
+    }), undefined);
+  } finally { server.close(); }
+});
+
+test('HTTP friction view exposes a revised proposal after blocked old intent, and preserves history and effective evidence', async () => {
+  const { runtime, server, call, state } = await start();
+  try {
+    const fixture = await frictionSourceFixture(runtime);
+    const initial = (await call('GET', `/api/friction/${fixture.report.id}`)).body;
+    const initialDigest = String(initial.proposalDigest);
+    const open = runtime.requests.openIdentified.bind(runtime.requests);
+    runtime.requests.openIdentified = async () => { throw new Error('routing paused'); };
+    const oldDecision = { action: 'promote-friction', id: fixture.report.id, proposalDigest: initialDigest };
+    assert.match(String((await call('POST', '/api/decide', oldDecision)).body.error), /routing_failed/);
+    runtime.requests.openIdentified = open;
+    const referenceCommit = fixture.commit('changed source');
+    assert.match(String((await call('POST', '/api/decide', oldDecision)).body.error), /friction_source_stale/);
+    assert.equal((await runtime.requests.list()).length, 0);
+
+    const beforeBlocked = await state.fingerprint();
+    await writeRevision(runtime, { version: 1, id: fixture.report.id, revision: 1,
+      previousCommit: fixture.originalCommit, sourceCommit: referenceCommit, reason: 'source_stale',
+      state: 'blocked', blockedReason: 'friction_citation_unverified', at: fixture.report.firstSeen,
+      investigation: { disposition: 'already-fixed', fixedBy: referenceCommit,
+        observed: ['unverified.ts:1'], inferred: [], unknown: [] } });
+    const blocked = (await call('GET', `/api/friction/${fixture.report.id}`)).body;
+    assert.equal(blocked.effectiveRevision, 0);
+    assert.equal(blocked.freshness && (blocked.freshness as { stale: boolean }).stale, true);
+    assert.equal((blocked.revisions as { blockedReason?: string }[])[0]?.blockedReason, 'friction_citation_unverified');
+    assert.equal('proposalDigest' in blocked, false);
+    assert.notEqual(await state.fingerprint(), beforeBlocked, 'blocked revisions trigger the stream');
+    const beforeRevision = await state.fingerprint();
+
+    const revisedInvestigation = { ...fixture.investigation, observed: ['check.ts:1 still fails'],
+      proposedWork: { ...fixture.investigation.proposedWork, goal: 'Revised goal' } };
+    await writeRevision(runtime, { version: 1, id: fixture.report.id, revision: 2,
+      previousCommit: fixture.originalCommit, sourceCommit: referenceCommit, reason: 'source_stale',
+      state: 'revised', at: fixture.report.firstSeen, investigation: revisedInvestigation });
+    const revised = (await call('GET', `/api/friction/${fixture.report.id}`)).body;
+    assert.equal(revised.effectiveRevision, 2);
+    assert.deepEqual(revised.freshness, { investigatedCommit: referenceCommit, referenceCommit,
+      stale: false, scope: 'local-checkout-not-fetched' });
+    assert.equal((revised.revisions as unknown[]).length, 2);
+    assert.deepEqual(revised.originalInvestigation, fixture.investigation);
+    assert.deepEqual((revised.triage as { investigation: unknown }).investigation, revisedInvestigation);
+    assert.equal(revised.proposalDigest, await effectiveProposalDigest(runtime, fixture.report.id));
+    assert.notEqual(revised.proposalDigest, initialDigest);
+    assert.notEqual(await state.fingerprint(), beforeRevision, 'revision changes trigger the stream');
+    const decision = { action: 'promote-friction', id: fixture.report.id, proposalDigest: revised.proposalDigest };
+    assert.equal((await call('POST', '/api/decide', decision)).status, 200);
+    assert.equal((await call('POST', '/api/decide', decision)).status, 200);
+    const [request] = await runtime.requests.list();
+    assert.equal((await runtime.requests.list()).length, 1);
+    assert.equal(request.ask.kind === 'work' && request.ask.proposal.goal, 'Revised goal');
+    const promoted = (await call('GET', `/api/friction/${fixture.report.id}`)).body;
+    assert.equal((promoted.promotionHistory as { digest: string; state: string; reason: string }[])[0]?.digest, initialDigest);
+    assert.equal((promoted.promotionHistory as { state: string; reason: string }[])[0]?.state, 'blocked');
+    assert.equal((promoted.promotionHistory as { reason: string }[])[0]?.reason, 'friction_source_stale');
+    assert.equal((promoted.promotionHistory as unknown[]).length, 1);
+    assert.equal((promoted.promotion as { digest: string }).digest, revised.proposalDigest);
+    assert.doesNotMatch(JSON.stringify(promoted), /private\/desk/);
+
+    await writeRevision(runtime, { version: 1, id: fixture.report.id, revision: 3,
+      previousCommit: referenceCommit, sourceCommit: referenceCommit, reason: 'source_stale',
+      state: 'revised', at: fixture.report.firstSeen,
+      investigation: { disposition: 'already-fixed', fixedBy: referenceCommit,
+        observed: ['check.ts:1 fixed'], inferred: [], unknown: [] } });
+    const fixed = (await call('GET', `/api/friction/${fixture.report.id}`)).body;
+    assert.equal(fixed.effectiveRevision, 3);
+    assert.equal('proposalDigest' in fixed, false);
+    assert.equal((fixed.triage as { investigation: { disposition: string; fixedBy: string; observed: string[]; proposedWork?: unknown } }).investigation.disposition, 'already-fixed');
+    assert.equal((fixed.triage as { investigation: { fixedBy: string } }).investigation.fixedBy, referenceCommit);
+    assert.deepEqual((fixed.triage as { investigation: { observed: string[] } }).investigation.observed, ['check.ts:1 fixed']);
+    assert.equal((fixed.triage as { investigation: { proposedWork?: unknown } }).investigation.proposedWork, undefined);
+    assert.deepEqual(fixed.originalInvestigation, fixture.investigation);
   } finally { server.close(); }
 });
 
