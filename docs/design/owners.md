@@ -399,7 +399,13 @@ owner's latest person chat, discovered from existing nonchild sessions and perso
 waits for that chat to be idle, then posts with `noReply`; the decision watcher skips runtime notices. No person
 chat means the notice stays pending. A pinned destination and stable message ID reconcile a post accepted before
 a crash; transport failures retain the queue entry. Full exchanges remain in `notices/exchanges` under the state
-directory, and shortened notices cite their record ID. Owners also open requests to each other.
+directory, and shortened notices cite their record ID. Delivery records preserve the exact rendered text and
+agent; acceptance reconciliation requires that exact persisted message, not its ID alone. An expiring host-only
+delivery capability exempts the informational post from chat-turn admission while a bounded delivery lease
+protects the post itself. Genuine messages retain normal gates, even when they copy notice text. Completed
+real turns can ignore exact delivered notices at their tail; old stranded admissions need the separate
+[operator recovery procedure](../deployment.md#recovering-admissions-stranded-by-informational-notices).
+Owners also open requests to each other.
 
 An explicit `onionsoup_ask` with `followUp: true` lets the read-only answer propose **one** change in the answering
 owner's declared repository. Host code validates that owner can change that repository, then creates a regular
