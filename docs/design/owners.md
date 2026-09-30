@@ -285,7 +285,36 @@ owner's latest person chat, discovered from existing nonchild sessions and perso
 waits for that chat to be idle, then posts with `noReply`; the decision watcher skips runtime notices. No person
 chat means the notice stays pending. A pinned destination and stable message ID reconcile a post accepted before
 a crash; transport failures retain the queue entry. Full exchanges remain in `notices/exchanges` under the state
-directory, and shortened notices cite their record ID. Owners also open requests to each other:
+directory, and shortened notices cite their record ID. Owners also open requests to each other.
+
+An explicit `onionsoup_ask` with `followUp: true` lets the read-only answer propose **one** change in the answering
+owner's declared repository. Host code validates that owner can change that repository, then creates a regular
+`work` request; receiver acceptance, plan approval, verification, review and publication gates remain unchanged.
+Omitting `followUp` stays informational even if a model returns a proposal. This does not grant consultation write
+tools, run NAS operations, or turn a wiki correction into a wiki write. Missing evidence remains in `unknown`.
+
+The plugin supplies the originating session/message identity. That identity, caller, receiver and exact question
+key an additive `state/handoffs/ask-<digest>.json` record. The first valid answer is persisted before opening
+`r-handoff-<digest>` under a cross-process lock. Retrying the same tool input in the same originating message
+reuses that answer and adopts the request's current state, including denial or completion. A crash between the
+record and request is recovered by the admitted daemon tick or replaying that same ask. Only the new explicit
+handoff store is scanned; old notices and attention are never replayed. Routing is bounded to 20 intents per tick
+and three transient failed attempts per intent before `blocked`; invalid authority/repository proposals block on the
+first attempt. Failures retain a reason code in the sidecar and the tool returns the paid answer with typed routing
+status rather than losing it. Routing does not hire models. The request preserves the requester's origin.
+Its routing marker is saved before journaling; separate journal markers retry request-opened entries without
+blocking or changing the request. Journal failures log `handoff_journal_failed`; after three failures the reason
+remains on the sidecar for diagnosis. A crash after an append but before its marker can duplicate a journal entry.
+A process claim prevents concurrent consultation for the same origin. A live claimant yields
+`handoff_consultation_in_progress`; a dead claimant can be replaced. There is no timer that steals a live claim:
+a hung process must stop before retry, and PID reuse can conservatively delay recovery. No file lock spans inference. A new originating message is a new request, not semantic deduplication.
+The asked/answered journal entries and original exchange notice are best effort: a crash or write failure can
+omit them, and replay does not recreate them. The full answer/origin stay in the handoff record; the daemon repairs
+the separately tracked request-opened journal. Exchange notification and journals are informational, not the
+authoritative handoff state. Rollback leaves the
+new sidecars unread by older binaries; regular requests retain their existing schema and execution semantics.
+
+Request kinds:
 
 | Request | From → to | After the receiving owner accepts |
 | --- | --- | --- |

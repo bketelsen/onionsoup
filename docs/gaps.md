@@ -4,6 +4,11 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
 
 ## Owners and their authority
 
+- **Actionable consultations currently cover repository changes only.** Explicit `onionsoup_ask` follow-up routes one
+  proposal to existing gated work. Missing live evidence, wiki edits and household operations still need their
+  existing tools. New explicit handoff intents recover through the daemon without replaying old notices. Blocked routing
+  after three transient attempts (or one invalid-scope attempt) requires diagnosis; there is no cross-message semantic deduplication yet.
+
 - **Owner sessions' bash is not sandboxed yet.** Owner chats and the sessions that carry out approved plans run in
   the surface's opencode on the host, and so do the implementer and reviewer subagents they start. Their bash runs
   as the person, bounded only by permission rules, which [AGENTS.md](../AGENTS.md) rule 3 says are never the
