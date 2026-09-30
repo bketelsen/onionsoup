@@ -81,7 +81,18 @@ const handlers = {
     const branch = state.branch || 'original'; const headRefOid = cp.execFileSync('git', ['-C', remote, 'rev-parse', branch]).toString().trim(); console.log(JSON.stringify({ url, state: state.state, mergeable: state.mergeable || 'MERGEABLE', headRefOid })); },
   checks() { console.log(JSON.stringify(state.failing === false ? [] : [{ name: 'test', bucket: 'fail', link: '' }])); },
   list() { console.log(JSON.stringify(state.created ? [{ url, state: state.state }] : [])); },
-  create() { if (state.failCreate) { state.failCreate = false; fs.writeFileSync(path, JSON.stringify(state)); process.exit(1); } state.created++; state.draft = args.includes('--draft'); state.branch = args[args.indexOf('--head') + 1]; state.body = args[args.indexOf('--body') + 1]; console.log(url); },
+  create() {
+    if (state.failCreate) {
+      state.failCreate = false;
+      fs.writeFileSync(path, JSON.stringify(state));
+      process.exit(1);
+    }
+    state.created++;
+    state.draft = args.includes('--draft');
+    state.branch = args[args.indexOf('--head') + 1];
+    state.body = args[args.indexOf('--body') + 1];
+    console.log(url);
+  },
   merge() { state.state = 'MERGED'; },
 };
 handlers[args[0] === 'api' ? 'api' : args[1]]();
@@ -1282,10 +1293,36 @@ test('external reconciliation refuses approval/runner races and changed PR evide
     external.draft = false;
     external.merge_commit_sha = head;
     await save();
+    const beforeRefusal = await runtime.ledger.get(item.id);
+    await assert.rejects(reconcile(), /external_pr_merge_not_in_base/);
+    assert.deepEqual(await runtime.ledger.get(item.id), beforeRefusal);
+    await git(runtime.repositoryOwner('clippy').workspace, ['push', '-q', 'origin', `${head}:main`]);
     const merged = await reconcile();
     assert.equal(merged.publication!.state, 'merged');
+    assert.equal(merged.externalPublication!.mergeCommit, head);
     assert.equal(merged.implementations.length, linked.implementations.length);
     assert.deepEqual(linked.proposal, item.proposal);
     assert.equal((await githubState(root)).created, 0);
+  });
+});
+
+
+test('first external reconciliation refuses an unreachable merge without changing the request or work item', async () => {
+  const { runtime, root, remote, head, item, request, external } = await externalFixture();
+  external.merged = true;
+  external.state = 'closed';
+  external.draft = false;
+  external.merge_commit_sha = head;
+  scriptHires(runtime, async () => { throw new Error('ancestry refusal must precede review'); });
+  await fakeGithub(root, remote, async () => {
+    await writeFile(join(root, 'github.json'), JSON.stringify({ created: 0, state: 'MERGED', external }));
+    const priorItem = await runtime.ledger.get(item.id);
+    const priorRequest = await runtime.requests.get(request.id);
+    await assert.rejects(
+      reconcileExternalPublication(runtime, 'clippy', item.id, external.html_url, 'person'),
+      /external_pr_merge_not_in_base/,
+    );
+    assert.deepEqual(await runtime.ledger.get(item.id), priorItem);
+    assert.deepEqual(await runtime.requests.get(request.id), priorRequest);
   });
 });

@@ -71,13 +71,33 @@ async function reviewBase(directory: string, remote: ExternalPullRequest) {
   return (await git(directory, ['merge-base', remote.head.sha, anchor])).trim();
 }
 
+async function requireConfiguredBase(runtime: Runtime, item: WorkItem, directory: string, remote: ExternalPullRequest) {
+  const owner = runtime.repositoryFor(item);
+  if ((await git(directory, ['remote', 'get-url', 'origin'])).trim() !== owner.domain.remote) {
+    throw new Error('external_pr_remote_mismatch');
+  }
+  await git(directory, ['fetch', '--no-tags', 'origin', owner.domain.baseBranch]);
+  if (!remote.merged) return;
+  try {
+    await git(directory, ['merge-base', '--is-ancestor', remote.merge_commit_sha!, `origin/${owner.domain.baseBranch}`]);
+  } catch (cause) {
+    throw new Error('external_pr_merge_not_in_base', { cause });
+  }
+}
+
+function reviewedImplementation(review: Awaited<ReturnType<typeof reviewExternalPublication>>) {
+  return {
+    report: {
+      summary: 'Externally published PR verified and reconciled; deployment not assessed',
+      filesChanged: [], deviationsFromPlan: [],
+    },
+    diffStat: review.patch, verification: review.verification, tree: review.tree,
+  };
+}
+
 async function recordPublication(runtime: Runtime, item: WorkItem, remote: ExternalPullRequest, by: string) {
   const directory = item.planWorktree!;
   await requireSource(directory, remote.head.sha);
-  const configuredOwner = runtime.repositoryFor(item);
-  if ((await git(directory, ['remote', 'get-url', 'origin'])).trim() !== configuredOwner.domain.remote) throw new Error('external_pr_remote_mismatch');
-  await git(directory, ['fetch', '--no-tags', 'origin', configuredOwner.domain.baseBranch]);
-  if (remote.merged) await git(directory, ['merge-base', '--is-ancestor', remote.merge_commit_sha!, `origin/${configuredOwner.domain.baseBranch}`]);
   const base = await reviewBase(directory, remote);
   if (base === remote.head.sha) throw new Error('external_pr_empty_review_diff');
   const review = await reviewExternalPublication(runtime, item, directory, base);
@@ -96,9 +116,11 @@ async function recordPublication(runtime: Runtime, item: WorkItem, remote: Exter
     return { ...current, status: 'landed', activeRunner: undefined, reason: undefined,
       branch: remote.head.ref, landedCommit: remote.head.sha,
       publication: { url: remote.html_url, branch: remote.head.ref, by, at: observedAt, state: remote.merged ? 'merged' : 'open' },
-      externalPublication: { by, observedAt, head: remote.head.sha, base, mergeCommit: remote.merge_commit_sha ?? undefined,
-        reviewer: review.reviewer, evidence: review.evidence },
-      implementations: [...current.implementations, { report: { summary: 'Externally published PR verified and reconciled; deployment not assessed', filesChanged: [], deviationsFromPlan: [] }, diffStat: review.patch, verification: review.verification, tree: review.tree }],
+      externalPublication: {
+        by, observedAt, head: remote.head.sha, base, mergeCommit: remote.merge_commit_sha ?? undefined,
+        reviewer: review.reviewer, evidence: review.evidence,
+      },
+      implementations: [...current.implementations, reviewedImplementation(review)],
       verdicts: [...current.verdicts, review.verdict],
     };
   });
@@ -115,14 +137,19 @@ export async function reconcileExternalPublication(runtime: Runtime, ownerId: st
   if (initial.externalPublication && initial.publication?.url === url) {
     if (initial.externalPublication.head !== remote.head.sha) throw new Error('external_pr_head_changed');
     if (!remote.merged || initial.publication.state === 'merged') return initial;
+    await requireConfiguredBase(runtime, initial, owner.workspace, remote);
     return runtime.ledger.update(itemId, current => {
       if (current.activeRunner || current.status !== 'landed' || current.publication?.url !== url
         || current.externalPublication?.head !== remote.head.sha) throw new Error('external_pr_item_changed');
-      return { ...current, publication: { ...current.publication, state: 'merged' } };
+      return { ...current,
+        publication: { ...current.publication, state: 'merged' },
+        externalPublication: { ...current.externalPublication, mergeCommit: remote.merge_commit_sha! },
+      };
     });
   }
   requireApprovedWork(initial, ownerId);
   await requireRequest(runtime, initial);
+  await requireConfiguredBase(runtime, initial, initial.planWorktree!, remote);
   const claimed = await runtime.ledger.update(itemId, current => {
     requireApprovedWork(current, ownerId);
     return { ...current, activeRunner: process.pid };

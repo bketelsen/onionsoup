@@ -399,7 +399,6 @@ between attempts, so the same old request does not occupy an owner on every tick
 publication requires both recorded completion of the restart/serving check and a matching served `index.html` digest;
 it does not prove a full static asset tree from index content alone.
 
-
 For reviewed trial changes, pass `draft: true` to `onionsoup_propose_changes` or use
 `owners propose <owner> --item <item> --draft --note <title>`. This persists a no-merge
 publication boundary even when the owner has a merge grant. To recover an approved request
