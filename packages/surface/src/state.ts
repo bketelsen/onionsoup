@@ -76,7 +76,7 @@ export const Decision = z.object({
 export type Decision = z.infer<typeof Decision>;
 
 export interface InboxEntry {
-  kind: 'plan' | 'push' | 'create' | 'delete' | 'permission' | 'question' | 'request-recovery' | 'attention' | 'initiative' | 'provider-auth';
+  kind: 'plan' | 'push' | 'create' | 'delete' | 'permission' | 'question' | 'request-recovery' | 'attention' | 'initiative' | 'provider-auth' | 'plan-revision-blocked';
   id: string;
   owner: string;
   title: string;
@@ -85,7 +85,6 @@ export interface InboxEntry {
   attentionStatus?: string;
   attentionAssignment?: AttentionAssignmentView;
   assignmentTargets?: ReturnType<typeof attentionAssignmentTargets>;
-  revisionBlocked?: boolean;
   /** For permission and question entries: the chat they came from. */
   sessionID?: string;
   permission?: PendingPermission;
@@ -265,9 +264,8 @@ export class SurfaceState {
     const providerHealth = await providerHealthViews(this.runtime);
     const entries: InboxEntry[] = [
       ...revisions.filter(({ delivery }) => delivery?.status === 'blocked').map(({ item, delivery }) => ({
-        kind: 'attention' as const, id: `plan-revision-${item.id}`, owner: item.owner, title: `Revision delivery blocked: ${item.proposal.title}`,
+        kind: 'plan-revision-blocked' as const, id: `plan-revision-${item.id}`, owner: item.owner, title: `Revision delivery blocked: ${item.proposal.title}`,
         detail: `${delivery!.reason}. Check the existing plan session before taking further action; do not blindly resubmit. Work ${item.id}.`,
-        revisionBlocked: true,
       })),
       ...providerHealth.filter(view => view.status === 'failing').map(providerAuthEntry),
       ...await Promise.all(attention.filter(entry => entry.status !== 'resolved').map(async entry => ({

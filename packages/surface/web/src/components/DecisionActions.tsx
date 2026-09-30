@@ -63,7 +63,6 @@ function PermissionActions(props: DecisionActionProps) {
 
 function AttentionActions(props: DecisionActionProps) {
   const { entry, busy, text, decide } = props;
-  if (entry.revisionBlocked) return null;
   return <>
     {entry.attentionStatus !== 'acknowledged' && <Button disabled={busy || !text.trim()}
       onClick={() => void decide('acknowledge-attention', { reason: text })}>Seen</Button>}
@@ -117,6 +116,7 @@ const ACTIONS: Record<ActionKind, (props: DecisionActionProps) => ReactNode> = {
   delete: DeleteActions,
   permission: PermissionActions,
   attention: AttentionActions,
+  'plan-revision-blocked': () => null,
   'request-recovery': RecoveryActions,
   initiative: InitiativeActions,
   question: () => null,

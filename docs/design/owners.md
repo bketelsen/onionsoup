@@ -765,3 +765,20 @@ Already in-flight submissions cannot be recalled; cancellation prevents future d
 work. The latest revision outbox is retained per item; prior human feedback stays on the work item. This is an
 additive sidecar, with no old-notice backfill. Existing legacy work-notice delivery is otherwise unchanged.
 Direct-chat plan feedback already returns to the active caller and keeps its existing synchronous path.
+
+Revision blockers use a distinct informational inbox kind, so they cannot inherit attention assignment or Seen
+controls. Feedback also repairs an idempotent `plan-feedback` notebook entry after delivery; journal failure does
+not prevent the prompt, and terminal records remain eligible for journal repair. Terminal delivery states cannot
+be overwritten by late concurrent transport results. Directory read failures are reported without preventing
+other notice systems from running.
+
+A revision has its own durable identity; the transport message ID is minted and persisted only at dispatch.
+It follows OpenCode's [native ascending ID format](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/id/id.ts)
+and advances beyond observed native IDs in the target transcript. It is never regenerated after submission.
+This avoids queue-time ordering ties without claiming that current transcript ordering relies only on IDs.
+If no origin was present initially, pre-send recovery may bind only the unchanged work item's declared `session`
+or `origin`; it does not choose another owner's current chat. Once pinned, the origin is never replaced.
+
+The ledger's human notes remain the authoritative correction history. Journal repair covers the current revision;
+if a later revision replaces an older record before journal repair succeeds, the older correction may remain only
+in the ledger. This deliberately adds neither a second historical outbox nor legacy feedback backfill.

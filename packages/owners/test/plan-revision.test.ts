@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -181,11 +181,77 @@ test('per-pass bound includes blocked-record inspections', async () => {
   const statuses = await Promise.all(ids.map(id => planRevisionStatus(runtime, id)));
   assert.equal(statuses.filter(status => status?.status === 'blocked').length, PLAN_REVISION_LIMITS.perPass);
   assert.equal(statuses.filter(status => status?.status === 'pending').length, 1);
-  let inspected = 0;
+  const inspected = new Set<string>();
   const get = runtime.ledger.get.bind(runtime.ledger);
-  runtime.ledger.get = async id => { inspected++; return get(id); };
+  runtime.ledger.get = async id => { inspected.add(id); return get(id); };
   await deliverPlanRevisions(runtime, fake.client, fail);
-  assert.equal(inspected, PLAN_REVISION_LIMITS.perPass);
+  assert.equal(inspected.size, PLAN_REVISION_LIMITS.perPass, 'the limit counts records, including journal repair of the same record');
   const after = await Promise.all(ids.map(id => planRevisionStatus(runtime, id)));
   assert.equal(after.filter(status => status?.status === 'pending').length, 0, 'blocked records cannot starve a later pending revision');
+});
+
+
+test('message identity is minted at dispatch after observed native message IDs and retained on restart', async () => {
+  const { runtime, item } = await setup();
+  await revisePlan(runtime, item.id, 'Brian', 'Simplify');
+  assert.equal((await planRevisionStatus(runtime, item.id))?.messageID, undefined);
+  const fake = transport();
+  const laterTime = ((BigInt(Date.now() + 60_000) * 0x1000n) & 0xffffffffffffn).toString(16).padStart(12, '0');
+  const existing = `msg_${laterTime}zzzzzzzzzzzzzz`;
+  fake.messages.push(existing);
+  await deliverPlanRevisions(runtime, fake.client, fail);
+  const sent = fake.calls[0].id;
+  assert.match(sent, /^msg_[a-f0-9]{12}[a-zA-Z0-9]{14}$/);
+  assert.ok(sent > existing);
+  const reopened = await Runtime.open({ declarations: 'packages/owners/test/fixtures/owners', state: runtime.stateDirectory });
+  await deliverPlanRevisions(reopened, fake.client, fail);
+  assert.equal((await planRevisionStatus(reopened, item.id))?.messageID, sent);
+  assert.equal(fake.calls.length, 1);
+});
+
+test('feedback journal repairs append-before-marker failure without stranding delivery or duplicating feedback', async () => {
+  const { runtime, item } = await setup();
+  await revisePlan(runtime, item.id, 'Brian', 'Simplify');
+  const notebook = runtime.notebook('clippy');
+  const original = notebook.journalOnce.bind(notebook);
+  notebook.journalOnce = async (...args) => { await original(...args); throw new Error('journal_marker_crash'); };
+  const notebookFor = runtime.notebook.bind(runtime);
+  runtime.notebook = owner => owner === 'clippy' ? notebook : notebookFor(owner);
+  const fake = transport();
+  const failures: unknown[] = [];
+  await deliverPlanRevisions(runtime, fake.client, (_id, error) => failures.push(error));
+  assert.equal(failures.length, 1);
+  assert.equal((await planRevisionStatus(runtime, item.id))?.status, 'delivered');
+  const reopened = await Runtime.open({ declarations: 'packages/owners/test/fixtures/owners', state: runtime.stateDirectory });
+  await deliverPlanRevisions(reopened, fake.client, fail);
+  await deliverPlanRevisions(reopened, fake.client, fail);
+  const journal = join(notebook.directory, 'journal');
+  const contents = await Promise.all((await readdir(journal)).filter(name => name.endsWith('.jsonl')).map(name => readFile(join(journal, name), 'utf8')));
+  const feedback = contents.join('\n').split('\n').filter(Boolean).map(line => JSON.parse(line)).filter(entry => entry.kind === 'plan-feedback');
+  assert.equal(feedback.length, 1);
+  assert.equal(feedback[0].note, 'Brian: Simplify');
+  assert.equal(fake.calls.length, 1);
+});
+
+test('a late prompt completion cannot overwrite cancellation suppression', async () => {
+  const { runtime, item } = await setup();
+  await revisePlan(runtime, item.id, 'Brian', 'Simplify');
+  const fake = transport();
+  const send = fake.client.prompt;
+  fake.client.prompt = async (...args) => {
+    await cancelItem(runtime, item.id, 'Brian', 'Stop');
+    await deliverPlanRevisions(runtime, fake.client, fail);
+    await send(...args);
+  };
+  await deliverPlanRevisions(runtime, fake.client, fail);
+  assert.equal((await planRevisionStatus(runtime, item.id))?.status, 'suppressed');
+  assert.equal(fake.calls.length, 1);
+});
+
+test('an unreadable revision directory reports its failure without rejecting the other notice pass', async () => {
+  const { runtime } = await setup();
+  await writeFile(join(runtime.stateDirectory, 'plan-revisions'), 'not a directory');
+  const failures: string[] = [];
+  await deliverPlanRevisions(runtime, transport().client, id => { failures.push(id); });
+  assert.deepEqual(failures, ['plan-revisions']);
 });

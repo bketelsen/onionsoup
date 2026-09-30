@@ -10,6 +10,7 @@ import { Badge, Button, cx, OwnerIcon, timeAgo } from './ui.tsx';
 
 const KIND_LABELS: Record<InboxEntry['kind'], string> = {
   plan: 'Plan to approve', push: 'Force-push to approve', create: 'Create request', delete: 'Delete request',
+  'plan-revision-blocked': 'Revision delivery blocked',
   attention: 'Attention', 'request-recovery': 'Request interrupted', initiative: 'Initiative to approve',
   permission: 'Permission', question: 'Question', 'provider-auth': 'Model provider',
 };
@@ -71,11 +72,11 @@ export function Decision({ entry, owner, onDone, compact }: { entry: InboxEntry;
           setWithDelete={setWithDelete} decide={decide} permission={permission} />
         {entry.sessionID && <Button variant="ghost" onClick={openChat}><RiChat3Line className="size-3.5" />Open chat</Button>}
       </div>
-      {entry.kind === 'attention' && !entry.revisionBlocked && <>
+      {entry.kind === 'attention' && <>
         <div className="typography-meta text-muted-foreground">Seen records acknowledgment; it does not start work. Assignment does not resolve this attention item.</div>
         <AttentionAssignment entry={entry} busy={busy} decide={decide} />
       </>}
-      {NOTE_PLACEHOLDERS[entry.kind] && !entry.revisionBlocked && (
+      {NOTE_PLACEHOLDERS[entry.kind] && (
         <input value={text} onChange={event => setText(event.target.value)} disabled={busy} aria-label={NOTE_PLACEHOLDERS[entry.kind]} placeholder={NOTE_PLACEHOLDERS[entry.kind]}
           className="rounded-md border border-border bg-background px-2 py-1 pointer-coarse:min-h-11 typography-meta outline-none focus:border-interactive-border-focus" />
       )}

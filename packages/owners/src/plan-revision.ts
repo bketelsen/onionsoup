@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
@@ -12,10 +12,10 @@ import type { Runtime } from './runtime.ts';
 
 export const PLAN_REVISION_LIMITS = { perPass: 20, textChars: 8_000 };
 const Revision = z.object({
-  id: z.string(), item: z.string(), owner: z.string(), expected: z.string(), plan: z.string(),
+  id: z.string(), messageID: z.string().optional(), item: z.string(), owner: z.string(), expected: z.string(), plan: z.string(),
   feedback: z.string(), note: HumanNote, origin: ChatOrigin.optional(),
   status: z.enum(['prepared', 'pending', 'sending', 'delivered', 'blocked', 'suppressed']),
-  reason: z.string().optional(), runner: z.number().optional(), submitted: z.boolean().default(false),
+  reason: z.string().optional(), runner: z.number().optional(), submitted: z.boolean().default(false), journaled: z.boolean().default(false),
 });
 type Revision = z.infer<typeof Revision>;
 // Scheduling hint only; authoritative delivery state remains on disk.
@@ -24,6 +24,23 @@ const PRE_SEND_BLOCKERS = new Set(['plan_revision_owner_retired', 'plan_revision
   'plan_revision_origin_missing', 'plan_revision_origin_unavailable']);
 function submissionAttempted(record: Revision) {
   return record.submitted || record.status === 'sending' || record.reason === 'plan_revision_delivery_uncertain';
+}
+function receiptId(record: Revision) {
+  // Already-submitted sidecars from the first format retain their original receipt identity.
+  return record.messageID ?? (submissionAttempted(record) ? record.id : undefined);
+}
+/** Native ascending format: https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/id/id.ts */
+function nextMessageId(observed: readonly string[]) {
+  let timestamp = (BigInt(Date.now()) * 0x1000n) & 0xffffffffffffn;
+  for (const id of observed) {
+    const match = /^msg_([a-f0-9]{12})[a-zA-Z0-9]{14}$/.exec(id);
+    if (match) {
+      const previous = BigInt(`0x${match[1]}`);
+      if (previous >= timestamp) timestamp = previous + 1n;
+    }
+  }
+  if (timestamp > 0xffffffffffffn) throw new Error('plan_revision_message_id_exhausted');
+  return `msg_${timestamp.toString(16).padStart(12, '0')}${randomBytes(7).toString('hex')}`;
 }
 export interface PlanRevisionClient {
   exists(origin: ChatOrigin): Promise<boolean>;
@@ -85,13 +102,13 @@ export async function queuePlanRevision(runtime: Runtime, itemId: string, by: st
 /** Small public projection exposes safe stopping reasons without copying feedback or transcript data. */
 export async function planRevisionStatus(runtime: Runtime, itemId: string) {
   const record = await read(runtime, itemId);
-  return record ? { status: record.status, reason: record.reason, messageID: record.id } : undefined;
+  return record ? { status: record.status, reason: record.reason, messageID: receiptId(record) } : undefined;
 }
 
 async function change(runtime: Runtime, record: Revision, status: Revision['status'], reason?: string) {
   return withRecordLock(`${path(runtime, record.item)}.lock`, async () => {
     const current = await read(runtime, record.item);
-    if (current?.id !== record.id) return;
+    if (current?.id !== record.id || ['delivered', 'suppressed'].includes(current.status)) return;
     if (current.status === status && current.reason === reason && !current.runner) return;
     await save(runtime, { ...current, status, reason, runner: undefined, submitted: submissionAttempted(current) || submissionAttempted(record) });
   });
@@ -140,7 +157,9 @@ async function deliverOne(runtime: Runtime, record: Revision, client: PlanRevisi
   const { item, agent, origin } = prepared;
   if (!await client.exists(origin)) return change(runtime, record, 'blocked',
     submissionAttempted(record) ? 'plan_revision_delivery_uncertain' : 'plan_revision_origin_unavailable');
-  if ((await client.messages(origin)).includes(record.id)) return change(runtime, record, 'delivered');
+  const observed = await client.messages(origin);
+  const receipt = receiptId(record);
+  if (receipt && observed.includes(receipt)) return change(runtime, record, 'delivered');
   if (submissionAttempted(record)) {
     if (record.runner && requestRunnerIsAlive(record.runner)) return;
     return change(runtime, record, 'blocked', 'plan_revision_delivery_uncertain');
@@ -149,28 +168,42 @@ async function deliverOne(runtime: Runtime, record: Revision, client: PlanRevisi
   if (!await client.idle(origin)) return;
   const claimed = await withRecordLock(`${path(runtime, record.item)}.lock`, async () => {
     const current = await read(runtime, record.item);
-    if (current?.id !== record.id || submissionAttempted(current) || !['pending', 'prepared'].includes(current.status)) return false;
-    if (ineligible(await runtime.ledger.get(record.item), current)) return false;
-    await save(runtime, { ...current, status: 'sending', runner: process.pid, submitted: true });
-    return true;
+    if (current?.id !== record.id || submissionAttempted(current) || !['pending', 'prepared'].includes(current.status)) return undefined;
+    if (ineligible(await runtime.ledger.get(record.item), current)) return undefined;
+    const claimed = { ...current, status: 'sending' as const, runner: process.pid, submitted: true,
+      messageID: current.messageID ?? nextMessageId(observed) };
+    await save(runtime, claimed);
+    return claimed;
   });
   if (!claimed) return;
   const text = `${NOTICE_PREFIX} ${record.note.by} requests another approach for ${item.id} "${item.proposal.title}": ${record.feedback}. Keep the goal. Revise and submit again with onionsoup_submit_plan item "${item.id}". Existing approval gates still apply.`;
   try {
-    await client.prompt(origin, agent, text, record.id);
+    await client.prompt(origin, agent, text, claimed.messageID);
     // promptAsync receipt alone is not proof that the transcript accepted the message.
-    if ((await client.messages(origin)).includes(record.id)) await change(runtime, record, 'delivered');
+    if ((await client.messages(origin)).includes(claimed.messageID)) await change(runtime, claimed, 'delivered');
     else await change(runtime, record, 'blocked', 'plan_revision_delivery_uncertain');
   } catch {
     await change(runtime, record, 'blocked', 'plan_revision_delivery_uncertain');
   }
 }
 
+/** Journal failure never strands delivery; terminal records remain eligible for journal repair. */
+async function journalFeedback(runtime: Runtime, record: Revision) {
+  if (record.journaled) return;
+  const applied = wasApplied(await runtime.ledger.get(record.item), record);
+  if (applied) await runtime.notebook(record.owner).journalOnce({ kind: 'plan-feedback', workItem: record.item,
+    note: `${record.note.by}: ${record.feedback}`, source: `plan-revision:${digest([record.item, record.note])}` }, record.note.at);
+  await withRecordLock(`${path(runtime, record.item)}.lock`, async () => {
+    const current = await read(runtime, record.item);
+    if (current?.id === record.id) await save(runtime, { ...current, journaled: true });
+  });
+}
+
 /** Called under plugin admission. Network calls never hold record locks; uncertain sends never blindly repeat. */
 export async function deliverPlanRevisions(runtime: Runtime, client: PlanRevisionClient,
   onError: (id: string, error: unknown) => void) {
   const names = await readdir(directory(runtime)).catch(error => {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') onError('plan-revisions', error);
     return [];
   });
   const files = names.filter(name => /^[a-f0-9]{64}\.json$/.test(name)).sort();
@@ -181,10 +214,12 @@ export async function deliverPlanRevisions(runtime: Runtime, client: PlanRevisio
   for (const name of ordered) {
     try {
       const record = Revision.parse(JSON.parse(await readFile(join(directory(runtime), name), 'utf8')));
-      if (['delivered', 'suppressed'].includes(record.status)) continue;
+      const terminal = ['delivered', 'suppressed'].includes(record.status);
+      if (terminal && record.journaled) continue;
       if (count++ >= PLAN_REVISION_LIMITS.perPass) break;
       SCAN_AFTER.set(runtime.stateDirectory, name);
-      await deliverOne(runtime, record, client);
+      if (!terminal) await deliverOne(runtime, record, client);
+      await journalFeedback(runtime, record);
     } catch (error) { onError(name, error); }
   }
 }

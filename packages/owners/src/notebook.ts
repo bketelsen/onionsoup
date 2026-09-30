@@ -143,6 +143,21 @@ export class Notebook {
     await appendFile(join(this.directory, 'journal', `${day}.jsonl`), line + '\n');
   }
 
+  /** Persist one source-keyed event on its original day, including replay after append/marker crashes. */
+  async journalOnce(entry: JournalEntry & { source: string }, at: string) {
+    await this.ensureJournal();
+    const file = join(this.directory, 'journal', `${at.slice(0, 10)}.jsonl`);
+    await withRecordLock(`${file}.lock`, async () => {
+      const contents = await readFile(file, 'utf8').catch(error => {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        return '';
+      });
+      const records = contents.split('\n').filter(Boolean).map(line => JSON.parse(line) as { source?: string });
+      if (records.some(record => record.source === entry.source)) return;
+      await appendFile(file, JSON.stringify({ at, owner: this.ownerId, ...entry }) + '\n');
+    });
+  }
+
   /** A bounded snapshot with a line cursor: entries appended during a hire remain unread. */
   async journalSnapshot(policy: MemoryPolicy, cursor?: JournalCursor, legacyMarker?: string) {
     const directory = join(this.directory, 'journal');
