@@ -5,6 +5,7 @@ import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { changeAttention, listAttention } from '../src/attention.ts';
 import { Runtime, advance, approvePlan, cancelItem, resumeItem, retryItem } from '@onionsoup/owners';
 import { git, refreshCheckout, ensureDesk, createWorktree } from '../src/workspace.ts';
 import { REBASE_WORKFLOW, maintainPullRequests, refreshPublications } from '../src/rebase.ts';
@@ -1047,7 +1048,16 @@ test('a cancelled plan\'s worktree waits for its idle session, and is never remo
   assert.equal(kept.planWorktreeKept, 'kept-uncommitted');
   const kinds = await journalKinds(runtime, 'clippy');
   assert.equal(kinds.filter(kind => kind === 'plan-worktree-removed').length, 1);
-  assert.equal(kinds.filter(kind => kind === 'attention').length, 1, 'the kept worktree is raised to the person once, not every pass');
+  assert.equal(kinds.filter(kind => kind === 'attention-condition').length, 2, 'one kept condition and one clean completion');
+  const attention = (await listAttention(runtime)).find(entry => entry.condition?.key === `plan-worktree:${dirty!.id}`)!;
+  assert.equal(attention.status, 'open');
+  await changeAttention(runtime, attention.id, 'acknowledged', 'person', 'Will clean later');
+  await rm(join(dirty!.planWorktree!, 'dirty.txt'));
+  await cleanUp(runtime, sessions.client, pastIdleLimit());
+  const cleared = (await listAttention(runtime)).find(entry => entry.id === attention.id)!;
+  assert.equal(cleared.status, 'resolved', 'positive filesystem evidence clears even acknowledged condition');
+  assert.equal(cleared.decision?.reason, 'Will clean later', 'human acknowledgment history survives');
+  assert.equal(cleared.condition?.state, 'resolved');
 });
 
 test('a plan\'s worktree syncs with its base on its own, keeping its uncommitted work', async () => {

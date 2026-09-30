@@ -889,3 +889,9 @@ ownership. Malformed individual identities remain denied; directory ownership fa
 index error. Session creation checks index readability before contacting OpenCode, but a later storage failure
 can still occur after creation and requires inspection. Approved engine dispatch keeps its durable ledger fallback
 and does not depend on successful index writes. Recorded chat views are ordered by most recently updated.
+
+### Verified attention conditions
+
+New host-generated plan-worktree cleanup notices carry a condition identity scoped to the work item. Repeated observations update that one entry without undoing Seen. Successful removal (or verified absence) journals a terminal resolution before forgetting the worktree, so append failures remain retryable. The index retains a resolved tombstone even if it discovers completion before the original notice; delayed observations cannot resurrect that generation. Human decision notes remain attached.
+
+This is deliberately narrow: legacy free-text attention remains unchanged, assignment completion does not imply that an underlying condition cleared, and no prose matching infers resolution. Other producers need their own explicit identity and positive clear evidence before adopting the mechanism. Models cannot supply the condition field through the journal tool. A recurring condition must use a new generation key.

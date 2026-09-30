@@ -70,6 +70,13 @@ async function forgetPlanWorktree(runtime: Runtime, item: WorkItem) {
   for (const session of records.values()) {
     await rememberSession(runtime, { ...session, archived: session.directory === item.planWorktree || session.archived });
   }
+  await runtime.notebook(item.owner).ensureJournal();
+  // Journal before forgetting: a failed append leaves the item available for a safe absent-path retry.
+  await runtime.notebook(item.owner).journal({
+    kind: 'attention-condition', workItem: item.id,
+    condition: { key: `plan-worktree:${item.id}`, state: 'resolved' },
+    note: `Plan worktree for ${item.id} is no longer present; cleanup is complete.`,
+  });
   await runtime.ledger.update(item.id, current => ({ ...current, planWorktree: undefined, planWorktreeKept: undefined }));
 }
 
@@ -120,7 +127,10 @@ async function removePlanWorktree(runtime: Runtime, item: WorkItem, path: string
     }));
   const isRepeat = outcome === item.planWorktreeKept;
   const entry = isRepeat ? undefined : REMOVAL_JOURNAL[outcome]?.(path, detail);
-  if (entry) await runtime.notebook(item.owner).journal({ ...entry, workItem: item.id, outcome });
+  if (entry) await runtime.notebook(item.owner).journal({
+    ...entry, workItem: item.id, outcome,
+    ...(entry.kind === 'attention' ? { kind: 'attention-condition', condition: { key: `plan-worktree:${item.id}`, state: 'open' as const } } : {}),
+  });
   await recordKept(runtime, item, outcome);
   return outcome;
 }

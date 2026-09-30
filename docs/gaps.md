@@ -181,3 +181,5 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
 - **Persona-free owners have observation chat only.** They can inspect recorded state and consult other owners,
   but cannot execute domain changes or reminders. Migrating the legacy persona requirement in `canChange` to an
   explicit capability would require a separate compatibility/authority decision; adding chat does not perform it.
+
+Typed attention reconciliation currently covers host-verified plan-worktree cleanup only. Legacy free-text notices and other condition producers require explicit identities and positive clear evidence; they are not inferred closed or migrated automatically.
