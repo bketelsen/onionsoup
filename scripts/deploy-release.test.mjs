@@ -9,7 +9,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { armDeployment, beginAdmission, beginDrain, markDeploymentWaiting } from '../packages/owners/src/deployment-admission.ts';
 import { arm, worker, cancel, bootstrapLeases } from './deploy-release.mjs';
-import { runStageCommand } from './deploy-stage.mjs';
+import { runStageCommand, STAGE_TEST_OPTIONS, HOST_BUS_TESTS } from './deploy-stage.mjs';
 
 const exec = promisify(execFile);
 
@@ -37,7 +37,7 @@ test('candidate stage hides host credentials and prevents runtime writes while i
     assert.equal(process.env.GIT_CONFIG_COUNT, undefined);
     assert.equal((await import('node:os')).userInfo().username, 'stage');
     assert.equal(process.env.NODE_OPTIONS,
-      '--test-skip-pattern=^a sandboxed npm ci succeeds in a minimal fixture, with private XDG roots and the worktree writable$');
+      STAGE_TEST_OPTIONS);
     assert.equal(process.env.FAKE_CREDENTIAL, undefined);
     assert.equal(process.env.OPENCODE_SERVER_PASSWORD, undefined);
     assert.equal(process.env.ONIONSOUP_HOME, undefined);
@@ -83,7 +83,7 @@ test('candidate stage hides host credentials and prevents runtime writes while i
     assert.equal(process.env.GIT_CONFIG_COUNT, undefined);
     assert.equal(userInfo().username, 'stage');
      assert.equal(process.env.NODE_OPTIONS,
-       '--test-skip-pattern=^a sandboxed npm ci succeeds in a minimal fixture, with private XDG roots and the worktree writable$');
+       ${JSON.stringify(STAGE_TEST_OPTIONS)});
     assert.equal(process.env.GIT_CONFIG_NOSYSTEM, '1');
     assert.equal(process.env.GIT_TERMINAL_PROMPT, '0');
     assert.equal(process.env.FAKE_CREDENTIAL, undefined);
@@ -134,6 +134,28 @@ test('candidate stage hides host credentials and prevents runtime writes while i
      });
     assert.equal(await readFile(join(staging, 'verified'), 'utf8'), 'ok');
     assert.equal(await readFile(join(runtime, 'marker'), 'utf8'), 'unchanged');
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
+});
+
+test('stage test filter excludes only exact host-bus test names, including names with spaces', async () => {
+  const scratch = await mkdtemp(join(tmpdir(), 'onionsoup-stage-filter-'));
+  const probe = join(scratch, 'filter.test.mjs');
+  try {
+    await writeFile(probe, `import test from 'node:test';
+      ${HOST_BUS_TESTS.map(name => `test(${JSON.stringify(name)}, () => { throw new Error('nested_bus_test_ran'); });`).join('\n')}
+      test('a normal regression still runs', () => { console.log('ordinary_test_executed'); });
+      test('approved-plan review with a different name still runs', () => { console.log('other_test_executed'); });
+    `);
+    const environment = { ...process.env, NODE_OPTIONS: STAGE_TEST_OPTIONS };
+    delete environment.NODE_TEST_CONTEXT;
+    const { stdout } = await exec(process.execPath, ['--test', '--test-reporter=tap', probe], {
+      env: environment,
+    });
+    assert.match(stdout, /ordinary_test_executed/);
+    assert.match(stdout, /other_test_executed/);
+    assert.match(stdout, /# pass 2/);
   } finally {
     await rm(scratch, { recursive: true, force: true });
   }
