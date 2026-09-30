@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, rm, writeFile, chmod, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,6 +9,10 @@ import { effectiveTriage, frictionFreshness, investigationDirectory, readRevisio
   retryFrictionRevalidation, writeRevision } from '../src/friction-revalidation.ts';
 import { preflightHireExecutable } from '../src/opencode.ts';
 import { Runtime } from '../src/runtime.ts';
+import { effectiveProposalDigest, frictionProposalDigest, promoteFriction, recoverFrictionPromotions } from '../src/friction-promotion.ts';
+import { openOwnerSession, type OwnerSessionClient } from '../src/owner-sessions.ts';
+import { approvePlan } from '../src/work-recovery.ts';
+import { ensureDesk } from '../src/workspace.ts';
 
 const id = 'fr_012345678901234567890123';
 const at = '2026-01-01T00:00:00.000Z';
@@ -18,7 +22,7 @@ const originalInvestigation: NonNullable<FrictionTriage['investigation']> = {
     repository: 'example/clippy', acceptance: ['Regression passes'] },
 };
 
-async function fixture() {
+async function fixture(representative = false) {
   const root = await mkdtemp(join(tmpdir(), 'friction-revalidation-'));
   const runtime = await Runtime.open({ declarations: 'packages/owners/test/fixtures/owners', state: join(root, 'state') });
   runtime.declarations.root = root;
@@ -35,7 +39,11 @@ async function fixture() {
   };
   const first = commit('A');
   for (const file of ['owner-sessions.ts', 'plan-worktrees.ts', 'desk-changes.ts', 'work-lifecycle.test.ts', '_x.ts']) {
-    await writeFile(join(workspace, file), 'fixture line one\nfixture line two\nfixture line three\n');
+    const source = file === 'work-lifecycle.test.ts' ? 'test' : 'src';
+    const contents = representative && file !== '_x.ts'
+      ? await readFile(`packages/owners/${source}/${file}`, 'utf8')
+      : 'fixture line one\nfixture line two\nfixture line three\n';
+    await writeFile(join(workspace, file), contents);
   }
   execFileSync('git', ['-C', workspace, 'add', '.']);
   const fixed = commit('C each approved plan gets its own worktree');
@@ -678,4 +686,100 @@ test('executable preflight rejects nonexecutable files and directories and resol
     await chmod(join(root, 'bin', 'opencode'), 0o755);
     await preflightHireExecutable(root, 'bin');
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+async function localWorktreeRepository(state: Awaited<ReturnType<typeof fixture>>) {
+  const remote = join(state.root, 'origin.git');
+  execFileSync('git', ['init', '--quiet', '--bare', '--initial-branch=main', remote]);
+  execFileSync('git', ['-C', state.workspace, 'branch', '-M', 'main']);
+  execFileSync('git', ['-C', state.workspace, 'remote', 'add', 'origin', remote]);
+  execFileSync('git', ['-C', state.workspace, 'push', '--quiet', 'origin', 'main']);
+  const owner = state.runtime.declarations.owners.get('clippy')!;
+  assert.equal(owner.domain.kind, 'git-repository');
+  state.runtime.declarations.owners.set('clippy', { ...owner,
+    domain: { kind: 'git-repository', name: 'example/clippy', remote, baseBranch: 'main', verify: [] } });
+  await state.runtime.notebook('clippy').ensure('# Test charter\n');
+}
+
+async function isolatedPlanSessions(state: Awaited<ReturnType<typeof fixture>>) {
+  const directories: string[] = [];
+  const client: OwnerSessionClient = {
+    create: async directory => { directories.push(directory); return `ses_plan_${directories.length}`; },
+    prompt: async () => {}, remove: async () => {},
+    activity: async () => ({ isBusy: false, updatedAt: Date.now() }),
+  };
+  for (const title of ['First independent plan', 'Second independent plan']) {
+    const item = await state.runtime.ledger.create('clippy', 'owner-change', {
+      title, goal: title, rationale: 'Exercise worktree isolation', size: 'small', acceptance: ['Isolated changes'],
+    }, { status: 'awaiting-plan-approval', planDocument: { markdown: title, digest: title } });
+    await approvePlan(state.runtime, item.id, 'Fixture person');
+    await openOwnerSession(state.runtime, client, item.id);
+  }
+  return directories;
+}
+
+async function isolationCitations(state: Awaited<ReturnType<typeof fixture>>) {
+  const evidence = [
+    ['owner-sessions.ts', 'const worktree = await ensurePlanWorktree(runtime, item);'],
+    ['plan-worktrees.ts', "return join(runtime.plansRoot, item.owner, item.id);"],
+    ['desk-changes.ts', 'const planWorktree = item && !isRepair(item) ? item.planWorktree : undefined;'],
+    ['work-lifecycle.test.ts', "test('proposing one plan publishes only its worktree; the other plan and the desk propose on their own'"],
+  ];
+  return Promise.all(evidence.map(async ([file, text]) => {
+    const lines = (await readFile(join(state.workspace, file!), 'utf8')).split('\n');
+    const line = lines.findIndex(candidate => candidate.includes(text!));
+    assert.ok(line >= 0, `representative source contains ${text}`);
+    return `${file}:${line + 1} ${lines[line]!.trim()}`;
+  }));
+}
+
+test('representative per-plan worktree fix revalidates as already-fixed without serialization dispatch', async () => {
+  const state = await fixture(true);
+  try {
+    await enabled(state);
+    await localWorktreeRepository(state);
+    const desk = await ensureDesk(state.runtime.repositoryOwner('clippy'), state.runtime.desksRoot);
+    const [first, second] = await isolatedPlanSessions(state);
+    assert.ok(first && second);
+    assert.notEqual(first, second);
+    await writeFile(join(first, 'first-plan.txt'), 'independent first change\n');
+    await writeFile(join(second, 'second-plan.txt'), 'independent second change\n');
+    await assert.rejects(readFile(join(first, 'second-plan.txt')), { code: 'ENOENT' });
+    await assert.rejects(readFile(join(second, 'first-plan.txt')), { code: 'ENOENT' });
+    await assert.rejects(readFile(join(desk.path, 'first-plan.txt')), { code: 'ENOENT' });
+    assert.equal(execFileSync('git', ['-C', desk.path, 'status', '--porcelain'], { encoding: 'utf8' }), '');
+    const original = await readFile(state.originalPath, 'utf8');
+    const observed = await isolationCitations(state);
+    let hires = 0;
+    state.runtime.hire = async (_owner, request) => {
+      hires++;
+      assert.match(request.brief, /Serialize per-owner plan execution/);
+      assert.ok(request.brief.includes(state.first) && request.brief.includes(state.second));
+      assert.equal(request.extraPermission?.bash, 'deny');
+      const lock = join(investigationDirectory(state.runtime, id), 'revisions.lock');
+      assert.equal(spawnSync('flock', ['--nonblock', lock, 'true']).status, 0, 'model execution holds no report lock');
+      return { value: request.schema.parse({ disposition: 'already-fixed', fixedBy: state.fixed, observed,
+        inferred: [], unknown: [] }), sessionID: 'representative-isolation', cost: 0, startedAt: at, finishedAt: at };
+    };
+    const claim = await revalidateFriction(state.runtime, id);
+    assert.equal(claim.state, 'done');
+    assert.equal(claim.revision?.state, 'revised');
+    assert.equal(claim.revision?.investigation.disposition, 'already-fixed');
+    assert.equal(claim.revision?.investigation.fixedBy, state.fixed);
+    assert.deepEqual(claim.revision?.investigation.observed, observed);
+    assert.equal(claim.revision?.previousCommit, state.first);
+    assert.equal(claim.revision?.sourceCommit, state.second);
+    assert.equal(await effectiveProposalDigest(state.runtime, id), undefined);
+    await assert.rejects(promoteFriction(state.runtime, id, frictionProposalDigest(state.triage)!, 'Fixture person'),
+      /friction_proposal_unavailable/);
+    await recoverFrictionPromotions(state.runtime, (_id, error) => { throw error; });
+    assert.equal((await state.runtime.requests.list()).length, 0);
+    assert.equal((await state.runtime.ledger.list()).length, 2, 'only the two fixture plans exist');
+    assert.equal(await readFile(state.originalPath, 'utf8'), original);
+    assert.deepEqual(await revalidateFriction(state.runtime, id), claim);
+    assert.equal(hires, 1);
+    assert.equal((await readRevisions(state.runtime, id)).length, 1);
+    assert.equal(await readFile(join(first, 'first-plan.txt'), 'utf8'), 'independent first change\n');
+    assert.equal(await readFile(join(second, 'second-plan.txt'), 'utf8'), 'independent second change\n');
+  } finally { await state.cleanup(); }
 });

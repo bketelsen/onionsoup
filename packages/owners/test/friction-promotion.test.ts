@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { test } from 'node:test';
 import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Runtime } from '../src/runtime.ts';
 import { readFrictionTriage, type FrictionTriage } from '../src/friction-work.ts';
-import { effectiveProposalDigest, frictionPromotionHistory, frictionPromotionView, frictionProposalDigest, promoteFriction,
+import { effectiveProposalDigest, frictionInvestigationView, frictionPromotionHistory, frictionPromotionView, frictionProposalDigest, promoteFriction,
   recoverFrictionPromotions, retryFrictionPromotion } from '../src/friction-promotion.ts';
-import { frictionFreshness, revalidateFriction, writeRevision } from '../src/friction-revalidation.ts';
+import { frictionFreshness, investigationDirectory, readRevisions, revalidateFriction, writeRevision } from '../src/friction-revalidation.ts';
 
 const id = 'fr_012345678901234567890123';
 async function fixture() {
@@ -354,4 +354,131 @@ test('routed request remains untouched after HEAD moves, regardless of submitted
   assert.equal((await state.runtime.requests.get(request.id)).status, request.status);
   assert.equal((await state.runtime.requests.list()).length, 1);
   assert.deepEqual(await frictionPromotionHistory(state.runtime, id), []);
+});
+
+function barrier() {
+  let resolve!: () => void;
+  const promise = new Promise<void>(ready => { resolve = ready; });
+  return { promise, resolve };
+}
+
+function revisedProposal(state: Awaited<ReturnType<typeof fixture>>) {
+  return { version: 1 as const, id, revision: 1, previousCommit: state.triage.sourceCommit!,
+    sourceCommit: state.triage.sourceCommit!, reason: 'source_stale' as const, state: 'revised' as const,
+    at: state.triage.createdAt, investigation: { ...state.triage.investigation!,
+      proposedWork: { ...state.triage.investigation!.proposedWork!, goal: 'Freshly revised goal' } } };
+}
+
+test('request creation holds the report lock until persisted; concurrent revision publication waits', async () => {
+  const state = await fixture();
+  const entered = barrier();
+  const release = barrier();
+  const order: string[] = [];
+  const open = state.runtime.requests.openIdentified.bind(state.runtime.requests);
+  state.runtime.requests.openIdentified = async (...args) => {
+    entered.resolve();
+    await release.promise;
+    const request = await open(...args);
+    order.push('request persisted');
+    return request;
+  };
+  const promotion = promoteFriction(state.runtime, id, state.digest, 'Brian');
+  let publication: Promise<void> | undefined;
+  try {
+    await entered.promise;
+    const lock = join(investigationDirectory(state.runtime, id), 'revisions.lock');
+    assert.equal(spawnSync('flock', ['--nonblock', lock, 'true']).status, 1,
+      'the kernel proves the publication lock is held inside request creation');
+    publication = writeRevision(state.runtime, revisedProposal(state)).then(() => { order.push('revision published'); });
+    assert.deepEqual(await readRevisions(state.runtime, id), []);
+    release.resolve();
+    const request = await promotion;
+    await publication;
+    assert.deepEqual(order, ['request persisted', 'revision published']);
+    assert.equal((await promoteFriction(state.runtime, id, state.digest, 'Brian')).id, request.id);
+    assert.equal((await state.runtime.requests.list()).length, 1, 'replay adopts the existing request after revision');
+  } finally {
+    release.resolve();
+    await Promise.allSettled([promotion, publication]);
+    state.runtime.close();
+    await rm(state.root, { recursive: true, force: true });
+  }
+});
+
+test('revision publication wins before final routing validation and invalidates the saved approval', async () => {
+  const state = await fixture();
+  const entered = barrier();
+  const release = barrier();
+  const open = state.runtime.requests.openIdentified.bind(state.runtime.requests);
+  state.runtime.requests.openIdentified = async () => { throw new Error('pause routing'); };
+  await assert.rejects(promoteFriction(state.runtime, id, state.digest, 'Brian'), /routing_failed/);
+  state.runtime.requests.openIdentified = open;
+  const get = state.runtime.requests.get.bind(state.runtime.requests);
+  state.runtime.requests.get = async requestID => {
+    entered.resolve();
+    await release.promise;
+    return get(requestID);
+  };
+  const failures: unknown[] = [];
+  const routing = recoverFrictionPromotions(state.runtime, (_id, error) => failures.push(error));
+  try {
+    await entered.promise;
+    await writeRevision(state.runtime, revisedProposal(state));
+    release.resolve();
+    await routing;
+    assert.equal(failures.length, 1);
+    assert.match(String(failures[0]), /friction_source_stale/);
+    assert.equal((await state.runtime.requests.list()).length, 0);
+    assert.equal((await frictionPromotionView(state.runtime, id))?.status, 'blocked');
+    assert.equal((await readRevisions(state.runtime, id)).length, 1);
+  } finally {
+    release.resolve();
+    await routing;
+    state.runtime.close();
+    await rm(state.root, { recursive: true, force: true });
+  }
+});
+
+test('CLI investigation read model supplies effective approval and separately labeled original evidence', async () => {
+  const state = await fixture();
+  try {
+    const second = state.commit('New reference');
+    const stale = await frictionInvestigationView(state.runtime, id);
+    assert.equal(stale.freshness?.stale, true);
+    assert.equal(stale.proposalDigest, undefined);
+    await writeRevision(state.runtime, { ...revisedProposal(state), sourceCommit: second });
+    const displayed = JSON.parse(JSON.stringify(await frictionInvestigationView(state.runtime, id)));
+    assert.equal(displayed.revision, 1);
+    assert.equal(displayed.triage.investigation.proposedWork.goal, 'Freshly revised goal');
+    assert.equal(displayed.triage.sourceCommit, second);
+    assert.equal(displayed.originalTriage.investigation.proposedWork.goal, state.triage.investigation!.proposedWork!.goal);
+    assert.equal(displayed.originalTriage.sourceCommit, state.triage.sourceCommit);
+    assert.equal(displayed.freshness.stale, false);
+    assert.notEqual(displayed.proposalDigest, state.digest);
+    const request = await promoteFriction(state.runtime, id, displayed.proposalDigest, 'Brian');
+    assert.equal(request.ask.kind, 'work');
+    if (request.ask.kind === 'work') assert.equal(request.ask.proposal.goal, 'Freshly revised goal');
+  } finally {
+    state.runtime.close();
+    await rm(state.root, { recursive: true, force: true });
+  }
+});
+
+test('CLI investigation read model omits digest for already-fixed while preserving original proposal', async () => {
+  const state = await fixture();
+  try {
+    await writeRevision(state.runtime, { ...revisedProposal(state), investigation: {
+      disposition: 'already-fixed', fixedBy: state.triage.sourceCommit!, observed: ['check.ts:1 fixed'], inferred: [], unknown: [],
+    } });
+    const displayed = JSON.parse(JSON.stringify(await frictionInvestigationView(state.runtime, id)));
+    assert.equal(displayed.triage.investigation.disposition, 'already-fixed');
+    assert.equal(displayed.freshness.stale, false);
+    assert.equal(Object.hasOwn(displayed, 'proposalDigest'), false);
+    assert.equal(displayed.originalTriage.investigation.disposition, 'propose-fix');
+    await assert.rejects(promoteFriction(state.runtime, id, state.digest, 'Brian'), /friction_proposal_unavailable/);
+    assert.equal((await state.runtime.requests.list()).length, 0);
+  } finally {
+    state.runtime.close();
+    await rm(state.root, { recursive: true, force: true });
+  }
 });

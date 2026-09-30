@@ -1,5 +1,5 @@
 import { continuityPreview } from './continuity-preview.ts';
-import { promoteFriction, retryFrictionPromotion, frictionProposalDigest, frictionPromotionView } from './friction-promotion.ts';
+import { promoteFriction, retryFrictionPromotion, frictionInvestigationView } from './friction-promotion.ts';
 import { execFile } from 'node:child_process';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -10,7 +10,7 @@ import type { WorkItem } from './ledger.ts';
 import { wake } from './owner.ts';
 import { requestDistill } from './memory.ts';
 import { Runtime } from './runtime.ts';
-import { investigateFriction, readFrictionTriage } from './friction-work.ts';
+import { investigateFriction } from './friction-work.ts';
 import { revalidateFriction, retryFrictionRevalidation } from './friction-revalidation.ts';
 import { askOwner, formatAnswer } from './ask.ts';
 import { approveCreate, approveDelete, denyRequest, processRequests, requestPublish } from './brokering.ts';
@@ -140,9 +140,7 @@ const COMMANDS: Record<string, Command> = {
   },
   async 'friction-investigation'(runtime, [id]) {
     const selected = required(id, 'friction id');
-    const triage = await readFrictionTriage(runtime, selected);
-    console.log(JSON.stringify({ triage, proposalDigest: triage && frictionProposalDigest(triage),
-      promotion: await frictionPromotionView(runtime, selected) }, null, 2));
+    console.log(JSON.stringify(await frictionInvestigationView(runtime, selected), null, 2));
   },
   async 'friction-promotion-retry'(runtime, [id, digest]) {
     const request = await retryFrictionPromotion(runtime, required(id, 'friction id'), required(digest, 'proposal digest'), userInfo().username);
