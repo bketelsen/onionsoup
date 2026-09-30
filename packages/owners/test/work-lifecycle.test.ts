@@ -145,6 +145,7 @@ test('proposing desk changes for an approved plan publishes that plan item, and 
     assert.equal(published.publication?.state, 'open');
     assert.equal(published.deskPublication?.stage, 'complete');
     assert.equal(published.proposal.title, 'Planned change');
+    assert.equal(published.proposal.goal, proposal.goal, 'an implementation summary does not replace the requested outcome');
     const github = JSON.parse(await readFile(join(root, 'github.json'), 'utf8'));
     assert.match(github.body, /Approved plan<\/summary>\n\n1\. Write the change file/);
     assert.match(github.body, /Plan approved by person\./);
@@ -539,6 +540,8 @@ test('a desk re-review checks the previous findings against what changed since, 
   await writeFile(join(desk.path, 'change'), 'first draft\n');
   assert.equal((await proposeDeskChanges(runtime, 'clippy', { title: 'Desk change', summary: 'Update' })).outcome, 'needs-work');
   assert.doesNotMatch(briefs[0]!, /previous-review/, 'a first review has nothing to check against');
+  assert.match(briefs[0]!, /<host-verification>[\s\S]*"verifier":"host-sandbox","checks":\[\]/);
+  assert.match(briefs[0]!, /empty checks list means no configured checks ran/);
   await writeFile(join(desk.path, 'change'), 'second draft\n');
   assert.equal((await proposeDeskChanges(runtime, 'clippy', { title: 'Desk change', summary: 'Update' })).outcome, 'needs-work');
   assert.match(briefs[1]!, /<previous-review round="1" reviewer="[^"]+" decision="revise">/);
@@ -547,7 +550,56 @@ test('a desk re-review checks the previous findings against what changed since, 
   assert.match(briefs[1]!, /checking every previous finding/);
   const rounds = await deskReviewRounds(runtime, 'clippy', 'example/clippy');
   assert.deepEqual(rounds.map(round => round.findings[0]?.issue), ['issue 1', 'issue 2']);
+  assert.equal(rounds[0]!.evidence?.tree, rounds[0]!.tree);
+  assert.notEqual(rounds[1]!.evidence?.tree, rounds[0]!.evidence?.tree);
   assert.equal((await git(desk.path, ['diff', '--name-only'])).trim(), 'change', "the review's snapshot leaves the owner's own git diff intact");
+});
+
+test('approved-plan review receives original task criteria and recorded host check outcomes', async () => {
+  const { runtime } = await fixture();
+  const item = await runtime.ledger.create('clippy', 'owner-change', {
+    ...proposal, acceptance: ['The operator can resume the same goal after correction'],
+  }, { status: 'working' });
+  const owner = runtime.declarations.owners.get('clippy')!;
+  assert.equal(owner.domain.kind, 'git-repository');
+  if (owner.domain.kind === 'git-repository') owner.domain.verify = [['true']];
+  const desk = await ensureDesk(runtime.repositoryOwner('clippy'), runtime.desksRoot);
+  await writeFile(join(desk.path, 'change'), 'candidate\n');
+  let brief = '';
+  scriptHires(runtime, async request => {
+    brief = request.brief;
+    return revise('Needs evidence');
+  });
+  assert.equal((await proposeDeskChanges(runtime, 'clippy', { title: 'Patch', summary: 'Author claim', item: item.id })).outcome, 'needs-work');
+  assert.match(brief, /"command":"true","exitCode":0/);
+  assert.match(brief, /<task-acceptance>\n\["The operator can resume the same goal after correction"\]/);
+  assert.match(brief, /does not prove deployment/);
+});
+
+test('host checks that modify source require another verification before any paid review', async () => {
+  const { runtime } = await fixture();
+  const owner = runtime.declarations.owners.get('clippy')!;
+  assert.equal(owner.domain.kind, 'git-repository');
+  if (owner.domain.kind === 'git-repository') owner.domain.verify = [['sh', '-c', 'echo generated > change']];
+  const desk = await ensureDesk(runtime.repositoryOwner('clippy'), runtime.desksRoot);
+  await writeFile(join(desk.path, 'change'), 'unverified\n');
+  runtime.hire = async () => { throw new Error('review must not run'); };
+  const result = await proposeDeskChanges(runtime, 'clippy', { title: 'Patch', summary: 'Author claim' });
+  assert.equal(result.outcome, 'needs-work');
+  assert.match(result.summary, /verification_changed_source/);
+  assert.deepEqual(await deskReviewRounds(runtime, 'clippy', 'example/clippy'), []);
+});
+
+test('source changed during review cannot be published with the old evidence', async () => {
+  const { runtime } = await fixture();
+  const desk = await ensureDesk(runtime.repositoryOwner('clippy'), runtime.desksRoot);
+  await writeFile(join(desk.path, 'change'), 'reviewed\n');
+  scriptHires(runtime, async () => {
+    await writeFile(join(desk.path, 'change'), 'changed concurrently\n');
+    return verdict;
+  });
+  await assert.rejects(proposeDeskChanges(runtime, 'clippy', { title: 'Patch', summary: 'Author claim' }), /review_evidence_stale/);
+  assert.deepEqual(await runtime.ledger.list(), []);
 });
 
 test('after too many rounds the person decides; a reset starts afresh and an approval clears the history', async (context) => {
