@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { Runtime } from '../src/runtime.ts';
 import { revisePlan, cancelItem } from '../src/work-recovery.ts';
-import { deliverPlanRevisions, planRevisionStatus, type PlanRevisionClient } from '../src/plan-revision.ts';
+import { PLAN_REVISION_LIMITS, deliverPlanRevisions, planRevisionStatus, type PlanRevisionClient } from '../src/plan-revision.ts';
 import { submitPlan } from '../src/plan-work.ts';
 
 const origin = { sessionID: 'fixture-planning', directory: '/fixture/chat' };
@@ -20,9 +20,9 @@ async function setup(withOrigin = true) {
 function transport() {
   const messages: string[] = [];
   const calls: { id: string; text: string }[] = [];
-  const state = { accept: true, fail: false };
+  const state = { accept: true, fail: false, sessionExists: true };
   const client: PlanRevisionClient = {
-    exists: async target => { assert.deepEqual(target, origin); return true; },
+    exists: async target => { assert.deepEqual(target, origin); return state.sessionExists; },
     messages: async () => messages,
     idle: async () => true,
     prompt: async (_target, _agent, text, id) => {
@@ -119,4 +119,73 @@ test('missing origin and retired owner expose specific delivery blockers', async
   await deliverPlanRevisions(retired.runtime, fake.client, fail);
   assert.equal((await planRevisionStatus(retired.runtime, retired.item.id))?.reason, 'plan_revision_owner_retired');
   assert.equal(fake.calls.length, 0);
+});
+
+test('restoring pre-send prerequisites safely resumes owner, persona, origin and session blockers', async () => {
+  for (const prerequisite of ['owner', 'persona', 'origin', 'session']) {
+    const { runtime, item } = await setup(prerequisite !== 'origin');
+    const owner = runtime.declarations.owners.get('clippy')!;
+    const persona = owner.persona;
+    await revisePlan(runtime, item.id, 'Brian', 'Simplify');
+    const fake = transport();
+    if (prerequisite === 'owner') runtime.declarations.owners.delete('clippy');
+    if (prerequisite === 'persona') owner.persona = undefined;
+    if (prerequisite === 'session') fake.state.sessionExists = false;
+    await deliverPlanRevisions(runtime, fake.client, fail);
+    assert.equal((await planRevisionStatus(runtime, item.id))?.status, 'blocked');
+    assert.equal(fake.calls.length, 0);
+    runtime.declarations.owners.set('clippy', owner);
+    owner.persona = persona;
+    fake.state.sessionExists = true;
+    if (prerequisite === 'origin') await runtime.ledger.update(item.id, current => ({ ...current, origin }));
+    await deliverPlanRevisions(runtime, fake.client, fail);
+    await deliverPlanRevisions(runtime, fake.client, fail);
+    assert.equal(fake.calls.length, 1);
+    assert.equal((await planRevisionStatus(runtime, item.id))?.status, 'delivered');
+  }
+});
+
+test('losing and restoring prerequisites after uncertain submission never permits a second send', async () => {
+  const { runtime, item } = await setup();
+  const owner = runtime.declarations.owners.get('clippy')!;
+  await revisePlan(runtime, item.id, 'Brian', 'Simplify');
+  const fake = transport();
+  fake.state.accept = false;
+  fake.state.fail = true;
+  await deliverPlanRevisions(runtime, fake.client, fail);
+  runtime.declarations.owners.delete('clippy');
+  await deliverPlanRevisions(runtime, fake.client, fail);
+  runtime.declarations.owners.set('clippy', owner);
+  fake.state.sessionExists = false;
+  await deliverPlanRevisions(runtime, fake.client, fail);
+  fake.state.sessionExists = true;
+  fake.state.fail = false;
+  fake.state.accept = true;
+  await deliverPlanRevisions(runtime, fake.client, fail);
+  assert.equal(fake.calls.length, 1);
+  assert.equal((await planRevisionStatus(runtime, item.id))?.reason, 'plan_revision_delivery_uncertain');
+});
+
+test('per-pass bound includes blocked-record inspections', async () => {
+  const { runtime, item } = await setup(false);
+  const ids = [item.id];
+  for (let index = 0; index < PLAN_REVISION_LIMITS.perPass; index++) {
+    const another = await runtime.ledger.create('clippy', 'owner-change', proposal, {
+      status: 'awaiting-plan-approval', planDocument: { markdown: 'Original', digest: 'original' },
+    });
+    ids.push(another.id);
+  }
+  for (const id of ids) await revisePlan(runtime, id, 'Brian', 'Simplify');
+  const fake = transport();
+  await deliverPlanRevisions(runtime, fake.client, fail);
+  const statuses = await Promise.all(ids.map(id => planRevisionStatus(runtime, id)));
+  assert.equal(statuses.filter(status => status?.status === 'blocked').length, PLAN_REVISION_LIMITS.perPass);
+  assert.equal(statuses.filter(status => status?.status === 'pending').length, 1);
+  let inspected = 0;
+  const get = runtime.ledger.get.bind(runtime.ledger);
+  runtime.ledger.get = async id => { inspected++; return get(id); };
+  await deliverPlanRevisions(runtime, fake.client, fail);
+  assert.equal(inspected, PLAN_REVISION_LIMITS.perPass);
+  const after = await Promise.all(ids.map(id => planRevisionStatus(runtime, id)));
+  assert.equal(after.filter(status => status?.status === 'pending').length, 0, 'blocked records cannot starve a later pending revision');
 });

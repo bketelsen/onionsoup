@@ -754,7 +754,11 @@ by revision. Explicit cancellation or a superseding plan observed before dispatc
 An observed transcript message reconciles acceptance after a crash. A lost response, or an abandoned sending claim
 with no transcript receipt, is **delivery uncertain**: the runtime never blindly sends again. It may subsequently
 recognize the stable receipt, but otherwise requires inspection of the existing session. Missing origin, missing
-persona and retired owner have separate blocker codes. Blockers are visible in the inbox and owner/manager status;
+persona and retired owner have separate blocker codes. A blocked revision that has never attempted submission
+can resume automatically once its owner/persona and exact session return; an initially absent origin may be bound
+from the unchanged work item's recorded session. A durable submission-attempt marker prevents prerequisite
+recovery from turning an uncertain prior send into a fresh send. Each pass inspects at most 20 nonterminal records,
+including blocked records. Blockers are visible in the inbox and owner/manager status;
 use the item's normal cancel controls when stopping work. Delivery status is not evidence of revised-plan completion.
 
 Already in-flight submissions cannot be recalled; cancellation prevents future dispatch and never rewinds external

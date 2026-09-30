@@ -10,7 +10,7 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
 
 - **Uncertain revision delivery requires inspection.** New inbox/manager plan revisions have durable delivery
   intent and stable receipt reconciliation; an uncertain send is not automatically retried. There is no delivery
-  repair/resend UI yet. In-flight model submissions cannot be recalled, and old work notices retain their existing
+  repair/resend UI yet. Pre-send prerequisite blockers resume when the prerequisites return; uncertain sends do not. In-flight model submissions cannot be recalled, and old work notices retain their existing
   delivery mechanism. Revision is distinct from cancellation, not a new goal-management layer.
 
 - **Cross-owner progress is recorded state, not omniscience.** Request participants and the receiving owner's
