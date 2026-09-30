@@ -9,7 +9,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { ITEM_SECTIONS } from '../web/src/components/ItemSections.tsx';
 import {
-  OPERATOR_ID, OperatorDeclaration, Runtime, approveInitiative, armDeployment, beginDrain, draftInitiative, listAdmissions,
+  OPERATOR_ID, OPERATOR_RECOVERY_PERMISSION, OperatorDeclaration, Runtime, approveInitiative, armDeployment, beginDrain, draftInitiative, listAdmissions,
   recordProviderFailure, recordProviderSuccess, releaseDrain, reportFriction, setReminder,
   effectiveProposalDigest, writeRevision,
   readFrictionTriage, sourceSnapshot,
@@ -620,6 +620,40 @@ test('auto-accept answers the prompts of that chat and no other, including ones 
     assert.deepEqual((await call('GET', '/api/owners/bellonda/sessions')).body.autoAccept, { ses_1: true });
     await call('PUT', '/api/owners/bellonda/sessions/ses_1/auto-accept', { enabled: false });
     assert.deepEqual((await call('GET', '/api/owners/bellonda/sessions')).body.autoAccept, {});
+  } finally {
+    server.close();
+  }
+});
+
+test('operator recovery always waits for the person despite chat auto-accept, including inherited child settings', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'operator-recovery-gate-'));
+  const digest = 'fixture-exact-child-recovery-digest';
+  const { runtime, server, call, calls, state } = await start(api => {
+    api.listSessions = async candidate => candidate === directory ? [
+      { id: 'ses_operator', title: 'Operator chat', directory, time: { created: 0, updated: 0 } },
+      { id: 'ses_child', parentID: 'ses_operator', title: 'Native child', directory, time: { created: 0, updated: 0 } },
+    ] : [];
+    api.permissions = async candidate => candidate === directory ? [
+      { id: 'per_recovery', sessionID: 'ses_operator', permission: OPERATOR_RECOVERY_PERMISSION,
+        patterns: [digest], metadata: { jobID: 'job_fixture', childID: 'child_fixture', digest }, always: [] },
+      { id: 'per_child_recovery', sessionID: 'ses_child', permission: OPERATOR_RECOVERY_PERMISSION,
+        patterns: [digest], metadata: { jobID: 'job_fixture', childID: 'child_fixture', digest }, always: [] },
+      { id: 'per_read', sessionID: 'ses_operator', permission: 'read', patterns: ['README.md'], metadata: {}, always: [] },
+    ].filter(entry => !calls.some(call => call[0] === 'permission' && call[2] === entry.id)) : [];
+  });
+  try {
+    runtime.declarations.operator = OperatorDeclaration.parse({ name: 'Duncan', title: 'Operator', model: 'github-copilot/gpt-6-sol', directory });
+    const enabled = await call('PUT', '/api/owners/operator/sessions/ses_operator/auto-accept', { enabled: true });
+    assert.deepEqual(enabled.body, { enabled: true, answered: 1 });
+    assert.deepEqual(calls.filter(entry => entry[0] === 'permission').map(entry => entry[2]), ['per_read']);
+    await state.autoAnswerAll();
+    assert.equal(calls.filter(entry => entry[0] === 'permission').length, 1, 'repeated passes never approve recovery');
+    const inbox = (await call('GET', '/api/state')).body.inbox as { id: string; owner: string }[];
+    assert(inbox.some(entry => entry.id === 'per_recovery' && entry.owner === OPERATOR_ID));
+    assert(inbox.some(entry => entry.id === 'per_child_recovery' && entry.owner === OPERATOR_ID));
+    const rejected = await call('POST', '/api/owners/operator/permissions/per_recovery', { reply: 'reject' });
+    assert.equal(rejected.status, 200);
+    assert.deepEqual(calls.at(-1), ['permission', directory, 'per_recovery', 'reject']);
   } finally {
     server.close();
   }

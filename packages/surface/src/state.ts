@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import {
-  listChildAbandonments, abandonedChildMessages,
+  listChildAbandonments, abandonedChildMessages, OPERATOR_RECOVERY_PERMISSION,
   planRevisionStatus, approveCreate, approveDelete, approvePlan, approvePush, chatDirectory, denyRequest, deskState, describeAsk,
   domainSummary, itemText, revisePlan, resumeItem, retryItem, cancelItem, memoryFingerprint, type ResourceRequest, type Runtime,
   promoteFriction, retryFrictionPromotion, frictionPromotionView, frictionPromotionHistory,
@@ -52,8 +52,8 @@ function requestRecoveryDetail(request: ResourceRequest) {
   ].join('; ');
 }
 
-/** Gates asked in chat that only the person answers: auto-accept never approves a plan, a ship, an owner change or a wiki delete. */
-const PERSON_GATES = new Set([PLAN_APPROVAL_PERMISSION, 'onionsoup_ship', 'onionsoup_owner_change', WIKI_DELETE_PERMISSION]);
+/** These decisions always wait for the person, including in chats configured to auto-accept routine permissions. */
+const PERSON_GATES = new Set([PLAN_APPROVAL_PERMISSION, 'onionsoup_ship', 'onionsoup_owner_change', WIKI_DELETE_PERMISSION, OPERATOR_RECOVERY_PERMISSION]);
 
 /** Delegated plans wait in the inbox; a plan submitted from the person's chat is answered there instead. */
 function waitsInInbox(item: WorkItem) {

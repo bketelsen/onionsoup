@@ -37,6 +37,9 @@ export function PermissionCard({ entry, onDone }: { entry: InboxEntry; onDone: (
             </div>
           </div>
           <div className="px-2 py-2">
+            {metadata.approvalScope === 'once' && typeof metadata.warning === 'string' && (
+              <p className="typography-meta mb-2">{metadata.warning}</p>
+            )}
             <div className="mb-2">
               <div className="typography-meta text-muted-foreground mb-1">Patterns</div>
               <code className="typography-meta px-2 py-1 bg-muted/30 rounded block break-all">{permission.patterns.join(', ')}</code>
@@ -52,9 +55,9 @@ export function PermissionCard({ entry, onDone }: { entry: InboxEntry; onDone: (
             <button className={CARD_ACTION} style={{ color: 'var(--status-success)' }} disabled={responding} onClick={() => void reply('once')}>
               <RiCheckLine className="h-3 w-3 flex-shrink-0" />Allow Once
             </button>
-            <button className={CARD_ACTION} style={{ color: 'var(--muted-foreground)' }} disabled={responding} onClick={() => void reply('always')}>
+            {metadata.approvalScope !== 'once' && <button className={CARD_ACTION} style={{ color: 'var(--muted-foreground)' }} disabled={responding} onClick={() => void reply('always')}>
               <RiTimeLine className="h-3 w-3 flex-shrink-0" />{permission.always.length ? <span className="truncate max-w-[180px]">Always: {permission.always.join(', ')}</span> : 'Always Allow'}
-            </button>
+            </button>}
             <button className={CARD_ACTION} style={{ color: 'var(--status-error)' }} disabled={responding} onClick={() => void reply('reject')}>
               <RiCloseLine className="h-3 w-3 flex-shrink-0" />Deny
             </button>

@@ -4,6 +4,7 @@ import { mkdtemp, readFile, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { prepareOperatorRecovery } from '../src/operator-job-recovery.ts';
 import { OperatorJobs, operatorJobDigest } from '../src/operator-jobs.ts';
 import { OPERATOR_SUPERVISOR_LIMITS, OperatorSupervisor } from '../src/operator-supervisor.ts';
 import { OPERATOR_JOB_LIMITS, type OperatorJobInput, type OperatorSessionSnapshot, type OperatorSupervisorClient } from '../src/operator-jobs-types.ts';
@@ -49,7 +50,7 @@ async function fixture() {
   const workspace = await mkdtemp(join(tmpdir(), 'operator-jobs-'));
   const jobs = new OperatorJobs(workspace, workspace, 'operator');
   const sessions = new Sessions();
-  const supervisor = new OperatorSupervisor(jobs, sessions, { ...OPERATOR_SUPERVISOR_LIMITS, receiptGraceMs: 0 });
+  const supervisor = new OperatorSupervisor(jobs, sessions, { ...OPERATOR_SUPERVISOR_LIMITS, receiptGraceMs: 0, uncertaintyIntervalMs: 0 });
   const origin = { operator: 'operator', sessionID: 'ses_parent', directory: workspace };
   const intake = { messageID: 'msg_human', text: 'Investigate configuration and tests in parallel. Do not modify files.' };
   const input = (key = 'investigate', count = 2): OperatorJobInput => ({
@@ -142,7 +143,7 @@ test('restart interrupts incomplete turns honestly; explicit resume keeps the sa
   await f.supervisor.tick();
   const running = await f.jobs.get(f.origin, job.id);
   for (const child of running.children) f.sessions.sessions.get(child.sessionID!)!.snapshot.status = 'idle';
-  const restarted = new OperatorSupervisor(new OperatorJobs(f.workspace, f.workspace, 'operator'), f.sessions, { ...OPERATOR_SUPERVISOR_LIMITS, receiptGraceMs: 0 });
+  const restarted = new OperatorSupervisor(new OperatorJobs(f.workspace, f.workspace, 'operator'), f.sessions, { ...OPERATOR_SUPERVISOR_LIMITS, receiptGraceMs: 0, uncertaintyIntervalMs: 0 });
   await restarted.tick();
   const interrupted = await f.jobs.get(f.origin, job.id);
   assert(interrupted.children.every(child => child.blocker === 'operator_child_interrupted'));
@@ -327,6 +328,9 @@ test('unavailable or ambiguous creation lookup retains its claim and permits onl
   assert.equal(f.sessions.prompts.length, 1);
   f.sessions.listSessions = list;
   await f.supervisor.tick();
+  assert.equal(f.sessions.prompts.length, 1, 'bounded uncertainty requires explicit recheck');
+  await f.supervisor.refresh(f.origin, first.id, 'child_0');
+  await f.supervisor.tick();
   assert.equal(f.sessions.prompts.length, 2);
   assert.equal((await f.jobs.get(f.origin, first.id)).children[0]!.sessionID, 'ses_1');
 });
@@ -380,4 +384,318 @@ test('long child results retain full transcript identity and digest with an expl
   assert(evidence.text.length <= OPERATOR_JOB_LIMITS.textChars);
   assert.equal(f.sessions.sessions.get(evidence.sessionID)!.snapshot.messages.find(message => message.id === evidence.messageID)!.text, fullText);
   assert.equal((await f.jobs.get(f.origin, next.id)).children[0]!.status, 'running');
+});
+
+function barrier() {
+  let release!: () => void;
+  let entered!: () => void;
+  const pending = new Promise<void>(resolve => { release = resolve; });
+  const started = new Promise<void>(resolve => { entered = resolve; });
+  return { pending, started, release, entered };
+}
+
+async function within<T>(promise: Promise<T>) {
+  let timeout!: ReturnType<typeof setTimeout>;
+  try {
+    return await Promise.race([promise, new Promise<never>((_resolve, reject) => {
+      timeout = setTimeout(() => reject(new Error('ledger_blocked_by_runtime_call')), 2_000);
+    })]);
+  } finally { clearTimeout(timeout); }
+}
+
+test('slow runtime observation holds no ledger lock: pause, new intake and synthesis remain responsive', async () => {
+  const f = await fixture();
+  const first = await f.jobs.create(f.origin, f.intake, f.input('slow', 1));
+  const second = await f.jobs.create(f.origin, f.intake, f.input('ready', 1));
+  await f.supervisor.tick();
+  const secondRunning = await f.jobs.get(f.origin, second.id);
+  f.sessions.finish(secondRunning.children[0]!.sessionID!);
+  await f.supervisor.tick();
+  const ready = await f.jobs.get(f.origin, second.id);
+  const firstRunning = await f.jobs.get(f.origin, first.id);
+  const gate = barrier();
+  const read = f.sessions.readSession.bind(f.sessions);
+  f.sessions.readSession = async (directory, sessionID) => {
+    if (sessionID === firstRunning.children[0]!.sessionID) {
+      gate.entered();
+      await gate.pending;
+    }
+    return read(directory, sessionID);
+  };
+  const tick = f.supervisor.tick();
+  await gate.started;
+  try {
+    await within(Promise.all([
+      f.supervisor.intervene(f.origin, first.id, 'pause'),
+      f.jobs.create(f.origin, f.intake, f.input('new-intake', 1)),
+      f.jobs.synthesize(f.origin, second.id, operatorJobDigest(ready), [ready.children[0]!.evidence!.messageID], 'Evidence-backed summary.'),
+    ]));
+    assert.equal((await f.jobs.get(f.origin, first.id)).status, 'paused');
+  } finally { gate.release(); await tick; }
+});
+
+test('concurrent scheduler instances preserve the global two-effect limit and single dispatch per child', async () => {
+  const f = await fixture();
+  for (let index = 0; index < 4; index++) await f.jobs.create(f.origin, f.intake, f.input(`parallel_${index}`, 2));
+  const schedulers = Array.from({ length: 6 }, () => new OperatorSupervisor(
+    new OperatorJobs(f.workspace, f.workspace, 'operator'), f.sessions, { ...OPERATOR_SUPERVISOR_LIMITS, receiptGraceMs: 0, uncertaintyIntervalMs: 0 }));
+  await Promise.all(schedulers.map(supervisor => supervisor.tick()));
+  const jobs = await f.jobs.snapshot();
+  assert.equal(f.sessions.prompts.length, 2);
+  assert.equal(new Set(f.sessions.prompts.map(prompt => prompt.sessionID)).size, 2);
+  assert.equal(jobs.flatMap(job => job.children).filter(child => child.status === 'running').length, 2);
+  assert(jobs.flatMap(job => job.children).every(child => child.attempts.length <= 1));
+});
+
+test('pause during dispatch preflight invalidates launch without blocking the parent', async () => {
+  const f = await fixture();
+  const job = await f.jobs.create(f.origin, f.intake, f.input('pause-preflight', 1));
+  const gate = barrier();
+  const read = f.sessions.readSession.bind(f.sessions);
+  f.sessions.readSession = async (directory, sessionID) => {
+    gate.entered();
+    await gate.pending;
+    return read(directory, sessionID);
+  };
+  const tick = f.supervisor.tick();
+  await gate.started;
+  try { await within(f.supervisor.intervene(f.origin, job.id, 'pause')); }
+  finally { gate.release(); await tick; }
+  const paused = await f.jobs.get(f.origin, job.id);
+  assert.equal(paused.status, 'paused');
+  assert.equal(paused.children[0]!.attempts.length, 0);
+  assert.equal(f.sessions.prompts.length, 0);
+});
+
+async function fixtureAbandon(f: Awaited<ReturnType<typeof fixture>>, id: string) {
+  await f.jobs.transaction(async (ledger, save) => {
+    const job = f.jobs.bound(ledger, f.origin, id);
+    const child = job.children[0]!;
+    child.abandonment = { digest: 'fixture-human-decision', at: new Date().toISOString(), actor: 'fixture-human',
+      note: 'Explicitly release this unknown logical reservation.', unknownOutcome: true, operationToken: child.operation?.token,
+      approval: { permissionID: 'per_fixture', callID: 'call_fixture', nonce: '00000000-0000-4000-8000-000000000001', sessionID: f.origin.sessionID, messageID: 'msg_permission', reply: 'once' } };
+    child.status = 'abandoned';
+    delete child.operation;
+    job.status = 'blocked';
+    await save();
+  });
+}
+
+test('late creation result attaches only to the abandoned tombstone and never dispatches', async () => {
+  const f = await fixture();
+  const job = await f.jobs.create(f.origin, f.intake, f.input('late-create', 1));
+  const gate = barrier();
+  const create = f.sessions.createSession.bind(f.sessions);
+  f.sessions.createSession = async (directory, title) => {
+    gate.entered();
+    await gate.pending;
+    return create(directory, title);
+  };
+  const tick = f.supervisor.tick();
+  await gate.started;
+  await within(fixtureAbandon(f, job.id));
+  gate.release();
+  await tick;
+  const abandoned = await f.jobs.get(f.origin, job.id);
+  assert.equal(abandoned.children[0]!.status, 'abandoned');
+  assert.equal(abandoned.children[0]!.sessionID, 'ses_1');
+  assert.equal(abandoned.children[0]!.attempts.length, 0);
+  await f.supervisor.tick();
+  assert.equal(f.sessions.sessions.size, 1);
+  assert.equal(f.sessions.prompts.length, 0);
+});
+
+test('late prompt receipt cannot resurrect an abandoned child or fabricate a stopped attempt', async () => {
+  const f = await fixture();
+  const job = await f.jobs.create(f.origin, f.intake, f.input('late-prompt', 1));
+  const gate = barrier();
+  const prompt = f.sessions.prompt.bind(f.sessions);
+  f.sessions.prompt = async (directory, sessionID, messageID, text) => {
+    gate.entered();
+    await gate.pending;
+    return prompt(directory, sessionID, messageID, text);
+  };
+  const tick = f.supervisor.tick();
+  await gate.started;
+  await within(fixtureAbandon(f, job.id));
+  gate.release();
+  await tick;
+  const abandoned = await f.jobs.get(f.origin, job.id);
+  assert.equal(abandoned.children[0]!.status, 'abandoned');
+  assert(abandoned.children[0]!.attempts[0]!.sentAt);
+  assert.equal(abandoned.children[0]!.attempts[0]!.endedAt, undefined);
+  f.sessions.finish('ses_1');
+  await f.supervisor.tick();
+  assert.equal((await f.jobs.get(f.origin, job.id)).children[0]!.evidence, undefined);
+  assert.equal(f.sessions.prompts.length, 1);
+});
+
+test('restart expires an uncertain prompt claim without repeating its effect; explicit recheck adopts late receipt', async () => {
+  const f = await fixture();
+  const job = await f.jobs.create(f.origin, f.intake, f.input('expired-send', 1));
+  const gate = barrier();
+  const prompt = f.sessions.prompt.bind(f.sessions);
+  f.sessions.prompt = async (directory, sessionID, messageID, text) => {
+    gate.entered();
+    await gate.pending;
+    return prompt(directory, sessionID, messageID, text);
+  };
+  const oldTick = f.supervisor.tick();
+  await gate.started;
+  await f.jobs.transaction(async (ledger, save) => {
+    ledger.jobs[0]!.children[0]!.operation!.expiresAt = '2000-01-01T00:00:00.000Z';
+    await save();
+  });
+  const restarted = new OperatorSupervisor(new OperatorJobs(f.workspace, f.workspace, 'operator'), f.sessions,
+    { ...OPERATOR_SUPERVISOR_LIMITS, receiptGraceMs: 0, uncertaintyIntervalMs: 0 });
+  await restarted.tick();
+  assert.equal((await f.jobs.get(f.origin, job.id)).children[0]!.attempts.length, 1);
+  gate.release();
+  await oldTick;
+  assert.equal(f.sessions.prompts.length, 1);
+  await restarted.refresh(f.origin, job.id, 'child_0');
+  const recovered = await f.jobs.get(f.origin, job.id);
+  assert.equal(recovered.children[0]!.status, 'running');
+  assert.equal(recovered.children[0]!.attempts.length, 1);
+  assert.equal(recovered.children[0]!.uncertainty, undefined);
+  assert.equal(f.sessions.sessions.size, 1);
+});
+
+test('late observation cannot overwrite an abandoned child', async () => {
+  const f = await fixture();
+  const job = await f.jobs.create(f.origin, f.intake, f.input('stale-read', 1));
+  await f.supervisor.tick();
+  f.sessions.finish('ses_1');
+  const gate = barrier();
+  const read = f.sessions.readSession.bind(f.sessions);
+  f.sessions.readSession = async (directory, sessionID) => {
+    const stale = await read(directory, sessionID);
+    gate.entered();
+    await gate.pending;
+    return stale;
+  };
+  const tick = f.supervisor.tick();
+  await gate.started;
+  await within(fixtureAbandon(f, job.id));
+  gate.release();
+  await tick;
+  assert.equal((await f.jobs.get(f.origin, job.id)).children[0]!.status, 'abandoned');
+  assert.equal((await f.jobs.get(f.origin, job.id)).children[0]!.evidence, undefined);
+});
+
+test('parallel child resumes do not invalidate each other through sibling progress', async () => {
+  const f = await fixture();
+  const job = await f.jobs.create(f.origin, f.intake, f.input('parallel-resume', 2));
+  await f.supervisor.tick();
+  for (const session of f.sessions.sessions.values()) session.snapshot.status = 'idle';
+  await f.supervisor.tick();
+  await Promise.all(['child_0', 'child_1'].map(childID => f.supervisor.intervene(f.origin, job.id, 'resume', childID)));
+  await f.supervisor.tick();
+  const resumed = await f.jobs.get(f.origin, job.id);
+  assert(resumed.children.every(child => child.status === 'running' && child.attempts.length === 2));
+  assert.equal(f.sessions.sessions.size, 2);
+});
+
+test('job pause and resume during child retry observation fences the stale retry even after status returns', async () => {
+  const f = await fixture();
+  const job = await f.jobs.create(f.origin, f.intake, f.input('retry-control-aba', 1));
+  await f.supervisor.tick();
+  f.sessions.sessions.get('ses_1')!.snapshot.status = 'idle';
+  await f.supervisor.tick();
+  const gate = barrier();
+  const read = f.sessions.readSession.bind(f.sessions);
+  f.sessions.readSession = async (directory, sessionID) => {
+    gate.entered();
+    await gate.pending;
+    return read(directory, sessionID);
+  };
+  const retry = f.supervisor.intervene(f.origin, job.id, 'resume', 'child_0');
+  const rejected = assert.rejects(retry, /intervention_changed/);
+  await gate.started;
+  await within(f.supervisor.intervene(f.origin, job.id, 'pause'));
+  await within(f.supervisor.intervene(f.origin, job.id, 'resume'));
+  gate.release();
+  await rejected;
+  assert.equal((await f.jobs.get(f.origin, job.id)).children[0]!.attempts.length, 1);
+  assert.equal(f.sessions.prompts.length, 1);
+});
+
+test('job-control ABA invalidates a pending dispatch preflight before any prompt effect', async () => {
+  const f = await fixture();
+  const job = await f.jobs.create(f.origin, f.intake, f.input('dispatch-control-aba', 1));
+  const gate = barrier();
+  const read = f.sessions.readSession.bind(f.sessions);
+  f.sessions.readSession = async (directory, sessionID) => {
+    gate.entered();
+    await gate.pending;
+    return read(directory, sessionID);
+  };
+  const tick = f.supervisor.tick();
+  await gate.started;
+  await f.supervisor.intervene(f.origin, job.id, 'pause');
+  await f.supervisor.intervene(f.origin, job.id, 'resume');
+  gate.release();
+  await tick;
+  assert.equal(f.sessions.prompts.length, 0);
+  assert.equal((await f.jobs.get(f.origin, job.id)).children[0]!.attempts.length, 0);
+  f.sessions.readSession = read;
+  await f.supervisor.tick();
+  assert.equal(f.sessions.prompts.length, 1);
+});
+
+test('known foreign work remains durably fenced across later runtime outages and is never recovery eligible', async () => {
+  const f = await fixture();
+  const job = await f.jobs.create(f.origin, f.intake, f.input('foreign-outage', 1));
+  await f.supervisor.tick();
+  const snapshot = f.sessions.sessions.get('ses_1')!.snapshot;
+  snapshot.messages.push({ id: 'msg_other_genuine_user', role: 'user', text: 'Separate genuine work.', tools: [] });
+  await f.supervisor.tick();
+  const foreign = await f.jobs.get(f.origin, job.id);
+  assert.equal(foreign.children[0]!.blocker, 'operator_child_foreign_work');
+  const originalAttempts = structuredClone(foreign.children[0]!.attempts);
+  let unavailableReads = 0;
+  f.sessions.readSession = async () => {
+    unavailableReads++;
+    throw new Error('runtime_transport_unavailable');
+  };
+  for (let count = 0; count < 4; count++) await f.supervisor.tick();
+  const fenced = await f.jobs.get(f.origin, job.id);
+  assert.equal(fenced.children[0]!.blocker, 'operator_child_foreign_work');
+  assert.equal(fenced.children[0]!.uncertainty, undefined);
+  assert.deepEqual(fenced.children[0]!.attempts, originalAttempts);
+  assert.equal(unavailableReads, 0, 'known foreign work is excluded from automatic unknown-outcome recovery');
+  const preview = await prepareOperatorRecovery(f.jobs, f.sessions, f.origin, job.id, 'child_0');
+  assert.equal(preview.eligible, false);
+  assert.equal(preview.reason, 'foreign-work');
+  await assert.rejects(f.supervisor.refresh(f.origin, job.id, 'child_0'), /refresh_unsafe/);
+  assert.equal(unavailableReads, 0, 'explicit recheck cannot erase a known foreign-work fence');
+  assert.equal(f.sessions.prompts.length, 1);
+  assert.equal(f.sessions.aborts.length, 0);
+});
+
+test('foreign user evidence before an uncertain prompt receipt establishes a sticky fence, including operation expiry', async () => {
+  const f = await fixture();
+  f.sessions.promptThrowsBeforeEffect = true;
+  const job = await f.jobs.create(f.origin, f.intake, f.input('foreign-before-receipt', 1));
+  await f.supervisor.tick();
+  const snapshot = f.sessions.sessions.get('ses_1')!.snapshot;
+  snapshot.messages.push({ id: 'msg_unrelated_user', role: 'user', text: 'Other genuine work before receipt.', tools: [] });
+  await f.supervisor.tick();
+  const fenced = await f.jobs.get(f.origin, job.id);
+  assert.equal(fenced.children[0]!.blocker, 'operator_child_foreign_work');
+  assert.equal(fenced.children[0]!.uncertainty, undefined);
+  await f.jobs.transaction(async (ledger, save) => {
+    ledger.jobs[0]!.children[0]!.operation = { token: 'expired_foreign_fixture', kind: 'observe',
+      startedAt: '2000-01-01T00:00:00.000Z', expiresAt: '2000-01-01T00:01:00.000Z' };
+    await save();
+  });
+  f.sessions.readSession = async () => { throw new Error('unavailable_after_foreign'); };
+  for (let count = 0; count < 4; count++) await f.supervisor.tick();
+  const current = await f.jobs.get(f.origin, job.id);
+  assert.equal(current.children[0]!.operation, undefined);
+  assert.equal(current.children[0]!.blocker, 'operator_child_foreign_work');
+  assert.equal(current.children[0]!.uncertainty, undefined);
+  assert.equal(current.children[0]!.attempts[0]!.endedAt, undefined);
+  assert.equal((await prepareOperatorRecovery(f.jobs, f.sessions, f.origin, job.id, 'child_0')).eligible, false);
+  assert.equal(f.sessions.prompts.length, 0);
 });

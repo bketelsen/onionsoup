@@ -6,6 +6,7 @@ import { MEMORY_INDEX } from './operator-memory.ts';
 import { BOOTSTRAP_SKILL, NO_ONIONSOUP_TOOLS } from './owner-agents.ts';
 import { WIKI_TOOL } from './wiki-tool.ts';
 import { OPERATOR_JOB_TOOL } from './operator-job-tools.ts';
+import { OPERATOR_RECOVERY_PERMISSION } from './operator-jobs-types.ts';
 
 /** The onionsoup repository this engine runs from: where the operator uses the CLI. */
 export const ENGINE_REPOSITORY = fileURLToPath(new URL('../../../', import.meta.url));
@@ -39,7 +40,7 @@ export function operatorPermission(operator: OperatorDeclaration) {
   return {
     edit: 'allow', bash: operatorBash(operator), webfetch: 'allow', websearch: 'allow', external_directory: 'allow',
     task: 'allow', question: 'allow', doom_loop: 'ask', skill: { '*': 'allow', [BOOTSTRAP_SKILL]: 'deny' },
-    ...NO_ONIONSOUP_TOOLS, [WIKI_TOOL]: 'allow', [OPERATOR_JOB_TOOL]: 'allow',
+    ...NO_ONIONSOUP_TOOLS, [WIKI_TOOL]: 'allow', [OPERATOR_JOB_TOOL]: 'allow', [OPERATOR_RECOVERY_PERMISSION]: 'ask',
   };
 }
 
@@ -87,6 +88,12 @@ How you work:
 - When a child is interrupted, inspect its evidence before resume with that child's ID; recovery uses the same
   session and preserves earlier attempts. Pause stops new launches; running children continue. Cancel preserves
   history and may remain pending until the actual child stops. Never claim cancellation before it is confirmed.
+- Unknown creation or dispatch outcomes retain their reservation and stop automatic checks after a bounded budget.
+  Use recheck for one fresh observation, or recovery-preview to inspect the exact attempt. Abandon requires the
+  person's one-time permission on that exact digest; you cannot approve it. It releases a scheduling reservation,
+  not proof that an earlier model turn stopped. That turn may still finish. Preserve this uncertainty explicitly.
+  An abandoned child is never resumed, relaunched or counted as completed. A replacement requires a new explicit
+  request from the person. Runtime notices and existing auto-accept settings cannot approve this recovery.
 - When a job needs synthesis, check each child's evidence and uncertainty, then call synthesize with the current
   digest, all evidence message IDs, and your explanation. Report the result to the person. A child's conclusion is
   a model claim, not independent verification. A truncated evidence preview keeps its full transcript identity and

@@ -58,6 +58,7 @@ import { OPERATOR_JOB_TOOL, operatorJobTool } from './operator-job-tools.ts';
 import { checkOperatorChildMessage, checkOperatorChildTool } from './operator-child-scope.ts';
 import { rememberOperatorChildren } from './operator-job-history.ts';
 import { deliverOperatorJobWakes } from './operator-job-wake.ts';
+import { OperatorRecoveryPermissions } from './operator-recovery-permission.ts';
 import {
   commitOperatorMemory, editsUnder, ensureOperatorMemory, isMemoryNudge, MEMORY_NUDGE_TEXT, memoryIndexBlock, memorySignature, OperatorActivityLog,
   operatorMemoryDirectory,
@@ -356,6 +357,7 @@ const server: Plugin = async (input, options) => {
   const operator = runtime.declarations.operator;
   const operatorJobs = operator ? new OperatorJobs(runtime.stateDirectory, operator.directory, operator.name) : undefined;
   const operatorSupervisor = operatorJobs ? new OperatorSupervisor(operatorJobs, operatorSupervisorClient(input.client)) : undefined;
+  const operatorRecoveryPermissions = new OperatorRecoveryPermissions();
   // The operator journals what it does, like an owner, to a notebook of its own (never distilled) that also holds its
   // memory: files it keeps itself, committed here when its chat goes idle.
   const operatorNotebook = runtime.notebook(OPERATOR_ID);
@@ -1122,9 +1124,6 @@ const server: Plugin = async (input, options) => {
     let lease: AdmissionLease | undefined;
     try {
       lease = await beginAdmission(runtime.stateDirectory, 'plugin:notices');
-      if (operatorSupervisor) await operatorSupervisor.tick().catch(error => console.warn('operator_supervisor_failed', error));
-      if (operatorJobs) await rememberOperatorChildren(runtime, operatorJobs, input.client).catch(error => console.warn('operator_child_history_failed', error));
-      if (operatorJobs) await deliverOperatorJobWakes(operatorJobs, planRevisionClient(input.client), (jobID, error) => console.warn('operator_job_wake_failed', jobID, error));
       await deliverPlanRevisions(runtime, planRevisionClient(input.client), (itemId, error) => console.warn('plan_revision_delivery_failed', itemId, error));
       await deliverDirectRequestReviews(runtime, planRevisionClient(input.client), (requestId, error) => console.warn('direct_review_wake_failed', requestId, error));
       await deliverWorkNotices();
@@ -1141,6 +1140,28 @@ const server: Plugin = async (input, options) => {
     void deliverNotices().catch(error => console.warn('notice_delivery_failed', error));
   }, PLUGIN_LIMITS.noticeMs);
   noticeTimer.unref?.();
+  // Operator metadata latency must not delay domain-owner notices or hold their maintenance lease.
+  let isMaintainingOperatorJobs = false;
+  async function maintainOperatorJobs() {
+    if (!operatorJobs || !operatorSupervisor || isMaintainingOperatorJobs) return;
+    isMaintainingOperatorJobs = true;
+    let lease: AdmissionLease | undefined;
+    try {
+      lease = await beginAdmission(runtime.stateDirectory, 'plugin:operator-jobs');
+      await operatorSupervisor.tick().catch(error => console.warn('operator_supervisor_failed', error));
+      await Promise.all([
+        deliverOperatorJobWakes(operatorJobs, planRevisionClient(input.client), (jobID, error) => console.warn('operator_job_wake_failed', jobID, error)),
+        rememberOperatorChildren(runtime, operatorJobs, input.client).catch(error => console.warn('operator_child_history_failed', error)),
+      ]);
+    } finally {
+      await lease?.release();
+      isMaintainingOperatorJobs = false;
+    }
+  }
+  const operatorTimer = operator ? setInterval(() => {
+    return maintainOperatorJobs().catch(error => console.warn('operator_maintenance_failed', error));
+  }, PLUGIN_LIMITS.noticeMs) : undefined;
+  operatorTimer?.unref?.();
   const reconciliationTimer = setInterval(() => {
     return reconcileChats();
   }, PLUGIN_LIMITS.noticeMs);
@@ -1303,6 +1324,7 @@ const server: Plugin = async (input, options) => {
     },
 
     async event({ event }) {
+      operatorRecoveryPermissions.event(event);
       const typed = event as { type: string; properties: Record<string, any> };
       const isIdle = typed.type === 'session.idle' || (typed.type === 'session.status' && typed.properties.status?.type === 'idle');
       const activityAtEvent = isIdle ? new Map(chatActivity) : undefined;
@@ -1348,7 +1370,7 @@ const server: Plugin = async (input, options) => {
         if (agent === operator!.name) return;
         if (ownerByAgent.has(agent)) requireOwner(agent);
         throw new Error('operator_job_operator_only');
-      }) } : {}),
+      }, operatorRecoveryPermissions) } : {}),
       onionsoup_friction: tool({
         description: 'Report unexpected onionsoup engine behavior with expected/actual and reproducible evidence. Host code adds observed failures and origin; repeats are counted, not re-triaged. Do not include secrets.',
         args: {

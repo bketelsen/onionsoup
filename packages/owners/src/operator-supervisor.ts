@@ -1,44 +1,18 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { nextMessageId } from './plan-revision.ts';
 import { OperatorJobs, operatorJobEvent } from './operator-jobs.ts';
-import {
-  OPERATOR_JOB_LIMITS, type OperatorChild, type OperatorJob, type OperatorJobLedger, type OperatorJobOrigin,
-  type OperatorSessionSnapshot, type OperatorSupervisorClient,
-} from './operator-jobs-types.ts';
+import { OPERATOR_JOB_LIMITS, type OperatorChild, type OperatorJob, type OperatorJobLedger, type OperatorJobOrigin,
+  type OperatorSessionSnapshot, type OperatorSupervisorClient, type OperatorClientOptions } from './operator-jobs-types.ts';
+import { OperatorScheduler, OPERATOR_OPERATION_LIMITS, OPERATOR_TERMINAL_JOBS, OPERATOR_TERMINAL_CHILDREN,
+  OPERATOR_CREATION_BLOCKERS, operatorChildUnsettled, operatorChildOccupiesSlot, operatorChildBlock,
+  settleOperatorJob, operatorParentControlVersion, type OperatorClaim } from './operator-scheduler.ts';
+import { assertOperatorCurrentTurn, operatorChildHasNewEvidence, observeOperatorChild } from './operator-child-observation.ts';
+import { OPERATOR_UNCERTAINTY_LIMITS, canObserveOperatorChild, clearOperatorUncertainty, recordOperatorUncertainty } from './operator-uncertainty.ts';
 
-export const OPERATOR_SUPERVISOR_LIMITS = { ...OPERATOR_JOB_LIMITS, receiptGraceMs: 5_000 };
+export const OPERATOR_SUPERVISOR_LIMITS = { ...OPERATOR_JOB_LIMITS, receiptGraceMs: 5_000,
+  operationLeaseMs: OPERATOR_OPERATION_LIMITS.leaseMs, observationsPerTick: OPERATOR_OPERATION_LIMITS.observationsPerTick,
+  uncertaintyIntervalMs: OPERATOR_UNCERTAINTY_LIMITS.intervalMs, tickBudgetMs: 20_000 };
 type Limits = typeof OPERATOR_SUPERVISOR_LIMITS;
-type Save = () => Promise<void>;
-const LIVE = new Set<OperatorChild['status']>(['creating', 'dispatching', 'running']);
-const TERMINAL = new Set<OperatorJob['status']>(['completed', 'cancelled']);
-const CREATION_BLOCKERS = new Set(['operator_child_creation_uncertain', 'operator_child_creation_ambiguous',
-  'operator_child_creation_runtime_unavailable']);
-
-function hasUnsettledAttempt(child: OperatorChild) {
-  return child.attempts.some(attempt => !attempt.endedAt);
-}
-
-function occupiesSlot(child: OperatorChild) {
-  return LIVE.has(child.status) || hasUnsettledAttempt(child) || CREATION_BLOCKERS.has(child.blocker ?? '');
-}
-
-function block(job: OperatorJob, child: OperatorChild, reason: string) {
-  if (child.status === 'blocked' && child.blocker === reason) return;
-  child.status = 'blocked';
-  child.blocker = reason;
-  operatorJobEvent(job, 'blocked', reason, child.id);
-}
-
-function settled(job: OperatorJob) {
-  if (job.status === 'paused' || TERMINAL.has(job.status)) return;
-  if (job.children.every(child => child.status === 'completed')) {
-    if (job.status !== 'needs-synthesis') operatorJobEvent(job, 'ready', 'All child transcripts are complete; synthesize against their exact evidence IDs.');
-    job.status = 'needs-synthesis';
-    return;
-  }
-  job.status = job.children.some(child => child.status === 'blocked') ? 'blocked' : 'running';
-}
-
 function promptFor(job: OperatorJob, child: OperatorChild) {
   const dependencies = child.dependsOn.map(id => {
     const dependency = job.children.find(candidate => candidate.id === id)!;
@@ -52,283 +26,330 @@ function promptFor(job: OperatorJob, child: OperatorChild) {
     + 'Return findings with specific file paths/line references, uncertainties and blockers. Tool transcripts are retained; do not claim tests or effects you did not perform.';
 }
 
-/** Deterministic scheduling only. prompt() accepts asynchronous work; it must never await model execution. */
+/** Runtime operations never hold the ledger lock. Every effect follows a durable single-use claim. */
 export class OperatorSupervisor {
+  readonly scheduler: OperatorScheduler;
   constructor(readonly jobs: OperatorJobs, readonly client: OperatorSupervisorClient,
-    readonly limits: Limits = OPERATOR_SUPERVISOR_LIMITS) {}
+    readonly limits: Limits = OPERATOR_SUPERVISOR_LIMITS) {
+    this.scheduler = new OperatorScheduler(jobs, limits.operationLeaseMs);
+  }
 
   async tick() {
-    return this.jobs.transaction(async (ledger, save) => {
-      await this.reconcile(ledger, save);
-      await this.schedule(ledger, save);
-      ledger.jobs.forEach(settled);
-      await save();
-      return ledger.jobs;
+    const options = { signal: AbortSignal.timeout(this.limits.tickBudgetMs) };
+    await this.scheduler.expire();
+    const candidates = (await this.jobs.snapshot()).flatMap(job => job.children.map(child => ({ job, child })))
+      .filter(({ job, child }) => this.canReconcile(job, child)).slice(0, this.limits.observationsPerTick);
+    await Promise.all(candidates.map(({ job, child }) => this.reconcileChild(job, child, options)));
+    if (!options.signal.aborted) await this.schedule(options);
+    return this.jobs.snapshot();
+  }
+
+  async refresh(origin: OperatorJobOrigin, id: string, childID: string) {
+    const job = await this.jobs.get(origin, id);
+    const child = job.children.find(candidate => candidate.id === childID);
+    if (!child || OPERATOR_TERMINAL_CHILDREN.has(child.status) || child.operation
+      || child.blocker === 'operator_child_foreign_work') throw new Error('operator_child_refresh_unsafe');
+    await this.reconcileChild(job, child, { signal: AbortSignal.timeout(this.limits.tickBudgetMs) }, true);
+    return this.jobs.get(origin, id);
+  }
+
+  private canReconcile(job: OperatorJob, child: OperatorChild) {
+    return !OPERATOR_TERMINAL_JOBS.has(job.status) && !OPERATOR_TERMINAL_CHILDREN.has(child.status)
+      && child.blocker !== 'operator_child_foreign_work' && !child.operation && canObserveOperatorChild(child)
+      && (this.needsAdoption(child) || Boolean(child.sessionID && (operatorChildUnsettled(child) || child.status === 'blocked')));
+  }
+
+  private needsAdoption(child: OperatorChild) {
+    return !child.sessionID && (child.status === 'creating' || OPERATOR_CREATION_BLOCKERS.has(child.blocker ?? '')
+      || child.uncertainty?.kind === 'creation');
+  }
+
+  private unknown(job: OperatorJob, child: OperatorChild,
+    kind: NonNullable<OperatorChild['uncertainty']>['kind'], reason: string) {
+    if (child.blocker === 'operator_child_foreign_work') return;
+    operatorChildBlock(job, child, reason);
+    recordOperatorUncertainty(job, child, kind, reason, new Date(), {
+      ...OPERATOR_UNCERTAINTY_LIMITS, intervalMs: this.limits.uncertaintyIntervalMs,
     });
   }
 
-  private async reconcile(ledger: OperatorJobLedger, save: Save) {
-    for (const job of ledger.jobs) {
-      if (job.origin.operator !== this.jobs.operator || TERMINAL.has(job.status)) continue;
-      for (const child of job.children) {
-        if (child.status === 'creating' || CREATION_BLOCKERS.has(child.blocker ?? '')) await this.adopt(job, child, save);
-        if (child.sessionID && (hasUnsettledAttempt(child) || child.status === 'blocked')) await this.observe(job, child);
-      }
-      settled(job);
+  private async reconcileChild(job: OperatorJob, child: OperatorChild, options: OperatorClientOptions, force = false) {
+    if (!force && !this.canReconcile(job, child)) return;
+    const kind = this.needsAdoption(child) ? 'adopt' : 'observe';
+    if (kind === 'observe' && !child.sessionID) throw new Error('operator_child_refresh_no_session');
+    const claim = await this.scheduler.claim(job, child, kind);
+    if (!claim) {
+      if (force) throw new Error('operator_child_operation_changed');
+      return;
     }
+    const handlers = { adopt: () => this.adopt(claim, options), observe: () => this.observe(claim, options) };
+    await handlers[kind]();
   }
 
-  private async adopt(job: OperatorJob, child: OperatorChild, save: Save) {
-    let sessions: Awaited<ReturnType<OperatorSupervisorClient['listSessions']>>;
+  private async adopt(claim: OperatorClaim, options: OperatorClientOptions) {
+    let candidates: Array<{ id: string; title: string }>;
     try {
-      sessions = await this.client.listSessions(child.directory);
+      candidates = (await this.client.listSessions(claim.child.directory, options)).filter(session => session.title === claim.child.title);
     } catch {
-      block(job, child, 'operator_child_creation_runtime_unavailable');
+      await this.scheduler.apply(claim, (job, child) => this.unknown(job, child, 'creation', 'operator_child_creation_runtime_unavailable'));
       return;
     }
-    const candidates = sessions.filter(session => session.title === child.title);
-    if (candidates.length !== 1) {
-      block(job, child, candidates.length ? 'operator_child_creation_ambiguous' : 'operator_child_creation_uncertain');
-      return;
-    }
-    child.sessionID = candidates[0]!.id;
-    child.status = 'queued';
-    delete child.blocker;
-    operatorJobEvent(job, 'progress', 'Recovered the exact session creation receipt; no replacement child was launched.', child.id);
-    await save();
-  }
-
-  private async observe(job: OperatorJob, child: OperatorChild) {
-    const snapshot = await this.readChild(job, child);
-    if (!snapshot) return;
-    const attempt = child.attempts.at(-1);
-    if (!attempt) {
-      this.recoverUnsent(job, child, snapshot);
-      return;
-    }
-    const receipt = snapshot.messages.find(message => message.id === attempt.messageID && message.role === 'user');
-    if (!receipt) {
-      if (this.isPastGrace(attempt.createdAt)) block(job, child, 'operator_child_dispatch_uncertain');
-      return;
-    }
-    if (snapshot.messages.filter(message => message.role === 'user').at(-1)?.id !== attempt.messageID) {
-      block(job, child, 'operator_child_foreign_work');
-      return;
-    }
-    const replies = snapshot.messages.filter(message => message.role === 'assistant' && message.parentID === attempt.messageID);
-    const final = replies.at(-1);
-    const tools = replies.flatMap(message => message.tools);
-    const hasPendingTools = tools.some(tool => tool.status === 'pending' || tool.status === 'running');
-    if (snapshot.status !== 'idle' || hasPendingTools) {
-      if (child.blocker === 'operator_child_runtime_unavailable') {
-        child.status = 'running';
-        delete child.blocker;
-        operatorJobEvent(job, 'progress', 'Runtime observation recovered; the original child turn remains active.', child.id);
+    await this.scheduler.apply(claim, (job, child) => {
+      if (candidates.length !== 1) {
+        this.unknown(job, child, 'creation', candidates.length ? 'operator_child_creation_ambiguous' : 'operator_child_creation_uncertain');
+        return;
       }
-      return;
-    }
-    if (final?.completed && !final.error && final.text.trim()) {
-      child.evidence = {
-        sessionID: child.sessionID!, promptID: attempt.messageID, messageID: final.id,
-        text: final.text.trim().slice(0, OPERATOR_JOB_LIMITS.textChars),
-        truncated: final.text.length > OPERATOR_JOB_LIMITS.textChars, originalChars: final.text.length,
-        fullTextDigest: createHash('sha256').update(final.text).digest('hex'),
-        tools: tools.filter(tool => tool.status === 'completed' || tool.status === 'error') as NonNullable<OperatorChild['evidence']>['tools'],
-      };
-      attempt.endedAt ??= new Date().toISOString();
-      child.status = 'completed';
+      child.sessionID = candidates[0]!.id;
+      child.status = 'queued';
       delete child.blocker;
-      operatorJobEvent(job, 'progress', 'Exact child turn completed; transcript evidence recorded, conclusions remain model claims.', child.id);
-      return;
-    }
-    if (!this.isPastGrace(attempt.sentAt ?? attempt.createdAt)) return;
-    attempt.endedAt ??= new Date().toISOString();
-    attempt.reason ??= final?.error ? 'operator_child_turn_error' : 'operator_child_interrupted';
-    block(job, child, attempt.reason);
+      clearOperatorUncertainty(child);
+      operatorJobEvent(job, 'progress', 'Recovered the exact session creation receipt; no replacement child was launched.', child.id);
+    });
   }
 
-  private async readChild(job: OperatorJob, child: OperatorChild) {
+  private async observe(claim: OperatorClaim, options: OperatorClientOptions) {
+    const snapshot = await this.read(claim, options);
+    if (!snapshot) return;
+    await this.scheduler.apply(claim, (job, child) => this.observed(job, child, snapshot));
+  }
+
+  private observed(job: OperatorJob, child: OperatorChild, snapshot: OperatorSessionSnapshot) {
+    if (child.blocker === 'operator_child_foreign_work') return;
+    observeOperatorChild(job, child, snapshot, this.limits.receiptGraceMs,
+      (currentJob, currentChild, kind, reason) => this.unknown(currentJob, currentChild, kind, reason));
+  }
+
+  private async read(claim: OperatorClaim, options: OperatorClientOptions) {
     try {
-      return await this.client.readSession(child.directory, child.sessionID!);
+      return await this.client.readSession(claim.child.directory, claim.child.sessionID!, options);
     } catch {
-      block(job, child, 'operator_child_runtime_unavailable');
+      await this.scheduler.apply(claim, (job, child) => this.unknown(job, child, 'observation', 'operator_child_runtime_unavailable'));
       return undefined;
     }
   }
 
-  private recoverUnsent(job: OperatorJob, child: OperatorChild, snapshot: OperatorSessionSnapshot) {
-    if (child.blocker !== 'operator_child_runtime_unavailable') return;
-    if (snapshot.status !== 'idle' || snapshot.messages.length) {
-      block(job, child, 'operator_child_foreign_work');
-      return;
-    }
-    child.status = 'queued';
-    delete child.blocker;
-    operatorJobEvent(job, 'progress', 'Unsent child session observation recovered; no prompt was previously attempted.', child.id);
+  private async schedule(options: OperatorClientOptions) {
+    const jobs = await this.jobs.snapshot();
+    const available = Math.max(0, this.limits.concurrentChildren - jobs.flatMap(job => job.children).filter(operatorChildOccupiesSlot).length);
+    const queued = jobs.flatMap(job => job.children.map(child => ({ job, child })))
+      .filter(({ job, child }) => this.eligible(job, child)).slice(0, available);
+    await Promise.all(queued.map(({ job, child }) => this.launch(job, child, options)));
   }
 
-  private isPastGrace(at: string) {
-    return Date.now() - Date.parse(at) >= this.limits.receiptGraceMs;
+  private eligible(job: OperatorJob, child: OperatorChild) {
+    return ['running', 'blocked'].includes(job.status) && child.status === 'queued' && !child.operation && !child.uncertainty
+      && child.dependsOn.every(id => job.children.some(candidate => candidate.id === id && candidate.status === 'completed'));
   }
 
-  private async schedule(ledger: OperatorJobLedger, save: Save) {
-    for (const job of ledger.jobs) {
-      if (job.origin.operator !== this.jobs.operator || !['running', 'blocked'].includes(job.status)) continue;
-      for (const child of job.children) {
-        const live = ledger.jobs.flatMap(candidate => candidate.children).filter(occupiesSlot).length;
-        if (live >= this.limits.concurrentChildren) return;
-        if (child.status !== 'queued' || !this.dependenciesComplete(job, child)) continue;
-        if (!child.sessionID) await this.create(job, child, save);
-        if (child.sessionID && child.status === 'queued') await this.dispatch(job, child, save);
-      }
-    }
+  private capacity(ledger: OperatorJobLedger, ownReservation?: OperatorChild) {
+    return ledger.jobs.flatMap(job => job.children).filter(child => child !== ownReservation && operatorChildOccupiesSlot(child)).length < this.limits.concurrentChildren;
   }
 
-  private dependenciesComplete(job: OperatorJob, child: OperatorChild) {
-    return child.dependsOn.every(id => job.children.some(candidate => candidate.id === id && candidate.status === 'completed'));
+  private async launch(job: OperatorJob, child: OperatorChild, options: OperatorClientOptions) {
+    if (options.signal?.aborted) return;
+    if (!child.sessionID) await this.create(job, child, options);
+    const current = await this.jobs.get(job.origin, job.id);
+    const next = current.children.find(candidate => candidate.id === child.id)!;
+    if (this.eligible(current, next) && next.sessionID && !options.signal?.aborted) await this.dispatch(current, next, options);
   }
 
-  private async create(job: OperatorJob, child: OperatorChild, save: Save) {
-    // Canonicalize again immediately before dispatch: a changed symlink must not expand the original scope.
+  private async create(job: OperatorJob, child: OperatorChild, options: OperatorClientOptions) {
     try {
       if (await this.jobs.canonicalDirectory(child.directory) !== child.directory) throw new Error('operator_job_workspace_changed');
     } catch {
-      block(job, child, 'operator_child_workspace_unavailable');
+      const claim = await this.scheduler.claim(job, child, 'observe');
+      if (claim) await this.scheduler.apply(claim, (currentJob, currentChild) => operatorChildBlock(currentJob, currentChild, 'operator_child_workspace_unavailable'));
       return;
     }
-    child.status = 'creating';
-    await save();
+    const claim = await this.scheduler.claim(job, child, 'create', (currentJob, currentChild, ledger) => {
+      if (!this.eligible(currentJob, currentChild) || !this.capacity(ledger) || options.signal?.aborted) return false;
+      currentChild.status = 'creating';
+      return true;
+    });
+    if (!claim) return;
     try {
-      child.sessionID = (await this.client.createSession(child.directory, child.title)).id;
-      child.status = 'queued';
-      operatorJobEvent(job, 'progress', 'Read-only child session created.', child.id);
+      const session = await this.client.createSession(child.directory, child.title, options);
+      const applied = await this.scheduler.apply(claim, (currentJob, currentChild) => {
+        currentChild.sessionID = session.id;
+        currentChild.status = 'queued';
+        operatorJobEvent(currentJob, 'progress', 'Read-only child session created.', child.id);
+      });
+      if (!applied) await this.lateReceipt(claim, session.id);
     } catch {
-      block(job, child, 'operator_child_creation_uncertain');
+      await this.scheduler.apply(claim, (currentJob, currentChild) => this.unknown(currentJob, currentChild, 'creation', 'operator_child_creation_uncertain'));
     }
-    await save();
   }
 
-  private async dispatch(job: OperatorJob, child: OperatorChild, save: Save) {
-    const snapshot = await this.readChild(job, child);
+  private async dispatch(job: OperatorJob, child: OperatorChild, options: OperatorClientOptions) {
+    const preflight = await this.scheduler.claim(job, child, 'observe',
+      (currentJob, currentChild, ledger) => this.eligible(currentJob, currentChild) && this.capacity(ledger));
+    if (!preflight) return;
+    const snapshot = await this.read(preflight, options);
     if (!snapshot) return;
+    const claim = await this.scheduler.advance(preflight, 'dispatch', (currentJob, currentChild, ledger) => {
+      if (!['running', 'blocked'].includes(currentJob.status) || !this.capacity(ledger, currentChild) || options.signal?.aborted) return false;
+      if (!this.dispatchable(currentJob, currentChild, snapshot)) return false;
+      currentChild.attempts.push({ id: `attempt_${randomUUID()}`, messageID: nextMessageId(snapshot.messages.map(message => message.id)), createdAt: new Date().toISOString() });
+      currentChild.status = 'dispatching';
+      return true;
+    });
+    if (!claim) return;
+    const attempt = claim.child.attempts.at(-1)!;
+    try {
+      await this.client.prompt(child.directory, child.sessionID!, attempt.messageID, promptFor(claim.job, claim.child), options);
+      const applied = await this.scheduler.apply(claim, (currentJob, currentChild) => {
+        currentChild.attempts.at(-1)!.sentAt = new Date().toISOString();
+        currentChild.status = 'running';
+        operatorJobEvent(currentJob, 'progress', 'Child investigation dispatched asynchronously.', child.id);
+      });
+      if (!applied) await this.lateReceipt(claim);
+    } catch {
+      await this.scheduler.apply(claim, (currentJob, currentChild) => this.unknown(currentJob, currentChild, 'dispatch', 'operator_child_dispatch_uncertain'));
+    }
+  }
+
+  private dispatchable(job: OperatorJob, child: OperatorChild, snapshot: OperatorSessionSnapshot) {
     if (snapshot.status !== 'idle') {
-      block(job, child, 'operator_child_session_busy');
-      return;
+      operatorChildBlock(job, child, 'operator_child_session_busy');
+      return false;
     }
     try {
-      this.assertCurrentTurn(child, snapshot);
+      assertOperatorCurrentTurn(child, snapshot);
     } catch {
-      block(job, child, 'operator_child_foreign_work');
-      return;
+      operatorChildBlock(job, child, 'operator_child_foreign_work');
+      return false;
     }
-    const previous = child.attempts.at(-1);
-    if (previous && snapshot.messages.some(message => message.parentID === previous.messageID && message.completed && !message.error)) {
-      block(job, child, 'operator_child_retry_new_evidence');
-      return;
+    if (operatorChildHasNewEvidence(child, snapshot)) {
+      operatorChildBlock(job, child, 'operator_child_retry_new_evidence');
+      return false;
     }
-    const attempt = { id: `attempt_${randomUUID()}`, messageID: nextMessageId(snapshot.messages.map(message => message.id)), createdAt: new Date().toISOString() };
-    child.attempts.push(attempt);
-    child.status = 'dispatching';
-    await save();
-    try {
-      await this.client.prompt(child.directory, child.sessionID!, attempt.messageID, promptFor(job, child));
-      Object.assign(attempt, { sentAt: new Date().toISOString() });
-      child.status = 'running';
-      operatorJobEvent(job, 'progress', 'Child investigation dispatched asynchronously.', child.id);
-    } catch {
-      block(job, child, 'operator_child_dispatch_uncertain');
-    }
-    await save();
+    return true;
   }
 
   async intervene(originInput: OperatorJobOrigin, id: string, action: 'pause' | 'resume' | 'cancel', childID?: string) {
     const origin = await this.jobs.origin(originInput);
-    return this.jobs.transaction(async (ledger, save) => {
+    const handlers = {
+      pause: () => this.changeJob(origin, id, 'pause'),
+      resume: () => childID ? this.retryChild(origin, id, childID) : this.changeJob(origin, id, 'resume'),
+      cancel: () => this.cancel(origin, id),
+    };
+    await handlers[action]();
+    return this.jobs.get(origin, id);
+  }
+
+  private async changeJob(origin: OperatorJobOrigin, id: string, action: 'pause' | 'resume') {
+    await this.jobs.transaction(async (ledger, save) => {
       const job = this.jobs.bound(ledger, origin, id);
-      const handlers = {
-        pause: () => this.pause(job),
-        resume: () => this.resume(job, childID),
-        cancel: () => this.cancel(job, save),
+      if (OPERATOR_TERMINAL_JOBS.has(job.status)) throw new Error('operator_job_terminal');
+      const mutations = {
+        pause: () => {
+          job.status = 'paused';
+          operatorJobEvent(job, 'paused', 'New dispatches paused; existing children continue and retain their sessions.');
+        },
+        resume: () => {
+          job.status = 'running';
+          operatorJobEvent(job, 'resumed', 'Scheduling resumed within the original read-only scope.');
+          settleOperatorJob(job);
+        },
       };
-      await handlers[action]();
+      mutations[action]();
       await save();
-      return job;
     });
   }
 
-  private async pause(job: OperatorJob) {
-    if (TERMINAL.has(job.status)) throw new Error('operator_job_terminal');
-    if (job.status === 'paused') return;
-    job.status = 'paused';
-    operatorJobEvent(job, 'paused', 'New dispatches paused; existing children continue and retain their sessions.');
-  }
-
-  private async resume(job: OperatorJob, childID?: string) {
-    if (TERMINAL.has(job.status)) throw new Error('operator_job_terminal');
-    if (childID) await this.retryChild(job, childID);
-    job.status = 'running';
-    operatorJobEvent(job, 'resumed', 'Scheduling resumed within the original read-only scope.');
-    settled(job);
-  }
-
-  private async retryChild(job: OperatorJob, childID: string) {
+  private async retryChild(origin: OperatorJobOrigin, id: string, childID: string) {
+    const job = await this.jobs.get(origin, id);
     const child = job.children.find(candidate => candidate.id === childID);
-    if (!child || child.status !== 'blocked' || !child.sessionID || hasUnsettledAttempt(child)) throw new Error('operator_child_retry_unsafe');
-    const snapshot = await this.client.readSession(child.directory, child.sessionID);
-    if (snapshot.status !== 'idle') throw new Error('operator_child_retry_busy');
-    this.assertCurrentTurn(child, snapshot);
-    const prior = child.attempts.at(-1)!;
-    if (snapshot.messages.some(message => message.parentID === prior.messageID && message.completed && !message.error)) {
-      throw new Error('operator_child_retry_new_evidence');
+    if (!child || child.status !== 'blocked' || !child.sessionID || operatorChildUnsettled(child)
+      || child.operation || child.uncertainty?.needsDecision) throw new Error('operator_child_retry_unsafe');
+    const claim = await this.scheduler.claim(job, child, 'retry');
+    if (!claim) throw new Error('operator_child_operation_changed');
+    const snapshot = await this.read(claim, { signal: AbortSignal.timeout(this.limits.tickBudgetMs) });
+    if (!snapshot) throw new Error('operator_child_runtime_unavailable');
+    try {
+      this.validateRetry(child, snapshot);
+      const applied = await this.scheduler.apply(claim, (currentJob, currentChild) => {
+        if (operatorParentControlVersion(currentJob) !== operatorParentControlVersion(claim.job)) throw new Error('operator_child_intervention_changed');
+        currentChild.status = 'queued';
+        delete currentChild.blocker;
+        clearOperatorUncertainty(currentChild);
+        currentJob.status = 'running';
+        operatorJobEvent(currentJob, 'resumed', 'Retry authorized for the same child session; previous attempt and transcript retained.', child.id);
+      });
+      if (!applied) throw new Error('operator_child_operation_changed');
+    } catch (error) {
+      await this.scheduler.apply(claim, () => {});
+      throw error;
     }
+  }
+
+  private validateRetry(child: OperatorChild, snapshot: OperatorSessionSnapshot) {
+    if (snapshot.status !== 'idle') throw new Error('operator_child_retry_busy');
+    assertOperatorCurrentTurn(child, snapshot);
+    if (operatorChildHasNewEvidence(child, snapshot)) throw new Error('operator_child_retry_new_evidence');
     if (!['operator_child_interrupted', 'operator_child_turn_error'].includes(child.blocker ?? '')) throw new Error('operator_child_retry_unsafe');
-    child.status = 'queued';
-    delete child.blocker;
-    operatorJobEvent(job, 'resumed', 'Retry authorized for the same child session; previous attempt and transcript retained.', child.id);
   }
 
-  private async cancel(job: OperatorJob, save: Save) {
-    if (job.status === 'cancelled') return;
-    if (job.status === 'completed') throw new Error('operator_job_terminal');
-    job.status = 'paused';
-    operatorJobEvent(job, 'paused', 'Cancellation requested; exact child sessions must settle before cancellation completes.');
-    await save();
-    for (const child of job.children) await this.cancelChild(job, child, save);
-    job.status = 'cancelled';
-    operatorJobEvent(job, 'cancelled', 'Job cancelled; transcripts and attempt history preserved.');
+  private async cancel(origin: OperatorJobOrigin, id: string) {
+    const initial = await this.jobs.get(origin, id);
+    if (initial.status === 'cancelled') return;
+    await this.changeJob(origin, id, 'pause');
+    const job = await this.jobs.get(origin, id);
+    for (const child of job.children) await this.cancelChild(job, child);
+    await this.jobs.transaction(async (ledger, save) => {
+      const current = this.jobs.bound(ledger, origin, id);
+      if (current.children.some(child => !OPERATOR_TERMINAL_CHILDREN.has(child.status))) throw new Error('operator_child_cancel_pending');
+      current.status = 'cancelled';
+      operatorJobEvent(current, 'cancelled', 'Job cancelled; transcripts and attempt history preserved.');
+      await save();
+    });
   }
 
-  private assertCurrentTurn(child: OperatorChild, snapshot: OperatorSessionSnapshot) {
-    const lastUser = snapshot.messages.filter(message => message.role === 'user').at(-1);
-    const attempt = child.attempts.at(-1);
-    if (attempt && lastUser?.id !== attempt.messageID) throw new Error('operator_child_turn_changed_or_uncertain');
-    if (!attempt && snapshot.messages.length) throw new Error('operator_child_foreign_work');
-  }
-
-  private async cancelChild(job: OperatorJob, child: OperatorChild, save: Save) {
-    if (['completed', 'cancelled'].includes(child.status)) return;
-    if (!child.sessionID && occupiesSlot(child)) throw new Error('operator_child_cancel_uncertain');
-    if (child.sessionID) {
-      const snapshot = await this.client.readSession(child.directory, child.sessionID);
-      this.assertCurrentTurn(child, snapshot);
-      if (snapshot.status !== 'idle') {
-        await this.client.abort(child.directory, child.sessionID);
+  private async cancelChild(job: OperatorJob, child: OperatorChild) {
+    if (OPERATOR_TERMINAL_CHILDREN.has(child.status)) return;
+    if (child.operation) throw new Error('operator_child_cancel_pending');
+    if (!child.sessionID && operatorChildOccupiesSlot(child)) throw new Error('operator_child_cancel_uncertain');
+    const claim = await this.scheduler.claim(job, child, 'abort');
+    if (!claim) throw new Error('operator_child_operation_changed');
+    const options = { signal: AbortSignal.timeout(this.limits.tickBudgetMs) };
+    try {
+      const snapshot = child.sessionID ? await this.client.readSession(child.directory, child.sessionID, options) : undefined;
+      if (snapshot) assertOperatorCurrentTurn(child, snapshot);
+      if (snapshot && snapshot.status !== 'idle') {
+        const effect = await this.scheduler.advance(claim, 'abort', currentJob => currentJob.status === 'paused');
+        if (!effect) throw new Error('operator_child_operation_changed');
+        try {
+          await this.client.abort(child.directory, child.sessionID!, options);
+        } finally {
+          await this.scheduler.apply(effect, () => {});
+        }
         throw new Error('operator_child_cancel_pending');
       }
-      if (hasUnsettledAttempt(child)) {
-        await this.observe(job, child);
-        if (hasUnsettledAttempt(child)) throw new Error('operator_child_cancel_pending');
-      }
+      await this.scheduler.apply(claim, (currentJob, currentChild) => {
+        if (currentJob.status !== 'paused') throw new Error('operator_child_intervention_changed');
+        if (snapshot && operatorChildUnsettled(currentChild)) this.observed(currentJob, currentChild, snapshot);
+        if (operatorChildUnsettled(currentChild)) throw new Error('operator_child_cancel_pending');
+        if (currentChild.status === 'completed') return;
+        currentChild.status = 'cancelled';
+        operatorJobEvent(currentJob, 'cancelled', 'Exact child cancellation recorded without deleting its transcript.', child.id);
+      });
+    } catch (error) {
+      await this.scheduler.apply(claim, () => {});
+      throw error;
     }
-    if (child.status === 'completed') return;
-    for (const attempt of child.attempts) {
-      if (!attempt.endedAt) {
-        attempt.endedAt ??= new Date().toISOString();
-        attempt.reason = 'operator_child_cancelled';
-      }
-    }
-    child.status = 'cancelled';
-    operatorJobEvent(job, 'cancelled', 'Exact child cancellation recorded without deleting its transcript.', child.id);
-    await save();
+  }
+
+  private async lateReceipt(claim: OperatorClaim, sessionID?: string) {
+    await this.jobs.transaction(async (ledger, save) => {
+      const job = ledger.jobs.find(candidate => candidate.id === claim.job.id && candidate.origin.operator === this.jobs.operator);
+      const child = job?.children.find(candidate => candidate.id === claim.child.id && candidate.title === claim.child.title);
+      if (!job || !child?.abandonment || child.status !== 'abandoned') return;
+      if (sessionID && !child.sessionID) child.sessionID = sessionID;
+      const sent = claim.child.attempts.at(-1);
+      const attempt = child.attempts.find(candidate => candidate.id === sent?.id && candidate.messageID === sent.messageID);
+      if (!sessionID && attempt && !attempt.sentAt) attempt.sentAt = new Date().toISOString();
+      operatorJobEvent(job, 'abandoned', 'Late runtime receipt retained on the abandoned child for fencing and audit; no work was requeued or accepted.', child.id);
+      await save();
+    });
   }
 }

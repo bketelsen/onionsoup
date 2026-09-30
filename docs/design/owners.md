@@ -733,7 +733,7 @@ The host binds a job to the configured operator and exact top-level chat, and ca
 from the transcript. Original intake, decomposed goal, constraints and task scope are separate fields; a runtime
 notice cannot create a new job as if it were a person. `create` returns a durable handle promptly. Tasks name existing
 directories within the operator's configured workspace, use `access: "read-only"`, and can name `dependsOn` task IDs.
-The scheduler admits at most two children across all jobs. These are independent OpenCode sessions with logical
+The scheduler reserves at most two managed slots across all jobs. These are independent OpenCode sessions with logical
 parentage in `state/operator-jobs/jobs.json`, so the parent can answer another message while both children run.
 Children are also recorded in the operator's existing session history, without inventing native parent relationships.
 
@@ -741,11 +741,41 @@ Use `list` or `show { id }` for status, exact child sessions, attempts, events a
 new dispatches while existing investigations continue. `cancel` aborts only the bound child turns and preserves their
 records; uncertain dispatch or changed turns block cancellation, rather than claiming it succeeded. `resume` restarts
 scheduling; with `childID`, it resumes a proven interrupted read-only turn in the **same** session using a new durable
-attempt. Restart reconciliation never launches a replacement for an uncertain creation or dispatch. A missing receipt
-stays blocked for diagnosis. Idle runtime status alone is not evidence of completion.
+attempt. Restart reconciliation never launches a replacement for an uncertain creation or dispatch. Idle runtime
+status alone is not evidence of completion.
 
-The plugin's ordinary notice pass reconciles jobs and sends durable, actionable parent wakes for progress, blockers
-and readiness. Wakes wait for an idle parent, keep a stable message receipt and never blindly resend an uncertain
+Runtime calls run outside ledger mutation locks. Short durable operation claims reserve capacity before effects;
+returned observations and acknowledgements apply only to their matching claims. Parent controls fence stale actions
+without treating a sibling's progress as a change to the whole job. Each client operation shares one aggregate
+10-second transport budget, and a scheduler pass uses a shared 20-second budget with at most 16 observations.
+An expired operation claim permits observation of its receipt, never reissuing the uncertain effect. Parent create,
+pause and synthesis calls can proceed while metadata reads wait.
+
+Unknown outcomes keep their reservations during bounded observation (three attempts or two minutes, with 15-second
+spacing by default), then stop automatic polling with `needsDecision`. `recheck { id, childID }` performs one fresh
+observation without dispatching work. If the receipt appears, it reconciles the existing session. Otherwise,
+`recovery-preview { id, childID }` shows the exact scope and digest; `abandon { id, childID, digest, text }` requests a
+one-time human decision. It is never an automatic retry or a claim that the original work failed.
+
+Abandonment releases only the logical scheduling reservation. The old inference may still finish, so physical
+concurrency may temporarily exceed the two managed slots after this explicit decision. The unknown outcome remains
+visible: no fabricated end timestamp, completion, or accepted result. The child remains permanently fenced against
+future prompts, tools, resume and dependency completion. Late acknowledgements are retained on that record without
+resurrecting it. No replacement is created; a replacement requires a separate explicit user request.
+
+Recovery requires a matching native permission request **and reply**, bound to the parent session, tool message,
+host-generated nonce and exact recovery digest. Only a native `once` reply is accepted; `always` is rejected even
+though the request offers no persistent patterns. An automatically allowed `ask()` is insufficient. Surface auto-accept
+excludes this gate, and its UI offers only a one-time decision. Known foreign work remains protected through later
+failed reads: recovery inspection records a protective blocker if it first discovers that evidence, without changing
+the runtime or attempt history. An observed busy runtime without a receipt is not eligible. Rejection, abort, changed scope, new foreign work or
+a receipt discovered during approval leaves the reservation intact. No standing grant is added. Duplicate approved
+calls preserve the first audit receipt. Native permission prompts do not survive a runtime restart; ask again if
+the runtime stopped before committing the recovery.
+
+The plugin has a separate admitted operator maintenance pass, so slow operator metadata cannot hold up domain-owner
+notices. It reconciles jobs and sends durable, actionable parent wakes for progress, blockers and readiness.
+Wakes wait for an idle parent, keep a stable message receipt and never blindly resend an uncertain
 prompt. They are runtime observations, not new permissions. The operator must inspect current job state before acting.
 Completed child evidence retains exact session, prompt, final message and tool-call identities. `synthesize` takes the
 current job digest, all final evidence message IDs and the operator's explanation, then completes the job once. This

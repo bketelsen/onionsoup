@@ -28,6 +28,9 @@ operator, for example: “Investigate the configuration and its tests in paralle
 It can create two bounded child tasks, keep answering your chat, and receive progress and completion events. Jobs
 retain the original request and exact child sessions across runtime restarts. `show` reads progress; `pause`, `resume`
 and `cancel` are scoped to that chat's jobs; `synthesize` records a summary against the children's evidence digest.
+If a runtime outcome remains unknown, `recheck` inspects the same child once. `recovery-preview` and `abandon` let
+the person release that exact reservation through a one-time permission decision. The unknown outcome and transcript
+remain preserved; no replacement is launched and no permission is remembered for later jobs.
 This stage rejects write scopes and does not drive domain owners. See [durable operator investigations](design/owners.md#durable-operator-investigations)
 for recovery behavior and the current limits.
 

@@ -15,7 +15,7 @@ export async function checkOperatorChildMessage(jobs: OperatorJobs, agent: strin
   const bound = await operatorChild(jobs, sessionID);
   if (!bound && agent !== OPERATOR_INVESTIGATOR) return;
   const child = bound?.child;
-  if (!child || agent !== OPERATOR_INVESTIGATOR || child.attempts.at(-1)?.messageID !== messageID
+  if (!child || child.status === 'abandoned' || child.abandonment || agent !== OPERATOR_INVESTIGATOR || child.attempts.at(-1)?.messageID !== messageID
     || child.attempts.at(-1)?.endedAt) throw new Error('operator_child_message_unbound');
 }
 
@@ -24,7 +24,7 @@ export async function checkOperatorChildTool(jobs: OperatorJobs, sessionID: stri
   const bound = await operatorChild(jobs, sessionID);
   if (!bound) return;
   const child = bound.child;
-  if (!child.attempts.length || child.attempts.at(-1)?.endedAt) throw new Error('operator_child_not_running');
+  if (child.status === 'abandoned' || child.abandonment || !child.attempts.length || child.attempts.at(-1)?.endedAt) throw new Error('operator_child_not_running');
   if (!['read', 'glob', 'grep', 'list'].includes(tool)) throw new Error('operator_child_read_only');
   const path = tool === 'read' ? args.filePath : args.path ?? child.directory;
   if (typeof path !== 'string') throw new Error('operator_child_path_required');
