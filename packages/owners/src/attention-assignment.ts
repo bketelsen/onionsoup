@@ -14,7 +14,7 @@ const text = z.string().trim().min(1).max(ATTENTION_ASSIGNMENT_LIMITS.textChars)
 export const AttentionAssignmentInput = z.object({ owner: text, repository: text, title: text, goal: text,
   acceptance: z.array(text).min(1).max(ATTENTION_ASSIGNMENT_LIMITS.criteria) });
 export type AttentionAssignmentInput = z.infer<typeof AttentionAssignmentInput>;
-const Assignment = z.object({ version: z.literal(1), attention: text, sourceOwner: text, by: text, at: z.string(),
+export const Assignment = z.object({ version: z.literal(1), attention: text, sourceOwner: text, by: text, at: z.string(),
   input: AttentionAssignmentInput, proposal: ProposedWork, requestID: z.string().regex(/^r-handoff-[a-f0-9]{64}$/),
   status: z.enum(['pending', 'routed', 'blocked']), attempts: z.number().int().nonnegative(), reason: z.string().optional() });
 type Assignment = z.infer<typeof Assignment>;

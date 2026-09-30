@@ -41,9 +41,9 @@ export const FrictionRecord = z.object({
 }).strict();
 export type FrictionRecord = z.infer<typeof FrictionRecord>;
 
-const Wake = z.object({ id: FrictionRecord.shape.id, at: z.string().datetime(), status: z.literal('pending') });
+export const Wake = z.object({ id: FrictionRecord.shape.id, at: z.string().datetime(), status: z.literal('pending') });
 const Submission = z.object({ id: FrictionRecord.shape.id, journaled: z.boolean(), baseline: z.number().int().nonnegative().optional() });
-const FrictionIndex = z.record(FrictionRecord.shape.id, z.object({ lastSeen: z.string().datetime() }));
+export const FrictionIndex = z.record(FrictionRecord.shape.id, z.object({ lastSeen: z.string().datetime() }));
 const exec = promisify(execFile);
 
 /** Never take paths, command lines, patch content or argument values from tool input. */

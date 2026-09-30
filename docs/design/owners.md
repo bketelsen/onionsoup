@@ -782,3 +782,52 @@ or `origin`; it does not choose another owner's current chat. Once pinned, the o
 The ledger's human notes remain the authoritative correction history. Journal repair covers the current revision;
 if a later revision replaces an older record before journal repair succeeds, the older correction may remain only
 in the ledger. This deliberately adds neither a second historical outbox nor legacy feedback backfill.
+
+### Read-only continuity rollout preview
+
+`owners continuity-preview` reads bounded metadata directly and prints JSON. Unlike runtime readers that discover
+journal entries or repair indices, this command takes no admission/record locks, creates no state directories,
+refreshes no checkout, calls no model, and opens no request. It needs only `--state` and `--declarations` paths;
+it does not load provider credentials or owner model configuration. It has no apply, activate or replay option.
+
+The report includes configured/disabled/invalid friction policy and cutoff; the saved friction index's recent-100
+window, excluded reports and investigation candidates; cached acknowledged attention without assignment; routing
+states of handoffs, assignments and promotions; investigation states; and persisted admission/runner references.
+Candidates still require runtime authority, cadence, source and busy-owner checks. Acknowledgment never makes an
+item eligible for work. Routing status is distinct from the linked request's execution status. Admissions/runners
+are conservative references whose liveness is unknown here; the preview does not certify deployment safety or
+account for all live chats.
+
+Reads are limited to 200 directory entries per category and 1 MiB per file. A larger file or truncated category is
+reported, never interpreted as an empty queue. Attention coverage is its cached index and cutoff, with no transcript
+or journal scan. Friction counts describe indexed captures, not every file on disk. Malformed metadata and missing
+indices are named as unknown without echoing their contents; terminal symlink files are not followed. Directories
+must be the operator-selected state/configuration trees. The snapshot is non-atomic. Its stable selection digest
+excludes sample time and identifies the displayed metadata selection only: it is neither consent nor a backfill
+manifest. Repeat it before reviewing any future explicit selection.
+
+Roll out in small observable steps:
+
+1. Review the preview's scope, unknowns and active-work references. Use existing deployment admission and live-chat
+   checks before any release; do not deploy or interrupt ongoing work on the strength of this report.
+2. Keep friction policy absent while validating an isolated fixture with bounded live inference. Confirm that one
+   report gives one investigation and that normal work still progresses. Provider fallback can use more than one
+   underlying session, so inspect actual cost rather than equating dispatch count with spend.
+3. With explicit operator approval, configure an activation-time cutoff and a conservative cadence for selected new
+   reports. Review the first investigation before choosing **Request this fix**. Verify receiver acceptance, ordinary
+   plan approval, and a concrete acceptance result; a routed request or merged PR alone is not proof friction ended.
+4. Review historical acknowledged items and pre-cutoff wakes individually. This preview does not backfill them.
+   No old note saying “fix this” becomes an assignment, and changing the cutoff is not a safe substitute for review.
+
+Stop new investigation admission if repeated uncertain claims, invalid source/scope, missing evidence, unexpected
+cost, duplicate work or slower existing work appears. Removing the optional friction policy stops future discovery;
+it does not abort the current read-only hire or cancel already requested work. Handle existing requests with their
+normal cancellation/recovery controls after reviewing active work. On rollback, retain additive sidecars and all
+ordinary requests/work records. Older binaries may ignore the new views, but existing requests can still execute;
+rolling back code is not cancellation. Never delete records to make a preview look clean.
+
+Measure usefulness through concrete comparison tasks: fewer repeated human decisions for the same goal; fewer
+facts Brian must relay between owners; fewer eligible obligations stalled across successive previews; and a progress
+answer that names current evidence, uncertainty, blockers and next action. Compare duplicate request identities,
+uncertain/blocked counts and observed inference cost alongside those user outcomes. The preview provides metadata
+counts, not automatic measurements of conversational burden or verified business outcomes.

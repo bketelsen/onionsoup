@@ -14,7 +14,7 @@ export const Attention = z.object({
 });
 export type Attention = z.infer<typeof Attention>;
 const Cursor = z.object({ offset: z.number(), line: z.number(), size: z.number(), complete: z.boolean() });
-const AttentionIndex = z.object({
+export const AttentionIndex = z.object({
   cutoff: z.string(),
   cursors: z.record(z.string(), Cursor),
   entries: z.record(z.string(), Attention),
