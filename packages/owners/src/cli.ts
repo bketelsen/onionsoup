@@ -11,7 +11,7 @@ import { wake } from './owner.ts';
 import { requestDistill } from './memory.ts';
 import { Runtime } from './runtime.ts';
 import { investigateFriction, readFrictionTriage } from './friction-work.ts';
-import { revalidateFriction } from './friction-revalidation.ts';
+import { revalidateFriction, retryFrictionRevalidation } from './friction-revalidation.ts';
 import { askOwner, formatAnswer } from './ask.ts';
 import { approveCreate, approveDelete, denyRequest, processRequests, requestPublish } from './brokering.ts';
 import { DAEMON_LIMITS, daemon, drain, recordDutyRun, tick, type TickLog } from './daemon.ts';
@@ -128,6 +128,15 @@ const COMMANDS: Record<string, Command> = {
   },
   async 'friction-revalidate'(runtime, [id]) {
     console.log(JSON.stringify(await revalidateFriction(runtime, required(id, 'friction id')), null, 2));
+  },
+  async 'friction-revalidation-retry'(runtime, [id, referenceCommit, failedToken]) {
+    const approval = {
+      referenceCommit: required(referenceCommit, 'reference commit'),
+      failedToken: required(failedToken, 'failed claim token'),
+      authorizedBy: userInfo().username,
+    };
+    const retried = await retryFrictionRevalidation(runtime, required(id, 'friction id'), approval);
+    console.log(JSON.stringify(retried, null, 2));
   },
   async 'friction-investigation'(runtime, [id]) {
     const selected = required(id, 'friction id');

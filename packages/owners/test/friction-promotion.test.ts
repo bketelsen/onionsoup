@@ -15,6 +15,7 @@ async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'friction-promotion-'));
   const runtime = await Runtime.open({ declarations: 'packages/owners/test/fixtures/owners', state: join(root, 'state') });
   runtime.declarations.root = root;
+  runtime.preflightHire = async () => {};
   const workspace = join(root, 'source');
   await mkdir(workspace);
   runtime.declarations.owners.get('clippy')!.workspace = workspace;

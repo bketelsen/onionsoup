@@ -10,7 +10,7 @@ import { Notebook } from './notebook.ts';
 import { Requests } from './requests.ts';
 import { Initiatives } from './initiatives.ts';
 import { Reminders } from './reminders.ts';
-import { Freelancers, HireError, sandboxedHire, type ConnectHire, type HireRequest } from './opencode.ts';
+import { Freelancers, HireError, sandboxedHire, preflightHireExecutable, type ConnectHire, type HireRequest } from './opencode.ts';
 import { ProviderHealthStore, providerOf, recordProviderFailure, recordProviderSuccess, type ProviderError } from './provider-health.ts';
 
 export const RUNTIME_LIMITS = { findingChars: 2_000 };
@@ -53,6 +53,8 @@ export class Runtime {
   readonly providerHealth: ProviderHealthStore;
   /** Replaceable so tests script a hire's opencode instead of starting a sandbox. */
   connectHire: ConnectHire = sandboxedHire;
+  /** Replaceable alongside scripted hires; checks launch availability without starting a session. */
+  preflightHire = preflightHireExecutable;
   /** Replaceable so tests never touch real incus. */
   incus: IncusClient = cliIncus;
   /** Replaceable transport so request tests never touch a real NAS. */

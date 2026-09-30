@@ -1,5 +1,7 @@
 import { execFile } from 'node:child_process';
-import { dirname, join, relative } from 'node:path';
+import { dirname, join, relative, resolve, delimiter } from 'node:path';
+import { access, stat } from 'node:fs/promises';
+import { constants } from 'node:fs';
 import { promisify } from 'node:util';
 import { createOpencodeClient } from '@opencode-ai/sdk/v2/client';
 import { Agent } from 'undici';
@@ -11,6 +13,20 @@ import { lacksStructuredOutput, opencodeProviders, redactApiKeys, type DeclaredP
 import { freePort, spawnSandboxed, stopSandboxed } from './sandbox.ts';
 
 const run = promisify(execFile);
+
+/** Resolve the same PATH used by the sandbox without executing OpenCode or making an inference. */
+export async function preflightHireExecutable(directory: string, searchPath = process.env.PATH ?? '/usr/bin:/bin') {
+  for (const entry of searchPath.split(delimiter)) {
+    const candidate = resolve(directory, entry, 'opencode');
+    try {
+      await access(candidate, constants.X_OK);
+      if ((await stat(candidate)).isFile()) return;
+    } catch (error) {
+      if (!['ENOENT', 'ENOTDIR', 'EACCES'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error;
+    }
+  }
+  throw new Error('hire_executable_unavailable');
+}
 
 export const HIRE_LIMITS = { heartbeatMs: 30_000, timeoutMs: 20 * 60_000, serverStartMs: 30_000, permissionPollMs: 2_000, serverOutputChars: 500 };
 

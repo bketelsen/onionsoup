@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile, chmod, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { FrictionInvestigation, type FrictionTriage } from '../src/friction-work.ts';
-import { effectiveTriage, frictionFreshness, investigationDirectory, readRevisions, revalidateFriction, writeRevision } from '../src/friction-revalidation.ts';
+import { effectiveTriage, frictionFreshness, investigationDirectory, readRevisions, revalidateFriction,
+  retryFrictionRevalidation, writeRevision } from '../src/friction-revalidation.ts';
+import { preflightHireExecutable } from '../src/opencode.ts';
 import { Runtime } from '../src/runtime.ts';
 
 const id = 'fr_012345678901234567890123';
@@ -20,6 +22,7 @@ async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'friction-revalidation-'));
   const runtime = await Runtime.open({ declarations: 'packages/owners/test/fixtures/owners', state: join(root, 'state') });
   runtime.declarations.root = root;
+  runtime.preflightHire = async () => {};
   const owner = runtime.declarations.owners.get('clippy')!;
   const workspace = join(root, 'source');
   owner.workspace = workspace;
@@ -198,6 +201,7 @@ test('different reference commits concurrently allocate distinct revisions witho
       'commit', '--allow-empty', '-m', 'different reference']);
     other = await Runtime.open({ declarations: 'packages/owners/test/fixtures/owners', state: join(state.root, 'state') });
     other.declarations.root = state.root;
+    other.preflightHire = async () => {};
     other.declarations.owners.get('clippy')!.workspace = otherWorkspace;
     let calls = 0;
     const hire: typeof state.runtime.hire = async (_owner, request) => {
@@ -481,4 +485,197 @@ test('already-fixed requires observed evidence and fixedBy, and excludes propose
     proposedWork: originalInvestigation.proposedWork }).success, false);
   assert.equal(FrictionInvestigation.safeParse({ ...originalInvestigation, fixedBy: 'a'.repeat(40) }).success, false);
   assert.equal(FrictionInvestigation.safeParse({ ...base, fixedBy: 'a'.repeat(40) }).success, true);
+});
+
+
+async function failInitial(state: Awaited<ReturnType<typeof fixture>>) {
+  await enabled(state);
+  state.runtime.hire = async () => { throw new Error('failure may have occurred after inference'); };
+  const failed = await revalidateFriction(state.runtime, id);
+  if (failed.state !== 'failed' || !failed.token) throw new Error('expected failed claim');
+  const path = join(investigationDirectory(state.runtime, id), `claim-${state.second}.json`);
+  return { failed, path, bytes: await readFile(path, 'utf8'),
+    approval: { referenceCommit: state.second, failedToken: failed.token, authorizedBy: 'fixture-person' } };
+}
+
+test('explicit retry preserves original bytes and allows one additional hire with idempotent completion', async () => {
+  const state = await fixture();
+  try {
+    const initial = await failInitial(state);
+    const original = await readFile(state.originalPath, 'utf8');
+    const calls = scriptedHire(state);
+    const retried = await retryFrictionRevalidation(state.runtime, id, initial.approval);
+    assert.equal(retried.state, 'done');
+    if (retried.state !== 'done') throw new Error('expected completed retry');
+    assert.equal(retried.retry?.failedToken, initial.failed.token);
+    assert.equal(retried.retry?.authorizedBy, 'fixture-person');
+    assert.equal(retried.retry?.referenceCommit, state.second);
+    assert.equal(retried.retry?.at, retried.at);
+    assert.deepEqual(JSON.parse(await readFile(initial.path, 'utf8')).retry,
+      { ...initial.approval, at: retried.at });
+    assert.notEqual(retried.token, initial.failed.token);
+    assert.equal(retried.revision?.investigation.disposition, 'already-fixed');
+    assert.equal(await readFile(initial.path + '.failed-attempt.json', 'utf8'), initial.bytes);
+    assert.equal(await readFile(state.originalPath, 'utf8'), original);
+    assert.deepEqual(await retryFrictionRevalidation(state.runtime, id, initial.approval), retried);
+    assert.deepEqual(await revalidateFriction(state.runtime, id), retried);
+    assert.equal(calls(), 1);
+    assert.equal((await readRevisions(state.runtime, id)).length, 1);
+    assert.deepEqual(await state.runtime.requests.list(), []);
+  } finally { await state.cleanup(); }
+});
+
+test('failed explicit retry cannot replenish its budget with either token', async () => {
+  const state = await fixture();
+  try {
+    const initial = await failInitial(state);
+    let calls = 0;
+    state.runtime.hire = async () => { calls++; throw new Error('Bearer SECRET'); };
+    const retried = await retryFrictionRevalidation(state.runtime, id, initial.approval);
+    assert.equal(retried.state, 'failed');
+    if (retried.state !== 'failed') throw new Error('expected failed retry');
+    assert.deepEqual(await retryFrictionRevalidation(state.runtime, id, initial.approval), retried);
+    await assert.rejects(retryFrictionRevalidation(state.runtime, id,
+      { ...initial.approval, failedToken: retried.token! }), /retry_not_eligible/);
+    assert.deepEqual(await revalidateFriction(state.runtime, id), retried);
+    assert.doesNotMatch(await readFile(initial.path, 'utf8'), /SECRET/);
+    assert.equal(calls, 1);
+    assert.deepEqual(await readRevisions(state.runtime, id), []);
+  } finally { await state.cleanup(); }
+});
+
+test('concurrent human retries acquire one replacement and never dispatch twice', async () => {
+  const state = await fixture();
+  let release!: () => void;
+  let entered!: () => void;
+  const started = new Promise<void>(resolve => { entered = resolve; });
+  const pending = new Promise<void>(resolve => { release = resolve; });
+  try {
+    const initial = await failInitial(state);
+    const calls = scriptedHire(state);
+    const hire = state.runtime.hire;
+    state.runtime.hire = async (...args) => { entered(); await pending; return hire(...args); };
+    const attempts = [retryFrictionRevalidation(state.runtime, id, initial.approval),
+      retryFrictionRevalidation(state.runtime, id, initial.approval)];
+    await started;
+    assert.equal((await retryFrictionRevalidation(state.runtime, id, initial.approval)).state, 'running');
+    assert.equal((await revalidateFriction(state.runtime, id)).state, 'running');
+    release();
+    assert.ok((await Promise.all(attempts)).some(claim => claim.state === 'done'));
+    assert.equal(calls(), 1);
+    assert.equal((await readRevisions(state.runtime, id)).length, 1);
+    assert.equal(await readFile(initial.path + '.failed-attempt.json', 'utf8'), initial.bytes);
+  } finally { release(); await state.cleanup(); }
+});
+
+test('interruption after archival resumes only an identical failed attempt', async () => {
+  const state = await fixture();
+  try {
+    const initial = await failInitial(state);
+    await writeFile(initial.path + '.failed-attempt.json', initial.bytes);
+    const calls = scriptedHire(state);
+    assert.equal((await retryFrictionRevalidation(state.runtime, id, initial.approval)).state, 'done');
+    assert.equal(calls(), 1);
+    assert.equal(await readFile(initial.path + '.failed-attempt.json', 'utf8'), initial.bytes);
+  } finally { await state.cleanup(); }
+});
+
+test('conflicting archive blocks retry without replacing failed claim or hiring', async () => {
+  const state = await fixture();
+  try {
+    const initial = await failInitial(state);
+    await writeFile(initial.path + '.failed-attempt.json', '{}');
+    const calls = scriptedHire(state);
+    await assert.rejects(retryFrictionRevalidation(state.runtime, id, initial.approval), /retry_history_conflict/);
+    assert.equal(await readFile(initial.path, 'utf8'), initial.bytes);
+    assert.equal(await readFile(initial.path + '.failed-attempt.json', 'utf8'), '{}');
+    assert.equal(calls(), 0);
+  } finally { await state.cleanup(); }
+});
+
+for (const condition of ['running', 'dead', 'uncertain', 'malformed', 'wrong-token', 'wrong-commit', 'revision']) {
+  test(`${condition} refuses a human retry without hiring or losing history`, async () => {
+    const state = await fixture();
+    try {
+      const initial = await failInitial(state);
+      const claims: Record<string, unknown> = {
+        running: { ...initial.failed, state: 'running', runner: process.pid },
+        dead: { ...initial.failed, state: 'running', runner: 2147483647 },
+        uncertain: { ...initial.failed, state: 'uncertain' },
+      };
+      if (condition in claims) await writeFile(initial.path, JSON.stringify(claims[condition]));
+      if (condition === 'malformed') await writeFile(initial.path, '{');
+      if (condition === 'revision') await writeRevision(state.runtime, { version: 1, id, revision: 1,
+        previousCommit: state.first, sourceCommit: state.second, reason: 'source_stale',
+        state: 'blocked', at, investigation: originalInvestigation });
+      const calls = scriptedHire(state);
+      await assert.rejects(retryFrictionRevalidation(state.runtime, id, { ...initial.approval,
+        ...(condition === 'wrong-token' ? { failedToken: 'other-attempt' } : {}),
+        ...(condition === 'wrong-commit' ? { referenceCommit: state.first } : {}),
+      }), /friction_revalidation_/);
+      assert.equal(calls(), 0);
+      assert.equal((await readdir(investigationDirectory(state.runtime, id))).includes(
+        `claim-${state.second}.json.failed-attempt.json`), false);
+    } finally { await state.cleanup(); }
+  });
+}
+
+test('dead retry remains uncertain and cannot start a third attempt', async () => {
+  const state = await fixture();
+  try {
+    const initial = await failInitial(state);
+    await writeFile(initial.path + '.failed-attempt.json', initial.bytes);
+    await writeFile(initial.path, JSON.stringify({ state: 'running', runner: 2147483647, token: 'retry-token', at,
+      retry: { ...initial.approval, at } }));
+    const calls = scriptedHire(state);
+    assert.equal((await retryFrictionRevalidation(state.runtime, id, initial.approval)).state, 'uncertain');
+    assert.equal((await retryFrictionRevalidation(state.runtime, id, initial.approval)).state, 'uncertain');
+    assert.equal(calls(), 0);
+    assert.equal(await readFile(initial.path + '.failed-attempt.json', 'utf8'), initial.bytes);
+  } finally { await state.cleanup(); }
+});
+
+test('missing executable preflight consumes neither initial claim nor human retry', async () => {
+  const state = await fixture();
+  try {
+    await enabled(state);
+    const executable = join(state.root, 'bin');
+    await mkdir(executable);
+    state.runtime.preflightHire = directory => preflightHireExecutable(directory, executable);
+    const calls = scriptedHire(state);
+    await assert.rejects(revalidateFriction(state.runtime, id), /hire_executable_unavailable/);
+    assert.equal(calls(), 0);
+    const claimPath = join(investigationDirectory(state.runtime, id), `claim-${state.second}.json`);
+    await assert.rejects(readFile(claimPath), { code: 'ENOENT' });
+    // Executable resolution is a filesystem-only check: this script must never run.
+    const binary = join(executable, 'opencode');
+    await writeFile(binary, '#!/bin/sh\nexit 77\n');
+    await chmod(binary, 0o755);
+    const initial = await failInitial(state);
+    await rm(binary);
+    await assert.rejects(retryFrictionRevalidation(state.runtime, id, initial.approval), /hire_executable_unavailable/);
+    assert.equal(await readFile(initial.path, 'utf8'), initial.bytes);
+    await assert.rejects(readFile(initial.path + '.failed-attempt.json'), { code: 'ENOENT' });
+    await writeFile(binary, '#!/bin/sh\nexit 77\n');
+    await chmod(binary, 0o755);
+    const retries = scriptedHire(state);
+    assert.equal((await retryFrictionRevalidation(state.runtime, id, initial.approval)).state, 'done');
+    assert.equal(retries(), 1);
+  } finally { await state.cleanup(); }
+});
+
+test('executable preflight rejects nonexecutable files and directories and resolves relative PATH at hire directory', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'hire-executable-'));
+  try {
+    await mkdir(join(root, 'bin'));
+    await writeFile(join(root, 'bin', 'opencode'), 'not executable');
+    await assert.rejects(preflightHireExecutable(root, 'bin'), /hire_executable_unavailable/);
+    await rm(join(root, 'bin', 'opencode'));
+    await mkdir(join(root, 'bin', 'opencode'));
+    await assert.rejects(preflightHireExecutable(root, 'bin'), /hire_executable_unavailable/);
+    await rm(join(root, 'bin', 'opencode'), { recursive: true });
+    await writeFile(join(root, 'bin', 'opencode'), '#!/bin/sh\nexit 77\n');
+    await chmod(join(root, 'bin', 'opencode'), 0o755);
+    await preflightHireExecutable(root, 'bin');
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
