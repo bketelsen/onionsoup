@@ -62,7 +62,7 @@ async function records(runtime: Runtime, status: 'pending' | 'delivered' | 'unde
 
 test('recent activity includes autonomous work and fresh decisions, honors retractions, and ignores old or malformed records', async () => {
   const { runtime, notebook } = await fixture();
-  for (const kind of ['asked', 'answered', 'work-status', 'ci-triage', 'attention', 'owner-created', 'owner-updated', 'owner-retired']) {
+  for (const kind of ['asked', 'answered', 'work-status', 'ci-triage', 'attention', 'attention-condition', 'owner-created', 'owner-updated', 'owner-retired']) {
     await notebook.journal({ kind, note: `${kind} context` });
   }
   await notebook.journal({ kind: 'chat-decision', note: 'cancelled choice', quote: 'original words' });
