@@ -266,6 +266,10 @@ async function tickAdmitted(runtime: Runtime, log: TickLog) {
   }
   try {
     await recoverAskHandoffs(runtime, log.error);
+  } catch (error) {
+    log.error('handoffs', error);
+  }
+  try {
     await runtime.requests.markInterrupted();
     await runRequests(runtime, log);
   } catch (error) {

@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import type { HireRequest } from '../src/opencode.ts';
 import { Runtime } from '../src/runtime.ts';
 import { askOwner } from '../src/ask.ts';
+import { tick } from '../src/daemon.ts';
 import { Answer, readAskHandoff, recoverAskHandoffs, routeAskHandoff, saveAskHandoff, withAskConsultation, type HandoffInput } from '../src/ask-handoffs.ts';
 
 const input: HandoffInput = {
@@ -17,6 +18,22 @@ const answer: Answer = {
   proposedWork: { title: 'Repair typo', goal: 'Correct the spelling', rationale: 'README.md',
     acceptance: ['Correct spelling appears in README.md'], size: 'small', repository: 'example/clippy' },
 };
+
+test('an unreadable handoff store cannot stall ordinary request recovery', async () => {
+  const runtime = await setup();
+  await writeFile(join(runtime.stateDirectory, 'handoffs'), 'not a directory');
+  runtime.declarations.owners.clear();
+  runtime.reloadDeclarations = async () => {};
+  let recovered = false;
+  runtime.requests.markInterrupted = async () => { recovered = true; return 0; };
+  const errors: string[] = [];
+  await tick(runtime, {
+    duty: () => {}, item: () => {}, request: () => {},
+    error: context => { errors.push(context); },
+  });
+  assert.equal(recovered, true);
+  assert.ok(errors.includes('handoffs'));
+});
 async function setup() {
   const runtime = await Runtime.open({ declarations: 'packages/owners/test/fixtures/owners', state: await mkdtemp(join(tmpdir(), 'ask-handoff-')) });
   for (const owner of runtime.declarations.owners.values()) await runtime.notebook(owner.id).ensure('# Test');
