@@ -294,6 +294,10 @@ async function tickAdmitted(runtime: Runtime, log: TickLog) {
   }
   try {
     await recoverAttentionAssignments(runtime, log.error);
+  } catch (error) {
+    log.error('attention assignments', error);
+  }
+  try {
     await recoverAskHandoffs(runtime, log.error);
   } catch (error) {
     log.error('handoffs', error);

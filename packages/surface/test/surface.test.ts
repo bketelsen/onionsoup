@@ -818,6 +818,9 @@ test('attention assignment route preserves Seen and exposes linked gated request
     const first = await call('POST', '/api/decide', { action: 'assign-attention', id: attention.id, assignment });
     assert.match(String(first.body.outcome), /pending-owner/);
     await call('POST', '/api/decide', { action: 'assign-attention', id: attention.id, assignment });
+    const retried = await call('POST', '/api/decide', { action: 'retry-attention-assignment', id: attention.id });
+    assert.equal(retried.status, 200);
+    assert.equal(retried.body.outcome, 'pending-owner');
     const requests = await runtime.requests.list();
     assert.equal(requests.length, 1);
     const request = requests[0];

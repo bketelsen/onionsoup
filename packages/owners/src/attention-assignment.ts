@@ -68,6 +68,11 @@ export async function assignAttention(runtime: Runtime, id: string, input: Atten
     const existing = await read(runtime, id);
     if (existing) {
       if (JSON.stringify(existing.input) !== JSON.stringify(parsed)) throw new Error('attention_assignment_conflict');
+      // Explicit resubmission permits another bounded routing attempt, never reopens a request.
+      if (existing.status === 'blocked') {
+        validateTarget(runtime, parsed);
+        await save(runtime, { ...existing, status: 'pending', attempts: 0, reason: undefined });
+      }
       return;
     }
     const attention = (await listAttention(runtime)).find(entry => entry.id === id);
@@ -80,6 +85,12 @@ export async function assignAttention(runtime: Runtime, id: string, input: Atten
       status: 'pending', attempts: 0 }));
   });
   return route(runtime, id);
+}
+
+export async function retryAttentionAssignment(runtime: Runtime, id: string, by: string) {
+  const assignment = await read(runtime, id);
+  if (!assignment) throw new Error('attention_assignment_missing');
+  return assignAttention(runtime, id, assignment.input, by);
 }
 
 export async function attentionAssignmentView(runtime: Runtime, id: string): Promise<AttentionAssignmentView | undefined> {

@@ -16,6 +16,7 @@ export function AttentionAssignment({ entry, busy, decide }: {
     Assigned by {assignment.by} to {assignment.owner}: {assignment.status === 'pending-owner' ? 'awaiting owner acceptance' : assignment.status}.
     <div className="font-mono break-all">{assignment.requestID}</div>
     {assignment.reason && <div>{assignment.reason}</div>}
+    {assignment.status === 'blocked' && <Button disabled={busy} onClick={() => void decide('retry-attention-assignment')}>Retry assignment</Button>}
     {assignment.workItem && <Button variant="ghost" onClick={() => navigate('item', assignment.workItem!)}>View linked work</Button>}
     <div>This remains unresolved until its outcome is verified.</div>
   </div>;

@@ -724,7 +724,7 @@ needed to submit this concrete request. The inbox displays its request status an
 Repeated identical submissions adopt the request without reopening completed/denied work; changed input conflicts.
 A daemon recovery pass handles only new explicit assignment sidecars, with current configuration checked before
 new request creation and existing identities adopted after a crash. It attempts at most 20 pending assignments
-per tick and stops after three transient failures or one invalid-scope failure. There is no legacy backfill.
+per tick; each assignment stops after three routing failures or one invalid-scope failure. An explicit **Retry assignment** revalidates current scope and grants another bounded routing budget, adopting any existing request without restarting it. The original assignment author remains its provenance. There is no legacy backfill.
 Assignment does not acknowledge, resolve or cancel the attention entry, and resolving attention does not cancel
 its independently gated work request. This first version supports one immutable assignment per attention item;
-reassignment/generations and an assignment recovery UI are follow-ups. Stop existing work through its normal controls.
+reassignment/generations remain follow-ups. Stop existing work through its normal controls.

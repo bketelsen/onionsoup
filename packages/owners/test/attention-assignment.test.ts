@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { Runtime } from '../src/runtime.ts';
 import { listAttention, changeAttention } from '../src/attention.ts';
-import { assignAttention, attentionAssignmentView, recoverAttentionAssignments } from '../src/attention-assignment.ts';
+import { assignAttention, attentionAssignmentView, recoverAttentionAssignments, retryAttentionAssignment } from '../src/attention-assignment.ts';
 
 const input = { owner: 'clippy', repository: 'example/clippy', title: 'Repair check', goal: 'Make check work', acceptance: ['Regression check passes'] };
 async function setup() {
@@ -82,4 +82,22 @@ test('changed assignment conflicts, and repeated submission never restarts a den
   assert.equal((await assignAttention(runtime, attention.id, input, 'Brian')).status, 'denied');
   await assert.rejects(assignAttention(runtime, attention.id, { ...input, goal: 'Different goal' }, 'Brian'), /attention_assignment_conflict/);
   assert.equal((await runtime.requests.list()).length, 1);
+});
+
+test('transient routing stops after its budget and explicit retry recovers the same assignment', async () => {
+  const { runtime, attention } = await setup();
+  const open = runtime.requests.openIdentified.bind(runtime.requests);
+  let attempts = 0;
+  runtime.requests.openIdentified = async () => { attempts++; throw new Error('storage_unavailable'); };
+  await assert.rejects(assignAttention(runtime, attention.id, input, 'Brian'));
+  const errors: unknown[] = [];
+  for (let tick = 0; tick < 5; tick++) await recoverAttentionAssignments(runtime, (_id, error) => errors.push(error));
+  assert.equal(attempts, 3);
+  assert.equal((await attentionAssignmentView(runtime, attention.id))?.status, 'blocked');
+  runtime.requests.openIdentified = open;
+  const request = await retryAttentionAssignment(runtime, attention.id, 'Brian');
+  assert.equal(request.status, 'pending-owner');
+  assert.equal((await runtime.requests.list()).length, 1);
+  await runtime.requests.update(request.id, current => ({ ...current, status: 'denied', reason: 'No' }));
+  assert.equal((await retryAttentionAssignment(runtime, attention.id, 'Brian')).status, 'denied');
 });

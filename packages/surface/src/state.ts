@@ -3,7 +3,7 @@ import { z } from 'zod';
 import {
   approveCreate, approveDelete, approvePlan, approvePush, chatDirectory, denyRequest, deskState, describeAsk,
   domainSummary, itemText, revisePlan, resumeItem, retryItem, cancelItem, memoryFingerprint, type ResourceRequest, type Runtime,
-  AttentionAssignmentInput, assignAttention, attentionAssignmentView, attentionAssignmentTargets, type AttentionAssignmentView,
+  AttentionAssignmentInput, assignAttention, retryAttentionAssignment, attentionAssignmentView, attentionAssignmentTargets, type AttentionAssignmentView,
   listAttention, changeAttention, recoverRequest, reconcileRequest,
   listFriction, frictionDetail, readFrictionTriage, type FrictionRecord,
   approveInitiative, reviseInitiative, cancelInitiative, initiativeViews, managerOf, planGrantFor, cancelReminder,
@@ -534,6 +534,7 @@ export class SurfaceState {
       'reconcile-request': async () => (await reconcileRequest(this.runtime, decision.id)).status,
       'retry-request': async () => (await recoverRequest(this.runtime, decision.id, 'retry', by, required(reason, 'reason'))).status,
       'cancel-request': async () => (await recoverRequest(this.runtime, decision.id, 'cancel', by, required(reason, 'reason'))).status,
+      'retry-attention-assignment': async () => (await retryAttentionAssignment(this.runtime, decision.id, by)).status,
       'assign-attention': async () => {
         if (!decision.assignment) throw new Error('attention_assignment_required');
         const request = await assignAttention(this.runtime, decision.id, decision.assignment, by);
