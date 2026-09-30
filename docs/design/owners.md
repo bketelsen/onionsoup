@@ -274,8 +274,29 @@ records them as unavailable), and only observed failed
 tool events, never raw arguments. Host-side records under `state/friction` are bounded and deduplicated by a
 versioned owner/tool/error-class signature; when no failure event was observed, prose-based matches are marked
 provisional. Each submission journals a short `friction` activity entry, and a new signature leaves one durable
-pending wake intent. The surface lists these reports and links to the first reporting chat. Capture does not yet
-consume the intent, notify Leto, provide a workaround or draft/publish a GitHub issue.
+pending wake intent. The surface lists these reports and links to the first reporting chat. Capture itself never dispatches work. Optional `friction-triage.json` in the config directory declares
+`{ "version": 1, "owner": "maintainer-id", "repository": "org/repo", "enabledSince": "ISO timestamp", "intervalMs": 3600000 }`.
+The owner must own that repository. With no file, triage is disabled. A configured daemon considers only reports
+first seen on or after the cutoff, among the most recent 100 reports. It schedules at most one read-only
+investigation per interval (minimum one minute), after existing requests and while the maintainer has no reserved,
+runnable or running work. Admission and owner reservations keep it off deployment and existing worker paths.
+
+The worker reads the existing clean checkout, records its commit, and explicitly labels remote freshness unknown;
+it never fetches, resets or gathers infrastructure snapshots. A sandboxed owner hire returns observed/inferred/unknown
+facts and either a bounded proposed fix in that repository, missing evidence, or no action. A versioned sidecar in
+`state/friction/investigations/<id>.json` holds the claim, result, session and cost. Original reports and pending wake
+files stay compatible; the sidecar is the processing status. Repeated discoveries adopt the saved result. A crashed
+claim becomes `blocked: friction_triage_delivery_uncertain`; inference failures stop without automatic paid retries.
+The cadence timestamp is durable before dispatch; a crash there may delay dispatch by one interval. The underlying
+hire has the existing timeout and structured-output fallback/resend behavior; this is a dispatch bound, not a dollar cap.
+
+The Friction list/detail shows processing status and the proposed fix with its evidence; no new inbox item is created.
+`owners friction-investigation <id>` reads the result. `owners friction-triage <id>` explicitly investigates one
+selected eligible wake under the CLI runtime lock (it cannot run beside the daemon). This operator command bypasses
+the daemon cadence but cannot repeat a saved/uncertain investigation. Neither path sends messages, opens requests,
+publishes issues, edits code, or claims a fix completed. Promoting a reviewed proposal uses the ordinary work/plan/effect
+gates. Disabling policy stops new dispatch; it does not cancel an already running read-only hire. No policy is installed
+by an upgrade; choosing an activation-time cutoff preserves legacy pending wakes for separate approved backfill.
 
 ### Requests between owners
 

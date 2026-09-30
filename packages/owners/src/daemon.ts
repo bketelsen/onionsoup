@@ -1,4 +1,5 @@
 import { noticeRequestProgress } from './request-status.ts';
+import { consumeFrictionWake, nextFrictionInvestigation } from './friction-work.ts';
 import { recoverAskHandoffs } from './ask-handoffs.ts';
 import { canReconcileRequest, reconcileRequest } from './request-recovery.ts';
 import { readFile, writeFile } from 'node:fs/promises';
@@ -86,11 +87,12 @@ const requestOwners = new Set<string>();
 
 const items = new Background(DAEMON_LIMITS.parallelItems);
 const duties = new Background(DAEMON_LIMITS.parallelDuties);
+const friction = new Background(1);
 const memories = new Background(DAEMON_LIMITS.parallelMemory);
 
 /** Wait for background work the ticks started. */
 export async function drain() {
-  await Promise.all([items.drain(), duties.drain(), memories.drain(), requests.drain()]);
+  await Promise.all([items.drain(), duties.drain(), memories.drain(), requests.drain(), friction.drain()]);
 }
 
 export interface TickLog {
@@ -185,7 +187,7 @@ export async function scheduleMemory(runtime: Runtime, log: TickLog, unavailable
 /** Requests sharing either owner serialize; different owners progress up to the configured cap. */
 async function runRequests(runtime: Runtime, log: TickLog) {
   const busyOwners = new Set([...items.keys(), ...duties.keys()].map(key => key.split('/')[0]));
-  for (const ownerId of memories.keys()) busyOwners.add(ownerId);
+  for (const ownerId of [...memories.keys(), ...friction.keys()]) busyOwners.add(ownerId);
   for (const item of await runtime.ledger.list()) {
     if (item.activeRunner !== undefined && requestRunnerIsAlive(item.activeRunner)) busyOwners.add(item.owner);
   }
@@ -224,12 +226,32 @@ async function runRequests(runtime: Runtime, log: TickLog) {
 }
 
 async function reservedRequestOwners(runtime: Runtime) {
-  const reserved = new Set(requestOwners);
+  const reserved = new Set([...requestOwners, ...friction.keys()]);
   for (const request of await runtime.requests.list()) {
     if (!request.operation?.runner || !requestRunnerIsAlive(request.operation.runner)) continue;
     for (const owner of requestParticipants(runtime, request)) reserved.add(owner);
   }
   return reserved;
+}
+
+/** Lowest-priority investigation: no refresh or work dispatch, and one bounded hire off the tick. */
+export async function scheduleFriction(runtime: Runtime, log: TickLog, reserved: ReadonlySet<string>) {
+  if (friction.size) return;
+  const selected = await nextFrictionInvestigation(runtime);
+  if (!selected || reserved.has(selected.owner) || memories.has(selected.owner)) return;
+  const busy = [...items.keys(), ...duties.keys()].some(key => key.split('/')[0] === selected.owner);
+  if (busy) return;
+  const work = await runtime.ledger.list();
+  if (work.some(item => item.owner === selected.owner && (item.activeRunner || isRunnable(item)))) return;
+  await friction.start(selected.owner, async () => {
+    try {
+      const investigation = await consumeFrictionWake(runtime, selected);
+      if (investigation) log.duty(selected.owner, 'friction-triage',
+        `${investigation.id}: ${investigation.state}`);
+    } catch (error) {
+      log.error('friction triage', error);
+    }
+  }, runtime.stateDirectory, 'daemon-friction');
 }
 
 /**
@@ -288,6 +310,12 @@ async function tickAdmitted(runtime: Runtime, log: TickLog) {
   } catch (error) {
     log.error('request reservations', error);
     return; // Retry next tick when the owner reservations can be read safely.
+  }
+  try {
+    await scheduleFriction(runtime, log, reserved);
+    reserved = new Set([...reserved, ...friction.keys()]);
+  } catch (error) {
+    log.error('friction triage', error);
   }
   await runDueDuties(runtime, log, reserved);
   const runnable = (await runtime.ledger.list()).filter(isRunnable);

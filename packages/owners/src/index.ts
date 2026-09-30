@@ -47,3 +47,5 @@ export {
   beginAdmission, listAdmissions, armDeployment, markDeploymentWaiting, beginDrain, releaseDrain,
   type AdmissionLease,
 } from './deployment-admission.ts';
+
+export { readFrictionTriage, type FrictionTriage } from './friction-work.ts';

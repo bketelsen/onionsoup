@@ -300,7 +300,16 @@ test('HTTP friction views show bounded safe records and the originating chat wit
     assert.equal(listing.length, 2);
     assert.equal(listing.find(entry => entry.id === first.id)?.count, 2);
     assert.equal(listing.find(entry => entry.id === first.id)?.sessionID, 'ses_original');
+    await mkdir(join(runtime.stateDirectory, 'friction/investigations'), { recursive: true });
+    await writeFile(join(runtime.stateDirectory, 'friction/investigations', `${first.id}.json`), JSON.stringify({
+      version: 1, id: first.id, policy: { version: 1, owner: 'bellonda', repository: 'example/wiki', enabledSince: first.firstSeen },
+      state: 'investigated', runner: 1234, token: 'private-claim-token', sessionID: 'private-hire-session',
+      createdAt: first.firstSeen, updatedAt: first.lastSeen,
+      investigation: { disposition: 'needs-evidence', observed: [], inferred: [], unknown: ['Need a reproduction'] },
+    }));
     const detail = await call('GET', `/api/friction/${first.id}`);
+    assert.match(JSON.stringify(detail.body), /Need a reproduction/);
+    assert.doesNotMatch(JSON.stringify(detail.body), /private-claim-token|private-hire-session|runner/);
     assert.equal(detail.status, 200);
     assert.equal(detail.body.summary, '<script>alert(1)</script>');
     assert.doesNotMatch(JSON.stringify([listing, detail.body]), /secret\/desk|command|\.env/);
