@@ -17,7 +17,7 @@ for (const [name, workspace] of workspaces) {
   for (const file of await sources(join(workspace.directory, 'src'))) {
     const source = ts.createSourceFile(file, await readFile(file, 'utf8'), ts.ScriptTarget.Latest, true);
     function check(specifier) {
-      if (specifier.startsWith('node:')) return;
+      if (specifier.startsWith('node:') || specifier === 'bun:sqlite') return;
       if (specifier.startsWith('.')) {
         const target = resolve(dirname(file), specifier);
         if (relative(join(workspace.directory, 'src'), target).startsWith('..')) throw new Error(`${file}: relative import escapes package: ${specifier}`);

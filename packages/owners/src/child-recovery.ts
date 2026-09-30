@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, readdir, open, link, unlink, realpath } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
+import { openRecoveryDatabase } from './recovery-database.ts';
 import { z } from 'zod';
 
 const identifier = z.string().regex(/^ses_[a-zA-Z0-9]+$/);
@@ -31,7 +31,7 @@ function recoveryPath(state: string, id: string) {
 /** Consistent, read-only snapshot. No stored format, message, ancestry or finish marker is rewritten. */
 export function childRecoverySnapshot(input: ChildIdentity, database = childRecoveryDatabase()) {
   const identity = ChildIdentity.parse(input);
-  const db = new DatabaseSync(database, { readOnly: true });
+  const db = openRecoveryDatabase(database);
   try {
     db.exec('BEGIN');
     const session = SessionRow.parse(db.prepare('select * from session where id = ?').get(identity.childID));

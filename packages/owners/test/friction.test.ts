@@ -112,7 +112,10 @@ test('unknown error shapes retain a safe discriminator and do not merge distinct
   assert.equal(first.id, repeat.id);
   assert.notEqual(first.id, different.id);
   assert.equal((await readdir(join(state, 'friction', 'wakes'))).filter(file => file.endsWith('.json')).length, 2);
-  assert.doesNotMatch(JSON.stringify(await listFriction(runtime)), /SECRET|387|499|127|\/secret\//);
+  const records = await listFriction(runtime);
+  assert.doesNotMatch(JSON.stringify(records), /SECRET|\/secret\//);
+  // Generated timestamps and IDs can coincidentally contain these numbers. Check the sanitized failures.
+  assert.doesNotMatch(JSON.stringify(records.flatMap(record => record.failures)), /387|499|127/);
   assert.equal(safeToolError('daemon refused job 492 /tmp/log'), safeToolError('daemon refused job 567 /tmp/other'));
 });
 

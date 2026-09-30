@@ -1,3 +1,4 @@
+import { openRecoveryDatabase } from '../src/recovery-database.ts';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { mkdtemp, readFile, readdir } from 'node:fs/promises';
@@ -59,4 +60,14 @@ test('a completed child is not labeled abandoned',async context=>{
   db.prepare('update message set data=? where id=?').run(JSON.stringify({role:'assistant',parentID:'msg_user',finish:'stop',time:{completed:3}}),'msg_answer');
   const digest=childRecoverySnapshot(identity,database).digest;
   await assert.rejects(recordChildAbandonment(state,{...approval,digest},database),/already_completed/);
+});
+
+test('native recovery database refuses writes and cannot create a missing store',async context=>{
+  const {database,db,state}=await fixture();context.after(()=>db.close());
+  const before=await readFile(database);
+  const readOnly=openRecoveryDatabase(database);
+  try { assert.throws(()=>readOnly.exec('delete from message'),/readonly|read-only/i); }
+  finally { readOnly.close(); }
+  assert.deepEqual(await readFile(database),before);
+  assert.throws(()=>openRecoveryDatabase(join(state,'missing.db')));
 });
