@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import { isDirectReport } from './declarations.ts';
 import { ExchangeNotice, queueExchangeNotice } from './exchange-notices.ts';
-import type { WorkItem, WorkStatus } from './ledger.ts';
+import { ExternalPrObservation, type WorkItem, type WorkStatus } from './ledger.ts';
 import { withRecordLock } from './record-lock.ts';
 import { describeAsk, type ResourceRequest, type RequestStatus } from './requests.ts';
 import type { Runtime } from './runtime.ts';
@@ -19,6 +19,7 @@ const RequestProgress = z.object({
   publication: z.object({ url: z.string(), state: z.string() }).optional(),
   next: z.string(), lastRecordedAt: z.string(), observedAt: z.string(), stale: z.boolean(),
   evidence: z.enum(['recorded', 'linked_work_missing', 'linked_work_mismatch']),
+  historicalMerge: ExternalPrObservation.optional(),
   hostEvidence: RequestWorkEvidence.optional(),
   hostEvidenceState: z.enum(['recorded', 'unavailable', 'superseded', 'stale']).default('unavailable'),
 });
@@ -71,6 +72,7 @@ export function requestProgress(request: ResourceRequest, item: WorkItem | undef
     decision: request.publishDecision?.reply ?? request.decision?.reply, reason: request.reason,
     workItem: request.workItem, workStatus: linked?.status, workReason: linked?.reason,
     publication: linked?.publication ? { url: linked.publication.url, state: linked.publication.state } : undefined,
+    ...(linked?.externalPrObservations?.length ? { historicalMerge: linked.externalPrObservations.at(-1) } : {}),
     next, lastRecordedAt, observedAt: now.toISOString(),
     stale: !Number.isFinite(Date.parse(lastRecordedAt)) || now.getTime() - Date.parse(lastRecordedAt) > REQUEST_STATUS_LIMITS.staleMs,
     evidence,
@@ -98,6 +100,22 @@ function hostEvidenceText(progress: RequestProgress, compact = false) {
   ].filter(Boolean).join('\n');
 }
 
+function historicalFollowUpText(progress: RequestProgress, compact: boolean) {
+  const observation = progress.historicalMerge;
+  const evidence = observation?.followUpEvidence;
+  const review = evidence?.review;
+  if (!observation || !evidence || !review) return '';
+  return [
+    `Review at historical observation: ${review.reviewer}; ${review.verdict.decision}; tree ${observation.tree}; recorded ${evidence.observedAt}. Findings remain follow-up, not historical approval.`,
+    compact ? clipped(review.verdict.summary, REQUEST_STATUS_LIMITS.fieldChars) : review.verdict.summary,
+    ...(compact ? review.verdict.findings.slice(0, 1) : review.verdict.findings)
+      .map(finding => `[${finding.severity}] ${finding.file}: ${finding.issue}; ${finding.suggestion}`),
+    evidence.blocker && `Blocker at observation: ${evidence.blocker}.`,
+    evidence.abbreviated && 'Historical evidence was abbreviated; inspect the original review record for complete findings.',
+    'Snapshot of that attempt only; later review and acceptance are separate. No follow-up work was dispatched.',
+  ].filter(Boolean).join('\n');
+}
+
 export function requestProgressText(progress: RequestProgress, compact = false) {
   return [
     `${progress.id}: ${progress.from} → ${progress.to}; ${progress.title}; request ${progress.status}`,
@@ -106,6 +124,8 @@ export function requestProgressText(progress: RequestProgress, compact = false) 
     progress.reason && `Request reason: ${progress.reason}`,
     progress.workItem && `Linked work ${progress.workItem}: ${progress.workStatus ?? 'unknown'}${progress.workReason ? `; ${progress.workReason}` : ''}`,
     progress.publication && `PR ${progress.publication.url}: ${progress.publication.state} (recorded; deployment unknown).`,
+    progress.historicalMerge && `Historical PR ${progress.historicalMerge.url}: merged ${progress.historicalMerge.mergeCommit}; acceptance was pending at observation ${progress.historicalMerge.observedAt}. This observation does not complete the request or establish deployment.`,
+    historicalFollowUpText(progress, compact),
     hostEvidenceText(progress, compact),
     `Next: ${progress.next}`,
     `Records read at ${progress.observedAt}; last recorded change ${progress.lastRecordedAt}${progress.stale ? ' (stale)' : ''}; ${progress.evidence}. Live state not probed.`,

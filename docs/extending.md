@@ -404,4 +404,7 @@ For reviewed trial changes, pass `draft: true` to `onionsoup_propose_changes` or
 publication boundary even when the owner has a merge grant. To recover an approved request
 whose PR was published externally, the person uses `owners reconcile-pr <owner> <item> <url>`;
 see [draft publication and recovery](design/owners.md) for its exact-source verification and
-review requirements. Neither operation establishes deployment.
+review requirements. For a historical merged-PR fact without accepted completion, use
+`owners observe-merged-pr <owner> <item> <url>`. It preserves current review findings as
+follow-up and leaves the request open; it does not run another review or dispatch work.
+None of these operations establishes deployment.

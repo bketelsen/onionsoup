@@ -207,6 +207,11 @@ export class Requests {
     return withRecordLock(`${this.path(request.id)}.lock`, () => this.write(request));
   }
 
+  /** Read a stable request while committing related evidence; never call request writes inside the callback. */
+  async inspectLocked<T>(id: string, inspect: (current: ResourceRequest) => Promise<T>) {
+    return withRecordLock(`${this.path(id)}.lock`, async () => inspect(await this.get(id)));
+  }
+
   async update(id: string, change: (current: ResourceRequest) => ResourceRequest) {
     return withRecordLock(`${this.path(id)}.lock`, async () => this.write(ResourceRequest.parse(change(await this.get(id)))));
   }

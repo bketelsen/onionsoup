@@ -17,7 +17,7 @@ import { approveCreate, approveDelete, denyRequest, processRequests, requestPubl
 import { DAEMON_LIMITS, daemon, drain, recordDutyRun, tick, type TickLog } from './daemon.ts';
 import { approvePush } from './rebase.ts';
 import { describeAsk, type ResourceRequest } from './requests.ts';
-import { reconcileExternalPublication } from './external-publication.ts';
+import { observeExternalMerge, reconcileExternalPublication } from './external-publication.ts';
 import { proposeDeskChanges, resetDeskReviews } from './desk-changes.ts';
 import { shipEngine } from './ship.ts';
 import { deskState, initiativesText, initiativeText } from './desk.ts';
@@ -241,6 +241,10 @@ const COMMANDS: Record<string, Command> = {
     const title = required(options.note, '--note (title)');
     const result = await proposeDeskChanges(runtime, required(ownerId, 'owner'), { title, summary: options.reason ?? title, repository: options.repository, item: options.item, draft: options.draft });
     console.log(`${result.outcome}: ${result.summary}`);
+  },
+  async 'observe-merged-pr'(runtime, [ownerId, itemId, url]) {
+    const item = await observeExternalMerge(runtime, required(ownerId, 'owner'), required(itemId, 'item'), required(url, 'PR URL'), userInfo().username);
+    console.log(`${item.id}: historical merge observed ${url}; acceptance pending; request not completed; deployment not assessed`);
   },
   async 'reconcile-pr'(runtime, [ownerId, itemId, url]) {
     const item = await reconcileExternalPublication(runtime, required(ownerId, 'owner'), required(itemId, 'item'), required(url, 'PR URL'), userInfo().username);
