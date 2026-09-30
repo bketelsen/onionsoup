@@ -53,13 +53,13 @@ test('revision retains the goal, persists feedback once and delivers one stable 
 test('prepared intent recovers crashes before or after the ledger transition without duplicate feedback', async () => {
   for (const afterUpdate of [false, true]) {
     const { runtime, item } = await setup();
-    const update = runtime.ledger.update.bind(runtime.ledger);
-    runtime.ledger.update = async (...args) => {
+    const update = runtime.ledger.updateIfChanged.bind(runtime.ledger);
+    runtime.ledger.updateIfChanged = async (...args) => {
       if (afterUpdate) await update(...args);
       throw new Error('crash_at_transition');
     };
     await assert.rejects(revisePlan(runtime, item.id, 'Brian', 'Simplify'), /crash_at_transition/);
-    runtime.ledger.update = update;
+    runtime.ledger.updateIfChanged = update;
     const fake = transport();
     await deliverPlanRevisions(runtime, fake.client, fail);
     assert.equal((await runtime.ledger.get(item.id)).humanNotes.length, 1);

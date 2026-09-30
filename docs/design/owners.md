@@ -601,9 +601,29 @@ send-backs the plan is left for the person and raises the manager's attention. W
 the person as always, and the inbox says when the manager reviews under a grant. A person who sends a delegated plan
 back from the inbox does the same as a manager's send-back.
 
+**Direct-request review.** For a one-off work request, the requester may review its own direct report's plan under
+the same configured `approve-plans` grant, using `onionsoup_review_request_plan`. `onionsoup_status request=<id>`
+returns the original requested scope, submitted plan, exact request/item/digest and current review capability.
+The digest binds both distinct goal texts, receiver, repository, plan and revision history; it does not assume
+that a restated plan goal is identical to the request. Host code rereads configuration and validates the binding
+inside the final request/item locks. A matched-scope approval records a durable review and grant use, then the
+existing owner-session gate starts work. `revise` preserves the goal and uses durable plan-revision delivery;
+`needs-human` records the precise unresolved scope question and leaves approval pending. It never approves extra
+work merely because a model promised approval. Human inbox approval and initiative behavior are unchanged.
+The shared `SUPERVISION_LIMITS.revisionsPerItem` budget bounds automatic send-backs; after it is exhausted the
+person decides the next plan.
+
+The plugin's ordinary notice pass prepares a durable actionable continuation for each eligible direct-request
+plan generation in the request's original chat. Informational progress notices remain `noReply`. The new wake
+uses a stable native message receipt, waits for an idle origin and reconciles accepted delivery after restart.
+Pre-send prerequisites retry; an uncertain attempted send without a transcript receipt is blocked rather than
+blindly replayed. Changed plans invalidate prior bindings, and a recorded review suppresses repeat wakes.
+Models execute outside record locks; a concurrent human decision wins the gate and stale model verdicts fail.
+Scope matching is an explicit reviewer assessment with a note, not deterministic semantic analysis of prose.
+
 **Steering and pushback.** A manager reads all her direct reports' work with `onionsoup_status`, assigned or taken on
-directly (one-off requests, their own work), and it lists her initiatives. She acts only on work her initiatives
-assigned, with `onionsoup_steer` (approve a plan under the grant, send it back, cancel the work, or leave the report
+directly (one-off requests, their own work), and it lists her initiatives. `onionsoup_steer` acts on work her initiatives
+assigned (approve a plan under the grant, send it back, cancel the work, or leave the report
 a note); reading is oversight, steering is authority. A report pushes back with `onionsoup_raise` (objection, question or blocked): the
 escalation is stored on the initiative, journaled to both, raised as the manager's attention, and wakes her. While it
 is open she cannot approve that assignment's plans; she resolves it with `onionsoup_initiative resolve-escalation`.

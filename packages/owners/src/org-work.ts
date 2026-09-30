@@ -12,6 +12,8 @@ import { queueNotice } from './notices.ts';
 import type { RequestStatus, ResourceRequest } from './requests.ts';
 import type { Runtime } from './runtime.ts';
 import { approvePlan, cancelItem, revisePlan } from './work-recovery.ts';
+import { SUPERVISION_LIMITS } from './plan-review-limits.ts';
+export { SUPERVISION_LIMITS } from './plan-review-limits.ts';
 
 /**
  * A manager's initiatives: drafted in chat, approved once by the person, then supervised deterministically. Each
@@ -344,7 +346,6 @@ export async function superviseInitiatives(runtime: Runtime, options: Supervisio
   }
 }
 
-export const SUPERVISION_LIMITS = { revisionsPerItem: 2 };
 
 /** The plan a manager reviews, as text, with the digest her review names. */
 export function planUnderReview(item: WorkItem) {
@@ -458,7 +459,7 @@ export const STEER_ACTIONS = Object.keys(STEERS) as SteerAction[];
 
 export async function steerReportItem(runtime: Runtime, managerId: string, itemId: string, action: SteerAction, note: string) {
   const context = await assignedItem(runtime, managerId, itemId);
-  if (!context) throw new Error(`not_your_report_item: ${itemId} is not work in one of ${managerId}'s initiatives`);
+  if (!context) throw new Error(`not_your_report_item: ${itemId} is not work in one of ${managerId}'s initiatives; direct request plans use onionsoup_review_request_plan with the exact request and plan binding`);
   if (action !== 'approve-plan' && !note.trim()) throw new Error(`steer_note_required: ${action} needs a note`);
   const outcome = await STEERS[action](runtime, managerId, context.item, note);
   await journal(runtime, [managerId, context.item.owner], 'steered', `${itemId}: ${action} by ${managerId}${note ? `: ${note}` : ''}`);

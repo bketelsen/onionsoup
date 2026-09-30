@@ -53,7 +53,12 @@ test('configured owner prompts carry repository writing guidance alongside each 
   assert.doesNotMatch(milesTeg, /freelancer|onionsoup_open_work/);
   assert.doesNotMatch(config.agent!.Moneo!.prompt!, /onionsoup_submit_plan/, 'an owner that only observes is not told to plan changes');
   assert.match(config.agent!.Moneo!.prompt!, /You do not change your domain yourself/);
-  assert.match(config.agent!.Odrade!.prompt!, /you are woken here when it submits a plan/);
+  assert.match(config.agent!.Odrade!.prompt!, /initiative plans wake you here/);
+  assert.match(config.agent!.Odrade!.prompt!, /onionsoup_review_request_plan with the exact request\/item\/digest/);
+  assert.match(config.agent!.Odrade!.prompt!, /use needs-human for unresolved scope/);
+  assert.equal((config.permission as Record<string, string>).onionsoup_review_request_plan, 'deny');
+  assert.equal(permissions('Odrade').onionsoup_review_request_plan, 'allow');
+  assert.equal(permissions('Bellonda').onionsoup_review_request_plan, undefined);
   assert.match(config.agent!.Bellonda!.prompt!, /Work it assigns opens a session where you plan it alone/);
 });
 
