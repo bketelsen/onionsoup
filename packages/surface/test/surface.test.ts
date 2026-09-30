@@ -5,12 +5,16 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { ITEM_SECTIONS } from '../web/src/components/ItemSections.tsx';
 import {
   OPERATOR_ID, OperatorDeclaration, Runtime, approveInitiative, armDeployment, beginDrain, draftInitiative, listAdmissions,
   recordProviderFailure, recordProviderSuccess, releaseDrain, reportFriction, setReminder,
   effectiveProposalDigest, writeRevision,
   readFrictionTriage, sourceSnapshot,
   submitInitiative,
+  type WorkItem,
 } from '@onionsoup/owners';
 import { SurfaceState, surfaceServer, type OpencodeApi } from '@onionsoup/surface';
 import { DEFAULT_RELEASE_MANIFEST, readReleaseBuildId } from '../src/deployment-view.ts';
@@ -209,6 +213,51 @@ async function start(
   };
   return { runtime, server, call, calls, state };
 }
+
+test('item API distinguishes prepared closure from explicit acceptance and retains the old revise verdict', async () => {
+  const { runtime, server, call } = await start();
+  try {
+    const proposal = { title: 'Repair friction', goal: 'Preserve history while revalidating safely', rationale: 'Trial', acceptance: ['No duplicate dispatch'], size: 'small' as const };
+    const at = new Date().toISOString();
+    const item = await runtime.ledger.create('clippy', 'owner-change', proposal, { status: 'working', request: 'r-trial',
+      reason: 'review_changes_required', verdicts: [{ decision: 'revise', summary: 'Original dispatch races', findings: [] }] });
+    const merge = { url: 'https://github.com/example/repo/pull/100', repository: 'example/repo', baseBranch: 'main',
+      head: 'a'.repeat(40), mergeCommit: 'b'.repeat(40), mergedAt: at };
+    const candidate: NonNullable<WorkItem['requestClosureCandidates']>[number] = {
+      digest: 'd'.repeat(64), item: item.id, request: 'r-trial', owner: 'clippy', proposal, planDigest: 'original-plan',
+      requestDigest: 'e'.repeat(64), subjectDigest: 'f'.repeat(64), configurationDigest: '1'.repeat(64), historyDigest: '2'.repeat(64),
+      approvalDigest: '3'.repeat(64), planDocumentDigest: '4'.repeat(64),
+      directory: '/fixture/integrated', repository: 'example/repo', baseBranch: 'main', head: 'c'.repeat(40), tree: 'd'.repeat(40), base: 'b'.repeat(40),
+      historicalMerges: [merge], followUps: [{ ...merge, url: 'https://github.com/example/repo/pull/107', mergeCommit: 'c'.repeat(40) }],
+      originalFindings: [], verification: { observedAt: at, tree: 'd'.repeat(40), verifier: 'host-sandbox', checks: [] },
+      review: { reviewer: 'fixture/other-family', verdict: { decision: 'approve', summary: 'Follow-up fixes scoped findings', findings: [] }, resolutions: [] },
+      preparedBy: 'person', preparedAt: at,
+    };
+    await runtime.ledger.update(item.id, current => ({ ...current, requestClosureCandidates: [candidate] }));
+    const prepared = (await call('GET', `/api/items/${item.id}`)).body;
+    assert.equal(prepared.done, false);
+    assert.equal((prepared.item as WorkItem).requestAcceptance, undefined);
+    const receipt = { candidate, by: 'person', note: 'Original scoped goal met', acceptedAt: at };
+    await runtime.ledger.update(item.id, current => ({ ...current, status: 'landed', requestAcceptance: receipt }));
+    const accepted = (await call('GET', `/api/items/${item.id}`)).body;
+    assert.equal(accepted.done, true);
+    assert.equal(accepted.waiting, undefined);
+    assert.deepEqual((accepted.item as WorkItem).requestAcceptance, receipt);
+    assert.equal((accepted.item as WorkItem).verdicts[0]!.decision, 'revise');
+    assert.equal((accepted.item as WorkItem).reason, 'review_changes_required');
+    assert.match(String(accepted.text), /goal accepted by person/);
+    assert.match(String(accepted.text), /Review 1: revise/);
+    assert.match(String(accepted.text), /deployment not assessed/);
+    const section = ITEM_SECTIONS.find(component => component.name === 'RequestAcceptance')!;
+    const html = renderToStaticMarkup(createElement(section, { item: accepted.item as WorkItem }));
+    assert.match(html, /Original goal accepted/);
+    assert.match(html, /by person/);
+    assert.match(html, /pull\/107/);
+    assert.match(html, /earlier review verdicts remain unchanged/);
+  } finally {
+    server.close();
+  }
+});
 
 test('the surface lists owners with what waits on the person, and chat permissions land in the inbox', async () => {
   const { runtime, server, call } = await start();

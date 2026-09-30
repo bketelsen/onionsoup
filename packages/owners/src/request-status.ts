@@ -10,6 +10,7 @@ import { withRecordLock } from './record-lock.ts';
 import { describeAsk, type ResourceRequest, type RequestStatus } from './requests.ts';
 import type { Runtime } from './runtime.ts';
 import { RequestWorkEvidence, readRequestWorkEvidence } from './request-work-evidence.ts';
+import { RequestAcceptance } from './request-closure-types.ts';
 
 export const REQUEST_STATUS_LIMITS = { staleMs: 24 * 60 * 60_000, recentMs: 7 * 24 * 60 * 60_000, noticesPerTick: 20, summaryRecords: 12, summaryChars: 12_000, fieldChars: 240 };
 const RequestProgress = z.object({
@@ -20,6 +21,7 @@ const RequestProgress = z.object({
   next: z.string(), lastRecordedAt: z.string(), observedAt: z.string(), stale: z.boolean(),
   evidence: z.enum(['recorded', 'linked_work_missing', 'linked_work_mismatch']),
   historicalMerge: ExternalPrObservation.optional(),
+  acceptance: RequestAcceptance.optional(),
   hostEvidence: RequestWorkEvidence.optional(),
   hostEvidenceState: z.enum(['recorded', 'unavailable', 'superseded', 'stale']).default('unavailable'),
 });
@@ -66,13 +68,15 @@ export function requestProgress(request: ResourceRequest, item: WorkItem | undef
   const lastRecordedAt = linked && linked.updatedAt > request.updatedAt ? linked.updatedAt : request.updatedAt;
   const evidence = request.workItem && !linked ? (item ? 'linked_work_mismatch' : 'linked_work_missing') : 'recorded';
   const next = evidence !== 'recorded' ? 'Linked work is unavailable or inconsistent; inspect before claiming progress.'
-    : request.status === 'work-running' && linked ? WORK_NEXT[linked.status] : REQUEST_NEXT[request.status];
+    : linked?.requestAcceptance ? 'Original goal explicitly accepted against recorded follow-up evidence; deployment is not implied.'
+      : request.status === 'work-running' && linked ? WORK_NEXT[linked.status] : REQUEST_NEXT[request.status];
   return RequestProgress.parse({
     id: request.id, from: request.from, to: request.to, purpose: request.ask.purpose, title: describeAsk(request.ask), status: request.status,
     decision: request.publishDecision?.reply ?? request.decision?.reply, reason: request.reason,
     workItem: request.workItem, workStatus: linked?.status, workReason: linked?.reason,
     publication: linked?.publication ? { url: linked.publication.url, state: linked.publication.state } : undefined,
     ...(linked?.externalPrObservations?.length ? { historicalMerge: linked.externalPrObservations.at(-1) } : {}),
+    ...(linked?.requestAcceptance ? { acceptance: linked.requestAcceptance } : {}),
     next, lastRecordedAt, observedAt: now.toISOString(),
     stale: !Number.isFinite(Date.parse(lastRecordedAt)) || now.getTime() - Date.parse(lastRecordedAt) > REQUEST_STATUS_LIMITS.staleMs,
     evidence,
@@ -106,7 +110,8 @@ function historicalFollowUpText(progress: RequestProgress, compact: boolean) {
   const review = evidence?.review;
   if (!observation || !evidence || !review) return '';
   return [
-    `Review at historical observation: ${review.reviewer}; ${review.verdict.decision}; tree ${observation.tree}; recorded ${evidence.observedAt}. Findings remain follow-up, not historical approval.`,
+    `Review at historical observation: ${review.reviewer}; ${review.verdict.decision}; tree ${observation.tree}; recorded ${evidence.observedAt}. ${progress.acceptance
+      ? 'Historical verdict retained; current acceptance is recorded separately below.' : 'Findings remain follow-up, not historical approval.'}`,
     compact ? clipped(review.verdict.summary, REQUEST_STATUS_LIMITS.fieldChars) : review.verdict.summary,
     ...(compact ? review.verdict.findings.slice(0, 1) : review.verdict.findings)
       .map(finding => `[${finding.severity}] ${finding.file}: ${finding.issue}; ${finding.suggestion}`),
@@ -114,6 +119,23 @@ function historicalFollowUpText(progress: RequestProgress, compact: boolean) {
     evidence.abbreviated && 'Historical evidence was abbreviated; inspect the original review record for complete findings.',
     'Snapshot of that attempt only; later review and acceptance are separate. No follow-up work was dispatched.',
   ].filter(Boolean).join('\n');
+}
+
+function acceptanceText(progress: RequestProgress, compact: boolean) {
+  const receipt = progress.acceptance;
+  if (!receipt) return '';
+  const candidate = receipt.candidate;
+  const note = compact ? clipped(receipt.note, REQUEST_STATUS_LIMITS.fieldChars) : receipt.note;
+  return [
+    `Goal accepted by ${receipt.by} at ${receipt.acceptedAt}: ${note}`,
+    `Closure ${candidate.digest}; integrated commit ${candidate.head}; tree ${candidate.tree}.`,
+    compact ? `${candidate.followUps.length} verified follow-up merges; see request detail.`
+      : `Follow-up merges: ${candidate.followUps.map(merge => `${merge.url} (${merge.mergeCommit})`).join(', ')}.`,
+    `Closure host checks: ${candidate.verification.checks.length}; independent review by ${candidate.review.reviewer}: ${candidate.review.verdict.decision}.`,
+    compact ? `${candidate.review.resolutions.length} historical findings explicitly assessed; see request detail.`
+      : candidate.review.resolutions.map(resolution => `${resolution.finding}: ${resolution.disposition}; ${resolution.evidence}`).join('\n'),
+    'Acceptance records the original goal against this evidence; it does not rewrite the historical review or establish deployment.',
+  ].join('\n');
 }
 
 export function requestProgressText(progress: RequestProgress, compact = false) {
@@ -127,6 +149,7 @@ export function requestProgressText(progress: RequestProgress, compact = false) 
     progress.historicalMerge && `Historical PR ${progress.historicalMerge.url}: merged ${progress.historicalMerge.mergeCommit}; acceptance was pending at observation ${progress.historicalMerge.observedAt}. This observation does not complete the request or establish deployment.`,
     historicalFollowUpText(progress, compact),
     hostEvidenceText(progress, compact),
+    acceptanceText(progress, compact),
     `Next: ${progress.next}`,
     `Records read at ${progress.observedAt}; last recorded change ${progress.lastRecordedAt}${progress.stale ? ' (stale)' : ''}; ${progress.evidence}. Live state not probed.`,
   ].filter(Boolean).join('\n');

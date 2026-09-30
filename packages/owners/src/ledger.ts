@@ -8,6 +8,8 @@ import { ChatOrigin } from './chat-origin.ts';
 import { ReviewEvidence } from './desk-reviews.ts';
 import { RequestWorkEvidence } from './request-work-evidence.ts';
 import { AssignmentRef } from './initiatives.ts';
+import { RequestAcceptance, RequestClosureCandidate } from './request-closure-types.ts';
+export { RequestAcceptance, RequestClosureCandidate } from './request-closure-types.ts';
 
 export const HireRecord = z.object({
   stage: z.string(),
@@ -150,6 +152,8 @@ export const WorkItem = z.object({
     mergeCommit: z.string().optional(), reviewer: z.string(), evidence: ReviewEvidence,
   }).optional(),
   externalPrObservations: z.array(ExternalPrObservation).optional(),
+  requestClosureCandidates: z.array(RequestClosureCandidate).optional(),
+  requestAcceptance: RequestAcceptance.optional(),
   /** The chat the work was opened from, so the owner hears there how it went. */
   origin: ChatOrigin.optional(),
   /** The owner session that carries out an approved plan; later notices about the work go there. */
@@ -211,6 +215,15 @@ export class Ledger {
   /** Read and mutate the latest record under a cross-process lock; never hold it across effects. */
   async update(id: string, change: (current: WorkItem) => WorkItem) {
     return withRecordLock(`${this.path(id)}.lock`, async () => this.write(WorkItem.parse(change(await this.get(id)))));
+  }
+
+  /** Short read-only final checks may run under the record lock; undefined is an exact no-op. */
+  async updateIfChanged(id: string, change: (current: WorkItem) => WorkItem | undefined | Promise<WorkItem | undefined>) {
+    return withRecordLock(`${this.path(id)}.lock`, async () => {
+      const current = await this.get(id);
+      const next = await change(current);
+      return next === undefined ? current : this.write(WorkItem.parse(next));
+    });
   }
 
   private async write(item: WorkItem) {

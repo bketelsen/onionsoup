@@ -19,7 +19,7 @@ const ExternalPullRequest = z.object({
 });
 type ExternalPullRequest = z.infer<typeof ExternalPullRequest>;
 
-function pullNumber(url: string, repository: string) {
+export function pullNumber(url: string, repository: string) {
   const parsed = new URL(url);
   const prefix = `/${repository}/pull/`;
   const number = parsed.pathname.startsWith(prefix) ? parsed.pathname.slice(prefix.length) : '';
@@ -29,12 +29,12 @@ function pullNumber(url: string, repository: string) {
   return number;
 }
 
-async function readPullRequest(repository: string, number: string) {
+export async function readPullRequest(repository: string, number: string) {
   const { stdout } = await run('gh', ['api', `repos/${repository}/pulls/${number}`]);
   return ExternalPullRequest.parse(JSON.parse(stdout));
 }
 
-function validateRemote(remote: ExternalPullRequest, repository: string, baseBranch: string, url: string) {
+export function validateRemote(remote: ExternalPullRequest, repository: string, baseBranch: string, url: string) {
   if (remote.html_url !== url || remote.base.repo.full_name !== repository || remote.head.repo.full_name !== repository
     || remote.base.ref !== baseBranch) throw new Error('external_pr_repository_mismatch');
   if (!remote.merged && remote.state !== 'open') throw new Error('external_pr_closed');

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { ChatOrigin } from './chat-origin.ts';
 import { ProposedWork } from './artifacts.ts';
 import { canChange, isDirectReport } from './declarations.ts';
+import { completeAcceptedRequest } from './request-closure-completion.ts';
 import { OWNER_CHANGE_WORKFLOW } from './plan-work.ts';
 import type { AssignmentRef } from './initiatives.ts';
 import { PublishDecision, requireStatus, type ResourceRequest, type WorkAsk, type OperatorAssignmentSource } from './requests.ts';
@@ -99,6 +100,7 @@ export async function decideWork(runtime: Runtime, request: ResourceRequest) {
 export async function trackDelegatedWork(runtime: Runtime, request: ResourceRequest) {
   if (!request.workItem) throw new Error('delegation_work_item_missing');
   const item = await runtime.ledger.get(request.workItem);
+  if (item.requestAcceptance) return completeAcceptedRequest(runtime, item.id);
   const failed = new Set(['failed', 'rejected', 'cancelled']).has(item.status) || item.publication?.state === 'closed';
   const completed = item.publication?.state === 'merged' || (item.status === 'landed' && Boolean(item.rebaseOf));
   if (!failed && !completed) return request;

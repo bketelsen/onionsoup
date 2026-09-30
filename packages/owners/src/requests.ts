@@ -216,6 +216,15 @@ export class Requests {
     return withRecordLock(`${this.path(id)}.lock`, async () => this.write(ResourceRequest.parse(change(await this.get(id)))));
   }
 
+  /** Atomically project a durable result; undefined preserves even the original update timestamp. */
+  async updateIfChanged(id: string, change: (current: ResourceRequest) => ResourceRequest | undefined) {
+    return withRecordLock(`${this.path(id)}.lock`, async () => {
+      const current = await this.get(id);
+      const updated = change(current);
+      return updated ? this.write(ResourceRequest.parse(updated)) : current;
+    });
+  }
+
   private async write(request: ResourceRequest) {
     await mkdir(this.directory, { recursive: true });
     const updated = { ...request, updatedAt: new Date().toISOString() };

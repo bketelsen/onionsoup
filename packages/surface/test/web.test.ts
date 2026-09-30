@@ -385,7 +385,7 @@ test('an owner plan\'s page shows the plan, its approval, the session doing it, 
     publication: { url: 'https://github.com/example/fleet/pull/7', branch: 'owners/w-1', by: 'homelab', at: '', state: 'open' },
   });
   // The plan renders through the chat's Markdown, which needs a browser DOM to sanitize; the rest renders here.
-  assert.deepEqual(ITEM_SECTIONS.map(Section => Section.name), ['WorkSession', 'Proposal', 'Plan', 'Notes', 'Publication', 'Verification', 'Reviews', 'Hires']);
+  assert.deepEqual(ITEM_SECTIONS.map(Section => Section.name), ['WorkSession', 'Proposal', 'Plan', 'Notes', 'RequestAcceptance', 'Publication', 'Verification', 'Reviews', 'Hires']);
   const html = ITEM_SECTIONS.filter(Section => Section.name !== 'Plan').map(Section => renderToStaticMarkup(createElement(Section, { item }))).join('');
   assert.match(html, /Open the work session/);
   assert.match(html, /published<\/span>.*reviewed by .*openai\/gpt-5\.6-sol/s);

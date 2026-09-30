@@ -126,7 +126,10 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
   ledger-backed desk publication are not backfilled. They need manual GitHub maintenance; approved request
   items with their clean source worktree can now be explicitly reconciled using `owners reconcile-pr` after
   fresh verification and review, or factually linked with `owners observe-merged-pr` without accepting
-  completion or clearing outstanding review findings. Neither command performs broad backfill. Newly proposed
+  completion or clearing outstanding review findings. Later merged fixes can satisfy the original goal through
+  explicit `owners prepare-request-closure` and `owners accept-request` commands, with fresh verification,
+  independent review and a separate human acceptance receipt. This narrow flow has no browser acceptance
+  button, bulk backfill or general live-outcome attestation. Newly proposed
   desk changes have ledger records, maintenance and originating-chat notices.
 
 - **Sandbox: provider credentials are still readable.** Masking the host opencode config/state closed the plugin
@@ -184,7 +187,7 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
   started after the surface did. The activity rail finds an item's hire sessions by title in opencode's store
   (`readSessionsTitled` in `packages/surface/src/hire-store.ts`) instead.
 
-- Desk reviewers now receive tree-bound host check metadata and original task criteria. A general evidence-unavailable workflow, live-environment evidence adapters, and task-specific closure attestations remain future work; command success alone is not deployment or goal completion.
+- Desk reviewers receive tree-bound host check metadata and original task criteria. Explicit repository-request closure can now accept a reviewed integrated result after historical merges and follow-up fixes. A general evidence-unavailable workflow and live-environment evidence adapters remain future work; command success alone is not deployment or goal completion.
 
 - **Persona-free owners have observation chat only.** They can inspect recorded state and consult other owners,
   but cannot execute domain changes or reminders. Migrating the legacy persona requirement in `canChange` to an

@@ -18,6 +18,8 @@ import { DAEMON_LIMITS, daemon, drain, recordDutyRun, tick, type TickLog } from 
 import { approvePush } from './rebase.ts';
 import { describeAsk, type ResourceRequest } from './requests.ts';
 import { observeExternalMerge, reconcileExternalPublication } from './external-publication.ts';
+import { prepareRequestClosure, acceptRequestClosure } from './request-closure.ts';
+import { completeAcceptedRequest } from './request-closure-completion.ts';
 import { proposeDeskChanges, resetDeskReviews } from './desk-changes.ts';
 import { shipEngine } from './ship.ts';
 import { deskState, initiativesText, initiativeText } from './desk.ts';
@@ -47,6 +49,7 @@ const { values: options, positionals } = parseArgs({
     repository: { type: 'string' },
     item: { type: 'string' },
     draft: { type: 'boolean' },
+    'follow-up': { type: 'string', multiple: true },
   },
 });
 
@@ -76,6 +79,8 @@ function detail(item: WorkItem) {
   if (item.branch) out.push('', `Branch: ${item.branch}  Worktree: ${item.worktree}`);
   if (item.landedCommit) out.push(`Landed: ${item.landedCommit}`);
   if (item.publication) out.push(`Published: ${item.publication.url}`);
+  if (item.requestAcceptance) out.push(`Goal accepted by ${item.requestAcceptance.by} at ${item.requestAcceptance.acceptedAt}: ${item.requestAcceptance.note}`,
+    `Closure evidence ${item.requestAcceptance.candidate.digest}; verified commit ${item.requestAcceptance.candidate.head}; deployment not assessed`);
   return out.join('\n');
 }
 
@@ -245,6 +250,18 @@ const COMMANDS: Record<string, Command> = {
   async 'observe-merged-pr'(runtime, [ownerId, itemId, url]) {
     const item = await observeExternalMerge(runtime, required(ownerId, 'owner'), required(itemId, 'item'), required(url, 'PR URL'), userInfo().username);
     console.log(`${item.id}: historical merge observed ${url}; acceptance pending; request not completed; deployment not assessed`);
+  },
+  async 'prepare-request-closure'(runtime, [ownerId, itemId]) {
+    const candidate = await prepareRequestClosure(runtime, required(ownerId, 'owner'), required(itemId, 'item'),
+      required(options.directory, '--directory (clean integrated checkout)'), options['follow-up'] ?? [], userInfo().username);
+    console.log(JSON.stringify(candidate, null, 2));
+    console.log(`Review this evidence, then explicitly accept: owners accept-request ${ownerId} ${itemId} ${candidate.digest} --note "<acceptance rationale>"`);
+  },
+  async 'accept-request'(runtime, [ownerId, itemId, digest]) {
+    const item = await acceptRequestClosure(runtime, required(ownerId, 'owner'), required(itemId, 'item'),
+      required(digest, 'closure digest'), userInfo().username, required(options.note, '--note (acceptance rationale)'));
+    const request = await completeAcceptedRequest(runtime, item.id);
+    console.log(`${request.id}: ${request.status}; original goal explicitly accepted; closure ${item.requestAcceptance!.candidate.digest}; deployment not assessed`);
   },
   async 'reconcile-pr'(runtime, [ownerId, itemId, url]) {
     const item = await reconcileExternalPublication(runtime, required(ownerId, 'owner'), required(itemId, 'item'), required(url, 'PR URL'), userInfo().username);
