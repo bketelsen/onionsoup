@@ -57,11 +57,20 @@ function revisionPath(runtime: Runtime, id: string, number: number): string {
   return join(investigationDirectory(runtime, id), `rev-${number}.json`);
 }
 
+/** Serialize report publication with approval validation and dispatch across all host processes. */
+export function withFrictionReportLock<T>(runtime: Runtime, id: string, operation: () => Promise<T>): Promise<T> {
+  return withRecordLock(join(investigationDirectory(runtime, id), 'revisions.lock'), operation);
+}
+
 export async function writeRevision(runtime: Runtime, revision: Revision): Promise<void> {
   const valid = Revision.parse(revision);
-  const destination = revisionPath(runtime, valid.id, valid.revision);
-  await mkdir(investigationDirectory(runtime, valid.id), { recursive: true });
-  await writeOnceLinked(destination, JSON.stringify(valid, null, 2) + '\n');
+  return withFrictionReportLock(runtime, valid.id, () => publishRevision(runtime, valid));
+}
+
+async function publishRevision(runtime: Runtime, revision: Revision): Promise<void> {
+  const destination = revisionPath(runtime, revision.id, revision.revision);
+  await mkdir(investigationDirectory(runtime, revision.id), { recursive: true });
+  await writeOnceLinked(destination, JSON.stringify(revision, null, 2) + '\n');
 }
 
 export async function readRevisions(runtime: Runtime, id: string): Promise<Revision[]> {
@@ -258,11 +267,10 @@ async function citationsVerified(directory: string, referenceCommit: string, obs
 }
 
 async function appendRevision(runtime: Runtime, revision: Omit<Revision, 'revision'>) {
-  const directory = investigationDirectory(runtime, revision.id);
-  return withRecordLock(join(directory, 'revisions.lock'), async () => {
+  return withFrictionReportLock(runtime, revision.id, async () => {
     const revisions = await readRevisions(runtime, revision.id);
-    const next = { ...revision, revision: (revisions.at(-1)?.revision ?? 0) + 1 };
-    await writeRevision(runtime, next);
+    const next = Revision.parse({ ...revision, revision: (revisions.at(-1)?.revision ?? 0) + 1 });
+    await publishRevision(runtime, next);
     return next;
   });
 }

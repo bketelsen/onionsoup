@@ -334,7 +334,8 @@ The cadence timestamp is durable before dispatch; a crash there may delay dispat
 hire has the existing timeout and structured-output fallback/resend behavior; this is a dispatch bound, not a dollar cap.
 
 The Friction list/detail shows processing status and the proposed fix with its evidence; no new inbox item is created.
-`owners friction-investigation <id>` reads the result. `owners friction-triage <id>` explicitly investigates one
+`owners friction-investigation <id>` reads the effective triage, revision, local freshness and current approval digest;
+`originalTriage` separately retains the original evidence. Stale or already-fixed results have no approval digest. `owners friction-triage <id>` explicitly investigates one
 selected eligible wake under the CLI runtime lock (it cannot run beside the daemon). This operator command bypasses
 the daemon cadence but cannot repeat a saved/uncertain investigation. Neither investigation path sends messages, opens requests, publishes issues, edits code, or claims a fix completed.
 
@@ -361,7 +362,11 @@ allows one initial read-only hire for that commit; a failed hire or a dead runne
 `state/friction/investigations/<id>/`, published atomically; the original investigation is never rewritten. The
 latest `revised` revision is the effective proposal, and its digest includes the revision number, so a revised
 proposal needs fresh approval. A blocked intent that never routed is archived as superseded history before the new
-approval routes; the report still has one request identity.
+approval routes; the report still has one request identity. Revision publication and the final effective-proposal,
+freshness and approval checks through request creation share a per-report kernel lock, across CLI, daemon and
+surface. Revalidation model execution stays outside that lock. A revision published first invalidates the old
+approval; a request created first remains the one durable request. This lock does not control external Git
+checkout changes; freshness remains a clean local snapshot, not an atomic remote-source guarantee.
 
 A person may authorize one additional attempt with
 `owners friction-revalidation-retry <id> <reference-commit> <failed-claim-token>`. Read the token from the saved
