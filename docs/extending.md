@@ -21,6 +21,16 @@ Then register the plugin with opencode, so your owners become agents you can cha
 Requirements: Node 24, opencode (logged in to the providers your owners use), `bwrap` and `systemd-run`
 (the sandbox), Git and `gh`.
 
+## Give the operator parallel investigations
+
+An existing `operator.yaml` also enables `onionsoup_operator_job`; no owner or standing grant is needed. Ask the
+operator, for example: “Investigate the configuration and its tests in parallel. Read only; report the evidence.”
+It can create two bounded child tasks, keep answering your chat, and receive progress and completion events. Jobs
+retain the original request and exact child sessions across runtime restarts. `show` reads progress; `pause`, `resume`
+and `cancel` are scoped to that chat's jobs; `synthesize` records a summary against the children's evidence digest.
+This stage rejects write scopes and does not drive domain owners. See [durable operator investigations](design/owners.md#durable-operator-investigations)
+for recovery behavior and the current limits.
+
 ## Create an owner
 
 1. Copy `owners/example.yaml` to `owners/<id>.yaml` and edit it: persona, domain, model, conversation rules,

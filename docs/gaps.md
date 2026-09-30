@@ -48,6 +48,10 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
   API, but a prompt injection can still do anything the person's account and the CLI can. Its journal has no view in
   the surface yet: read
   `state/notebooks/operator/journal/*.jsonl`.
+- **Durable operator jobs initially cover read-only investigations.** They preserve child identities, attempts,
+  progress wakes and evidence-backed synthesis while the parent remains responsive. Write scopes are rejected;
+  exclusive workspace claims and scoped editing are a separate stage. An uncertain child dispatch or parent wake
+  with no runtime receipt stays blocked rather than being replayed. These host sessions are not a filesystem sandbox.
 - **Plan approvals in chat do not survive a restart.** A plan approval pending in a chat is lost if the surface restarts (the
   permission prompt lives in its opencode); the item stays `awaiting-plan-approval` and the owner resubmits it with
   `item`.
