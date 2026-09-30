@@ -8,6 +8,7 @@ import type { WorkItem } from './ledger.ts';
 import { wake } from './owner.ts';
 import { requestDistill } from './memory.ts';
 import { Runtime } from './runtime.ts';
+import { investigateFriction, readFrictionTriage } from './friction-work.ts';
 import { askOwner, formatAnswer } from './ask.ts';
 import { approveCreate, approveDelete, denyRequest, processRequests, requestPublish } from './brokering.ts';
 import { DAEMON_LIMITS, daemon, drain, recordDutyRun, tick, type TickLog } from './daemon.ts';
@@ -117,6 +118,12 @@ const WIKI_COMMANDS: Record<string, Command> = {
 };
 
 const COMMANDS: Record<string, Command> = {
+  async 'friction-triage'(runtime, [id]) {
+    console.log(JSON.stringify(await investigateFriction(runtime, required(id, 'friction id')), null, 2));
+  },
+  async 'friction-investigation'(runtime, [id]) {
+    console.log(JSON.stringify(await readFrictionTriage(runtime, required(id, 'friction id')) ?? null, null, 2));
+  },
   async wake(runtime, [ownerId, dutyId = 'survey']) {
     console.log(`waking ${ownerId} for ${dutyId} (${runtime.owner(required(ownerId, 'owner')).model})`);
     const result = await wake(runtime, required(ownerId, 'owner'), dutyId);
@@ -311,7 +318,7 @@ const LOCK_FREE = [
   'resume', 'retry', 'cancel', 'desk', 'desk-state', 'retract', 'ask', 'request-publish', 'propose',
   'ship', 'approve-push', 'approve-create', 'approve-delete', 'deny-request',
   'desk-review-reset', 'initiatives', 'initiative', 'approve-initiative', 'revise-initiative', 'cancel-initiative',
-  'wiki',
+  'wiki', 'friction-investigation',
 ];
 try {
   // A daemon may restart while the deployment gate is held. Runtime.open only ensures the existing state

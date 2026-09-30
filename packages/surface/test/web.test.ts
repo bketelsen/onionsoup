@@ -86,7 +86,14 @@ test('friction details render persisted HTML as inert text and link to the saved
     summary: '<script>alert(1)</script>', expected: 'A reply', actual: '<img src=x onerror=alert(1)>',
     sessionID: 'ses_origin', count: 1, firstSeen: '2026-09-24', lastSeen: '2026-09-24',
     commit: 'unavailable', model: 'unavailable', failures: [], failureContext: 'unavailable', provisional: true };
+  record.triage = { state: 'investigated', updatedAt: '2026-09-24T00:00:00.000Z', investigation: {
+    disposition: 'propose-fix', observed: ['<script>unsafe</script>'], inferred: [], unknown: ['Freshness unknown'],
+    proposedWork: { title: 'Repair evidence', goal: 'Evidence available', rationale: 'Reviewer blocked',
+      repository: 'example/wiki', size: 'small', acceptance: ['Reviewer reads evidence'] },
+  } };
   const html = renderToStaticMarkup(createElement(FrictionDetail, { record }));
+  assert.match(html, /Proposed fix: Repair evidence/);
+  assert.match(html, /no work has been dispatched/);
   assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
   assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/);
   assert.doesNotMatch(html, /<script>|<img/);

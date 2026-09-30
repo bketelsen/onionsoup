@@ -4,7 +4,7 @@ import {
   approveCreate, approveDelete, approvePlan, approvePush, chatDirectory, denyRequest, deskState, describeAsk,
   domainSummary, itemText, revisePlan, resumeItem, retryItem, cancelItem, memoryFingerprint, type ResourceRequest, type Runtime,
   listAttention, changeAttention, recoverRequest, reconcileRequest,
-  listFriction, frictionDetail, type FrictionRecord,
+  listFriction, frictionDetail, readFrictionTriage, type FrictionRecord,
   approveInitiative, reviseInitiative, cancelInitiative, initiativeViews, managerOf, planGrantFor, cancelReminder,
   type AssignmentView, type Initiative, type InitiativeView, type WorkItem,
   isDelegated, isFinished, OWNER_CHANGE_WORKFLOW, PLAN_APPROVAL_PERMISSION, OPERATOR_ID, operatorChatDirectory, WIKI_DELETE_PERMISSION,
@@ -460,13 +460,20 @@ export class SurfaceState {
   }
 
   /** Public view excludes the saved directory, which is only for host-side notice delivery. */
-  private publicFriction(record: FrictionRecord): PublicFrictionRecord {
+  private async publicFriction(record: FrictionRecord): Promise<PublicFrictionRecord> {
     const { origin, ...fields } = record;
-    return { ...fields, sessionID: origin.sessionID };
+    try {
+      const saved = await readFrictionTriage(this.runtime, record.id);
+      const triage = saved ? { state: saved.state, updatedAt: saved.updatedAt,
+        reason: saved.reason, investigation: saved.investigation } : undefined;
+      return { ...fields, sessionID: origin.sessionID, triage };
+    } catch {
+      return { ...fields, sessionID: origin.sessionID, triageError: 'friction_triage_unreadable' };
+    }
   }
 
   async friction() {
-    return (await listFriction(this.runtime)).map(record => this.publicFriction(record));
+    return Promise.all((await listFriction(this.runtime)).map(record => this.publicFriction(record)));
   }
 
   async frictionRecord(id: string) {
@@ -583,7 +590,7 @@ export class SurfaceState {
       (await this.runtime.initiatives.list()).map(initiative => [initiative.id, initiative.status, initiative.updatedAt]),
       await memoryFingerprint(this.runtime),
       await listAttention(this.runtime),
-      (await listFriction(this.runtime)).map(entry => [entry.id, entry.count, entry.lastSeen]),
+      (await this.friction()).map(entry => [entry.id, entry.count, entry.lastSeen, entry.triage?.updatedAt, entry.triage?.state, entry.triageError]),
       (await this.runtime.providerHealth.list()).map(record => [record.provider, record.status, record.failures]),
     ]);
   }
