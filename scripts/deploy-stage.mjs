@@ -7,7 +7,13 @@ import { promisify } from 'node:util';
 const exec = promisify(execFile);
 const PRIVATE_HOME = '/home/stage';
 const STAGE_PATH = '/opt/node/bin:/usr/bin:/bin';
-const HOST_BUS_TEST = 'a sandboxed npm ci succeeds in a minimal fixture, with private XDG roots and the worktree writable';
+export const HOST_BUS_TESTS = [
+  'a sandboxed npm ci succeeds in a minimal fixture, with private XDG roots and the worktree writable',
+  'approved-plan review receives original task criteria and recorded host check outcomes',
+  'host checks that modify source require another verification before any paid review',
+];
+// NODE_OPTIONS splits unquoted spaces; quote the whole value so the filter cannot become just ^a.
+export const STAGE_TEST_OPTIONS = `--test-skip-pattern=${JSON.stringify(`^(?:${HOST_BUS_TESTS.join('|')})$`)}`;
 export const STAGE_LIMITS = { memoryMax: '8G', tasksMax: 2048 };
 const STAGE_ENV = {
   HOME: PRIVATE_HOME,
@@ -72,7 +78,7 @@ async function stageArguments(command, args, location, privateFiles, skipHostBus
     '--unshare-pid', '--unshare-ipc', '--unshare-uts',
     '--die-with-parent', '--new-session', '--clearenv',
     ...Object.entries(STAGE_ENV).flatMap(([key, value]) => ['--setenv', key, value]),
-    ...(skipHostBusTest ? ['--setenv', 'NODE_OPTIONS', `--test-skip-pattern=^${HOST_BUS_TEST}$`] : []),
+    ...(skipHostBusTest ? ['--setenv', 'NODE_OPTIONS', STAGE_TEST_OPTIONS] : []),
     '--chdir', location, '--',
     command === 'npm' ? '/opt/node/bin/npm' : command,
     ...args,
@@ -101,7 +107,7 @@ export async function runStageCommand(command, args, location, hostEnvironment =
     };
     // The archived suite's nested sandbox integration test requires a host user bus,
     // which is never mounted inside this dedicated stage sandbox.
-    if (skipHostBusTest) console.log(`Staged verify skips only "${HOST_BUS_TEST}" (nested host bus unavailable).`);
+    if (skipHostBusTest) console.log(`Staged verify skips only these nested host-bus tests: ${JSON.stringify(HOST_BUS_TESTS)}.`);
     await exec('systemd-run', [
       '--user', '--scope', '--quiet', '-p', `MemoryMax=${limits.memoryMax}`, '-p', 'MemorySwapMax=0',
       '-p', `TasksMax=${limits.tasksMax}`, '--', 'bwrap', ...sandboxArgs,
