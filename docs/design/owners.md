@@ -700,8 +700,8 @@ Owners each hold one domain under gates. Some work belongs to no domain: operati
 every owner's records, a one-off job on the homelab. For that the person may declare an **operator** in
 `operator.yaml` (`OperatorDeclaration` in `packages/owners/src/declarations.ts`; the agent in `operator.ts`): one
 agent the person directs turn by turn in a chat of its own, like a coding agent in auto mode. It sits outside the owner
-rules on purpose. It owns nothing, keeps no owner notebook, runs no duties, and is woken by the runtime only for the
-memory nudge below; owners cannot
+rules on purpose. It owns no domain, keeps no owner notebook, runs no duties, and is woken by the runtime for its
+own investigation jobs and the memory nudge below; owners cannot
 reach it (it is in no roster, and `onionsoup_ask`, `onionsoup_request_work` and friends resolve only owners). Its id
 `operator` and its name are reserved: no owner may take either (`operator_reserved`).
 
@@ -710,7 +710,7 @@ Its permissions allow nearly everything: any bash, edits, the web, any directory
 `git clean`, deleting incus instances, destroying ZFS datasets and pools, `mkfs`, `dd`, `kubectl delete`, and the
 CLI's person gates (`owners ... approve*`, `owners ... ship*`), so it does not answer an owner's plan or ship for the
 person unasked. It gets no `onionsoup_*` owner tools (they are denied, and refuse any agent that is not an owner)
-except `onionsoup_wiki`, with which it only reads the [wiki](#wiki), so it cannot submit, approve or ship through them, and the plan-approval, ship and owner-change prompts of owners'
+except `onionsoup_wiki`, with which it only reads the [wiki](#wiki), and `onionsoup_operator_job` for its own investigations. It cannot submit, approve or ship owner work through them, and the plan-approval, ship and owner-change prompts of owners'
 sessions are answered only in those sessions. It may load the person's operating skills in `.agents/skills`
 (operate-onionsoup, ship-onionsoup, create-owner), which owners and their subagents are denied, and never gets the
 owners' skills bootstrap.
@@ -722,6 +722,41 @@ command and edit it or its subagents run is journaled to `state/notebooks/operat
 never distilled), so the person can see afterwards what it did. Every chat shell, the operator's and the owners',
 gets the surface opencode's own server credentials blanked (the plugin's `shell.env` hook sets each of
 `HOST_ONLY_VARIABLES` to empty), so no command can use them to answer another session's prompt through the API.
+
+#### Durable operator investigations
+
+`onionsoup_operator_job` supervises the operator's own children, independently of owners and initiatives. Its first
+stage supports read-only file investigations: no child bash, edits, network tools, further delegation or owner tools.
+No persistent grant is created. The operator's normal interactive permissions are unchanged.
+
+The host binds a job to the configured operator and exact top-level chat, and captures the invoking human message
+from the transcript. Original intake, decomposed goal, constraints and task scope are separate fields; a runtime
+notice cannot create a new job as if it were a person. `create` returns a durable handle promptly. Tasks name existing
+directories within the operator's configured workspace, use `access: "read-only"`, and can name `dependsOn` task IDs.
+The scheduler admits at most two children across all jobs. These are independent OpenCode sessions with logical
+parentage in `state/operator-jobs/jobs.json`, so the parent can answer another message while both children run.
+Children are also recorded in the operator's existing session history, without inventing native parent relationships.
+
+Use `list` or `show { id }` for status, exact child sessions, attempts, events and transcript evidence. `pause` stops
+new dispatches while existing investigations continue. `cancel` aborts only the bound child turns and preserves their
+records; uncertain dispatch or changed turns block cancellation, rather than claiming it succeeded. `resume` restarts
+scheduling; with `childID`, it resumes a proven interrupted read-only turn in the **same** session using a new durable
+attempt. Restart reconciliation never launches a replacement for an uncertain creation or dispatch. A missing receipt
+stays blocked for diagnosis. Idle runtime status alone is not evidence of completion.
+
+The plugin's ordinary notice pass reconciles jobs and sends durable, actionable parent wakes for progress, blockers
+and readiness. Wakes wait for an idle parent, keep a stable message receipt and never blindly resend an uncertain
+prompt. They are runtime observations, not new permissions. The operator must inspect current job state before acting.
+Completed child evidence retains exact session, prompt, final message and tool-call identities. `synthesize` takes the
+current job digest, all final evidence message IDs and the operator's explanation, then completes the job once. This
+binds the summary to observed transcripts; it does not certify the truth of a model's conclusions.
+
+The acceptance scenario is two parallel investigations, another message answered in the same parent chat, a restart
+of a disposable OpenCode server, recovery of the same child IDs and evidence, and a recorded synthesis. Production
+sessions must not be restarted to test it. Write-enabled children and workspace write-claim scheduling are a later
+stage: this version rejects write scopes rather than allowing unsupervised concurrent edits. Native permissions and
+canonical-path checks constrain reading tools, but these host sessions are not a filesystem sandbox against concurrent
+path replacement by another process.
 
 #### Operator memory
 

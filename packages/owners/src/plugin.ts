@@ -49,7 +49,15 @@ import {
   BOOTSTRAP_MARKER, bootstrapText, NO_OPERATOR_SKILLS, OPERATOR_SKILLS_DIRECTORY, registerSkills, SKILLS_DIRECTORY, subagents, subagentsText,
   taskPermission,
 } from './owner-agents.ts';
-import { ENGINE_REPOSITORY, operatorAgent } from './operator.ts';
+import { ENGINE_REPOSITORY, operatorAgent, operatorInvestigatorAgent } from './operator.ts';
+import { OperatorJobs } from './operator-jobs.ts';
+import { OperatorSupervisor } from './operator-supervisor.ts';
+import { operatorSupervisorClient } from './operator-supervisor-client.ts';
+import { OPERATOR_INVESTIGATOR } from './operator-jobs-types.ts';
+import { OPERATOR_JOB_TOOL, operatorJobTool } from './operator-job-tools.ts';
+import { checkOperatorChildMessage, checkOperatorChildTool } from './operator-child-scope.ts';
+import { rememberOperatorChildren } from './operator-job-history.ts';
+import { deliverOperatorJobWakes } from './operator-job-wake.ts';
 import {
   commitOperatorMemory, editsUnder, ensureOperatorMemory, isMemoryNudge, MEMORY_NUDGE_TEXT, memoryIndexBlock, memorySignature, OperatorActivityLog,
   operatorMemoryDirectory,
@@ -346,6 +354,8 @@ const server: Plugin = async (input, options) => {
     await runtime.notebook(owner.id).ensure(charter).catch(() => undefined);
   }
   const operator = runtime.declarations.operator;
+  const operatorJobs = operator ? new OperatorJobs(runtime.stateDirectory, operator.directory, operator.name) : undefined;
+  const operatorSupervisor = operatorJobs ? new OperatorSupervisor(operatorJobs, operatorSupervisorClient(input.client)) : undefined;
   // The operator journals what it does, like an owner, to a notebook of its own (never distilled) that also holds its
   // memory: files it keeps itself, committed here when its chat goes idle.
   const operatorNotebook = runtime.notebook(OPERATOR_ID);
@@ -1112,6 +1122,9 @@ const server: Plugin = async (input, options) => {
     let lease: AdmissionLease | undefined;
     try {
       lease = await beginAdmission(runtime.stateDirectory, 'plugin:notices');
+      if (operatorSupervisor) await operatorSupervisor.tick().catch(error => console.warn('operator_supervisor_failed', error));
+      if (operatorJobs) await rememberOperatorChildren(runtime, operatorJobs, input.client).catch(error => console.warn('operator_child_history_failed', error));
+      if (operatorJobs) await deliverOperatorJobWakes(operatorJobs, planRevisionClient(input.client), (jobID, error) => console.warn('operator_job_wake_failed', jobID, error));
       await deliverPlanRevisions(runtime, planRevisionClient(input.client), (itemId, error) => console.warn('plan_revision_delivery_failed', itemId, error));
       await deliverDirectRequestReviews(runtime, planRevisionClient(input.client), (requestId, error) => console.warn('direct_review_wake_failed', requestId, error));
       await deliverWorkNotices();
@@ -1135,6 +1148,7 @@ const server: Plugin = async (input, options) => {
 
   return {
     async 'tool.execute.before'(input, output) {
+      if (operatorJobs) await checkOperatorChildTool(operatorJobs, input.sessionID, input.tool, output.args);
       if (await readChildAbandonment(runtime.stateDirectory, input.sessionID)) throw new Error('child_session_abandoned: preserved history is read-only');
       const key = `${input.sessionID}:${input.callID}`;
       if (trackedTools.has(key)) throw new Error('tool_call_already_active');
@@ -1214,7 +1228,11 @@ const server: Plugin = async (input, options) => {
       for (const name of Object.keys(RESTRICTED_TOOLS)) hiddenFromEveryone[name] = 'deny';
       // Owner tool servers are denied to every agent; each owner's own rules re-allow its servers (last match wins).
       Object.assign(agents, subagents(runtime.declarations, personaOwners));
-      if (operator) agents[operator.name] = operatorAgent(operator, { config: runtime.declarations.root, home: dirname(runtime.stateDirectory), memory: memoryDirectory });
+      if (operator) {
+        agents[operator.name] = operatorAgent(operator, { config: runtime.declarations.root, home: dirname(runtime.stateDirectory), memory: memoryDirectory });
+        agents[OPERATOR_INVESTIGATOR] = operatorInvestigatorAgent(operator);
+      }
+      hiddenFromEveryone[OPERATOR_JOB_TOOL] = 'deny';
       registerSkills(config as Parameters<typeof registerSkills>[0], operator ? [SKILLS_DIRECTORY, OPERATOR_SKILLS_DIRECTORY] : [SKILLS_DIRECTORY]);
       addDeclaredProviders(config, runtime.declarations.providers);
       const current = config.permission;
@@ -1230,6 +1248,7 @@ const server: Plugin = async (input, options) => {
 
     async 'chat.message'(message, output) {
       const messageID = message.messageID ?? output.message?.id;
+      if (operatorJobs) await checkOperatorChildMessage(operatorJobs, message.agent, message.sessionID, messageID);
       if (isExchangeNoticeDeliveryAttempt(runtime.stateDirectory, messageID, output.parts ?? [])) {
         const session = await input.client.session.get({ path: { id: message.sessionID } }).catch(() => undefined);
         if (session?.data?.directory && !session.error && !session.data.parentID
@@ -1325,6 +1344,11 @@ const server: Plugin = async (input, options) => {
     },
 
     tool: {
+      ...(operatorJobs && operatorSupervisor ? { [OPERATOR_JOB_TOOL]: operatorJobTool(operatorJobs, operatorSupervisor, input.client, agent => {
+        if (agent === operator!.name) return;
+        if (ownerByAgent.has(agent)) requireOwner(agent);
+        throw new Error('operator_job_operator_only');
+      }) } : {}),
       onionsoup_friction: tool({
         description: 'Report unexpected onionsoup engine behavior with expected/actual and reproducible evidence. Host code adds observed failures and origin; repeats are counted, not re-triaged. Do not include secrets.',
         args: {
