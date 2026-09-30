@@ -356,12 +356,26 @@ pending intent with `friction_source_stale` until revalidation and fresh approva
 
 `owners friction-revalidate <id>` explicitly re-investigates a stale report against the current commit, under the
 same CLI admission as `friction-triage` and never from the daemon. A write-once claim per report and reference commit
-allows at most one read-only hire for that commit; a failed hire or a dead runner leaves the claim `failed` or
-`uncertain`, and it is not retried. Results are appended as write-once revisions under
+allows one initial read-only hire for that commit; a failed hire or a dead runner leaves the claim `failed` or
+`uncertain`, and ordinary revalidation never retries it. Results are appended as write-once revisions under
 `state/friction/investigations/<id>/`, published atomically; the original investigation is never rewritten. The
 latest `revised` revision is the effective proposal, and its digest includes the revision number, so a revised
 proposal needs fresh approval. A blocked intent that never routed is archived as superseded history before the new
 approval routes; the report still has one request identity.
+
+A person may authorize one additional attempt with
+`owners friction-revalidation-retry <id> <reference-commit> <failed-claim-token>`. Read the token from the saved
+failed claim returned by `friction-revalidate`; this command acknowledges that a generic failure does **not**
+prove the earlier hire made no inference. The command binds that token to the current clean reference commit,
+records the local person's username, and archives the exact failed claim bytes before replacing the claim under
+a lock. Repeating the same command returns its saved retry; a failed retry cannot gain another attempt. A crash
+between archive and replacement resumes only when the archive exactly matches the failed claim. Running,
+uncertain, malformed claims and existing revisions for the commit block new hires. A dead retry becomes uncertain.
+The retry is a human CLI operation under normal admission, with no model tool, daemon retry or backlog replay.
+Initial and retry launches check that an executable `opencode` resolves in the hire's PATH before consuming an
+attempt; this filesystem check does not prove the sandbox, provider or inference will succeed. Correct the calling
+process's PATH to the existing installation before retrying. Older binaries reject retry metadata as uncertain,
+preserving the fail-closed rollback boundary. Original reports, investigations and revisions are retained.
 
 Only revalidation may answer `already-fixed`. That answer needs a `fixedBy` commit that exists and is an ancestor of
 the reference commit, and every cited source path must carry a line or range that exists at that commit. Otherwise the
