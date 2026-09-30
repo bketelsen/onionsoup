@@ -139,6 +139,15 @@ unreadable or malformed evidence retains the lease, as do in-flight messages, to
 and operator memory nudges. A held lease therefore needs investigation rather than manually
 clearing the drain on the strength of an absent status alone.
 
+Host exchange notices use a bounded delivery admission rather than a chat-turn admission. The
+plugin recognizes only a one-use, expiring delivery capability from the running host publisher,
+matched to the message, agent, directory and top-level session. The capability is removed before
+the message is persisted. A copied prefix, delivered notice ID, ordinary `noReply` API call, or
+message from another process does not authorize this bypass. A delayed callback after expiry
+falls back to the normal admission rules; a client timeout does not prove the server stopped.
+Exact delivered notice evidence may be ignored when checking a genuine turn's final reply. A
+later human message, changed notice, pending delivery or unknown entry remains blocking.
+
 ### One-time bridge for the 04d26ea → 41aed2f deployment
 
 If the **already staged** target is `41aed2f0301d86f52e51f63aa9628faa70f5a233` and
@@ -236,3 +245,51 @@ the guarded deployment procedure; approval is not permission to delete its live 
 restart under the existing drain, activity checks, checkpoints and rollback health checks.
 
 Recovery receipts identify both the approving person (`--approved-by`) and the recording OS user. The command, state and live surface must belong to the same OS user. Receipts bind the canonical database path and full original child rows; changed, unavailable or newly extended evidence retains the admission. Every additional child requires its own explicit approval.
+
+### Recovering admissions stranded by informational notices
+
+`scripts/recover-notice-admissions.mjs` is a separate operator-only bridge for a surface whose
+older plugin admitted a host `noReply` exchange notice as a turn. It does not delete leases,
+rewrite transcripts, manufacture an answer, or treat an unfinished real turn as completed.
+The historical `bootstrap-leases` migration above retains its original pinned builds.
+
+First stage the approved target through the normal release process. Keep a separately verified
+copy of this recovery command and its dependencies outside the release root, at the reviewed
+commit. Supply the exact current and staged build IDs, paths and each selected session:
+
+```sh
+node --conditions=onionsoup-source --import tsx scripts/recover-notice-admissions.mjs \
+  --root /absolute/release/root --state /absolute/onionsoup/state \
+  --config /absolute/onionsoup/config --surface-url http://127.0.0.1:4747/ \
+  --expected-old <current-commit> --expected-target <staged-commit> \
+  --session <exact-session-id>
+```
+
+Repeat `--session` for every selected session. Preview is read-only. It requires that this exact
+set accounts for every live admission, that the leases belong to the verified surface's OpenCode
+process, and that all known directories are quiet without permissions, questions, independent
+OpenCode processes or active item runners. Selected chats must be top-level and have no children.
+Each trailing entry must match a durable delivered host notice in identity, target, agent and
+complete rendered text; the preceding real turn must have its own completed assistant final.
+Legacy delivery records can be reconstructed only for the pinned affected build
+`b2db85b5fa46b1d8f6608ab6e1c3e29a75da0f95`; other builds need recorded delivery evidence.
+
+After the person approves the returned digest and exact selection, repeat the command with
+`--approve-digest <digest>`. The digest binds both manifests, current pointer, endpoint identity,
+selected leases, transcript and notice evidence. Apply takes the worker lock, starts the drain,
+and repeats the evidence and quiet checks. It writes a durable recovery checkpoint before
+restarting only the old surface. Both services must then be healthy on the unchanged old build,
+the endpoint must identify a replacement process, and every admission must be dead. Original
+lease files and all conversation and notice records remain intact. An immutable completion
+receipt is saved under `state/deploy/notice-admission-recoveries/`; the drain remains held so
+the existing release worker can deploy the already approved target through its normal checks.
+
+An uncertain restart or failed health check retains `state/deploy/rollback.json` and the drain;
+the old worker recognizes the checkpoint and refuses to continue. Repeating the identical
+approved command may finish only after proving the replacement healthy and evidence unchanged.
+It never retries an uncertain restart. A completed receipt makes later repeats inert. Changed
+evidence, additional admissions, or incomplete work requires a fresh diagnosis and approval;
+never remove a checkpoint or lease to force progress.
+The identical approved digest can resume an interruption between starting the drain and writing
+the checkpoint. Failures before a checkpoint reopen admissions; any partial checkpoint remains
+held for diagnosis.

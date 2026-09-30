@@ -8,6 +8,7 @@ import { chatPath } from './chats.ts';
 import { isRuntimeNotice, NOTICE_PREFIX } from './notices.ts';
 import { withRecordLock } from './record-lock.ts';
 import type { Runtime } from './runtime.ts';
+import { postExchangeNotice } from './exchange-notice-delivery.ts';
 
 export const NoticeChat = z.object({
   id: z.string(), directory: z.string(), parentID: z.string().optional(),
@@ -16,12 +17,13 @@ export const NoticeChat = z.object({
 export type NoticeChat = z.infer<typeof NoticeChat>;
 export const NoticeMessage = z.object({
   info: z.object({ id: z.string(), role: z.string(), agent: z.string().optional(), time: z.object({ created: z.number() }) }),
-  parts: z.array(z.object({ type: z.string(), text: z.string().optional(), synthetic: z.boolean().optional() })),
+  parts: z.array(z.object({ type: z.string(), text: z.string().optional(), synthetic: z.boolean().optional(), ignored: z.boolean().optional() })),
 });
 export type NoticeMessage = z.infer<typeof NoticeMessage>;
 const Target = z.object({ sessionID: z.string(), directory: z.string() });
 export const ExchangeNotice = z.object({
   id: z.string(), owner: z.string(), text: z.string(), at: z.string(), target: Target.optional(),
+  delivery: z.object({ agent: z.string(), text: z.string() }).optional(),
   undeliverableReason: z.enum(['owner_retired', 'owner_has_no_persona']).optional(),
 });
 export type ExchangeNotice = z.infer<typeof ExchangeNotice>;
@@ -32,7 +34,7 @@ export interface ExchangeClient {
   sessions(directory: string): Promise<NoticeChat[]>;
   messages(target: z.infer<typeof Target>): Promise<NoticeMessage[]>;
   idle(target: z.infer<typeof Target>): Promise<boolean>;
-  post(target: z.infer<typeof Target>, body: { agent: string; noReply: true; messageID: string; parts: { type: 'text'; text: string }[] }): Promise<void>;
+  post(target: z.infer<typeof Target>, body: { agent: string; noReply: true; messageID: string; parts: { type: 'text'; text: string; metadata?: Record<string, unknown> }[] }): Promise<void>;
 }
 
 function paths(runtime: Runtime) {
@@ -105,6 +107,36 @@ function noticeText(runtime: Runtime, notice: ExchangeNotice, limit: number) {
   return `${NOTICE_PREFIX} Owner exchange (${notice.id})\n${clipped(notice.text, limit)}\n\n${reference}`;
 }
 
+function matchesDelivery(message: NoticeMessage, notice: ExchangeNotice) {
+  return !!notice.delivery && message.info.id === notice.id && message.info.role === 'user'
+    && message.info.agent === notice.delivery.agent && message.parts.length === 1
+    && message.parts[0]?.type === 'text' && !message.parts[0].synthetic && !message.parts[0].ignored
+    && message.parts[0].text === notice.delivery.text;
+}
+
+/** Legacy reconstruction is reserved for an explicitly pinned operator recovery, never a chat bypass. */
+export async function deliveredExchangeNoticeProof(runtime: Runtime, target: z.infer<typeof Target>,
+  message: unknown, options: { allowLegacy?: boolean } = {}) {
+  const parsed = NoticeMessage.safeParse(message);
+  if (!parsed.success || !/^msg_[a-f0-9]{32}$/.test(parsed.data.info.id)) return undefined;
+  let raw: string;
+  try { raw = await readFile(join(paths(runtime).delivered, `${parsed.data.info.id}.json`), 'utf8'); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw error;
+  }
+  const notice = ExchangeNotice.parse(JSON.parse(raw));
+  if (notice.id !== parsed.data.info.id || notice.target?.sessionID !== target.sessionID
+    || notice.target.directory !== target.directory) return undefined;
+  let delivery = notice.delivery;
+  if (!delivery && options.allowLegacy && runtime.declarations.owners.has(notice.owner)) {
+    const owner = runtime.owner(notice.owner);
+    delivery = { agent: ownerChatAgent(owner), text: noticeText(runtime, notice, owner.chatContext.noticeChars) };
+  }
+  if (!delivery || !matchesDelivery(parsed.data, { ...notice, delivery })) return undefined;
+  return { notice, raw, ...delivery };
+}
+
 async function deliverOne(runtime: Runtime, file: string, client: ExchangeClient, locate: (ownerId: string) => Promise<z.infer<typeof Target> | undefined>) {
   const { pending, delivered } = paths(runtime);
   const path = join(pending, file);
@@ -127,11 +159,15 @@ async function deliverOne(runtime: Runtime, file: string, client: ExchangeClient
     const owner = runtime.owner(notice.owner);
     const target = notice.target ?? await locate(owner.id);
     if (!target || !(await client.idle(target))) return;
-    await save(path, { ...notice, target });
+    const delivery = notice.delivery ?? { agent: ownerChatAgent(configured), text: noticeText(runtime, notice, owner.chatContext.noticeChars) };
+    const prepared = { ...notice, target, delivery };
     const messages = await client.messages(target);
-    if (!messages.some(message => message.info.id === notice.id)) {
-      await client.post(target, { agent: ownerChatAgent(configured), noReply: true, messageID: notice.id,
-        parts: [{ type: 'text', text: noticeText(runtime, notice, owner.chatContext.noticeChars) }] });
+    const existing = messages.find(message => message.info.id === notice.id);
+    if (existing && (!notice.delivery || !matchesDelivery(existing, prepared))) throw new Error('exchange_notice_message_conflict');
+    await save(path, prepared);
+    if (!existing) {
+      await postExchangeNotice(runtime.stateDirectory, target, { agent: delivery.agent, noReply: true, messageID: notice.id,
+        parts: [{ type: 'text', text: delivery.text }] }, client.post.bind(client));
     }
     await mkdir(delivered, { recursive: true });
     await rename(path, join(delivered, file));

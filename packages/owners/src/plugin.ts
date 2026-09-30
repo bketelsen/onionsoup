@@ -1,7 +1,8 @@
 import { isAbandonedChild, readChildAbandonment } from './child-recovery.ts';
 import { ownerChatAgent, ownerChatVoice, observationChatPermission, observationChatPrompt } from './owner-chat.ts';
 import { recentActivityContext } from './chat-context.ts';
-import { deliverExchangeNotices } from './exchange-notices.ts';
+import { deliveredExchangeNoticeProof, deliverExchangeNotices } from './exchange-notices.ts';
+import { consumeExchangeNoticeDelivery, hasPendingExchangeNoticeDelivery } from './exchange-notice-delivery.ts';
 import { exchangeClient } from './exchange-client.ts';
 import { listAttention, changeAttention } from './attention.ts';
 import { requestProgressDetail, requestProgressSummary } from './request-status.ts';
@@ -590,13 +591,15 @@ const server: Plugin = async (input, options) => {
   async function hasFinalAnswer(sessionID: string, directory: string, userID?: string): Promise<boolean> {
     const reply = await input.client.session.messages({ path: { id: sessionID }, query: { directory } }).catch(() => undefined);
     if (!reply || reply.error || !Array.isArray(reply.data)) return false;
+    const informational = await Promise.all(reply.data.map(message => deliveredExchangeNoticeProof(runtime, { sessionID, directory }, message)));
+    const messages = reply.data.filter((_message, index) => !informational[index]);
     const expectedUserID = userID ?? (chatLeases.has(sessionID) ? undefined
-      : reply.data.findLast(message => message.info?.role === 'user')?.info?.id);
+      : messages.findLast(message => message.info?.role === 'user')?.info?.id);
     if (!expectedUserID) return false;
-    const index = reply.data.findIndex(message => message.info?.id === expectedUserID && message.info.role === 'user');
-    if (index < 0 || index >= reply.data.length - 1) return false;
-    if (reply.data.slice(index + 1).some(message => message.info?.role === 'user')) return false;
-    const last = reply.data.at(-1);
+    const index = messages.findIndex(message => message.info?.id === expectedUserID && message.info.role === 'user');
+    if (index < 0 || index >= messages.length - 1) return false;
+    if (messages.slice(index + 1).some(message => message.info?.role === 'user')) return false;
+    const last = messages.at(-1);
     if (!last) return false;
     const info = last.info as { role?: string; parentID?: string; time?: { completed?: number }; finish?: string } | undefined;
     return info?.role === 'assistant' && info.parentID === expectedUserID
@@ -1185,6 +1188,14 @@ const server: Plugin = async (input, options) => {
     },
 
     async 'chat.message'(message, output) {
+      const messageID = message.messageID ?? output.message?.id;
+      if (hasPendingExchangeNoticeDelivery(runtime.stateDirectory, messageID)) {
+        const session = await input.client.session.get({ path: { id: message.sessionID } }).catch(() => undefined);
+        if (session?.data?.directory && !session.error && !session.data.parentID
+          && output.message?.id === messageID && consumeExchangeNoticeDelivery(runtime.stateDirectory,
+            { sessionID: message.sessionID, directory: session.data.directory },
+            { id: messageID, role: output.message.role, agent: message.agent, parts: output.parts })) return;
+      }
       if (await readChildAbandonment(runtime.stateDirectory, message.sessionID)) throw new Error('child_session_abandoned: open a new session to continue');
       const pending = Symbol(message.sessionID);
       pendingAncestry.add(pending);
