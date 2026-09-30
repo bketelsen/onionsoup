@@ -23,7 +23,7 @@ jobs:
           node-version: '24'
           cache: npm
       - run: npm ci
-      - run: npm run verify
+      - run: timeout 180s npm run verify
         env:
           ONIONSOUP_HOME: ${{ runner.temp }}/onionsoup-home
           ONIONSOUP_CONFIG: ${{ runner.temp }}/onionsoup-config
