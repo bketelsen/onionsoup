@@ -1,9 +1,13 @@
 import { z } from 'zod';
 
 export const OPERATOR_INVESTIGATOR = 'onionsoup-operator-investigator';
+export const OPERATOR_RECOVERY_PERMISSION = 'onionsoup_operator_recovery';
 export const OPERATOR_JOB_LIMITS = { concurrentChildren: 2, tasksPerJob: 12, textChars: 24_000 };
 const Identifier = z.string().regex(/^[a-zA-Z0-9_-]+$/);
 const Text = z.string().trim().min(1).max(OPERATOR_JOB_LIMITS.textChars);
+export const OperatorRecoveryPermissionProof = z.object({ permissionID: Identifier, sessionID: Identifier, messageID: Identifier,
+  reply: z.literal('once'), callID: Text, nonce: z.string().uuid() });
+export type OperatorRecoveryPermissionProof = z.infer<typeof OperatorRecoveryPermissionProof>;
 export const OperatorJobOrigin = z.object({ operator: Text, sessionID: Identifier, directory: Text });
 export type OperatorJobOrigin = z.infer<typeof OperatorJobOrigin>;
 export const OperatorJobIntake = z.object({ messageID: Identifier, text: Text });
@@ -27,12 +31,19 @@ export const OperatorChildAttempt = z.object({
 });
 export const OperatorChild = OperatorTaskInput.extend({
   title: Text, sessionID: Identifier.optional(),
-  status: z.enum(['queued', 'creating', 'dispatching', 'running', 'completed', 'blocked', 'cancelled']),
+  status: z.enum(['queued', 'creating', 'dispatching', 'running', 'completed', 'blocked', 'cancelled', 'abandoned']),
   attempts: z.array(OperatorChildAttempt), evidence: OperatorChildEvidence.optional(), blocker: Text.optional(),
+  operation: z.object({ token: Identifier, kind: z.enum(['create', 'dispatch', 'observe', 'adopt', 'abort', 'retry']),
+    startedAt: Text, expiresAt: Text }).optional(),
+  uncertainty: z.object({ kind: z.enum(['creation', 'dispatch', 'observation']), since: Text, observations: z.number().int().nonnegative(),
+    lastObservedAt: Text, nextCheckAt: Text, needsDecision: z.boolean(), reason: Text }).optional(),
+  abandonment: z.object({ digest: Text, at: Text, actor: Text, note: Text, unknownOutcome: z.literal(true),
+    operationToken: Identifier.optional(), attemptID: Identifier.optional(), messageID: Identifier.optional(),
+    approval: OperatorRecoveryPermissionProof }).optional(),
 });
 export type OperatorChild = z.infer<typeof OperatorChild>;
 export const OperatorJobEvent = z.object({
-  id: Identifier, at: Text, kind: z.enum(['created', 'progress', 'blocked', 'ready', 'paused', 'resumed', 'cancelled', 'synthesized']),
+  id: Identifier, at: Text, kind: z.enum(['created', 'progress', 'blocked', 'ready', 'paused', 'resumed', 'cancelled', 'synthesized', 'abandoned', 'recovery-denied']),
   childID: Identifier.optional(), detail: Text,
 });
 export type OperatorJobEvent = z.infer<typeof OperatorJobEvent>;
@@ -63,9 +74,10 @@ export interface OperatorSessionSnapshot {
   messages: OperatorSessionMessage[];
 }
 export interface OperatorSupervisorClient {
-  listSessions(directory: string): Promise<Array<{ id: string; title: string }>>;
-  createSession(directory: string, title: string): Promise<{ id: string }>;
-  readSession(directory: string, sessionID: string): Promise<OperatorSessionSnapshot>;
-  prompt(directory: string, sessionID: string, messageID: string, text: string): Promise<void>;
-  abort(directory: string, sessionID: string): Promise<void>;
+  listSessions(directory: string, options?: OperatorClientOptions): Promise<Array<{ id: string; title: string }>>;
+  createSession(directory: string, title: string, options?: OperatorClientOptions): Promise<{ id: string }>;
+  readSession(directory: string, sessionID: string, options?: OperatorClientOptions): Promise<OperatorSessionSnapshot>;
+  prompt(directory: string, sessionID: string, messageID: string, text: string, options?: OperatorClientOptions): Promise<void>;
+  abort(directory: string, sessionID: string, options?: OperatorClientOptions): Promise<void>;
 }
+export interface OperatorClientOptions { signal?: AbortSignal }

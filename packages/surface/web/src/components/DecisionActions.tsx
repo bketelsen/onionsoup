@@ -53,10 +53,10 @@ function DeleteActions(props: DecisionActionProps) {
 }
 
 function PermissionActions(props: DecisionActionProps) {
-  const { busy, permission } = props;
+  const { entry, busy, permission } = props;
   return <>
     <Button variant="primary" disabled={busy} onClick={() => void permission('once')}>Allow once</Button>
-    <Button disabled={busy} onClick={() => void permission('always')}>Always</Button>
+    {entry.permission?.metadata?.approvalScope !== 'once' && <Button disabled={busy} onClick={() => void permission('always')}>Always</Button>}
     <Button variant="destructive" disabled={busy} onClick={() => void permission('reject')}>Reject</Button>
   </>;
 }

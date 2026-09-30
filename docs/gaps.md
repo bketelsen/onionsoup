@@ -50,8 +50,10 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
   `state/notebooks/operator/journal/*.jsonl`.
 - **Durable operator jobs initially cover read-only investigations.** They preserve child identities, attempts,
   progress wakes and evidence-backed synthesis while the parent remains responsive. Write scopes are rejected;
-  exclusive workspace claims and scoped editing are a separate stage. An uncertain child dispatch or parent wake
-  with no runtime receipt stays blocked rather than being replayed. These host sessions are not a filesystem sandbox.
+  exclusive workspace claims and scoped editing are a separate stage. An uncertain child stops automatic checks after
+  a bounded budget; explicit native human approval can abandon its logical reservation without claiming the inference
+  stopped or launching a replacement. An uncertain parent wake with no receipt stays blocked rather than being replayed.
+  These host sessions are not a filesystem sandbox.
 - **Plan approvals in chat do not survive a restart.** A plan approval pending in a chat is lost if the surface restarts (the
   permission prompt lives in its opencode); the item stays `awaiting-plan-approval` and the owner resubmits it with
   `item`.

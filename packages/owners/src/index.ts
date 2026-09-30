@@ -61,3 +61,5 @@ export { ownerChatAgent } from './owner-chat.ts';
 export { SessionHistory, rememberSession, rememberedSession, sessionHistory, itemSessionHistory } from './session-history.ts';
 
 export { readChildAbandonment, listChildAbandonments, abandonedChildMessages, ChildAbandonment } from './child-recovery.ts';
+
+export { OPERATOR_RECOVERY_PERMISSION } from './operator-jobs-types.ts';
