@@ -3,6 +3,7 @@ import { z } from 'zod';
 import {
   approveCreate, approveDelete, approvePlan, approvePush, chatDirectory, denyRequest, deskState, describeAsk,
   domainSummary, itemText, revisePlan, resumeItem, retryItem, cancelItem, memoryFingerprint, type ResourceRequest, type Runtime,
+  promoteFriction, retryFrictionPromotion, frictionProposalDigest, frictionPromotionView, FrictionProposalDigest,
   AttentionAssignmentInput, assignAttention, retryAttentionAssignment, attentionAssignmentView, attentionAssignmentTargets, type AttentionAssignmentView,
   listAttention, changeAttention, recoverRequest, reconcileRequest,
   listFriction, frictionDetail, readFrictionTriage, type FrictionRecord,
@@ -70,6 +71,7 @@ export const Decision = z.object({
   reason: z.string().optional(),
   withDelete: z.boolean().optional(),
   assignment: AttentionAssignmentInput.optional(),
+  proposalDigest: FrictionProposalDigest.optional(),
 });
 export type Decision = z.infer<typeof Decision>;
 
@@ -472,7 +474,8 @@ export class SurfaceState {
       const saved = await readFrictionTriage(this.runtime, record.id);
       const triage = saved ? { state: saved.state, updatedAt: saved.updatedAt,
         reason: saved.reason, investigation: saved.investigation } : undefined;
-      return { ...fields, sessionID: origin.sessionID, triage };
+      return { ...fields, sessionID: origin.sessionID, triage, proposalDigest: saved && frictionProposalDigest(saved),
+        promotion: await frictionPromotionView(this.runtime, record.id) };
     } catch {
       return { ...fields, sessionID: origin.sessionID, triageError: 'friction_triage_unreadable' };
     }
@@ -535,6 +538,14 @@ export class SurfaceState {
       'retry-request': async () => (await recoverRequest(this.runtime, decision.id, 'retry', by, required(reason, 'reason'))).status,
       'cancel-request': async () => (await recoverRequest(this.runtime, decision.id, 'cancel', by, required(reason, 'reason'))).status,
       'retry-attention-assignment': async () => (await retryAttentionAssignment(this.runtime, decision.id, by)).status,
+      'retry-friction-promotion': async () => {
+        const request = await retryFrictionPromotion(this.runtime, decision.id, required(decision.proposalDigest, 'proposal digest'), by);
+        return `${request.id}: ${request.status}`;
+      },
+      'promote-friction': async () => {
+        const request = await promoteFriction(this.runtime, decision.id, required(decision.proposalDigest, 'proposal digest'), by);
+        return `${request.id}: ${request.status}`;
+      },
       'assign-attention': async () => {
         if (!decision.assignment) throw new Error('attention_assignment_required');
         const request = await assignAttention(this.runtime, decision.id, decision.assignment, by);
@@ -602,7 +613,7 @@ export class SurfaceState {
       (await this.runtime.initiatives.list()).map(initiative => [initiative.id, initiative.status, initiative.updatedAt]),
       await memoryFingerprint(this.runtime),
       await listAttention(this.runtime),
-      (await this.friction()).map(entry => [entry.id, entry.count, entry.lastSeen, entry.triage?.updatedAt, entry.triage?.state, entry.triageError]),
+      (await this.friction()).map(entry => [entry.id, entry.count, entry.lastSeen, entry.triage?.updatedAt, entry.triage?.state, entry.triageError, entry.promotion, entry.proposalDigest]),
       (await this.runtime.providerHealth.list()).map(record => [record.provider, record.status, record.failures]),
     ]);
   }

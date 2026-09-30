@@ -79,6 +79,8 @@ test('the operator agent allows nearly everything, and irreversible commands and
     ['ls -la', 'allow'], ['npm run verify', 'allow'], ['git push origin main', 'allow'], ['rm file.txt', 'allow'],
     ['git push --force origin main', 'ask'], ['git push origin main -f', 'ask'], ['git reset --hard HEAD~1', 'ask'],
     ['rm -rf /tmp/x', 'ask'], ['sudo zfs destroy tank/data', 'ask'], ['incus delete web', 'ask'],
+    ['npm run owners -- friction-promote fr_fixture digest', 'ask'],
+    ['npm run owners -- friction-promotion-retry fr_fixture digest', 'ask'],
     ['npm run owners -- approve w-20260925-1a2b3c', 'ask'], ['npm run owners -- ship homelab', 'ask'],
     ['systemctl --user stop onionsoup-surface', 'ask'],
   ];

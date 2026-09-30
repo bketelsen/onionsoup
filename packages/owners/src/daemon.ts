@@ -1,3 +1,4 @@
+import { recoverFrictionPromotions } from './friction-promotion.ts';
 import { recoverAttentionAssignments } from './attention-assignment.ts';
 import { noticeRequestProgress } from './request-status.ts';
 import { consumeFrictionWake, nextFrictionInvestigation } from './friction-work.ts';
@@ -301,6 +302,11 @@ async function tickAdmitted(runtime: Runtime, log: TickLog) {
     await recoverAskHandoffs(runtime, log.error);
   } catch (error) {
     log.error('handoffs', error);
+  }
+  try {
+    await recoverFrictionPromotions(runtime, log.error);
+  } catch (error) {
+    log.error('friction promotions', error);
   }
   try {
     await runtime.requests.markInterrupted();

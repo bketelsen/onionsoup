@@ -113,6 +113,7 @@ async function investigate(runtime: Runtime, report: FrictionRecord, record: Fri
   const response = await runtime.hire(owner.id, { role: 'owner', model: owner.model, directory: owner.workspace,
     extraPermission: { bash: 'deny' },
     title: `Friction investigation ${record.id}`, brief: brief(report, record), schema: FrictionInvestigation });
+  record = await updateClaim(runtime, { ...record, sessionID: response.sessionID, cost: response.cost });
   const investigation = FrictionInvestigation.parse(response.value);
   investigation.observed = investigation.observed.map(safeProse);
   investigation.inferred = investigation.inferred.map(safeProse);

@@ -4,7 +4,19 @@ import type { FrictionRecord } from '../types.ts';
 import { Button, Empty, Section } from './ui.tsx';
 
 /** React text nodes render persisted, untrusted prose inertly. */
-export function FrictionDetail({ record }: { record: FrictionRecord }) {
+export function FrictionDetail({ record, refresh }: { record: FrictionRecord; refresh?: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const requestFix = async (action = 'promote-friction') => {
+    setBusy(true);
+    setError('');
+    try {
+      await api('/api/decide', { method: 'POST', body: { action, id: record.id, proposalDigest: action === 'retry-friction-promotion' ? record.promotion?.digest : record.proposalDigest } });
+      refresh?.();
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Unable to request fix');
+    } finally { setBusy(false); }
+  };
   return <article className="space-y-3 whitespace-pre-wrap break-words">
     <h2 className="text-lg font-semibold">{record.summary}</h2>
     <p>Expected: {record.expected}</p>
@@ -28,9 +40,24 @@ export function FrictionDetail({ record }: { record: FrictionRecord }) {
           <p>{record.triage.investigation.proposedWork.goal}</p>
           <p>{record.triage.investigation.proposedWork.repository} · {record.triage.investigation.proposedWork.rationale}</p>
           <ul>{record.triage.investigation.proposedWork.acceptance.map((entry, index) => <li key={index}>{entry}</li>)}</ul>
-          <p>Proposal only. Review and submit through the normal plan approval flow; no work has been dispatched.</p>
+          {!record.promotion && <>
+            <p>Proposal only; no work has been dispatched. Requesting this fix asks the owner to accept and plan it under existing approval rules.</p>
+            {record.proposalDigest && <Button variant="primary" disabled={busy} onClick={() => void requestFix()}>Request this fix</Button>}
+          </>}
         </>}
       </>}
+    </section>}
+    {error && <p role="alert">{error}</p>}
+    {record.promotion && <section className="space-y-2">
+      <h3>Requested by {record.promotion.by} · {record.promotion.at}</h3>
+      <p>{record.promotion.owner}: {record.promotion.status === 'pending-owner' ? 'awaiting owner acceptance' : record.promotion.status}</p>
+      <p className="font-mono break-all">{record.promotion.requestID}</p>
+      {record.promotion.reason && <p>{record.promotion.reason}</p>}
+      {record.promotion.status === 'blocked' && <Button disabled={busy}
+        onClick={() => void requestFix('retry-friction-promotion')}>Retry request routing</Button>}
+      {record.promotion.workItem && <Button onClick={() => navigate('item', record.promotion!.workItem!)}>View linked work</Button>}
+      <Button onClick={() => navigate('owner', record.promotion!.owner)}>View responsible owner</Button>
+      <p>Request status does not prove the original friction is fixed.</p>
     </section>}
     <Button onClick={() => navigate('owner', record.owner, 'chat', record.sessionID)}>Open originating chat</Button>
   </article>;
@@ -74,7 +101,11 @@ export function FrictionView({ recordId }: { recordId?: string }) {
         className="w-full text-left break-words" onClick={() => navigate('friction', record.id)}>
         {record.summary} · {record.count} · {record.triageError ? 'status unavailable' : record.triage?.state ?? 'not investigated'}</Button>) : <Empty>No friction reports yet.</Empty>}</div>
       {detailError && <p className="text-status-error">{detailError}</p>}
-      {detail && <div className="min-w-0 max-lg:order-first"><FrictionDetail record={detail} /></div>}
+      {detail && <div className="min-w-0 max-lg:order-first"><FrictionDetail key={detail.id} record={detail} refresh={() => {
+        void load();
+        void api<FrictionRecord>(`/api/friction/${encodeURIComponent(detail.id)}`)
+          .then(setDetail, failure => setDetailError(String(failure.message ?? failure)));
+      }} /></div>}
     </div>
     </Section>
   </main>;
