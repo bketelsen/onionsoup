@@ -8,6 +8,8 @@ export function operatorHandoffToolView(report: OperatorHandoffReport) {
     observedAt: report.observedAt, reason: report.reason, paths: report.paths, digest: report.artifact.digest,
     checks: report.checks.map(check => ({ id: check.id, checkID: check.checkID, status: check.status,
       exitCode: check.exitCode, digest: check.digest })),
+    resolutions: report.resolutions.map(resolution => ({ receiptID: resolution.receiptID, kind: resolution.kind, at: resolution.at })),
+    recovery: { previewAction: 'recovery-preview-handoff', action: 'recover-handoff' },
     commands: report.artifact.checks.map(check => ({ id: check.id, command: check.command,
       provenance: check.provenance })),
     completeEvidence: 'This is a timestamped observation; call show-handoff to refresh after a pending check. The JSON report contains the complete artifact, approvals, child evidence and check receipts. The patch contains the exact combined diff. Neither has been applied.' };

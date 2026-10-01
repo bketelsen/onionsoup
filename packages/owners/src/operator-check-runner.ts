@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, open, realpath, rm, writeFile, type FileHandle } from '
 import { constants as operatingSystem, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
 import { SANDBOX_LIMITS } from './sandbox.ts';
 import { OPERATOR_CHECK_LIMITS, OperatorCheckCommand, operatorCheckKind,
   validateOperatorCheckSourcePaths, type OperatorCheckRuntimeEvidence } from './operator-check-types.ts';
@@ -11,6 +12,7 @@ import { alreadyMemoryCapped, OPERATOR_WRITER_LIMITS, preflightOperatorFileWrite
   requireOperatorWriterBwrapFeatures } from './operator-write-writer.ts';
 import { preflightOperatorGoCheck, prepareOperatorGoCheck } from './operator-check-go.ts';
 import { operatorNamespaceWitness } from './operator-check-process.ts';
+import type { OperatorCheckWitness } from './operator-check-execution.ts';
 
 export const OPERATOR_CHECK_RUNNER_LIMITS = { memoryBytes: OPERATOR_WRITER_LIMITS.memoryBytes,
   tasksMax: SANDBOX_LIMITS.tasksMax, timeoutMs: 60_000, killMs: OPERATOR_WRITER_LIMITS.killMs,
@@ -18,6 +20,7 @@ export const OPERATOR_CHECK_RUNNER_LIMITS = { memoryBytes: OPERATOR_WRITER_LIMIT
   sourceFiles: 4_104, sourceBytes: 128 * 1024 * 1024, libraries: 64, temporaryBytes: 256 * 1024 * 1024 };
 export interface OperatorCheckSourceFile { path: string; content: Buffer; mode: number }
 export interface OperatorCheckRun { exitCode: number; output: string; outputTruncated: boolean; runtime?: OperatorCheckRuntimeEvidence }
+export interface OperatorCheckExecutionOptions { onWitness(witness: OperatorCheckWitness): Promise<void> }
 export interface PinnedOperatorCheckMount { handle: FileHandle; destination: string }
 export interface OperatorCheckRuntime { executable: string; environment: Record<string, string>; evidence?: OperatorCheckRuntimeEvidence }
 interface CheckAdapter {
@@ -25,6 +28,7 @@ interface CheckAdapter {
   prepare(directory: string, mounts: PinnedOperatorCheckMount[]): Promise<OperatorCheckRuntime>;
 }
 const execute = promisify(execFile);
+const guard = fileURLToPath(new URL('./operator-check-guard.mjs', import.meta.url));
 
 const goAdapter: CheckAdapter = { preflight: preflightOperatorGoCheck, prepare: prepareOperatorGoCheck };
 const adapters: Record<ReturnType<typeof operatorCheckKind>, CheckAdapter> = {
@@ -120,6 +124,13 @@ async function prepareNodeCheck(_directory: string, mounts: PinnedOperatorCheckM
   return { executable: '/runtime/node', environment: {} };
 }
 
+async function pinGuard(mounts: PinnedOperatorCheckMount[]) {
+  const handle = await open(guard, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  mounts.push({ handle, destination: '/runtime/operator-check-guard.mjs' });
+  // This is fixed host code shipped with this module, like the existing fixed file writer helper.
+  if (!(await handle.stat()).isFile()) throw new Error('operator_check_runtime_changed');
+}
+
 export async function preflightOperatorCheck(command = ['node', '--test', 'preflight.test.mjs']) {
   const approved = OperatorCheckCommand.safeParse(command);
   if (!approved.success) throw new Error('operator_check_command_invalid');
@@ -129,9 +140,11 @@ export async function preflightOperatorCheck(command = ['node', '--test', 'prefl
   await adapters[operatorCheckKind(approved.data)].preflight();
 }
 
-function bubblewrapArguments(command: string[], mounts: PinnedOperatorCheckMount[], runtime: OperatorCheckRuntime) {
+function bubblewrapArguments(command: string[], mounts: PinnedOperatorCheckMount[], runtime: OperatorCheckRuntime, guarded: boolean) {
   const binds = mounts.flatMap((mount, index) => ['--ro-bind-fd', String(index + 3), mount.destination]);
   const environment = Object.entries(runtime.environment).flatMap(([key, value]) => ['--setenv', key, value]);
+  const invocation = [runtime.executable, ...command.slice(1)];
+  if (guarded) invocation.unshift('/runtime/node', '/runtime/operator-check-guard.mjs');
   // The parent pins namespace init before releasing execution, then proves its death even after forced shutdown.
   return ['--unshare-all', '--as-pid-1', '--die-with-parent', '--new-session', '--cap-drop', 'ALL',
     '--info-fd', String(mounts.length + 3), '--block-fd', String(mounts.length + 4),
@@ -139,11 +152,11 @@ function bubblewrapArguments(command: string[], mounts: PinnedOperatorCheckMount
     '--tmpfs', '/tmp', '--dir', '/tmp/home', '--remount-ro', '/proc', '--remount-ro', '/dev', '--remount-ro', '/',
     '--clearenv', '--setenv', 'HOME', '/tmp/home', '--setenv', 'TMPDIR', '/tmp',
     '--setenv', 'PATH', '/runtime', '--setenv', 'LANG', 'C.UTF-8', ...environment, '--chdir', '/workspace',
-    '--', runtime.executable, ...command.slice(1)];
+    '--', ...invocation];
 }
 
-async function isolatedCommand(command: string[], mounts: PinnedOperatorCheckMount[], runtime: OperatorCheckRuntime) {
-  const args = bubblewrapArguments(command, mounts, runtime);
+async function isolatedCommand(command: string[], mounts: PinnedOperatorCheckMount[], runtime: OperatorCheckRuntime, guarded: boolean) {
+  const args = bubblewrapArguments(command, mounts, runtime, guarded);
   const limits = OPERATOR_CHECK_RUNNER_LIMITS;
   if (await alreadyMemoryCapped(limits.memoryBytes, limits.tasksMax)) return { executable: '/usr/bin/bwrap', args };
   return { executable: '/usr/bin/systemd-run', args: ['--user', '--scope', '--quiet',
@@ -179,12 +192,13 @@ function failureOutcome(exitCode: number, reason: string,
     outputTruncated: captured.outputTruncated || output.length > OPERATOR_CHECK_LIMITS.outputChars };
 }
 
-async function executeCheck(command: Awaited<ReturnType<typeof isolatedCommand>>, mounts: PinnedOperatorCheckMount[]): Promise<OperatorCheckRun> {
+async function executeCheck(command: Awaited<ReturnType<typeof isolatedCommand>>, mounts: PinnedOperatorCheckMount[],
+  options?: OperatorCheckExecutionOptions): Promise<OperatorCheckRun> {
   return new Promise((resolve, reject) => {
     let child: ReturnType<typeof spawn>;
     try {
       child = spawn(command.executable, command.args, { detached: true,
-        stdio: ['ignore', 'pipe', 'pipe', ...mounts.map(mount => mount.handle.fd), 'pipe', 'pipe'],
+        stdio: [options ? 'pipe' : 'ignore', 'pipe', 'pipe', ...mounts.map(mount => mount.handle.fd), 'pipe', 'pipe'],
         env: { PATH: '/usr/bin:/bin', XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR,
           DBUS_SESSION_BUS_ADDRESS: process.env.DBUS_SESSION_BUS_ADDRESS } });
     } catch {
@@ -192,7 +206,7 @@ async function executeCheck(command: Awaited<ReturnType<typeof isolatedCommand>>
       return;
     }
     let output = '';
-    const namespace = operatorNamespaceWitness(child, mounts.length + 3, mounts.length + 4);
+    const namespace = operatorNamespaceWitness(child, mounts.length + 3, mounts.length + 4, options?.onWitness);
     let outputTruncated = false;
     let timedOut = false;
     let spawnFailed = false;
@@ -248,7 +262,8 @@ async function cleanSnapshot(mounts: PinnedOperatorCheckMount[], directory: stri
 }
 
 /** The host supplies only verified tracked files and receipted creations, never a live checkout mount. */
-export async function runOperatorCheck(command: string[], sourceFiles: OperatorCheckSourceFile[]): Promise<OperatorCheckRun> {
+export async function runOperatorCheck(command: string[], sourceFiles: OperatorCheckSourceFile[],
+  options?: OperatorCheckExecutionOptions): Promise<OperatorCheckRun> {
   let directory: string | undefined;
   let started = false;
   let outcome: OperatorCheckRun;
@@ -262,9 +277,13 @@ export async function runOperatorCheck(command: string[], sourceFiles: OperatorC
     const handle = await open(workspace, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
     mounts.push({ handle, destination: '/workspace' });
     const runtime = await adapters[operatorCheckKind(approved)].prepare(directory, mounts);
-    const launch = await isolatedCommand(approved, mounts, runtime);
+    if (options) {
+      if (operatorCheckKind(approved) !== 'node-test') await prepareNodeCheck(directory, mounts);
+      await pinGuard(mounts);
+    }
+    const launch = await isolatedCommand(approved, mounts, runtime, !!options);
     started = true;
-    outcome = await executeCheck(launch, mounts);
+    outcome = await executeCheck(launch, mounts, options);
     if (runtime.evidence) outcome.runtime = runtime.evidence;
   } catch (error) {
     if (started) {

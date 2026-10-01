@@ -795,12 +795,32 @@ recorded as provenance; more than four distinct commands is refused rather than 
 Combined checks have their own durable ledger and deployment admission, with at most two prepared checks globally
 and one per handoff. They run asynchronously outside mutation locks. A prepared check is never replayed: known exits
 (including setup failure) produce reusable receipts, while unproven process termination retains admission and an
-uncertain record. Restart preserves that uncertainty; there is no automatic retry or claim that a crash undid work.
+uncertain record. Restart preserves that uncertainty; there is no automatic retry or claim that a crash undid work. Evidence-bound recovery is described below.
 `show-handoff { id }` rechecks live child evidence and workspace freshness and provides an exact patch and JSON report
 under `state/operator-handoffs/`. Reports are timestamped observations; call `show-handoff` after a pending check to refresh the exported JSON. `ready` means all configured combined checks passed for the current artifact;
 `unchecked` means none were configured. Neither means applied, independently reviewed, committed or published.
 The human's existing exact scope/check authorization covers these commands; preparing or checking a combined preview
 does not add another permission click or standing grant. Applying and publishing remain separate user-directed work.
+
+Combined-check recovery uses `recovery-preview-handoff { id, receiptID }` and
+`recover-handoff { id, receiptID, digest, text }`. Each new attempt persists its exact admission, command/artifact
+binding and process identity domain before it occupies a check slot. A separate, checksummed execution journal is
+saved before launch. The sandbox runs a fixed host guard which requires an explicit permit byte; EOF never starts
+the approved command. The host saves the verified namespace/launcher witness before sending that permit.
+
+Recovery inspects process identities outside ledger locks and rechecks the exact job, receipt and journal digest
+before committing. A saved host outcome can be reconciled without a new approval. When execution is positively
+stopped but no outcome was saved, the existing native **once** gate asks the person to release that exact reservation
+as `stopped-unverified`. An exited original host with an intact pre-launch journal and no execution witness also
+proves that the guarded command was never started. Neither case invents an exit code, reruns the check, accepts the
+combined result or rewrites prior synthesis. The original prepared receipt remains, alongside an immutable resolution;
+late outcome facts stay in the journal without replacing a human unverified resolution.
+
+Resolved receipts stop consuming the two combined-check slots, but their check IDs stay consumed. Cleanup deletes
+only the exact recorded admission identity and can be retried idempotently. Source drift still makes the handoff
+stale, but does not prevent releasing a positively stopped resource. Running, zombie, foreign or unreadable identities,
+changed boot/PID domains and missing legacy provenance remain ineligible. No process is killed by this recovery path,
+no broad lease clearing occurs, and no standing permission is created.
 
 The acceptance scenario is two parallel investigations, another message answered in the same parent chat, a restart
 of a disposable OpenCode server, recovery of the same child IDs and evidence, and a recorded synthesis. Production

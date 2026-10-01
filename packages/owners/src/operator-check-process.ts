@@ -2,19 +2,12 @@ import type { ChildProcess } from 'node:child_process';
 import { constants } from 'node:fs';
 import { open, readFile, type FileHandle } from 'node:fs/promises';
 import type { Duplex } from 'node:stream';
+import { operatorCheckProcessIdentity as processIdentity, readOperatorCheckOwner,
+  type OperatorCheckWitness } from './operator-check-execution.ts';
 
 export const OPERATOR_NAMESPACE_LIMITS = { metadataBytes: 4096, startupMs: 15_000,
   terminationMs: 5_000, pollMs: 20, ancestry: 8 };
-interface ProcessIdentity { pid: number; parent: number; state: string; started: string }
-
-function processIdentity(stat: string): ProcessIdentity {
-  const fields = stat.slice(stat.lastIndexOf(') ') + 2).trim().split(/\s+/);
-  const pid = Number(stat.slice(0, stat.indexOf(' ')));
-  const parent = Number(fields[1]);
-  if (!Number.isSafeInteger(pid) || pid < 1 || !Number.isSafeInteger(parent) || parent < 0
-    || !fields[0] || !/^\d+$/.test(fields[19] ?? '')) throw new Error('operator_check_process_uncertain');
-  return { pid, parent, state: fields[0], started: fields[19]! };
-}
+type ProcessIdentity = ReturnType<typeof processIdentity>;
 
 async function assertDescendant(identity: ProcessIdentity, launchPID: number) {
   let parent = identity.parent;
@@ -66,7 +59,8 @@ async function waitForNamespaceDeath(pinned: Awaited<ReturnType<typeof pinNamesp
 }
 
 /** The barrier prevents command execution until the trusted init PID has a pinned proc identity. */
-export function operatorNamespaceWitness(child: ChildProcess, informationFD: number, barrierFD: number) {
+export function operatorNamespaceWitness(child: ChildProcess, informationFD: number, barrierFD: number,
+  onWitness?: (witness: OperatorCheckWitness) => Promise<void>) {
   const information = child.stdio[informationFD] as Duplex;
   const barrier = child.stdio[barrierFD] as Duplex;
   let metadata = '';
@@ -90,15 +84,25 @@ export function operatorNamespaceWitness(child: ChildProcess, informationFD: num
   });
   information.once('error', deny);
   barrier.once('error', deny);
+  if (onWitness) child.stdin?.once('error', deny);
   information.once('end', () => {
     if (decided) return;
     void pinNamespace(metadata, child.pid).then(async witness => {
       if (decided) { await witness.handle.close(); return; }
       pinned = witness;
+      if (onWitness) {
+        const launcher = processIdentity(await readFile(`/proc/${child.pid}/stat`, 'utf8'));
+        if (launcher.pid !== child.pid || launcher.group !== child.pid) throw new Error('operator_check_process_uncertain');
+        const identity = (process: ProcessIdentity) => ({ pid: process.pid, started: process.started });
+        await onWitness({ version: 1, owner: await readOperatorCheckOwner(),
+          launcher: identity(launcher), namespace: identity(witness.identity) });
+        if (decided) return;
+      }
       decided = true;
       clearTimeout(startup);
       released = true;
       barrier.write(Buffer.from([1]));
+      if (onWitness) child.stdin!.end(Buffer.from([1]));
       finish();
     }).catch(deny);
   });
@@ -113,6 +117,8 @@ export function operatorNamespaceWitness(child: ChildProcess, informationFD: num
       if (pinned) await pinned.handle.close();
       information.destroy();
       if (released || groupExited) barrier.destroy();
+      // The guarded protocol refuses EOF, so closing this pipe is safe even with unproved outer shutdown.
+      if (onWitness) child.stdin?.destroy();
     },
   };
 }

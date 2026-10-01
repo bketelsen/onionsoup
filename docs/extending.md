@@ -82,13 +82,29 @@ For accepted changes in sibling worktrees of one repository at one base, ask for
    for each returned check, sequentially. Only commands already approved for that job can run; no new scope prompt is needed.
 3. `{ "action": "show-handoff", "id": "<job>" }` reports progress and the complete patch/JSON report paths.
    The operator remains available while checks run. A failed combined check is useful evidence even when each child
-   passed alone. Unknown completion is preserved across restart, never automatically retried.
+   passed alone. Unknown completion is preserved across restart, never automatically retried. Use the recovery actions below for a supported resolution.
 4. Review the exact combined diff and check receipts before your normal application/publication workflow. This action
    never applies changes, commits or pushes. A report with no configured checks is `unchecked`, not verified.
 
 Overlapping approved paths, different repositories/bases, stale files, unaccepted children or incomplete runtime
 evidence block a handoff. Its report preserves the original task, approvals and child history separately from combined
 verification. Previously recorded synthesis is not rewritten or retroactively presented as combined verification.
+
+For a combined check left `uncertain`, use the receipt ID returned by `show-handoff`:
+
+1. `{ "action": "recovery-preview-handoff", "id": "<job>", "receiptID": "<check receipt>" }`
+   displays the exact digest, original goal, saved outcome or process observation, and eligibility reason.
+2. `{ "action": "recover-handoff", "id": "<job>", "receiptID": "<check receipt>", "digest": "<preview digest>", "text": "<factual recovery note>" }`
+   imports an existing host completion, or asks **Allow once** to release a positively stopped check with no result.
+3. Read `show-handoff` again. A stopped unknown result remains `unverified`; its command is never replayed and the
+   original job/child acceptance is unchanged. An identical recovery call reuses its first resolution and safely
+   finishes only exact-identity admission cleanup if that was interrupted. The same procedure cleans up a retained
+   admission after normal completion, preserving that completed receipt without another approval.
+
+These actions are available only to the configured operator in the original parent chat. They do not infer success
+from elapsed time, a dead plugin lease or a model statement. Live/zombie/foreign processes, changed identity domains,
+unknown outcomes with missing journals and legacy receipts without execution provenance remain protected. A new attempt needs a separately
+scoped job; recovery creates none. No production restart or manual state edit is part of this procedure.
 
 To enable Go checks, the trusted service environment must set `ONIONSOUP_HOST_GO_ROOT` to the canonical absolute
 root of an installed Go toolchain (for example `/opt/go`). This selects runtime files, not a new authority grant.
