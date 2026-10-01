@@ -164,7 +164,7 @@ test('a rejected concurrent SDK read does not release its still-pending sibling'
 });
 
 for (const response of ['rejection', 'error-response'] as const) {
-  test(`an invoked effect with ${response} remains uncertain and cannot replay`, async context => {
+  test(`an invoked effect with ${response} retains its uncertain admission through disposal`, async context => {
     const setup = await fixture(context);
     let effects = 0;
     setup.start(async pass => {
@@ -180,7 +180,6 @@ for (const response of ['rejection', 'error-response'] as const) {
     assert.equal(uncertain.status, 'uncertain');
     assert.equal(uncertain.calls[0]!.effect, true);
     assert.equal(uncertain.calls[0]!.status, 'uncertain');
-    await setup.callbacks[0]!();
     await Promise.all([setup.maintenance.dispose(), setup.maintenance.dispose()]);
     assert.equal(effects, 1);
     assert.equal((await listAdmissions(setup.home))[0]!.id, uncertain.admission!.id);
@@ -213,6 +212,92 @@ test('a late successful effect can persist its receipt but cannot start another 
   assert.deepEqual(JSON.parse(await readFile(receipt, 'utf8')), { data: { id: 'confirmed-fixture-receipt' } });
   assert.equal(effects, 1);
   assert.equal((await setup.record()).status, 'released');
+  assert.deepEqual(await listAdmissions(setup.home), []);
+});
+
+test('a durable domain fence preserves an uncertain operation while later passes and a replacement do unrelated work', async context => {
+  const setup = await fixture(context);
+  const claimPath = join(setup.home, 'fixture-domain-notice-claim.json');
+  let effects = 0;
+  let unrelatedReads = 0;
+  const operation = async (pass: MaintenancePass) => {
+    const client = pass.client(sessionClient({
+      promptAsync: async () => { effects++; throw new Error('fixture_notice_ack_lost'); },
+      status: async () => { unrelatedReads++; return { data: {} }; },
+    }));
+    await pass.phase('fixture-domain-notice', async () => {
+      const existing = await readFile(claimPath, 'utf8').catch(error => {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        return undefined;
+      });
+      if (existing) {
+        assert.deepEqual(JSON.parse(existing), { status: 'sending', id: 'fixture-notice' });
+        return;
+      }
+      await writeFile(claimPath, JSON.stringify({ status: 'sending', id: 'fixture-notice' }), { flag: 'wx' });
+      await client.session.promptAsync({ path: { id: 'fixture' }, body: { parts: [] } });
+    });
+    await pass.phase('unrelated-status', async () => { await client.session.status(); });
+  };
+  setup.start(operation);
+  await setup.callbacks[0]!();
+  const uncertain = await setup.record();
+  assert.equal(uncertain.status, 'uncertain');
+  assert.equal(effects, 1);
+  assert.equal(unrelatedReads, 0);
+  const leasePath = join(setup.home, 'deploy', 'leases', `${uncertain.admission!.id}.json`);
+  const exactLease = await readFile(leasePath, 'utf8');
+  await setup.callbacks[0]!();
+  const next = await setup.record();
+  assert.equal(next.status, 'released');
+  assert.notEqual(next.operationID, uncertain.operationID);
+  assert.equal(unrelatedReads, 1);
+  const archivePath = join(setup.home, 'plugin-maintenance', setup.maintenance.instanceID, 'uncertain', `${uncertain.operationID}.json`);
+  const exactArchive = await readFile(archivePath, 'utf8');
+  assert.deepEqual(MaintenanceOperation.parse(JSON.parse(exactArchive)), uncertain);
+  assert.equal(await readFile(leasePath, 'utf8'), exactLease);
+  const replacement = setup.create();
+  setup.start(operation, replacement);
+  await setup.callbacks[1]!();
+  await Promise.all([setup.maintenance.dispose(), replacement.dispose()]);
+  assert.equal((await setup.record(replacement)).status, 'released');
+  assert.equal(unrelatedReads, 2);
+  assert.equal(effects, 1);
+  assert.equal(await readFile(archivePath, 'utf8'), exactArchive);
+  assert.equal(await readFile(leasePath, 'utf8'), exactLease);
+  assert.deepEqual((await listAdmissions(setup.home)).map(lease => lease.id), [uncertain.admission!.id]);
+});
+
+test('a completed handler cannot use a leaked pass or SDK client to start late reads or effects', async context => {
+  const setup = await fixture(context);
+  let savedPass: MaintenancePass | undefined;
+  let savedClient: ReturnType<MaintenancePass['client']> | undefined;
+  let reads = 0;
+  let effects = 0;
+  let phases = 0;
+  setup.start(async pass => {
+    savedPass = pass;
+    savedClient = pass.client(sessionClient({
+      get: async () => { reads++; return { data: {} }; },
+      promptAsync: async () => { effects++; return {}; },
+    }));
+    await savedClient.session.get({ path: { id: 'fixture' } });
+  });
+  await setup.callbacks[0]!();
+  const completed = await setup.record();
+  assert.equal(completed.status, 'released');
+  assert.throws(() => savedPass!.check(), /plugin_maintenance_stopped/);
+  const attempts = await Promise.allSettled([
+    savedPass!.phase('late-phase', async () => { phases++; }),
+    savedClient!.session.get({ path: { id: 'fixture' } }),
+    savedClient!.session.promptAsync({ path: { id: 'fixture' }, body: { parts: [] } }),
+  ]);
+  assert.ok(attempts.every(attempt => attempt.status === 'rejected'
+    && attempt.reason instanceof Error && ['plugin_maintenance_stopped', 'plugin_maintenance_effect_not_started'].includes(attempt.reason.message)));
+  assert.equal(reads, 1);
+  assert.equal(effects, 0);
+  assert.equal(phases, 0);
+  assert.deepEqual(await setup.record(), completed);
   assert.deepEqual(await listAdmissions(setup.home), []);
 });
 

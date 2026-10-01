@@ -720,7 +720,7 @@ async function isolatedPlanSessions(state: Awaited<ReturnType<typeof fixture>>) 
 
 async function isolationCitations(state: Awaited<ReturnType<typeof fixture>>) {
   const evidence = [
-    ['owner-sessions.ts', 'const worktree = await ensurePlanWorktree(runtime, item);'],
+    ['owner-sessions.ts', "const worktree = await sessionOpeningPhase(context, 'plan-place', () => ensurePlanWorktree(runtime, item, context));"],
     ['plan-worktrees.ts', "return join(runtime.plansRoot, item.owner, item.id);"],
     ['desk-changes.ts', 'const planWorktree = item && !isRepair(item) ? item.planWorktree : undefined;'],
     ['work-lifecycle.test.ts', "test('proposing one plan publishes only its worktree; the other plan and the desk propose on their own'"],

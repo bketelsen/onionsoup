@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { Plugin } from '@opencode-ai/plugin';
 import { AdmissionRecord, beginAdmission, type AdmissionLease } from './deployment-admission.ts';
 import { writeHandoffFile } from './operator-handoff-file.ts';
-import { MaintenanceUncertainError, type MaintenanceContext } from './maintenance-context.ts';
+import { MaintenanceEffectNotStarted, MaintenanceUncertainError, type MaintenanceContext } from './maintenance-context.ts';
 
 export const PLUGIN_MAINTENANCE_LIMITS = { budgetMs: 20_000, disposeMs: 1_000, effectTimeoutMs: 10_000 };
 export const MaintenanceOperation = z.object({
@@ -54,12 +54,13 @@ export class MaintenancePass implements MaintenanceContext {
   }
 
   private async invoke<T>(method: string, effect: boolean, operation: () => Promise<T>) {
-    this.check();
+    if (this.signal.aborted) throw effect ? new MaintenanceEffectNotStarted() : this.signal.reason;
     const call: Operation['calls'][number] = { id: randomUUID(), method, effect, status: 'pending' };
-    this.record.calls.push(call);
-    await this.save();
     let invoked = false;
     try {
+      this.check();
+      this.record.calls.push(call);
+      await this.save();
       this.check();
       invoked = true;
       const response = await operation();
@@ -73,6 +74,7 @@ export class MaintenancePass implements MaintenanceContext {
         call.status = 'uncertain';
         throw new MaintenanceUncertainError();
       }
+      if (effect && !invoked) throw new MaintenanceEffectNotStarted();
       throw error;
     } finally {
       if (call.status !== 'uncertain') this.record.calls = this.record.calls.filter(current => current !== call);
@@ -121,7 +123,7 @@ export class PluginMaintenance {
   readonly instanceID = randomUUID();
   private stopped = false;
   private readonly slots: Slot[] = [];
-  constructor(readonly home: string, readonly directory: string,
+  constructor(readonly home: string, readonly directory: string | (() => string),
     readonly limits = PLUGIN_MAINTENANCE_LIMITS) {}
 
   start(kind: string, intervalMs: number, operation: (pass: MaintenancePass) => Promise<unknown>,
@@ -137,9 +139,15 @@ export class PluginMaintenance {
 
   private async tick(slot: Slot, kind: string, operation: (pass: MaintenancePass) => Promise<unknown>, admitted: boolean) {
     if (slot.cleanup) await slot.cleanup();
-    if (this.stopped || slot.pass?.record.status === 'uncertain') return;
+    if (this.stopped) return;
+    if (slot.pass?.record.status === 'uncertain') {
+      const previous = slot.pass.record;
+      await writeHandoffFile(join(this.home, 'plugin-maintenance', this.instanceID, 'uncertain', `${previous.operationID}.json`),
+        JSON.stringify(MaintenanceOperation.parse(previous), null, 2));
+    }
     const operationID = randomUUID();
-    const metadata = { instanceID: this.instanceID, operationID, directory: this.directory };
+    const directory = typeof this.directory === 'function' ? this.directory() : this.directory;
+    const metadata = { instanceID: this.instanceID, operationID, directory };
     const lease = admitted ? await beginAdmission(this.home, kind, metadata) : undefined;
     const record = MaintenanceOperation.parse({ version: 1, ...metadata, kind, admission: lease,
       startedAt: new Date().toISOString(), status: 'running', phase: 'admitted', calls: [] });
@@ -154,6 +162,7 @@ export class PluginMaintenance {
       pass.check();
       await operation(pass);
     } finally {
+      pass.stop();
       clearTimeout(deadline);
       await pass.settle();
       if (record.status === 'settled') await this.release(slot, pass, lease);

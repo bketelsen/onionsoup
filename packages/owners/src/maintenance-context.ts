@@ -9,3 +9,8 @@ export interface MaintenanceContext {
 export class MaintenanceUncertainError extends Error {
   constructor() { super('plugin_maintenance_effect_uncertain'); }
 }
+
+/** Positive local proof: the effect transport was never invoked by this call. */
+export class MaintenanceEffectNotStarted extends Error {
+  constructor() { super('plugin_maintenance_effect_not_started'); }
+}

@@ -1147,7 +1147,7 @@ const server: Plugin = async (input, options) => {
   }
 
   const sessionClient = () => ownerSessionClient(input.client);
-  const maintenance = new PluginMaintenance(runtime.stateDirectory, input.directory ?? '');
+  const maintenance = new PluginMaintenance(runtime.stateDirectory, () => input.directory ?? '');
   async function deliverNotices(pass: MaintenancePass) {
     const client = pass.client(input.client);
     const sessions = ownerSessionClient(client);

@@ -663,7 +663,9 @@ shares cancellation across maintenance reads, and returns after a bounded wait. 
 cancellation still owns its admission until its underlying promise settles; a timeout is not completion.
 Maintenance admissions carry instance, operation and directory identity. The latest operation record for
 each instance/kind in `state/plugin-maintenance/` records its phase, pending or uncertain SDK calls and
-settled/released status. This is maintenance evidence, not proof that a chat or child completed.
+settled/released status. Uncertain passes are archived before a later pass runs; their admissions remain
+held, while exact domain claims prevent replay and unrelated maintenance can continue. This is
+maintenance evidence, not proof that a chat or child completed.
 Successful late effect receipts may be saved, but stopped passes cannot start another SDK effect or phase.
 An already-started host placement or stash/restore transaction finishes under its held admission.
 
@@ -671,7 +673,8 @@ Owner and reminder session opening reserves its item/kind before creating a sess
 `state/session-openings/` record retains the token, phase history, exact origin and native message ID.
 An ambiguous create or prompt keeps that reservation and never deletes or requeues the session.
 Only an attempt proven stopped before create may reserve a new token. Work notices likewise retain their
-claim and a `state/notices/delivery/` message receipt after an uncertain send. These uncertain records
+claim and a `state/notices/delivery/` message receipt after an uncertain send. A notice proven not sent
+may return to the pending queue, preserving its failed attempt receipt. These uncertain records
 need diagnosis; there is no expiry, automatic replay or general recovery command. Existing specialist
 operation tokens and wake receipts remain authoritative for their own reconciliation.
 

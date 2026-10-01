@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mkdtemp, readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { Plugin } from '@opencode-ai/plugin';
@@ -19,9 +20,10 @@ async function fixture() {
     version: 1, instanceID: randomUUID(), operationID: randomUUID(), kind: 'plugin:notices', directory: '/fixture',
     startedAt: new Date().toISOString(), phase: 'work-notices', status: 'running', calls: [],
   });
-  const receipt = async () => WorkNoticeDelivery.parse(JSON.parse(await readFile(
-    join(state, 'notices', 'delivery', 'fixture-notice.json'), 'utf8')));
-  return { state, runtime, pass, receipt };
+  const delivery = join(state, 'notices', 'delivery');
+  const receipts = async () => Promise.all((await readdir(delivery)).sort().map(async file =>
+    WorkNoticeDelivery.parse(JSON.parse(await readFile(join(delivery, file), 'utf8')))));
+  return { state, runtime, pass, receipts, receipt: async () => (await receipts()).at(-1)! };
 }
 
 test('ambiguous work notice send keeps exact message receipt and is not replayed by a replacement instance', async () => {
@@ -59,4 +61,26 @@ test('work notice claims are exclusive and stopped reads cannot claim or send', 
     deliverWorkNotices(context.runtime, second.client(delivering), second)]);
   assert.equal(sends, 1);
   assert.equal((await context.receipt()).status, 'sent');
+});
+
+
+test('disposal after notice claim but before transport records not-sent and safely restores one retry', async () => {
+  const context = await fixture();
+  const first = context.pass();
+  const check = first.check.bind(first);
+  first.check = () => {
+    if (existsSync(join(context.state, 'notices', 'delivery'))) first.stop();
+    check();
+  };
+  let sends = 0;
+  const client = { session: { status: async () => ({ data: {} }),
+    promptAsync: async () => { sends++; return { data: {} }; } } } as unknown as Parameters<Plugin>[0]['client'];
+  await assert.rejects(deliverWorkNotices(context.runtime, first.client(client), first), /plugin_maintenance_stopped/);
+  assert.equal(sends, 0);
+  assert.equal((await context.receipt()).status, 'not-sent');
+  assert.equal((await pendingNotices(context.runtime)).length, 1);
+  const second = context.pass();
+  await deliverWorkNotices(context.runtime, second.client(client), second);
+  assert.equal(sends, 1);
+  assert.deepEqual((await context.receipts()).map(receipt => receipt.status).sort(), ['not-sent', 'sent']);
 });
