@@ -244,7 +244,7 @@ export async function requestProgressSummary(runtime: Runtime, owner: string, no
   return sections.join('\n\n');
 }
 
-const Cursor = z.object({ sequence: z.number().int().nonnegative(), fingerprint: z.string(), pending: ExchangeNotice.optional() });
+export const Cursor = z.object({ sequence: z.number().int().nonnegative(), fingerprint: z.string(), pending: ExchangeNotice.optional() });
 type Cursor = z.infer<typeof Cursor>;
 function fingerprint(progress: RequestProgress) {
   const { observedAt: _observedAt, lastRecordedAt: _lastRecordedAt, stale: _stale, hostEvidence, hostEvidenceState, ...significant } = progress;
@@ -266,7 +266,7 @@ async function enqueuePending(runtime: Runtime, path: string, cursor: Cursor) {
   return queued;
 }
 
-const Baseline = z.object({ version: z.literal(1), observedAt: z.string(),
+export const Baseline = z.object({ version: z.literal(1), observedAt: z.string(),
   fingerprints: z.record(z.string(), z.string()) });
 
 /** Persist the entire first snapshot before queueing anything; an interrupted bootstrap has no partial effects. */

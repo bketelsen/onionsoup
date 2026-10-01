@@ -671,8 +671,14 @@ It preserves their unknown outcomes and original records, verifies the original 
 and starts only a target that acknowledges the durable quarantine before effects. In that mode the
 daemon and surface serve diagnostics; OpenCode, chats, dispatch and mutations remain disabled.
 Attempt records prevent uncertain stop/start replay. Failed activation never restarts an older build
-that cannot enforce quarantine. The ordinary deploy worker refuses the held checkpoint, and no generic
-quarantine-release command exists. See [legacy recovery](../deployment.md#legacy-maintenance-recovery-plan).
+that cannot enforce quarantine. The ordinary deploy worker refuses the held checkpoint. A separate
+operator-only release command inventories replay candidates and requires fresh exact-digest approval.
+It starts OpenCode in observation mode, keeping execution, MCP servers, notebook initialization and
+wiki synchronization blocked. Only terminal or existing single-use-protected continuations qualify;
+missing legacy submission identity remains an explicit blocker. After authenticated quiet proof,
+the host disposes restricted instances once and commits release before normal instances can load.
+Original outcomes remain unknown in immutable archives; no lease, transcript or domain status is cleared.
+See [legacy recovery](../deployment.md#legacy-maintenance-recovery-plan).
 Successful late effect receipts may be saved, but stopped passes cannot start another SDK effect or phase.
 An already-started host placement or stash/restore transaction finishes under its held admission.
 

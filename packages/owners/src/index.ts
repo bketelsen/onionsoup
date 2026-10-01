@@ -69,3 +69,6 @@ export { OperatorTaskCheck, OperatorCheckRecord } from './operator-check-types.t
 export { MaintenanceQuarantine, MaintenanceQuarantineBody, MaintenanceQuarantineAcknowledgment, maintenanceQuarantineDigest,
   maintenanceQuarantinePath, readMaintenanceQuarantine, maintenanceQuarantineStatus, assertMaintenanceAllowed,
   maintenanceRuntimeBuildId, maintenanceQuarantineAckPath, acknowledgeMaintenanceQuarantine } from './maintenance-quarantine.ts';
+
+export * from './maintenance-release-state.ts';
+export { maintenanceReleaseRuntimeState, maintenanceRuntimeManifest } from './maintenance-quarantine.ts';

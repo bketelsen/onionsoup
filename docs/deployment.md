@@ -415,3 +415,63 @@ the checkpoint and drain and leaves the quarantined target or stopped services f
 release, original lease files, transcripts and backups remain intact. Resuming ordinary work requires
 separate evidence-based reconciliation of the unknown effects and an explicitly reviewed release path;
 this command provides no generic way to waive that uncertainty.
+
+### Reconcile and release legacy quarantine
+
+`scripts/release-maintenance.mjs` is a separate operator command, not an agent tool or a standing
+permission. Use a stable reviewed installation outside the release root. Its target must have both
+`legacyMaintenanceQuarantine: 1` and `legacyMaintenanceRelease: 1` capabilities. The saved recovery
+receipt supplies the exact configuration, old/target builds and evidence roots; callers cannot
+substitute a different target or silently expand the selection.
+
+First prepare observation, using the original recovery digest:
+
+```sh
+node --conditions=onionsoup-source --import tsx scripts/release-maintenance.mjs \
+  --root "$release_root" --state "$state" --recovery-digest "$recovery_digest"
+```
+
+After explicit approval, repeat with `--begin-observation-digest "$observation_digest"` and
+`--approved-by "$approver"`. This preserves the original marker/checkpoint and backups, rechecks
+stopped original executors and current diagnostic identities, and publishes one durable observation
+intent. The capable surface starts its owned OpenCode once. The daemon, chat/tool gates, notebook
+initialization, MCP servers, automatic replies and wiki synchronization remain restricted. An uncertain
+startup attempt is retained and not retried by another surface process.
+
+Once the exact daemon/surface/plugin observation acknowledgments exist, inspect the release preview:
+
+```sh
+node --conditions=onionsoup-source --import tsx scripts/release-maintenance.mjs \
+  --root "$release_root" --state "$state" --recovery-digest "$recovery_digest" --mode release
+```
+
+The preview inventories all audited durable continuation stores, including absent files and exact
+resource bindings. It classifies terminal records and retained single-use claims separately from
+blocked continuations. Pending legacy openings without submission identity, unsubmitted wakes,
+unsettled application/child work, stale notice cursors and unknown files are named blockers. It neither
+abandons them nor treats human approval as proof they completed. This is replay-safety reconciliation;
+remote effect outcomes can remain unknown. Actual eligibility is established by the preview, not by
+passing synthetic tests or observing idle services.
+This inventory addresses replay of the two selected legacy plugin maintenance producers. Ordinary
+daemon duties, friction investigations and memory work resume under their existing gates after release;
+the inventory does not declare those unrelated workflows completed or grant them new authority.
+
+An eligible preview binds current processes, authenticated endpoint, all-project session/transcript
+and child evidence, configuration/workspace fingerprints, original backups and the exact inventory.
+Explicit approval is applied with `--release-digest "$release_digest" --approved-by "$approver"`.
+The command repeats the proof, retains its approval audit, disposes the owned idle observation instances
+once, and checks global health without recreating restricted instances. Only then, under the admission
+lock, does it verify local evidence again and publish the immutable release receipt. New normal instances
+can load the unchanged configured MCP permissions. No prompt, model run or test request is sent.
+
+The receipt is the gate's commit point. Original leases and domain records are preserved; the original
+quarantine and interruption checkpoint are archived before their coordination copies are removed.
+`outcome: unknown` in both interruption and release history remains deliberate. Retries after a committed
+release perform only matching archive cleanup, preserving any subsequently admitted work. An unconfirmed
+instance-disposal response holds the gate and names the uncertain operation; it is never silently retried.
+A crash before the receipt keeps quarantine active even if the pending deployment record already says
+completed. Retrying that exact saved approval restores the drain and checks the bound evidence.
+
+Before release, rollback means keeping the capable target restricted; it never boots the older unprotected
+binary. After release, genuine work may start immediately. Any later rollback therefore requires a new
+ordinary drain and quiet proof; the old observation approval cannot authorize another interruption.

@@ -20,11 +20,11 @@ const exec = promisify(execFile);
 const DIGEST = z.string().regex(/^[a-f0-9]{64}$/);
 const UNITS = ['onionsoup-owners.service', 'onionsoup-surface.service'];
 const LIMITS = { readinessMs: 60_000, readinessIntervalMs: 1000 };
-const Checkpoint = z.object({ version: z.literal(1), recovery: z.literal('legacy-maintenance'),
+export const Checkpoint = z.object({ version: z.literal(1), recovery: z.literal('legacy-maintenance'),
   digest: DIGEST, proof: MaintenanceProof, approvedBy: z.string().trim().min(1),
   recordedBy: z.string().trim().min(1), approvedAt: z.iso.datetime() }).strict();
 const Attempt = z.object({ version: z.literal(1), digest: DIGEST, action: z.string(), at: z.iso.datetime() }).strict();
-const Receipt = Checkpoint.extend({ state: z.literal('restored-quarantined'), outcome: z.literal('unknown'),
+export const Receipt = Checkpoint.extend({ state: z.literal('restored-quarantined'), outcome: z.literal('unknown'),
   quarantineDigest: DIGEST, restoredAt: z.iso.datetime() }).strict();
 
 function paths(selection, digest) {

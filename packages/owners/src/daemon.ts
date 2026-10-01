@@ -21,7 +21,8 @@ import { requestRunnerIsAlive, type ResourceRequest } from './requests.ts';
 import type { Runtime } from './runtime.ts';
 import { advance, isRunnable, retirePipelineItems } from './work-recovery.ts';
 import { beginAdmission } from './deployment-admission.ts';
-import { maintenanceQuarantineStatus, acknowledgeMaintenanceQuarantine, maintenanceRuntimeBuildId, isMaintenanceQuarantineError } from './maintenance-quarantine.ts';
+import { maintenanceQuarantineStatus, acknowledgeMaintenanceQuarantine, maintenanceRuntimeBuildId, isMaintenanceQuarantineError, maintenanceReleaseRuntimeState } from './maintenance-quarantine.ts';
+import { acknowledgeMaintenanceRelease, MAINTENANCE_RELEASE_LIMITS } from './maintenance-release-state.ts';
 
 export const DAEMON_LIMITS = {
   tickMs: 60_000, startupRetryMs: 250, shutdownGraceMs: 5_000, parallelItems: 4, parallelDuties: 2, parallelMemory: 1, parallelRequests: 2,
@@ -348,13 +349,23 @@ async function tickAdmitted(runtime: Runtime, log: TickLog) {
 
 /** Always on: tick forever. Work cut off by a stop is marked interrupted at the next start, never replayed. */
 export async function daemon(runtime: Runtime, log: TickLog, signal: AbortSignal) {
-  const quarantine = await maintenanceQuarantineStatus(runtime.stateDirectory);
-  if (quarantine.state !== 'absent') {
-    await acknowledgeMaintenanceQuarantine(runtime.stateDirectory, await maintenanceRuntimeBuildId(), 'daemon')
-      .catch(error => log.error('maintenance-quarantine', error));
-    while (!signal.aborted) await sleep(DAEMON_LIMITS.tickMs, undefined, { signal }).catch(() => {});
-    return;
+  let acknowledgedPhase = '';
+  while (!signal.aborted) {
+    const quarantine = await maintenanceQuarantineStatus(runtime.stateDirectory);
+    const release = await maintenanceReleaseRuntimeState(runtime.stateDirectory).catch(() => undefined);
+    if (release && release.phase !== 'diagnostic' && acknowledgedPhase !== release.phase) {
+      await acknowledgeMaintenanceRelease(runtime.stateDirectory, release.observation, 'daemon', release.phase);
+      acknowledgedPhase = release.phase;
+    }
+    if (quarantine.state === 'absent') break;
+    if (!acknowledgedPhase) {
+      await acknowledgeMaintenanceQuarantine(runtime.stateDirectory, await maintenanceRuntimeBuildId(), 'daemon')
+        .catch(error => log.error('maintenance-quarantine', error));
+      acknowledgedPhase = 'diagnostic';
+    }
+    await sleep(MAINTENANCE_RELEASE_LIMITS.pollMs, undefined, { signal }).catch(() => {});
   }
+  if (signal.aborted) return;
   let startup;
   while (!signal.aborted && !startup) {
     try {

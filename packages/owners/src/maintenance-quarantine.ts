@@ -3,6 +3,7 @@ import { lstat, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
+import { readMaintenanceReleaseState } from './maintenance-release-state.ts';
 import { AdmissionRecord } from './admission-record.ts';
 import { readOperatorCheckOwner } from './operator-check-execution.ts';
 import { writeHandoffFile } from './operator-handoff-file.ts';
@@ -53,6 +54,7 @@ export async function readMaintenanceQuarantine(stateDirectory: string) {
 export async function maintenanceQuarantineStatus(stateDirectory: string): Promise<MaintenanceQuarantineStatus> {
   try {
     const marker = await readMaintenanceQuarantine(stateDirectory);
+    if (marker && (await maintenanceReleaseRuntimeState(stateDirectory, marker))?.phase === 'released') return { state: 'absent' };
     return marker ? { state: 'active', digest: marker.digest, recoveryDigest: marker.recoveryDigest,
       targetBuildId: marker.targetBuildId, oldBuildId: marker.oldBuildId } : { state: 'absent' };
   } catch (error) {
@@ -61,19 +63,30 @@ export async function maintenanceQuarantineStatus(stateDirectory: string): Promi
 }
 export function isMaintenanceQuarantineError(error: unknown) {
   return error instanceof Error && ['maintenance_quarantined', 'maintenance_quarantine_invalid',
-    'maintenance_quarantine_unavailable'].includes(error.message);
+    'maintenance_quarantine_unavailable'].includes(error.message) || error instanceof Error && error.message.startsWith('maintenance_release_');
 }
 export async function assertMaintenanceAllowed(stateDirectory: string) {
-  if (await readMaintenanceQuarantine(stateDirectory)) throw new Error('maintenance_quarantined');
+  const status = await maintenanceQuarantineStatus(stateDirectory);
+  if (status.state !== 'absent') throw new Error(status.state === 'invalid' ? status.reason : 'maintenance_quarantined');
 }
 
 /** Read the installed package's identity, never a moving Git checkout's current HEAD. */
-export async function maintenanceRuntimeBuildId() {
+export async function maintenanceRuntimeManifest() {
   const path = process.env.ONIONSOUP_RELEASE_MANIFEST
     ?? join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'surface', 'release-manifest.json');
   try {
-    return z.object({ buildId: Build, capabilities: z.object({ legacyMaintenanceQuarantine: z.literal(1) }).strict().optional() }).strict().parse(JSON.parse(await readFile(path, 'utf8'))).buildId;
+    return z.object({ buildId: Build, capabilities: z.object({ legacyMaintenanceQuarantine: z.literal(1), legacyMaintenanceRelease: z.literal(1).optional() }).strict().optional() }).strict().parse(JSON.parse(await readFile(path, 'utf8')));
   } catch { return undefined; }
+}
+export async function maintenanceRuntimeBuildId() {
+  return (await maintenanceRuntimeManifest())?.buildId;
+}
+export async function maintenanceReleaseRuntimeState(stateDirectory: string, marker?: MaintenanceQuarantine) {
+  const current = marker ?? await readMaintenanceQuarantine(stateDirectory);
+  if (!current) return undefined;
+  const manifest = await maintenanceRuntimeManifest();
+  return readMaintenanceReleaseState(stateDirectory, current, manifest?.buildId,
+    manifest?.capabilities?.legacyMaintenanceRelease === 1);
 }
 export function maintenanceQuarantineAckPath(stateDirectory: string, component: MaintenanceQuarantineAcknowledgment['component'], pid: number) {
   return join(stateDirectory, 'deploy', 'maintenance-quarantine-ack', `${component}-${pid}.json`);
