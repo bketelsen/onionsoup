@@ -62,9 +62,9 @@ do not commit.” The `test` directory must already exist. The operator can call
    card, then choose **Allow once**. Existing files must be tracked UTF-8 text; new files must be explicitly named, absent
    and nonignored, with existing parent directories. A second independent worktree may run concurrently; an
    overlapping workspace claim is refused even when it names different files.
-2. The child edits through the host’s bounded file tool and requests approved checks by ID. The initial check adapter
-   accepts only `node --test` plus literal relative paths: no shell, package scripts, dependency installation, commits
-   or pushes. You can keep talking to the operator while it runs.
+2. The child edits through the host’s bounded file tool and requests approved checks by ID. Checks accept `node --test` plus literal relative paths, or `go test` / `go vet`
+   plus local package paths such as `./...` or `./pkg`: no shell, package scripts, dependency installation, commits
+   or pushes. Go checks require a host-selected toolchain and a self-contained module. You can keep talking to the operator while it runs.
 3. When the job reports `needs-review`, the operator calls `onionsoup_operator_job` with
    `{ "action": "review-write", "id": "<job>", "childID": "title" }` and presents the host diff and check receipts.
    Every approved check must pass against the current artifact before acceptance; later edits require fresh checks.
@@ -74,6 +74,15 @@ do not commit.” The `test` directory must already exist. The operator can call
    claim. It neither commits the change nor certifies tests beyond the shown host-run checks or independent review.
 5. After every child is complete and required edits are accepted, `show` supplies the current job digest and evidence
    message IDs for `synthesize`. The edits remain in your worktree for your normal verification and Git workflow.
+
+To enable Go checks, the trusted service environment must set `ONIONSOUP_HOST_GO_ROOT` to the canonical absolute
+root of an installed Go toolchain (for example `/opt/go`). This selects runtime files, not a new authority grant.
+Missing or invalid toolchains fail before check intent is recorded. A task supplies only commands such as
+`["go", "test", "./..."]` and `["go", "vet", "./pkg"]`; it cannot supply a runtime path or arbitrary flags.
+Checks use private caches and disable CGO, automatic toolchain downloads, module downloads and `go.work` discovery.
+Only dependencies present in the verified source tree and the selected standard library are available; package
+installation and networked dependency preparation remain separate unsupported actions. Development verification
+and isolated staging also require this environment variable for the real Go integration tests. CI pins Go 1.25.8.
 
 Retrying the exact approved `create` call returns the same job without another scope prompt or child launch. This
 does not authorize changes to the request, paths or commands. The first scope prompt remains required: removing it

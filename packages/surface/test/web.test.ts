@@ -526,6 +526,17 @@ test('write scope cards separate new paths and approved argv from artifact-bound
     }
   }
   const accept = metadata[1]!;
+  const runtime = { kind: 'go', version: 'go1.25.8', binarySha256: 'c'.repeat(64) };
+  const goApproval = operatorWriteApprovalOf({ permission: OPERATOR_WRITE_PERMISSION,
+    metadata: { ...accept, checks: [{ ...check, command: ['go', 'test', './...'], runtime }] } });
+  assert(goApproval);
+  const { OperatorWriteApprovalView } = await import('../web/src/components/OperatorWriteApproval.tsx');
+  const goHtml = renderToStaticMarkup(createElement(OperatorWriteApprovalView, { approval: goApproval }));
+  assert.match(goHtml, /Runtime: go1.25.8/);
+  assert.match(goHtml, /Go executable SHA256: c{64}/);
+  assert.equal(operatorWriteApprovalOf({ permission: OPERATOR_WRITE_PERMISSION,
+    metadata: { ...accept, checks: [{ ...check, runtime: { ...runtime, version: '<script>unsafe</script>' } }] } }), undefined);
+
   assert.equal(operatorWriteApprovalOf({ permission: OPERATOR_WRITE_PERMISSION,
     metadata: { ...accept, checks: [{ ...check, exitCode: 'model says passed' }] } }), undefined);
   assert.equal(operatorWriteApprovalOf({ permission: OPERATOR_WRITE_PERMISSION,

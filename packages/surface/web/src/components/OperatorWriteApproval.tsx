@@ -19,6 +19,7 @@ function CheckReceipt({ check }: { check: AcceptanceApproval['checks'][number] }
   const isTruncated = output.length > OPERATOR_CHECK_DISPLAY_LIMITS.outputChars;
   return <div className="space-y-1">
     <pre className={BLOCK}>{`Check: ${check.checkID}\nCommand: ${JSON.stringify(check.command)}\nStatus: ${check.status}\nExit code: ${check.exitCode ?? '(Not completed)'}\nArtifact digest: ${check.artifactDigest}`}</pre>
+    {check.runtime && <pre className={BLOCK}>{`Runtime: ${check.runtime.version}\nGo executable SHA256: ${check.runtime.binarySha256}`}</pre>}
     {output && <pre className={BLOCK}>{output.slice(0, OPERATOR_CHECK_DISPLAY_LIMITS.outputChars)}</pre>}
     {check.outputTruncated && <p>Host check output was truncated when recorded.</p>}
     {isTruncated && <p>Check output display truncated; the durable check receipt retains the recorded output.</p>}

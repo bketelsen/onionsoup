@@ -5,17 +5,32 @@ import { constants as operatingSystem, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { SANDBOX_LIMITS } from './sandbox.ts';
-import { OPERATOR_CHECK_LIMITS, OperatorCheckCommand } from './operator-check-types.ts';
-import { alreadyMemoryCapped, OPERATOR_WRITER_LIMITS, preflightOperatorFileWriter } from './operator-write-writer.ts';
+import { OPERATOR_CHECK_LIMITS, OperatorCheckCommand, operatorCheckKind,
+  validateOperatorCheckSourcePaths, type OperatorCheckRuntimeEvidence } from './operator-check-types.ts';
+import { alreadyMemoryCapped, OPERATOR_WRITER_LIMITS, preflightOperatorFileWriter,
+  requireOperatorWriterBwrapFeatures } from './operator-write-writer.ts';
+import { preflightOperatorGoCheck, prepareOperatorGoCheck } from './operator-check-go.ts';
 
 export const OPERATOR_CHECK_RUNNER_LIMITS = { memoryBytes: OPERATOR_WRITER_LIMITS.memoryBytes,
   tasksMax: SANDBOX_LIMITS.tasksMax, timeoutMs: 60_000, killMs: OPERATOR_WRITER_LIMITS.killMs,
   stopWaitMs: 5_000, exitPollMs: 20,
   sourceFiles: 4_104, sourceBytes: 128 * 1024 * 1024, libraries: 64, temporaryBytes: 256 * 1024 * 1024 };
 export interface OperatorCheckSourceFile { path: string; content: Buffer; mode: number }
-export interface OperatorCheckRun { exitCode: number; output: string; outputTruncated: boolean }
-interface PinnedMount { handle: FileHandle; destination: string }
+export interface OperatorCheckRun { exitCode: number; output: string; outputTruncated: boolean; runtime?: OperatorCheckRuntimeEvidence }
+export interface PinnedOperatorCheckMount { handle: FileHandle; destination: string }
+export interface OperatorCheckRuntime { executable: string; environment: Record<string, string>; evidence?: OperatorCheckRuntimeEvidence }
+interface CheckAdapter {
+  preflight(): Promise<void>;
+  prepare(directory: string, mounts: PinnedOperatorCheckMount[]): Promise<OperatorCheckRuntime>;
+}
 const execute = promisify(execFile);
+
+const goAdapter: CheckAdapter = { preflight: preflightOperatorGoCheck, prepare: prepareOperatorGoCheck };
+const adapters: Record<ReturnType<typeof operatorCheckKind>, CheckAdapter> = {
+  'node-test': { preflight: preflightNodeCheck, prepare: prepareNodeCheck },
+  'go-test': goAdapter,
+  'go-vet': goAdapter,
+};
 
 function safeSourcePath(path: string) {
   return typeof path === 'string' && path.length > 0 && path.length <= OPERATOR_CHECK_LIMITS.pathChars
@@ -52,7 +67,7 @@ export function validateOperatorCheckInput(command: string[], sourceFiles: Opera
     }
   }
   if (bytes > OPERATOR_CHECK_RUNNER_LIMITS.sourceBytes) throw new Error('operator_check_source_limit');
-  if (approved.data.slice(2).some(path => !paths.has(path))) throw new Error('operator_check_test_missing');
+  validateOperatorCheckSourcePaths(approved.data, paths);
   return approved.data;
 }
 
@@ -64,7 +79,7 @@ async function copySource(directory: string, sourceFiles: OperatorCheckSourceFil
   }
 }
 
-async function pinFile(path: string, destination: string, mounts: PinnedMount[]) {
+async function pinFile(path: string, destination: string, mounts: PinnedOperatorCheckMount[]) {
   const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
   mounts.push({ handle, destination });
   const metadata = await handle.stat();
@@ -72,7 +87,7 @@ async function pinFile(path: string, destination: string, mounts: PinnedMount[])
 }
 
 /** Only the trusted Node runtime is inspected; no repository executable runs on the host. */
-async function pinRuntime(node: string, mounts: PinnedMount[]) {
+async function pinRuntime(node: string, mounts: PinnedOperatorCheckMount[]) {
   await pinFile(node, '/runtime/node', mounts);
   const libraries = await execute('/usr/bin/ldd', [node], { env: {},
     timeout: OPERATOR_WRITER_LIMITS.timeoutMs, maxBuffer: OPERATOR_WRITER_LIMITS.capabilityOutputBytes })
@@ -91,25 +106,41 @@ async function pinRuntime(node: string, mounts: PinnedMount[]) {
 }
 
 /** Read-only capability/runtime checks can fail before durable intent; execution pins fresh handles again. */
-export async function preflightOperatorCheck() {
+async function preflightNodeCheck() {
   const { node } = await preflightOperatorFileWriter();
-  const mounts: PinnedMount[] = [];
+  const mounts: PinnedOperatorCheckMount[] = [];
   try { await pinRuntime(node, mounts); }
   finally { for (const mount of mounts.reverse()) await mount.handle.close(); }
 }
 
-function bubblewrapArguments(command: string[], mounts: PinnedMount[]) {
+async function prepareNodeCheck(_directory: string, mounts: PinnedOperatorCheckMount[]) {
+  const { node } = await preflightOperatorFileWriter();
+  await pinRuntime(node, mounts);
+  return { executable: '/runtime/node', environment: {} };
+}
+
+export async function preflightOperatorCheck(command = ['node', '--test', 'preflight.test.mjs']) {
+  const approved = OperatorCheckCommand.safeParse(command);
+  if (!approved.success) throw new Error('operator_check_command_invalid');
+  const help = await execute('/usr/bin/bwrap', ['--help'], { env: {}, timeout: OPERATOR_WRITER_LIMITS.timeoutMs,
+    maxBuffer: OPERATOR_WRITER_LIMITS.capabilityOutputBytes }).catch(() => { throw new Error('operator_check_bwrap_unavailable'); });
+  requireOperatorWriterBwrapFeatures(help.stdout);
+  await adapters[operatorCheckKind(approved.data)].preflight();
+}
+
+function bubblewrapArguments(command: string[], mounts: PinnedOperatorCheckMount[], runtime: OperatorCheckRuntime) {
   const binds = mounts.flatMap((mount, index) => ['--ro-bind-fd', String(index + 3), mount.destination]);
+  const environment = Object.entries(runtime.environment).flatMap(([key, value]) => ['--setenv', key, value]);
   return ['--unshare-all', '--die-with-parent', '--new-session', '--cap-drop', 'ALL',
     ...binds, '--proc', '/proc', '--dev', '/dev', '--size', String(OPERATOR_CHECK_RUNNER_LIMITS.temporaryBytes),
     '--tmpfs', '/tmp', '--dir', '/tmp/home', '--remount-ro', '/proc', '--remount-ro', '/dev', '--remount-ro', '/',
     '--clearenv', '--setenv', 'HOME', '/tmp/home', '--setenv', 'TMPDIR', '/tmp',
-    '--setenv', 'PATH', '/runtime', '--setenv', 'LANG', 'C.UTF-8', '--chdir', '/workspace',
-    '--', '/runtime/node', ...command.slice(1)];
+    '--setenv', 'PATH', '/runtime', '--setenv', 'LANG', 'C.UTF-8', ...environment, '--chdir', '/workspace',
+    '--', runtime.executable, ...command.slice(1)];
 }
 
-async function isolatedCommand(command: string[], mounts: PinnedMount[]) {
-  const args = bubblewrapArguments(command, mounts);
+async function isolatedCommand(command: string[], mounts: PinnedOperatorCheckMount[], runtime: OperatorCheckRuntime) {
+  const args = bubblewrapArguments(command, mounts, runtime);
   const limits = OPERATOR_CHECK_RUNNER_LIMITS;
   if (await alreadyMemoryCapped(limits.memoryBytes, limits.tasksMax)) return { executable: '/usr/bin/bwrap', args };
   return { executable: '/usr/bin/systemd-run', args: ['--user', '--scope', '--quiet',
@@ -145,7 +176,7 @@ function failureOutcome(exitCode: number, reason: string,
     outputTruncated: captured.outputTruncated || output.length > OPERATOR_CHECK_LIMITS.outputChars };
 }
 
-async function executeCheck(command: Awaited<ReturnType<typeof isolatedCommand>>, mounts: PinnedMount[]): Promise<OperatorCheckRun> {
+async function executeCheck(command: Awaited<ReturnType<typeof isolatedCommand>>, mounts: PinnedOperatorCheckMount[]): Promise<OperatorCheckRun> {
   return new Promise((resolve, reject) => {
     let child: ReturnType<typeof spawn>;
     try {
@@ -198,7 +229,7 @@ async function executeCheck(command: Awaited<ReturnType<typeof isolatedCommand>>
   });
 }
 
-async function cleanSnapshot(mounts: PinnedMount[], directory: string | undefined) {
+async function cleanSnapshot(mounts: PinnedOperatorCheckMount[], directory: string | undefined) {
   const handles = await Promise.allSettled(mounts.reverse().map(mount => mount.handle.close()));
   let removed = true;
   if (directory) {
@@ -213,18 +244,20 @@ export async function runOperatorCheck(command: string[], sourceFiles: OperatorC
   let directory: string | undefined;
   let started = false;
   let outcome: OperatorCheckRun;
-  const mounts: PinnedMount[] = [];
+  const mounts: PinnedOperatorCheckMount[] = [];
   try {
     const approved = validateOperatorCheckInput(command, sourceFiles);
-    const { node } = await preflightOperatorFileWriter();
     directory = await mkdtemp(join(tmpdir(), 'operator-check-'));
-    await copySource(directory, sourceFiles);
-    const handle = await open(directory, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+    const workspace = join(directory, 'workspace');
+    await mkdir(workspace, { mode: 0o700 });
+    await copySource(workspace, sourceFiles);
+    const handle = await open(workspace, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
     mounts.push({ handle, destination: '/workspace' });
-    await pinRuntime(node, mounts);
-    const launch = await isolatedCommand(approved, mounts);
+    const runtime = await adapters[operatorCheckKind(approved)].prepare(directory, mounts);
+    const launch = await isolatedCommand(approved, mounts, runtime);
     started = true;
     outcome = await executeCheck(launch, mounts);
+    if (runtime.evidence) outcome.runtime = runtime.evidence;
   } catch (error) {
     if (started) {
       await cleanSnapshot(mounts, directory);

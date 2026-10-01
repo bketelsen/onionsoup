@@ -3,7 +3,7 @@ import { isAbsolute, relative } from 'node:path';
 import type { OperatorChild, OperatorJob, OperatorJobInput, OperatorJobIntake, OperatorJobLedger,
   OperatorJobOrigin, OperatorWriteCreateApproval, OperatorSessionSnapshot } from './operator-jobs-types.ts';
 import type { OperatorWriteSnapshot, OperatorWriteArtifact } from './operator-write-workspace.ts';
-import { operatorCheckRecordDigest } from './operator-check-types.ts';
+import { operatorCheckRecordDigest, validateOperatorCheckSourcePaths } from './operator-check-types.ts';
 
 export function operatorWriteScopeDigest(origin: OperatorJobOrigin, intake: OperatorJobIntake,
   input: OperatorJobInput, baselines: Record<string, OperatorWriteSnapshot>) {
@@ -33,8 +33,9 @@ export function assertOperatorWriteApproval(origin: OperatorJobOrigin, intake: O
       || JSON.stringify([...baseline.approvedPaths].sort()) !== JSON.stringify([...(task.files ?? []), ...(task.createFiles ?? [])].sort())
       || JSON.stringify(baseline.createFiles ?? []) !== JSON.stringify(task.createFiles ?? [])) throw new Error('operator_write_baseline_mismatch');
     const knownPaths = new Set([...baseline.files.filter(file => file.kind === 'file').map(file => file.path), ...(task.createFiles ?? [])]);
-    if (task.checks?.some(check => check.command.slice(2).some(path => !knownPaths.has(path)))) {
-      throw new Error('operator_write_check_path_outside_scope');
+    for (const check of task.checks ?? []) {
+      try { validateOperatorCheckSourcePaths(check.command, knownPaths); }
+      catch { throw new Error('operator_write_check_path_outside_scope'); }
     }
   }
 }

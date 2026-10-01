@@ -22,6 +22,15 @@ jobs:
         with:
           node-version: '24'
           cache: npm
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.8'
+          cache: false
+      - name: Select the isolated check toolchain
+        run: |
+          go_root="$(realpath "$(go env GOROOT)")"
+          sudo chmod -R go-w "$go_root"
+          echo "ONIONSOUP_HOST_GO_ROOT=$go_root" >> "$GITHUB_ENV"
       - name: Prepare Git and the real Linux sandbox
         run: |
           git config --global user.name 'Onionsoup CI'
@@ -50,7 +59,7 @@ jobs:
           echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> "$GITHUB_ENV"
           mkdir -p ~/.config/opencode ~/.local/state/opencode ~/.local/share/opencode ~/.cache ~/.npm ~/go
       - run: npm ci
-      - run: timeout 180s npm run verify
+      - run: timeout 300s npm run verify
         env:
           ONIONSOUP_HOME: ${{ runner.temp }}/onionsoup-home
           ONIONSOUP_CONFIG: ${{ runner.temp }}/onionsoup-config
