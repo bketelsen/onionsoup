@@ -1,7 +1,7 @@
 import { execFile, spawn } from 'node:child_process';
 import { constants } from 'node:fs';
 import { mkdir, mkdtemp, open, realpath, rm, writeFile, type FileHandle } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { constants as operatingSystem, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { SANDBOX_LIMITS } from './sandbox.ts';
@@ -138,16 +138,29 @@ async function waitForGroupExit(pid: number | undefined) {
   }
 }
 
+function failureOutcome(exitCode: number, reason: string,
+  captured = { output: '', outputTruncated: false }): OperatorCheckRun {
+  const output = `[${reason}]\n${captured.output}`;
+  return { exitCode, output: output.slice(0, OPERATOR_CHECK_LIMITS.outputChars),
+    outputTruncated: captured.outputTruncated || output.length > OPERATOR_CHECK_LIMITS.outputChars };
+}
+
 async function executeCheck(command: Awaited<ReturnType<typeof isolatedCommand>>, mounts: PinnedMount[]): Promise<OperatorCheckRun> {
   return new Promise((resolve, reject) => {
-    const child = spawn(command.executable, command.args, { detached: true,
-      stdio: ['ignore', 'pipe', 'pipe', ...mounts.map(mount => mount.handle.fd)],
-      env: { PATH: '/usr/bin:/bin', XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR,
-        DBUS_SESSION_BUS_ADDRESS: process.env.DBUS_SESSION_BUS_ADDRESS } });
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(command.executable, command.args, { detached: true,
+        stdio: ['ignore', 'pipe', 'pipe', ...mounts.map(mount => mount.handle.fd)],
+        env: { PATH: '/usr/bin:/bin', XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR,
+          DBUS_SESSION_BUS_ADDRESS: process.env.DBUS_SESSION_BUS_ADDRESS } });
+    } catch {
+      resolve(failureOutcome(125, 'operator_check_launch_failed'));
+      return;
+    }
     let output = '';
     let outputTruncated = false;
     let timedOut = false;
-    let uncertain = false;
+    let spawnFailed = false;
     let killTimer: ReturnType<typeof setTimeout> | undefined;
     let stopTimer: ReturnType<typeof setTimeout> | undefined;
     const collect = (chunk: Buffer) => {
@@ -156,7 +169,8 @@ async function executeCheck(command: Awaited<ReturnType<typeof isolatedCommand>>
       output = (output + text).slice(0, OPERATOR_CHECK_LIMITS.outputChars);
     };
     const signal = (kind: NodeJS.Signals) => {
-      try { signalGroup(child.pid, kind); } catch { uncertain = true; }
+      try { signalGroup(child.pid, kind); }
+      catch { /* Completion still requires independent proof that the process group exited. */ }
     };
     const timeout = setTimeout(() => {
       timedOut = true;
@@ -167,35 +181,57 @@ async function executeCheck(command: Awaited<ReturnType<typeof isolatedCommand>>
     }, OPERATOR_CHECK_RUNNER_LIMITS.timeoutMs);
     child.stdout?.on('data', collect);
     child.stderr?.on('data', collect);
-    child.once('error', () => { uncertain = true; });
+    child.once('error', () => { spawnFailed = true; });
     child.once('close', (code, signal) => {
       clearTimeout(timeout);
       clearTimeout(killTimer);
       clearTimeout(stopTimer);
       void waitForGroupExit(child.pid).then(() => {
-        if (uncertain) reject(new Error('operator_check_process_uncertain'));
-        else if (timedOut) reject(new Error('operator_check_timeout'));
-        else if (code === null || signal) reject(new Error('operator_check_process_uncertain'));
+        const captured = { output, outputTruncated };
+        if (spawnFailed) resolve(failureOutcome(125, 'operator_check_launch_failed', captured));
+        else if (timedOut) resolve(failureOutcome(124, 'operator_check_timeout', captured));
+        else if (signal) resolve(failureOutcome(128 + operatingSystem.signals[signal], 'operator_check_terminated', captured));
+        else if (code === null) reject(new Error('operator_check_process_uncertain'));
         else resolve({ exitCode: code, output, outputTruncated });
       }, reject);
     });
   });
 }
 
+async function cleanSnapshot(mounts: PinnedMount[], directory: string | undefined) {
+  const handles = await Promise.allSettled(mounts.reverse().map(mount => mount.handle.close()));
+  let removed = true;
+  if (directory) {
+    try { await rm(directory, { recursive: true, force: true }); }
+    catch { removed = false; }
+  }
+  return removed && handles.every(handle => handle.status === 'fulfilled');
+}
+
 /** The host supplies only verified tracked files and receipted creations, never a live checkout mount. */
 export async function runOperatorCheck(command: string[], sourceFiles: OperatorCheckSourceFile[]): Promise<OperatorCheckRun> {
-  const approved = validateOperatorCheckInput(command, sourceFiles);
-  const { node } = await preflightOperatorFileWriter();
-  const directory = await mkdtemp(join(tmpdir(), 'operator-check-'));
+  let directory: string | undefined;
+  let started = false;
+  let outcome: OperatorCheckRun;
   const mounts: PinnedMount[] = [];
   try {
+    const approved = validateOperatorCheckInput(command, sourceFiles);
+    const { node } = await preflightOperatorFileWriter();
+    directory = await mkdtemp(join(tmpdir(), 'operator-check-'));
     await copySource(directory, sourceFiles);
     const handle = await open(directory, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
     mounts.push({ handle, destination: '/workspace' });
     await pinRuntime(node, mounts);
-    return await executeCheck(await isolatedCommand(approved, mounts), mounts);
-  } finally {
-    for (const mount of mounts.reverse()) await mount.handle.close();
-    await rm(directory, { recursive: true, force: true });
+    const launch = await isolatedCommand(approved, mounts);
+    started = true;
+    outcome = await executeCheck(launch, mounts);
+  } catch (error) {
+    if (started) {
+      await cleanSnapshot(mounts, directory);
+      throw error;
+    }
+    outcome = failureOutcome(125, 'operator_check_setup_failed');
   }
+  const cleaned = await cleanSnapshot(mounts, directory);
+  return cleaned ? outcome : failureOutcome(125, 'operator_check_cleanup_failed', outcome);
 }

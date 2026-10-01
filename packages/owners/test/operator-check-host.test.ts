@@ -5,8 +5,10 @@ import { test } from 'node:test';
 import { OperatorWrites } from '../src/operator-write-host.ts';
 import { OperatorJobs } from '../src/operator-jobs.ts';
 import { OperatorChecks } from '../src/operator-check-host.ts';
+import { OPERATOR_CHECK_RUNNER_LIMITS } from '../src/operator-check-runner.ts';
 import { OPERATOR_CHECK_TOOL } from '../src/operator-write-call.ts';
 import { operatorChildHoldsWorkspace } from '../src/operator-write-state.ts';
+import { prepareOperatorRecovery, operatorRecoveryDigest } from '../src/operator-job-recovery.ts';
 import { fixture, start } from './operator-write-host-fixture.ts';
 
 type Fixture = Awaited<ReturnType<typeof fixture>>;
@@ -117,4 +119,48 @@ test('crash after durable check intent is never replayed or inferred successful 
   assert.equal(operatorChildHoldsWorkspace(child), true);
   assert.equal(await readFile(join(context.directory, 'sum.mjs'), 'utf8'), 'export const sum=(a,b)=>a+b;\n');
   assert.throws(() => OperatorChecks.assertEvidence(child, { status: 'idle', messages: [] }), /operator_check_effect_uncertain/);
+});
+
+test('recovery preview exposes new paths and commands and binds their exact scope', async () => {
+  const context = await setup();
+  const job = await context.jobs.get(context.origin, context.id);
+  const child = structuredClone(job.children[0]!);
+  const preview = await prepareOperatorRecovery(context.jobs, context.client, context.origin, job.id, child.id);
+  assert.match(preview.warning, /new files.*sum.mjs/);
+  assert.match(preview.warning, /checks.*node.*--test.*sum.test.mjs/);
+  const digest = operatorRecoveryDigest(job, child);
+  child.createFiles = ['different.mjs'];
+  assert.notEqual(operatorRecoveryDigest(job, child), digest);
+  child.createFiles = job.children[0]!.createFiles;
+  const beforeCommand = operatorRecoveryDigest(job, child);
+  child.checks = [{ id: 'unit', command: ['node', '--test', 'different.test.mjs'] }];
+  assert.notEqual(operatorRecoveryDigest(job, child), beforeCommand);
+});
+
+test('a proved-stopped timeout records failure and permits an explicit bounded retry on corrected source', async () => {
+  const context = await setup();
+  await createSources(context);
+  const edit = await native(context, 'write', 3);
+  const before = edit.child.write!.operations.find(operation => operation.mutation.path === 'sum.test.mjs')!.receipt!.afterSha256;
+  const hanging = "import {test} from 'node:test'; test('wait',async()=>await new Promise(resolve=>setTimeout(resolve,5000)));\n";
+  const receipt = await context.writes.file(edit.toolContext, edit.callID,
+    { path: 'sum.test.mjs', expectedBeforeSha256: before, content: hanging });
+  const originalLimit = OPERATOR_CHECK_RUNNER_LIMITS.timeoutMs;
+  try {
+    OPERATOR_CHECK_RUNNER_LIMITS.timeoutMs = 500;
+    const failed = await check(context, 1);
+    assert.equal(failed.status, 'completed');
+    assert.equal(failed.exitCode, 124);
+    assert.match(failed.output!, /operator_check_timeout/);
+  } finally { OPERATOR_CHECK_RUNNER_LIMITS.timeoutMs = originalLimit; }
+  const changed = await native(context, 'write', 4);
+  await context.writes.file(changed.toolContext, changed.callID,
+    { path: 'sum.test.mjs', expectedBeforeSha256: receipt.afterSha256, content: testContent });
+  assert.equal((await check(context, 2)).exitCode, 0);
+  const preview = await finish(context);
+  assert.equal(preview.child.write!.checks!.length, 2, 'original failed check remains in durable history');
+  assert.equal(preview.child.write!.checks![0]!.exitCode, 124);
+  assert.equal(operatorChildHoldsWorkspace(preview.child), true, 'successful retry still needs exact diff acceptance');
+  const accepted = await context.writes.accept(context.origin, context.id, preview.child.id, preview.digest, context.parent());
+  assert.equal(accepted.children[0]!.status, 'completed');
 });

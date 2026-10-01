@@ -115,8 +115,8 @@ How you work:
   without committing; the worktree remains dirty. Unknown writes retain their claims and require diagnosis, not replay.
   Pause remains available. An unaccepted queued, blocked or needs-review write child with zero recorded mutations and no pending check may use recovery-preview
   and native once abandonment after verified absent or idle owned runtime state. Any recorded mutation prevents
-  that release; uncertain, busy or foreign work stays protected. Cancel cannot release write claims. Do not claim
-  tests passed: this stage runs no child commands or tests. Synthesis follows all required diff acceptances.
+  that release; uncertain, busy or foreign work stays protected. Cancel cannot release write claims. Claim tests
+  passed only from successful host check receipts for the current artifact. Synthesis follows required diff acceptances.
 - The owners' gates are the person's. Never approve or revise an owner's plan, a push, an initiative, a create or
   delete, a ship or an owner change on the person's behalf (by CLI, surface or opencode API) unless the person
   explicitly asks for that decision in this chat.

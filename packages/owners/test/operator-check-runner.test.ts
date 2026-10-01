@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
+import childProcess, { type SpawnOptions } from 'node:child_process';
 import { constants } from 'node:fs';
 import { chmod, copyFile, cp, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -32,14 +34,15 @@ test('real isolated Node runs a new module and regression test, and reports an o
 test('input rejects flags, globs, missing tests, duplicate paths and source escapes before executing', async () => {
   for (const command of [['sh', '-c', 'true'], ['node', '--test'], ['node', '--test', '--eval=1'],
     ['node', '--test', '../escape.mjs'], ['node', '--test', '*.mjs'], ['node', '--test', '/tmp/test.mjs']]) {
-    await assert.rejects(runOperatorCheck(command, [module, passing]), /operator_check_command_invalid/);
+    assert.throws(() => validateOperatorCheckInput(command, [module, passing]), /operator_check_command_invalid/);
+    assert.equal((await runOperatorCheck(command, [module, passing])).exitCode, 125);
   }
   for (const path of ['../escape', '/escape', 'a/../../escape', '.git/config', 'a/.git/config', 'a\\escape']) {
-    await assert.rejects(runOperatorCheck(['node', '--test', passing.path], [passing, file(path, '')]), /operator_check_source_invalid/);
+    assert.throws(() => validateOperatorCheckInput(['node', '--test', passing.path], [passing, file(path, '')]), /operator_check_source_invalid/);
   }
-  await assert.rejects(runOperatorCheck(['node', '--test', passing.path], [passing, passing]), /operator_check_source_invalid/);
-  await assert.rejects(runOperatorCheck(['node', '--test', passing.path], [module]), /operator_check_test_missing/);
-  await assert.rejects(runOperatorCheck(['node', '--test', passing.path], [{ ...passing, mode: 0o120777 }]), /operator_check_source_invalid/);
+  assert.throws(() => validateOperatorCheckInput(['node', '--test', passing.path], [passing, passing]), /operator_check_source_invalid/);
+  assert.throws(() => validateOperatorCheckInput(['node', '--test', passing.path], [module]), /operator_check_test_missing/);
+  assert.throws(() => validateOperatorCheckInput(['node', '--test', passing.path], [{ ...passing, mode: 0o120777 }]), /operator_check_source_invalid/);
 });
 
 test('synchronous pre-intent validation accepts safe regular modes and literal source names, rejects special modes and path conflicts', () => {
@@ -133,6 +136,7 @@ test('sandbox supports a staged runner and pinned Node under tmp without mountin
     for (const name of ['operator-check-runner.ts', 'operator-check-types.ts', 'operator-write-writer.ts']) {
       await cp(new URL(`../src/${name}`, import.meta.url), join(directory, name));
     }
+    await symlink(fileURLToPath(new URL('../src/sandbox.ts', import.meta.url)), join(directory, 'sandbox.ts'));
     await symlink(fileURLToPath(new URL('../../../node_modules', import.meta.url)), join(directory, 'node_modules'));
     const node = join(directory, 'node');
     await copyFile(await resolveOperatorWriterNode(), node, constants.COPYFILE_FICLONE);
@@ -186,7 +190,69 @@ process.on('SIGTERM', () => {});
 setInterval(() => {}, 1000);`);
   try {
     OPERATOR_CHECK_RUNNER_LIMITS.timeoutMs = 1_500;
-    await assert.rejects(runOperatorCheck(['node', '--test', hangs.path], [hangs]), /operator_check_timeout/);
+    const checked = await runOperatorCheck(['node', '--test', hangs.path], [hangs]);
+    assert.equal(checked.exitCode, 124);
+    assert.match(checked.output, /operator_check_timeout/);
     assert.deepEqual(await fixtureProcesses(marker), []);
   } finally { OPERATOR_CHECK_RUNNER_LIMITS.timeoutMs = previous; }
+});
+
+test('known pre-spawn snapshot and runtime failures complete with125 without leaking host error paths', async () => {
+  const previousTemporary = process.env.TMPDIR;
+  const previousNode = process.env.ONIONSOUP_HOST_NODE;
+  const privatePath = join(tmpdir(), `operator-check-private-${crypto.randomUUID()}`);
+  try {
+    process.env.TMPDIR = privatePath;
+    const missingDirectory = await runOperatorCheck(['node', '--test', passing.path], [module, passing]);
+    assert.equal(missingDirectory.exitCode, 125);
+    assert.equal(missingDirectory.output, '[operator_check_setup_failed]\n');
+    assert.ok(!missingDirectory.output.includes(privatePath));
+    if (previousTemporary === undefined) delete process.env.TMPDIR;
+    else process.env.TMPDIR = previousTemporary;
+    const invalidComponent = await runOperatorCheck(['node', '--test', passing.path], [module, passing,
+      file('x'.repeat(300), 'too long for the snapshot filesystem')]);
+    assert.equal(invalidComponent.exitCode, 125);
+    assert.equal(invalidComponent.output, '[operator_check_setup_failed]\n');
+    process.env.ONIONSOUP_HOST_NODE = join(privatePath, 'node');
+    const missingRuntime = await runOperatorCheck(['node', '--test', passing.path], [module, passing]);
+    assert.equal(missingRuntime.exitCode, 125);
+    assert.equal(missingRuntime.output, '[operator_check_setup_failed]\n');
+  } finally {
+    if (previousTemporary === undefined) delete process.env.TMPDIR;
+    else process.env.TMPDIR = previousTemporary;
+    if (previousNode === undefined) delete process.env.ONIONSOUP_HOST_NODE;
+    else process.env.ONIONSOUP_HOST_NODE = previousNode;
+  }
+});
+
+test('a real check whose process-group exit cannot be proved still rejects as uncertain', async context => {
+  const originalKill = process.kill.bind(process);
+  context.mock.method(process, 'kill', (pid: number, signal: NodeJS.Signals | number = 'SIGTERM') => {
+    if (pid < 0 && signal === 0) throw Object.assign(new Error('fixture denies group observation'), { code: 'EPERM' });
+    return originalKill(pid, signal);
+  });
+  await assert.rejects(runOperatorCheck(['node', '--test', passing.path], [module, passing]), /operator_check_process_uncertain/);
+});
+
+test('a missing launch executable has no process and completes with125', async context => {
+  const originalSpawn = childProcess.spawn;
+  const missingExecutable = join(tmpdir(), `operator-check-missing-launch-${crypto.randomUUID()}`);
+  const override = context.mock.method(childProcess, 'spawn', (_command: string, args: readonly string[], options: SpawnOptions) =>
+    originalSpawn(missingExecutable, args, options));
+  syncBuiltinESMExports();
+  try {
+    const checked = await runOperatorCheck(['node', '--test', passing.path], [module, passing]);
+    assert.equal(checked.exitCode, 125);
+    assert.equal(checked.output, '[operator_check_launch_failed]\n');
+    assert.ok(!checked.output.includes(missingExecutable));
+  } finally {
+    override.mock.restore();
+    syncBuiltinESMExports();
+  }
+});
+
+test('an isolated test runner killed by signal completes with a nonzero exit after its namespace stops', async () => {
+  const killed = file('killed.test.mjs', `process.kill(process.ppid, 'SIGKILL');`);
+  const checked = await runOperatorCheck(['node', '--test', killed.path], [killed]);
+  assert.equal(checked.exitCode, 137, checked.output);
 });
