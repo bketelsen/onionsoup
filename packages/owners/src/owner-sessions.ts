@@ -7,6 +7,8 @@ import { executionPrompt, OWNER_CHANGE_WORKFLOW, planningPrompt } from './plan-w
 import { ensurePlanWorktree, syncPlanWorktree } from './plan-worktrees.ts';
 import { rememberSession, itemSessionHistory } from './session-history.ts';
 import type { Runtime } from './runtime.ts';
+import type { MaintenanceContext } from './maintenance-context.ts';
+import { SessionOpeningStore, type SessionOpening } from './session-opening-store.ts';
 
 /**
  * The runtime opens owner sessions on the surface's opencode, where the person can watch and step in: one where an
@@ -33,8 +35,8 @@ interface SessionKind {
   title: (item: WorkItem) => string;
   prompt: (item: WorkItem) => string;
   /** Ready the directory the session runs in, before it opens. */
-  place: (runtime: Runtime, item: WorkItem) => Promise<SessionPlace>;
-  /** What the item records about its session; undefined takes the record back when the session never started. */
+  place: (runtime: Runtime, item: WorkItem, context?: MaintenanceContext) => Promise<SessionPlace>;
+  /** Exact session identity retained on the item, including uncertain prompt delivery. */
   recorded: (origin: ChatOrigin | undefined) => Partial<WorkItem>;
   /** Session-level rules on top of the owner's agent: the execution session edits its worktree without asking. */
   permission: readonly PermissionRule[];
@@ -48,30 +50,38 @@ function syncNote(sync: DeskSyncReport | undefined) {
  * A session in the owner's chat directory reads its desks, so they are synced first: the session starts from the
  * base branch as it is now, not where a desk was left. A failed sync is logged and does not stop the session.
  */
-export async function syncedChatPlace(runtime: Runtime, ownerId: string, repositories: readonly (string | undefined)[], label: string): Promise<SessionPlace> {
-  const syncs = await Promise.all(repositories.map(repository => syncOwnerDesk(runtime, ownerId, repository).catch((error: unknown) => {
+export async function syncedChatPlace(runtime: Runtime, ownerId: string, repositories: readonly (string | undefined)[], label: string, context?: MaintenanceContext): Promise<SessionPlace> {
+  const syncs = await Promise.all(repositories.map(repository => sessionOpeningPhase(context, 'desk-sync',
+    () => syncOwnerDesk(runtime, ownerId, repository, context)).catch((error: unknown) => {
+    context?.check();
     console.warn('owner_session_desk_sync_failed', label, error);
     return undefined;
   })));
-  return { directory: await chatDirectory(runtime, ownerId), note: syncs.map(syncNote).join('') };
+  context?.check();
+  const directory = await sessionOpeningPhase(context, 'chat-place', () => chatDirectory(runtime, ownerId));
+  context?.check();
+  return { directory, note: syncs.map(syncNote).join('') };
 }
 
 /** Planning reads the item's repository in the owner's chat directory, synced so the plan is made against the base. */
-async function planningPlace(runtime: Runtime, item: WorkItem) {
-  return syncedChatPlace(runtime, item.owner, [item.proposal.repository], item.id);
+async function planningPlace(runtime: Runtime, item: WorkItem, context?: MaintenanceContext) {
+  return syncedChatPlace(runtime, item.owner, [item.proposal.repository], item.id, context);
 }
 
 /**
  * Carrying out a plan happens in the plan's own worktree, new from the current base; one that already exists (a
  * session reopened after a failed start) is brought up to date instead.
  */
-async function executionPlace(runtime: Runtime, item: WorkItem): Promise<SessionPlace> {
-  const worktree = await ensurePlanWorktree(runtime, item);
+async function executionPlace(runtime: Runtime, item: WorkItem, context?: MaintenanceContext): Promise<SessionPlace> {
+  const worktree = await sessionOpeningPhase(context, 'plan-place', () => ensurePlanWorktree(runtime, item, context));
+  context?.check();
   if (worktree.isNew) return { directory: worktree.path, note: '' };
-  const sync = await syncPlanWorktree(runtime, item.owner, item.id).catch((error: unknown) => {
+  const sync = await sessionOpeningPhase(context, 'plan-sync', () => syncPlanWorktree(runtime, item.owner, item.id, context)).catch((error: unknown) => {
+    context?.check();
     console.warn('owner_session_plan_sync_failed', item.id, error);
     return undefined;
   });
+  context?.check();
   return { directory: worktree.path, note: syncNote(sync) };
 }
 
@@ -104,11 +114,17 @@ export function neededSession(item: WorkItem): OwnerSessionKind | undefined {
   return (Object.keys(OWNER_SESSIONS) as OwnerSessionKind[]).find(kind => OWNER_SESSIONS[kind].isNeeded(item));
 }
 
+/** Placement legitimately records its worktree identity; every other item field must remain unchanged. */
+function openingItemBinding(item: WorkItem) {
+  const { updatedAt: _updatedAt, planWorktree: _path, planWorktreeGeneration: _generation, ...binding } = item;
+  return JSON.stringify(binding);
+}
+
 /** Record the session on the item unless another opener got there first. */
 async function claim(runtime: Runtime, item: WorkItem, kind: SessionKind, origin: ChatOrigin) {
   try {
     return await runtime.ledger.update(item.id, current => {
-      if (!kind.isNeeded(current)) throw new Error('owner_session_already_open');
+      if (!kind.isNeeded(current) || JSON.stringify(current) !== JSON.stringify(item)) throw new Error('owner_session_already_open');
       return { ...current, ...kind.recorded(origin) };
     });
   } catch (error) {
@@ -117,42 +133,84 @@ async function claim(runtime: Runtime, item: WorkItem, kind: SessionKind, origin
   }
 }
 
-async function unclaim(runtime: Runtime, item: WorkItem, kind: SessionKind) {
-  await runtime.ledger.update(item.id, current => ({ ...current, ...kind.recorded(undefined) }));
+/** The lifecycle context checks both the boundary and the result of a potentially slow operation. */
+export async function sessionOpeningPhase<T>(context: MaintenanceContext | undefined, name: string, operation: () => Promise<T>) {
+  context?.check();
+  const value = context ? await context.phase(name, operation) : await operation();
+  context?.check();
+  return value;
 }
 
-/** Open the session an item needs, record it, and send its first message; returns the session, if one was opened. */
-export async function openOwnerSession(runtime: Runtime, client: OwnerSessionClient, itemId: string) {
+/** Save identity even when a delayed create response arrives after maintenance has stopped. */
+export async function createOpeningSession(store: SessionOpeningStore, reservation: SessionOpening,
+  client: OwnerSessionClient, directory: string, title: string, permission: readonly PermissionRule[], context?: MaintenanceContext) {
+  context?.check();
+  await store.advance(reservation, 'creating', { directory });
+  return sessionOpeningPhase(context, 'session-create', async () => {
+    context?.check();
+    const origin = { sessionID: await client.create(directory, title, permission), directory };
+    await store.advance(reservation, 'created', { origin });
+    return origin;
+  });
+}
+
+export async function promptOpeningSession(store: SessionOpeningStore, reservation: SessionOpening,
+  client: OwnerSessionClient, origin: ChatOrigin, agent: string, text: string, context?: MaintenanceContext) {
+  context?.check();
+  await store.advance(reservation, 'prompting');
+  await sessionOpeningPhase(context, 'session-prompt', async () => {
+    context?.check();
+    await client.prompt(origin, agent, text, reservation.messageID);
+    await store.advance(reservation, 'opened');
+  });
+}
+
+/** A durable reservation precedes creation. Ambiguous effects retain their identity and are never retried here. */
+export async function openOwnerSession(runtime: Runtime, client: OwnerSessionClient, itemId: string, context?: MaintenanceContext) {
   const item = await runtime.ledger.get(itemId);
+  context?.check();
   const kindName = neededSession(item);
   const persona = runtime.owner(item.owner).persona;
   if (!kindName || !persona) return undefined;
-  const kind: SessionKind = OWNER_SESSIONS[kindName];
-  const { directory, note } = await kind.place(runtime, item);
-  const origin = { sessionID: await client.create(directory, kind.title(item), kind.permission), directory };
-  const claimed = await claim(runtime, item, kind, origin);
-  if (!claimed) {
-    await client.remove(origin).catch(() => undefined);
-    return undefined;
-  }
-  for (const session of itemSessionHistory(claimed)) {
-    await rememberSession(runtime, session).catch(() => console.warn('owner_session_history_not_recorded', item.id, session.id));
-  }
+  const store = new SessionOpeningStore(runtime.stateDirectory);
+  const reservation = await store.reserve({ entity: 'owner-item', id: item.id, owner: item.owner, kind: kindName });
+  if (!reservation) return undefined;
   try {
-    await client.prompt(origin, persona.name, `${kind.prompt(claimed)}${note}`);
+    const kind: SessionKind = OWNER_SESSIONS[kindName];
+    const current = await runtime.ledger.get(itemId);
+    context?.check();
+    if (!kind.isNeeded(current) || current.owner !== item.owner) throw new Error('owner_session_item_changed');
+    const { directory, note } = await kind.place(runtime, current, context);
+    context?.check();
+    const afterPlace = await runtime.ledger.get(itemId);
+    context?.check();
+    if (openingItemBinding(afterPlace) !== openingItemBinding(current)) throw new Error('owner_session_item_changed');
+    const origin = await createOpeningSession(store, reservation, client, directory, kind.title(current), kind.permission, context);
+    const claimed = await claim(runtime, afterPlace, kind, origin);
+    context?.check();
+    if (!claimed) throw new Error('owner_session_item_changed');
+    for (const session of itemSessionHistory(claimed)) {
+      await rememberSession(runtime, session).catch(() => console.warn('owner_session_history_not_recorded', item.id, session.id));
+    }
+    await promptOpeningSession(store, reservation, client, origin, persona.name, `${kind.prompt(claimed)}${note}`, context);
+    context?.check();
+    await runtime.notebook(item.owner).journal({ kind: 'owner-session-opened', workItem: item.id, outcome: kindName, session: origin.sessionID });
+    return origin;
   } catch (error) {
-    await unclaim(runtime, claimed, kind);
-    await client.remove(origin).catch(() => undefined);
+    await store.failed(reservation);
     throw error;
   }
-  await runtime.notebook(item.owner).journal({ kind: 'owner-session-opened', workItem: item.id, outcome: kindName, session: origin.sessionID });
-  return origin;
 }
 
-/** Every item waiting for a session, opened one at a time; a failure leaves that item for the next pass. */
-export async function openNeededSessions(runtime: Runtime, client: OwnerSessionClient, onError: (itemId: string, error: unknown) => void) {
+/** Every eligible item is considered once per pass; uncertain reservations remain inspectable and fenced. */
+export async function openNeededSessions(runtime: Runtime, client: OwnerSessionClient,
+  onError: (itemId: string, error: unknown) => void, context?: MaintenanceContext) {
   const waiting = (await runtime.ledger.list()).filter(item => neededSession(item) && runtime.declarations.owners.get(item.owner)?.persona);
-  for (const item of waiting) await openOwnerSession(runtime, client, item.id).catch(error => onError(item.id, error));
+  context?.check();
+  for (const item of waiting) {
+    context?.check();
+    await openOwnerSession(runtime, client, item.id, context).catch(error => onError(item.id, error));
+  }
 }
 
 /** The plugin's opencode client as the session opener needs it. */

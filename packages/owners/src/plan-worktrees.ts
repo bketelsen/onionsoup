@@ -1,3 +1,4 @@
+import type { MaintenanceContext } from './maintenance-context.ts';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -26,16 +27,21 @@ function planWorktreePath(runtime: Runtime, item: WorkItem) {
   return join(runtime.plansRoot, item.owner, item.id);
 }
 
-async function addPlanWorktree(owner: RepositoryOwner, path: string, itemId: string) {
+async function addPlanWorktree(owner: RepositoryOwner, path: string, itemId: string, context?: MaintenanceContext) {
+  context?.check();
   await ensureClone(owner);
+  context?.check();
   await git(owner.workspace, ['fetch', '-q', 'origin']);
   // A worktree deleted by hand leaves its registration behind, which would refuse the path.
+  context?.check();
   await git(owner.workspace, ['worktree', 'prune']);
+  context?.check();
   await git(owner.workspace, ['worktree', 'add', '-q', '-B', planBranch(itemId), path, `origin/${owner.domain.baseBranch}`]);
 }
 
 /** The plan's worktree, made now if it does not exist yet, and recorded on the item. */
-export async function ensurePlanWorktree(runtime: Runtime, item: WorkItem) {
+export async function ensurePlanWorktree(runtime: Runtime, item: WorkItem, context?: MaintenanceContext) {
+  context?.check();
   const path = planWorktreePath(runtime, item);
   const isNew = !existsSync(path);
   // Persist identity before the filesystem effect: a crash after creation cannot reuse a resolved generation.
@@ -43,17 +49,18 @@ export async function ensurePlanWorktree(runtime: Runtime, item: WorkItem) {
     ...current, planWorktree: path,
     planWorktreeGeneration: isNew || current.planWorktree !== path ? randomUUID() : current.planWorktreeGeneration,
   }));
-  if (isNew) await addPlanWorktree(runtime.repositoryFor(item), path, item.id);
+  if (isNew) await addPlanWorktree(runtime.repositoryFor(item), path, item.id, context);
   return { path, isNew };
 }
 
 /** Bring a plan's worktree up to date with its base, keeping its uncommitted work, as a desk sync does. */
-export async function syncPlanWorktree(runtime: Runtime, ownerId: string, itemId: string) {
+export async function syncPlanWorktree(runtime: Runtime, ownerId: string, itemId: string, context?: MaintenanceContext) {
   const item = await runtime.ledger.get(itemId);
   if (item.owner !== ownerId) throw new Error(`item_not_yours: ${item.id} belongs to ${item.owner}`);
   if (!item.planWorktree) throw new Error(`no_plan_worktree: ${item.id} has no worktree of its own; its work is on your desk`);
   const owner = runtime.repositoryFor(item);
-  const sync = await syncDesk(item.planWorktree, owner.domain.baseBranch);
+  context?.check();
+  const sync = await syncDesk(item.planWorktree, owner.domain.baseBranch, context);
   const report = { ...sync, desk: item.planWorktree, repository: owner.domain.name, place: `worktree for plan ${item.id}` };
   return recordSync(runtime, ownerId, report, item.id);
 }
@@ -85,7 +92,7 @@ async function forgetPlanWorktree(runtime: Runtime, item: WorkItem) {
   await runtime.ledger.update(item.id, current => ({ ...current, planWorktree: undefined, planWorktreeKept: undefined }));
 }
 
-async function detachPlanWorktree(runtime: Runtime, item: WorkItem, path: string): Promise<PlanWorktreeRemoval> {
+async function detachPlanWorktree(runtime: Runtime, item: WorkItem, path: string, context?: MaintenanceContext): Promise<PlanWorktreeRemoval> {
   const known = new Set((await sessionHistory(runtime, item.owner)).map(session => session.id));
   for (const session of itemSessionHistory(item)) if (!known.has(session.id)) await rememberSession(runtime, session);
   if (!existsSync(path)) {
@@ -95,8 +102,12 @@ async function detachPlanWorktree(runtime: Runtime, item: WorkItem, path: string
   const kept = await keepReason(path, item.landedCommit);
   if (kept) return kept;
   const { workspace } = runtime.repositoryFor(item);
+  context?.check();
   await git(workspace, ['worktree', 'remove', path]);
-  if ((await git(workspace, ['branch', '--list', planBranch(item.id)])).trim()) await git(workspace, ['branch', '-D', planBranch(item.id)]);
+  if ((await git(workspace, ['branch', '--list', planBranch(item.id)])).trim()) {
+    context?.check();
+    await git(workspace, ['branch', '-D', planBranch(item.id)]);
+  }
   await forgetPlanWorktree(runtime, item);
   return 'removed';
 }
@@ -124,8 +135,8 @@ async function recordKept(runtime: Runtime, item: WorkItem, outcome: PlanWorktre
 }
 
 /** Remove a finished plan's worktree and its branch; never one that holds uncommitted or unpublished work. */
-async function removePlanWorktree(runtime: Runtime, item: WorkItem, path: string): Promise<PlanWorktreeRemoval> {
-  const { outcome, detail } = await detachPlanWorktree(runtime, item, path)
+async function removePlanWorktree(runtime: Runtime, item: WorkItem, path: string, context?: MaintenanceContext): Promise<PlanWorktreeRemoval> {
+  const { outcome, detail } = await detachPlanWorktree(runtime, item, path, context)
     .then(removal => ({ outcome: removal, detail: '' }))
     .catch((error: unknown) => ({
       outcome: 'failed' as const, detail: `plan_worktree_remove_failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -171,8 +182,9 @@ async function hasIdleSession(item: WorkItem, sessions: ActivityReader, now: Dat
   return !activity.isBusy && isQuiet;
 }
 
-async function removeIfIdle(runtime: Runtime, item: WorkItem, sessions: ActivityReader, now: Date) {
-  if (await hasIdleSession(item, sessions, now)) await removePlanWorktree(runtime, item, item.planWorktree!);
+async function removeIfIdle(runtime: Runtime, item: WorkItem, sessions: ActivityReader, now: Date, context?: MaintenanceContext) {
+  context?.check();
+  if (await hasIdleSession(item, sessions, now)) await removePlanWorktree(runtime, item, item.planWorktree!, context);
 }
 
 /**
@@ -181,8 +193,8 @@ async function removeIfIdle(runtime: Runtime, item: WorkItem, sessions: Activity
  * runs this, since it holds the opencode client; a failure leaves that item for the next pass.
  */
 export async function removeIdlePlanWorktrees(
-  runtime: Runtime, sessions: ActivityReader, onError: (itemId: string, error: unknown) => void, now = new Date(),
+  runtime: Runtime, sessions: ActivityReader, onError: (itemId: string, error: unknown) => void, now = new Date(), context?: MaintenanceContext,
 ) {
   const finished = (await runtime.ledger.list()).filter(isFinishedPlan);
-  for (const item of finished) await removeIfIdle(runtime, item, sessions, now).catch((error: unknown) => onError(item.id, error));
+  for (const item of finished) await removeIfIdle(runtime, item, sessions, now, context).catch((error: unknown) => onError(item.id, error));
 }

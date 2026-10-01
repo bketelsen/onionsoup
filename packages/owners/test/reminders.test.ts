@@ -143,7 +143,7 @@ test('a due reminder opens one owner session with its prompt and item; a future 
   assert.equal(journaled?.session, 'ses_reminder_1');
 });
 
-test('a reminder whose prompt fails is released for the next pass and its session removed', async () => {
+test('a reminder whose prompt outcome is uncertain retains its session and never replays', async () => {
   const { runtime } = await reminderHooks();
   const reminder = await setReminder(runtime, 'odrade', { after: '1d', prompt: 'Check the rollout settled.' });
   const failing = scriptedSessions(true);
@@ -151,14 +151,16 @@ test('a reminder whose prompt fails is released for the next pass and its sessio
   const tomorrow = new Date(Date.now() + 2 * DAY_MS);
   await openDueReminders(runtime, failing.client, id => errors.push(id), tomorrow);
   assert.deepEqual(errors, [reminder.id]);
-  assert.deepEqual(failing.removed, ['ses_reminder_1']);
+  assert.deepEqual(failing.removed, []);
   const released = await runtime.reminders.get(reminder.id);
   assert.equal(released.status, 'pending');
-  assert.equal(released.session, undefined);
+  assert.equal(released.session?.sessionID, 'ses_reminder_1');
   assert.equal((await journalKinds(runtime, 'odrade', 'reminder-fired')).length, 0);
   const working = scriptedSessions();
   await openDueReminders(runtime, working.client, id => errors.push(id), tomorrow);
-  assert.equal((await runtime.reminders.get(reminder.id)).status, 'fired', 'the next pass opens it');
+  assert.equal((await runtime.reminders.get(reminder.id)).status, 'pending', 'uncertain delivery is not reported as fired');
+  assert.equal(working.created.length, 0);
+  assert.equal(working.prompts.length, 0);
 });
 
 test('an owner cancels its own reminder, which then never fires; a fired or another owner\'s reminder cannot be cancelled', async () => {

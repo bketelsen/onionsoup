@@ -658,6 +658,23 @@ matching surface release manifest and a host opencode plugin URL through that po
 worker discovers the surface's spawned, authenticated opencode endpoint through the shared
 state directory. Its drain covers admitted work and known chat directories, not every
 possible independent opencode session; its readiness checks do not attest the loaded plugin.
+Each OpenCode plugin instance owns its maintenance timers. Its `dispose` hook stops all three timers,
+shares cancellation across maintenance reads, and returns after a bounded wait. A transport that ignores
+cancellation still owns its admission until its underlying promise settles; a timeout is not completion.
+Maintenance admissions carry instance, operation and directory identity. The latest operation record for
+each instance/kind in `state/plugin-maintenance/` records its phase, pending or uncertain SDK calls and
+settled/released status. This is maintenance evidence, not proof that a chat or child completed.
+Successful late effect receipts may be saved, but stopped passes cannot start another SDK effect or phase.
+An already-started host placement or stash/restore transaction finishes under its held admission.
+
+Owner and reminder session opening reserves its item/kind before creating a session. The durable
+`state/session-openings/` record retains the token, phase history, exact origin and native message ID.
+An ambiguous create or prompt keeps that reservation and never deletes or requeues the session.
+Only an attempt proven stopped before create may reserve a new token. Work notices likewise retain their
+claim and a `state/notices/delivery/` message receipt after an uncertain send. These uncertain records
+need diagnosis; there is no expiry, automatic replay or general recovery command. Existing specialist
+operation tokens and wake receipts remain authoritative for their own reconciliation.
+
 The host opencode plugin reconciles its own chat admission leases on a periodic pass
 (`PLUGIN_LIMITS.noticeMs`). A missed idle event releases a top-level lease only after a
 directory-scoped status omits the session (opencode lists busy/retry sessions) and the transcript ends in a completed, stopped assistant

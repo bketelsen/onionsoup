@@ -1,3 +1,4 @@
+import type { MaintenanceContext } from './maintenance-context.ts';
 import { isFinished, type WorkItem } from './ledger.ts';
 import type { Runtime } from './runtime.ts';
 import { ensureDesk, git } from './workspace.ts';
@@ -63,7 +64,8 @@ async function restoreWork(deskPath: string, sha: string) {
   return conflicts;
 }
 
-export async function syncDesk(deskPath: string, baseBranch: string): Promise<DeskSync> {
+export async function syncDesk(deskPath: string, baseBranch: string, context?: MaintenanceContext): Promise<DeskSync> {
+  context?.check();
   await git(deskPath, ['fetch', '-q', 'origin']);
   const base = `origin/${baseBranch}`;
   const from = (await git(deskPath, ['rev-parse', 'HEAD'])).trim();
@@ -71,6 +73,8 @@ export async function syncDesk(deskPath: string, baseBranch: string): Promise<De
   if (await isAncestor(deskPath, to, from)) return { outcome: 'current', from, to, conflicts: [] };
   await requireNothingUnpublished(deskPath, base);
   const isDirty = Boolean((await git(deskPath, ['status', '--porcelain'])).trim());
+  context?.check();
+  // Once stashing begins, finish restoring that admitted transaction even if disposal is requested.
   const stash = isDirty ? await stashWork(deskPath) : undefined;
   await git(deskPath, ['reset', '-q', '--hard', to]);
   const conflicts = stash ? await restoreWork(deskPath, stash) : [];
@@ -114,16 +118,19 @@ function onPullRequestText(pullRequest: WorkItem, items: readonly WorkItem[]) {
 }
 
 /** An owner's desk for one of its repositories, synced; a desk on a PR (a repair) is left where it is. */
-export async function syncOwnerDesk(runtime: Runtime, ownerId: string, repository?: string) {
+export async function syncOwnerDesk(runtime: Runtime, ownerId: string, repository?: string, context?: MaintenanceContext) {
+  context?.check();
   const owner = runtime.repositoryOwner(ownerId, repository);
   const desk = await ensureDesk(owner, runtime.desksRoot);
   const branch = (await git(desk.path, ['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
   if (branch !== desk.branch) throw new Error(`desk_on_pull_request: the desk is on ${branch}; propose or finish that repair first`);
+  context?.check();
   await git(desk.path, ['fetch', '-q', 'origin']);
   const items = await runtime.ledger.list();
   const pullRequest = await pullRequestUnderDesk(desk.path, owner.domain.baseBranch, items.filter(item => item.owner === ownerId && runtime.repositoryFor(item).domain.name === owner.domain.name));
   if (pullRequest) throw new Error(onPullRequestText(pullRequest, items));
-  const sync = await syncDesk(desk.path, owner.domain.baseBranch);
+  context?.check();
+  const sync = await syncDesk(desk.path, owner.domain.baseBranch, context);
   const place = `desk for ${owner.domain.name}`;
   return recordSync(runtime, ownerId, { ...sync, desk: desk.path, repository: owner.domain.name, place });
 }

@@ -198,9 +198,3 @@ export async function claimNotice(runtime: Runtime, id: string) {
   await mkdir(delivered, { recursive: true });
   return rename(join(pending, `${id}.json`), join(delivered, `${id}.json`)).then(() => true, () => false);
 }
-
-/** Put a notice back when delivery failed, to try again later. */
-export async function releaseNotice(runtime: Runtime, id: string) {
-  const { pending, delivered } = directories(runtime);
-  await rename(join(delivered, `${id}.json`), join(pending, `${id}.json`)).catch(() => undefined);
-}
