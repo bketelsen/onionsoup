@@ -17,7 +17,8 @@ export function operatorWriteReviewDigest(job: OperatorJob, child: OperatorChild
     goal: job.goal, constraints: job.constraints, child: { id: child.id, goal: child.goal, directory: child.directory,
       files: child.files, access: child.access, evidence: child.evidence, attempts: child.attempts,
       baseline: child.write.baseline, approval: child.write.approval, operations: child.write.operations,
-      artifact: child.write.artifact, createFiles: child.createFiles, checkScope: child.checks, checks: child.write.checks } })).digest('hex');
+      artifact: child.write.artifact, revisions: child.write.revisions, createFiles: child.createFiles,
+      checkScope: child.checks, checks: child.write.checks } })).digest('hex');
 }
 
 export function assertOperatorWriteApproval(origin: OperatorJobOrigin, intake: OperatorJobIntake,
@@ -116,6 +117,11 @@ export function assertOperatorWriteArtifact(child: OperatorChild, artifact: Oper
 }
 
 /** Failed or missing checks remain inspectable; only acceptance requires successful current receipts. */
+export function currentOperatorWriteChecks(child: OperatorChild) {
+  const superseded = new Set(child.write?.revisions?.flatMap(revision => revision.checkIDs) ?? []);
+  return (child.write?.checks ?? []).filter(record => !superseded.has(record.id));
+}
+
 export function assertOperatorWriteChecks(child: OperatorChild, artifact: OperatorWriteArtifact) {
   const records = child.write?.checks ?? [];
   if (records.some(record => record.status === 'prepared')) throw new Error('operator_write_check_uncertain');
@@ -125,7 +131,7 @@ export function assertOperatorWriteChecks(child: OperatorChild, artifact: Operat
     if (record.digest !== operatorCheckRecordDigest(record)) throw new Error('operator_write_check_receipt_mismatch');
   }
   for (const scope of child.checks ?? []) {
-    const latest = records.filter(record => record.checkID === scope.id).at(-1);
+    const latest = currentOperatorWriteChecks(child).filter(record => record.checkID === scope.id).at(-1);
     if (!latest) throw new Error('operator_write_check_missing');
     if (latest.artifactDigest !== artifact.digest) throw new Error('operator_write_check_stale');
     if (latest.exitCode !== 0) throw new Error('operator_write_check_failed');

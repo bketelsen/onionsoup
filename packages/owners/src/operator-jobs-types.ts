@@ -5,7 +5,7 @@ import { OperatorWriteSnapshot, OperatorWriteArtifact, OperatorWriteMutation, Op
 export const OPERATOR_INVESTIGATOR = 'onionsoup-operator-investigator';
 export const OPERATOR_RECOVERY_PERMISSION = 'onionsoup_operator_recovery';
 export const OPERATOR_WRITE_PERMISSION = 'onionsoup_operator_write';
-export const OPERATOR_JOB_LIMITS = { concurrentChildren: 2, tasksPerJob: 12, textChars: 24_000 };
+export const OPERATOR_JOB_LIMITS = { concurrentChildren: 2, tasksPerJob: 12, textChars: 24_000, writeRevisions: 3 };
 const Identifier = z.string().regex(/^[a-zA-Z0-9_-]+$/);
 const Text = z.string().trim().min(1).max(OPERATOR_JOB_LIMITS.textChars);
 export const OperatorPermissionProof = z.object({ permissionID: Identifier, sessionID: Identifier, messageID: Identifier,
@@ -53,12 +53,18 @@ export const OperatorWriteOperation = z.object({
   preparedAt: Text, resolvedAt: Text.optional(),
 });
 export type OperatorWriteOperation = z.infer<typeof OperatorWriteOperation>;
+export const OperatorWriteRevisionRequest = z.object({ digest: z.string().regex(/^[a-f0-9]{64}$/), text: Text });
+export const OperatorWriteRevision = OperatorWriteRevisionRequest.extend({
+  at: Text, attemptID: Identifier, evidence: OperatorChildEvidence, artifact: OperatorWriteArtifact,
+  checkIDs: z.array(Identifier),
+});
 export const OperatorChildWrite = z.object({
   baseline: OperatorWriteSnapshot,
   approval: z.object({ scopeDigest: Text, proof: OperatorPermissionProof, at: Text }),
   operations: z.array(OperatorWriteOperation),
   checks: z.array(OperatorCheckRecord).max(OPERATOR_CHECK_LIMITS.checksPerTask * OPERATOR_CHECK_LIMITS.attemptsPerCheck).optional(),
   artifact: OperatorWriteArtifact.optional(),
+  revisions: z.array(OperatorWriteRevision).max(OPERATOR_JOB_LIMITS.writeRevisions).optional(),
   acceptance: z.object({ digest: Text, proof: OperatorPermissionProof, at: Text }).optional(),
 });
 export type OperatorChildWrite = z.infer<typeof OperatorChildWrite>;

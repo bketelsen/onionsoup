@@ -911,6 +911,24 @@ before and after approval reject changed files, HEAD, scope or evidence. Accepta
 allows normal job synthesis once all children are complete. Check success covers only the shown commands and artifact;
 acceptance does not certify other tests or independent review, commit the edits or clean the worktree; a later write job needs a new clean baseline.
 
+`revise-write { id, childID, digest, text }` sends a completed, unaccepted write child back for scoped
+correction. Use its current `review-write` digest and feedback; the original human intake, task, approval,
+paths, check commands, session and workspace claim stay unchanged. No new scope click or standing grant is
+added. The host proves the exact idle final turn and unchanged artifact before queueing and again before
+normal dispatch. Runtime reads remain outside mutation locks. Concurrent acceptance, pause, stale evidence,
+foreign work, uncertain writes/checks, accepted children and already-started dependent work refuse the transition.
+An already-paused job stays paused. Unstarted dependents keep waiting for the corrected child to be accepted;
+independent accepted siblings are untouched.
+
+Each revision archives the previous final evidence, artifact, review digest, feedback and check IDs. Existing
+attempts, writes and check receipts remain immutable. Current evidence is cleared; even an unchanged result
+needs new check receipts and a new human diff acceptance. Review output separates historical checks/revisions
+from current checks. The default allows at most three revisions and retains the existing three-attempt budget
+per configured check across all revisions; exhausted checks refuse a revision before another turn starts.
+Exact repeated revision requests return the saved request without another dispatch; differing feedback against
+that same old digest refuses. Restarts use the same session and durable dispatch receipts, without replaying
+uncertain turns. This operation cannot expand scope, revise accepted work or release an uncertain reservation.
+
 A prepared mutation with an unknown outcome remains blocked with its workspace reservation intact. Restart, cancel,
 read-only abandonment and a fresh tool call cannot replay or clear it. This slice provides no uncertain-write recovery
 or automatic replacement. The original transcript, intent and any receipt remain available for diagnosis.
