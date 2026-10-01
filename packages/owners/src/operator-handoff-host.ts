@@ -9,14 +9,17 @@ import { OperatorHandoffStore, writeHandoffFile, type OperatorHandoffRecord } fr
 import { operatorCheckRecordDigest, type OperatorCheckRecord } from './operator-check-types.ts';
 import { preflightOperatorCheck, runOperatorCheck, validateOperatorCheckInput,
   type OperatorCheckRun, type OperatorCheckSourceFile } from './operator-check-runner.ts';
-import { beginAdmission, type AdmissionLease } from './deployment-admission.ts';
+import { beginAdmission, releaseMatchedAdmission, AdmissionRecord, type AdmissionLease } from './deployment-admission.ts';
+import { readOperatorCheckOwner, type OperatorCheckOwner } from './operator-check-execution.ts';
+import { OperatorHandoffExecutionJournal, operatorHandoffPreparedDigest, type OperatorHandoffExecutionBinding } from './operator-handoff-execution.ts';
 import { OPERATOR_SUPERVISOR_TRANSPORT_LIMITS } from './operator-supervisor-client.ts';
 
 export const OPERATOR_HANDOFF_HOST_LIMITS = { concurrentChecks: 2 };
 export interface OperatorHandoffReport {
   kind: 'operator-handoff'; application: 'not-applied'; observedAt: string;
-  status: 'needs-checks' | 'checking' | 'uncertain' | 'failed' | 'ready' | 'unchecked' | 'stale';
+  status: 'needs-checks' | 'checking' | 'uncertain' | 'failed' | 'ready' | 'unchecked' | 'stale' | 'unverified';
   current: boolean; reason?: string; artifact: OperatorHandoffRecord['artifact']; checks: OperatorCheckRecord[];
+  originalChecks: OperatorCheckRecord[]; resolutions: NonNullable<OperatorHandoffRecord['resolutions']>;
   paths: { patch: string; report: string };
 }
 type Context = Pick<ToolContext, 'abort' | 'messageID' | 'sessionID' | 'agent' | 'directory'>;
@@ -131,17 +134,18 @@ export class OperatorHandoffs {
     const report: OperatorHandoffReport = { kind: 'operator-handoff', application: 'not-applied',
       observedAt: new Date().toISOString(), current: !reason,
       status: reason ? 'stale' : this.status(record), ...(reason ? { reason } : {}), artifact: record.artifact,
-      checks: record.checks, paths };
+      checks: effectiveHandoffChecks(record), originalChecks: record.checks, resolutions: record.resolutions ?? [], paths };
     await writeHandoffFile(paths.patch, record.artifact.diff);
     await writeHandoffFile(paths.report, JSON.stringify(report, null, 2));
     return report;
   }
 
   private status(record: OperatorHandoffRecord): OperatorHandoffReport['status'] {
-    const pending = record.checks.filter(check => check.status === 'prepared');
+    const pending = unresolvedHandoffChecks(record);
     if (pending.some(check => !this.running.has(check.id))) return 'uncertain';
     if (pending.length) return 'checking';
-    if (record.checks.some(check => check.exitCode !== 0)) return 'failed';
+    if (record.resolutions?.some(resolution => resolution.kind === 'stopped-unverified')) return 'unverified';
+    if (effectiveHandoffChecks(record).some(check => check.exitCode !== 0)) return 'failed';
     if (!record.artifact.checks.length) return 'unchecked';
     return record.artifact.checks.every(check => record.checks.some(receipt => receipt.checkID === check.id)) ? 'ready' : 'needs-checks';
   }
@@ -158,21 +162,27 @@ export class OperatorHandoffs {
     if (candidate.artifact.digest !== digest) throw new Error('operator_handoff_artifact_stale');
     validateOperatorCheckInput(check.command, candidate.source);
     this.context(origin, context);
+    const owner = await readOperatorCheckOwner();
     const admission = await beginAdmission(this.jobs.home, 'plugin:operator-handoff');
+    const attempted = makeHandoffAttempt(checkID, check.command, digest, context, owner, admission);
     let receipt: OperatorCheckRecord | undefined;
-    try { receipt = await this.claim(candidate.job, digest, checkID, context); } catch (error) {
+    try {
+      await new OperatorHandoffExecutionJournal(this.jobs.home, attempted.binding).start();
+      receipt = await this.claim(candidate.job, digest, checkID, context, attempted);
+    } catch (error) {
       await admission.release();
       throw error;
     }
     if (!receipt) await admission.release();
     else {
       this.running.add(receipt.id);
-      void this.execute(id, receipt, candidate.source, admission);
+      void this.execute(id, receipt, candidate.source, admission, attempted.binding);
     }
     return this.show(origin, id);
   }
 
-  private async claim(job: OperatorJob, digest: string, checkID: string, context: Context) {
+  private async claim(job: OperatorJob, digest: string, checkID: string, context: Context,
+    attempted: ReturnType<typeof makeHandoffAttempt>) {
     return this.jobs.transaction(async ledger => {
       this.context(job.origin, context);
       this.assertSameJob(this.jobs.bound(ledger, job.origin, job.id), job);
@@ -180,15 +190,12 @@ export class OperatorHandoffs {
         const record = handoffs.records.find(candidate => candidate.artifact.jobID === job.id);
         if (!record || record.artifact.digest !== digest || record.jobDigest !== operatorJobDigest(job)) throw new Error('operator_handoff_artifact_stale');
         if (record.checks.some(receipt => receipt.checkID === checkID)) return undefined;
-        if (record.checks.some(receipt => receipt.status === 'prepared') || handoffs.records.flatMap(candidate => candidate.checks)
-          .filter(receipt => receipt.status === 'prepared').length >= OPERATOR_HANDOFF_HOST_LIMITS.concurrentChecks) {
+        if (unresolvedHandoffChecks(record).length || handoffs.records.flatMap(unresolvedHandoffChecks).length >= OPERATOR_HANDOFF_HOST_LIMITS.concurrentChecks) {
           throw new Error('operator_handoff_check_capacity');
         }
-        const check = record.artifact.checks.find(candidate => candidate.id === checkID)!;
-        const receipt: OperatorCheckRecord = { id: `check_${randomUUID()}`, checkID, command: check.command,
-          callID: `handoff_${randomUUID()}`, messageID: context.messageID, artifactDigest: digest,
-          status: 'prepared', startedAt: new Date().toISOString() };
+        const { receipt, binding } = attempted;
         record.checks.push(receipt);
+        (record.executions ??= []).push(binding);
         await save();
         return receipt;
       });
@@ -199,6 +206,7 @@ export class OperatorHandoffs {
     await this.store.transaction(async (ledger, save) => {
       const record = ledger.records.find(candidate => candidate.artifact.jobID === id);
       const current = record?.checks.find(candidate => candidate.id === receipt.id);
+      if (record?.resolutions?.some(resolution => resolution.receiptID === receipt.id)) return;
       if (!current || JSON.stringify(current) !== JSON.stringify(receipt)) throw new Error('operator_handoff_receipt_stale');
       Object.assign(current, outcome, { status: 'completed', completedAt: new Date().toISOString() });
       current.digest = operatorCheckRecordDigest(current);
@@ -206,18 +214,60 @@ export class OperatorHandoffs {
     });
   }
 
-  private async execute(id: string, receipt: OperatorCheckRecord, source: OperatorCheckSourceFile[], admission: AdmissionLease) {
+  private async execute(id: string, receipt: OperatorCheckRecord, source: OperatorCheckSourceFile[], admission: AdmissionLease,
+    binding: OperatorHandoffExecutionBinding) {
+    const journal = new OperatorHandoffExecutionJournal(this.jobs.home, binding);
     let outcome: OperatorCheckRun;
-    try { outcome = await this.effects.run(receipt.command, source); } catch (error) {
+    let started = false;
+    try {
+      await journal.start();
+      started = true;
+      outcome = await this.effects.run(receipt.command, source, { onWitness: witness => journal.witness(witness) });
+    } catch (error) {
+      if (!started) {
+        outcome = { exitCode: 125, output: '[operator_handoff_execution_not_started]', outputTruncated: false };
+        await this.settle(id, receipt, outcome, admission, journal);
+        return;
+      }
       this.running.delete(receipt.id);
       logHandoffFailure('operator_handoff_check_stop_unproven', id, receipt.id, error);
       return;
+    }
+    await this.settle(id, receipt, outcome, admission, journal);
+  }
+
+  private async settle(id: string, receipt: OperatorCheckRecord, outcome: OperatorCheckRun,
+    admission: AdmissionLease, journal: OperatorHandoffExecutionJournal) {
+    try { await journal.finish(outcome); } catch (error) {
+      logHandoffFailure('operator_handoff_execution_completion_not_persisted', id, receipt.id, error);
     }
     try { await this.complete(id, receipt, outcome); } catch (error) {
       logHandoffFailure('operator_handoff_check_completion_not_persisted', id, receipt.id, error);
     } finally {
       this.running.delete(receipt.id);
-      await admission.release().catch(error => logHandoffFailure('operator_handoff_admission_release_failed', id, receipt.id, error));
+      await releaseMatchedAdmission(this.jobs.home, AdmissionRecord.parse(admission)).catch(error => logHandoffFailure('operator_handoff_admission_release_failed', id, receipt.id, error));
     }
   }
+}
+
+
+export function unresolvedHandoffChecks(record: OperatorHandoffRecord) {
+  return record.checks.filter(check => check.status === 'prepared'
+    && !record.resolutions?.some(resolution => resolution.receiptID === check.id));
+}
+
+export function effectiveHandoffChecks(record: OperatorHandoffRecord) {
+  return record.checks.map(check => record.resolutions?.find(resolution => resolution.receiptID === check.id)?.completed ?? check);
+}
+
+
+function makeHandoffAttempt(checkID: string, command: string[], digest: string, context: Context,
+  owner: OperatorCheckOwner, admission: AdmissionLease) {
+  const token = admission.id;
+  const receipt: OperatorCheckRecord = { id: `check_${randomUUID()}`, checkID, command,
+    callID: `handoff_${token}`, messageID: context.messageID, artifactDigest: digest,
+    status: 'prepared', startedAt: new Date().toISOString() };
+  const binding: OperatorHandoffExecutionBinding = { receiptID: receipt.id, token,
+    receiptDigest: operatorHandoffPreparedDigest(receipt), artifactDigest: digest, owner, admission: AdmissionRecord.parse(admission) };
+  return { receipt, binding };
 }

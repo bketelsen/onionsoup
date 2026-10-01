@@ -59,7 +59,9 @@ jobs:
           echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> "$GITHUB_ENV"
           mkdir -p ~/.config/opencode ~/.local/state/opencode ~/.local/share/opencode ~/.cache ~/.npm ~/go
       - run: npm ci
-      - run: timeout 300s npm run verify
+      # Full real-sandbox fixtures can exceed five minutes on hosted runners.
+      # Keep all tests and their individual limits; bound only the complete suite here.
+      - run: timeout 600s npm run verify
         env:
           ONIONSOUP_HOME: ${{ runner.temp }}/onionsoup-home
           ONIONSOUP_CONFIG: ${{ runner.temp }}/onionsoup-config

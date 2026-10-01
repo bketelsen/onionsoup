@@ -226,3 +226,33 @@ export async function releaseDrain(
     await writeIntent(stateDirectory, { ...current, status });
   });
 }
+
+/** Recovery releases only a host-bound lease after its caller has persisted positive execution proof. */
+export async function releaseMatchedAdmission(stateDirectory: string, expectedInput: z.infer<typeof AdmissionRecord>) {
+  const expected = AdmissionRecord.parse(expectedInput);
+  return withAdmissionLock(stateDirectory, async () => {
+    const path = join(deployDirectory(stateDirectory), 'leases', `${expected.id}.json`);
+    let current: z.infer<typeof AdmissionRecord>;
+    try { current = AdmissionRecord.parse(JSON.parse(await readFile(path, 'utf8'))); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+      throw error;
+    }
+    if (JSON.stringify(current) !== JSON.stringify(expected)) throw new Error('deployment_admission_identity_mismatch');
+    await unlink(path);
+  });
+}
+
+/** Read only the expected recovery lease; missing is already-cleaned, a replaced identity is never adopted. */
+export async function inspectMatchedAdmission(stateDirectory: string, expectedInput: z.infer<typeof AdmissionRecord>) {
+  const expected = AdmissionRecord.parse(expectedInput);
+  return withAdmissionLock(stateDirectory, async () => {
+    const path = join(deployDirectory(stateDirectory), 'leases', `${expected.id}.json`);
+    let current: z.infer<typeof AdmissionRecord>;
+    try { current = AdmissionRecord.parse(JSON.parse(await readFile(path, 'utf8'))); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+      throw error;
+    }
+    if (JSON.stringify(current) !== JSON.stringify(expected)) throw new Error('deployment_admission_identity_mismatch');
+    return true;
+  });
+}
