@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { constants } from 'node:fs';
-import { access, chmod, copyFile, cp, link, mkdir, mkdtemp, readFile, rename, symlink, unlink, writeFile } from 'node:fs/promises';
+import { access, chmod, copyFile, cp, link, mkdir, mkdtemp, readFile, rename, stat, symlink, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { operatorWriterCommand, requireOperatorWriterBwrapFeatures, resolveOperatorWriterNode, runOperatorFileWriter } from '../src/operator-write-writer.ts';
 import { applyOperatorFileMutation, inspectOperatorFileMutation, operatorWriteArtifact, operatorWriteSha256,
-  prepareOperatorFileMutation, snapshotOperatorWriteWorkspace } from '../src/operator-write-workspace.ts';
+  prepareOperatorFileMutation, readOperatorWriteSourceFiles, snapshotOperatorWriteWorkspace, validateOperatorWriteWorkspace } from '../src/operator-write-workspace.ts';
 
 async function fixture() {
   const workspace = await mkdtemp(join(tmpdir(), 'operator-write-'));
@@ -290,4 +290,250 @@ test('approved colon-magic filenames remain literal and visible in the host revi
   assert.equal(await readFile(join(fixtureState.directory, 'other.txt'), 'utf8'), 'untouched\n');
   // Without literal pathspec handling this exact approved filename excludes every diff entry.
   assert.equal(fixtureState.git('diff', '--no-ext-diff', '--no-textconv', '--', path), '');
+});
+
+async function creationFixture(path = 'docs/new.txt') {
+  const original = await fixture();
+  const snapshot = await snapshotOperatorWriteWorkspace({ workspace: original.workspace, directory: original.directory, files: [], createFiles: [path] });
+  const prepare = (content = 'created π\n') => prepareOperatorFileMutation(snapshot, [], {
+    id: 'create-1', path, expectedBeforeSha256: 'absent', content,
+  });
+  return { ...original, snapshot, prepare, path };
+}
+
+test('explicit absent-file creation records its exact identity and untracked new-file review diff', async () => {
+  const current = await creationFixture();
+  const intent = await current.prepare();
+  assert.equal(intent.beforeSha256, 'absent');
+  const receipt = await applyOperatorFileMutation(current.snapshot, [], intent);
+  const actual = await stat(join(current.directory, current.path));
+  assert.equal(receipt.created?.inode, actual.ino);
+  assert.equal(receipt.created?.device, actual.dev);
+  assert.equal(receipt.created?.mode, 0o100600);
+  assert.equal(receipt.created?.birthtimeNs, (await stat(join(current.directory, current.path), { bigint: true })).birthtimeNs.toString());
+  assert.equal(await readFile(join(current.directory, current.path), 'utf8'), 'created π\n');
+  assert.equal(current.git('diff', '--cached'), '');
+  assert.equal(current.git('ls-files', '--', current.path), '');
+  const artifact = await operatorWriteArtifact(current.snapshot, [receipt]);
+  assert.match(artifact.diff, /new file mode 100644/);
+  assert.match(artifact.diff, /--- \/dev\/null/);
+  assert.match(artifact.diff, /\+created π/);
+  assert.deepEqual(artifact.files, [{ path: current.path, beforeSha256: 'absent', afterSha256: intent.afterSha256 }]);
+  assert.equal(artifact.diffSha256, operatorWriteSha256(artifact.diff));
+});
+
+test('a receipted new file can be updated without replacing its created inode', async () => {
+  const current = await creationFixture();
+  const first = await current.prepare();
+  const created = await applyOperatorFileMutation(current.snapshot, [], first);
+  const next = await prepareOperatorFileMutation(current.snapshot, [created], { id: 'update-2', path: current.path,
+    expectedBeforeSha256: first.afterSha256, content: 'updated new file\n' });
+  const updated = await applyOperatorFileMutation(current.snapshot, [created], next);
+  assert.equal(Object.hasOwn(updated, 'created'), false);
+  assert.equal((await stat(join(current.directory, current.path))).ino, created.created!.inode);
+  const artifact = await operatorWriteArtifact(current.snapshot, [created, updated]);
+  assert.match(artifact.diff, /\+updated new file/);
+  assert.doesNotMatch(artifact.diff, /created π/);
+});
+
+test('legacy serialized snapshots, mutation receipts and artifacts retain their original digest bodies', async () => {
+  const current = await fixture();
+  const snapshot = JSON.parse(JSON.stringify(current.snapshot));
+  assert.equal(Object.hasOwn(snapshot, 'createFiles'), false);
+  const explicitEmpty = await snapshotOperatorWriteWorkspace({ workspace: current.workspace, directory: current.directory,
+    files: ['docs/note.txt'], createFiles: [] });
+  assert.deepEqual(explicitEmpty, snapshot);
+  const intent = await current.prepare();
+  const receipt = await applyOperatorFileMutation(snapshot, [], intent);
+  const artifact = await operatorWriteArtifact(snapshot, [JSON.parse(JSON.stringify(receipt))]);
+  assert.equal(Object.hasOwn(receipt, 'created'), false);
+  for (const record of [snapshot, receipt, artifact]) {
+    const { digest, ...body } = record;
+    assert.equal(digest, operatorWriteSha256(JSON.stringify(body)));
+  }
+});
+
+for (const path of ['../escape', '/tmp/escape', '.git/new', 'docs/.git/new', 'missing/new.txt', 'docs/../new.txt', 'other.txt']) {
+  test(`new-file scope refuses ${JSON.stringify(path)} before any creation`, async () => {
+    const current = await fixture();
+    await assert.rejects(snapshotOperatorWriteWorkspace({ workspace: current.workspace, directory: current.directory, files: [], createFiles: [path] }));
+    assert.equal(await readFile(join(current.directory, 'other.txt'), 'utf8'), 'untouched\n');
+  });
+}
+
+test('new files must not be ignored, duplicated or overlap the existing-file scope', async () => {
+  const current = await fixture();
+  await writeFile(join(current.directory, '.gitignore'), 'docs/ignored*\n');
+  current.git('add', '.');
+  current.git('commit', '-qm', 'ignore fixture');
+  const input = { workspace: current.workspace, directory: current.directory, files: [] };
+  await assert.rejects(snapshotOperatorWriteWorkspace({ ...input, createFiles: ['docs/ignored.txt'] }), /creation_ignored/);
+  await assert.rejects(snapshotOperatorWriteWorkspace({ ...input, createFiles: ['new.txt', 'new.txt'] }), /scope_invalid/);
+  await assert.rejects(snapshotOperatorWriteWorkspace({ ...input, files: ['other.txt'], createFiles: ['other.txt'] }), /scope_invalid/);
+});
+
+test('an ignored-path rule added after approval blocks creation without touching the index', async () => {
+  const current = await creationFixture();
+  const intent = await current.prepare();
+  await writeFile(join(current.directory, '.git/info/exclude'), 'docs/new.txt\n');
+  await assert.rejects(applyOperatorFileMutation(current.snapshot, [], intent), /creation_ignored/);
+  await assert.rejects(access(join(current.directory, current.path)));
+});
+
+for (const content of ['foreign bytes', 'created π\n']) {
+  test(`unreceipted existing ${content === 'foreign bytes' ? 'foreign' : 'matching'} bytes cannot be adopted or overwritten as a creation`, async () => {
+    const current = await creationFixture();
+    const intent = await current.prepare();
+    await writeFile(join(current.directory, current.path), content);
+    await assert.rejects(applyOperatorFileMutation(current.snapshot, [], intent), /mutation_uncertain/);
+    await assert.rejects(inspectOperatorFileMutation(current.snapshot, [], intent), /mutation_uncertain/);
+    await assert.rejects(operatorWriteArtifact(current.snapshot, []), /creation_exists/);
+    assert.equal(await readFile(join(current.directory, current.path), 'utf8'), content);
+  });
+}
+
+test('O_EXCL at the fixed helper refuses a file appearing after preparation', async () => {
+  const current = await creationFixture();
+  const intent = await current.prepare();
+  await writeFile(join(current.directory, current.path), 'raced foreign file');
+  await assert.rejects(runOperatorFileWriter(current.snapshot, intent), /writer_uncertain/);
+  assert.equal(await readFile(join(current.directory, current.path), 'utf8'), 'raced foreign file');
+});
+
+test('two racing fixed creators produce one effect and never overwrite the winning inode', async () => {
+  const current = await creationFixture();
+  const intent = await current.prepare();
+  const outcomes = await Promise.allSettled([runOperatorFileWriter(current.snapshot, intent), runOperatorFileWriter(current.snapshot, intent)]);
+  assert.equal(outcomes.filter(outcome => outcome.status === 'fulfilled').length, 1);
+  assert.equal(outcomes.filter(outcome => outcome.status === 'rejected').length, 1);
+  assert.equal(await readFile(join(current.directory, current.path), 'utf8'), 'created π\n');
+  await assert.rejects(applyOperatorFileMutation(current.snapshot, [], intent), /mutation_uncertain/);
+});
+
+test('lost creation acknowledgement remains uncertain despite exact final bytes', async () => {
+  const current = await creationFixture();
+  const intent = await current.prepare();
+  await runOperatorFileWriter(current.snapshot, intent); // Simulate losing the host receipt after the fixed helper exited.
+  await assert.rejects(inspectOperatorFileMutation(current.snapshot, [], intent), /mutation_uncertain/);
+  await assert.rejects(applyOperatorFileMutation(current.snapshot, [], intent), /mutation_uncertain/);
+  assert.equal(await readFile(join(current.directory, current.path), 'utf8'), 'created π\n');
+});
+
+for (const change of ['parent', 'symlink', 'hardlink'] as const) {
+  test(`new-file authority rejects a ${change} swap before creation`, async () => {
+    const current = await creationFixture();
+    const intent = await current.prepare();
+    const actions = {
+      parent: async () => { await rename(join(current.directory, 'docs'), join(current.directory, 'old-docs')); await mkdir(join(current.directory, 'docs')); },
+      symlink: async () => { await symlink('../other.txt', join(current.directory, current.path)); },
+      hardlink: async () => { await link(join(current.directory, 'other.txt'), join(current.directory, current.path)); },
+    };
+    await actions[change]();
+    await assert.rejects(applyOperatorFileMutation(current.snapshot, [], intent));
+    assert.equal(await readFile(join(current.directory, 'other.txt'), 'utf8'), 'untouched\n');
+  });
+}
+
+test('a replaced created inode and forged receipt identity cannot authorize later writes', async () => {
+  const current = await creationFixture();
+  const intent = await current.prepare();
+  const receipt = await applyOperatorFileMutation(current.snapshot, [], intent);
+  const { digest: _digest, ...body } = receipt;
+  const forgedBody = { ...body, created: { ...receipt.created!, inode: receipt.created!.inode + 1 } };
+  await assert.rejects(validateOperatorWriteWorkspace(current.snapshot, [{ ...forgedBody, digest: operatorWriteSha256(JSON.stringify(forgedBody)) }]), /source_changed/);
+  const forgedBirth = { ...body, created: { ...receipt.created!, birthtimeNs: String(BigInt(receipt.created!.birthtimeNs!) + 1n) } };
+  await assert.rejects(validateOperatorWriteWorkspace(current.snapshot, [{ ...forgedBirth, digest: operatorWriteSha256(JSON.stringify(forgedBirth)) }]), /source_changed/);
+  const missingBody = { ...body };
+  delete missingBody.created;
+  await assert.rejects(validateOperatorWriteWorkspace(current.snapshot, [{ ...missingBody, digest: operatorWriteSha256(JSON.stringify(missingBody)) }]), /receipt_invalid/);
+  await rename(join(current.directory, current.path), join(current.workspace, 'original-created'));
+  await writeFile(join(current.directory, current.path), intent.content);
+  await assert.rejects(prepareOperatorFileMutation(current.snapshot, [receipt], { id: 'later', path: current.path,
+    expectedBeforeSha256: intent.afterSha256, content: 'must not write' }), /source_changed/);
+});
+
+test('a new literal pathspec-like filename and empty file both remain visible in review', async () => {
+  for (const content of ['literal content\n', '']) {
+    const current = await creationFixture(':(exclude)*');
+    const intent = await current.prepare(content);
+    const receipt = await applyOperatorFileMutation(current.snapshot, [], intent);
+    const artifact = await operatorWriteArtifact(current.snapshot, [receipt]);
+    assert.ok(artifact.diff.includes(':(exclude)*'));
+    assert.match(artifact.diff, /new file mode/);
+    assert.equal(artifact.files[0]?.beforeSha256, 'absent');
+  }
+});
+
+test('source-copy reader returns exact tracked binary/text and receipted new bytes while excluding ignored data', async () => {
+  const current = await fixture();
+  await writeFile(join(current.directory, '.gitignore'), '.private-cache\n');
+  await writeFile(join(current.directory, 'binary.bin'), Buffer.from([0, 255, 13]));
+  current.git('add', '.');
+  current.git('commit', '-qm', 'source fixture');
+  const snapshot = await snapshotOperatorWriteWorkspace({ workspace: current.workspace, directory: current.directory,
+    files: [], createFiles: ['docs/new.txt'] });
+  const intent = await prepareOperatorFileMutation(snapshot, [], { id: 'source-new', path: 'docs/new.txt',
+    expectedBeforeSha256: 'absent', content: 'new source\n' });
+  const receipt = await applyOperatorFileMutation(snapshot, [], intent);
+  await writeFile(join(current.directory, '.private-cache'), 'must not copy');
+  const source = await readOperatorWriteSourceFiles(snapshot, [receipt]);
+  assert.deepEqual(source.find(file => file.path === 'binary.bin')?.content, Buffer.from([0, 255, 13]));
+  assert.equal(source.find(file => file.path === 'docs/new.txt')?.content.toString('utf8'), 'new source\n');
+  assert.equal(source.some(file => file.path.startsWith('.git/') || file.path === '.private-cache'), false);
+  await writeFile(join(current.directory, 'unrelated.txt'), 'foreign');
+  await assert.rejects(readOperatorWriteSourceFiles(snapshot, [receipt]), /untracked_files/);
+});
+
+test('source-copy reader never follows a tracked symlink', async () => {
+  const current = await fixture();
+  await symlink('/etc/passwd', join(current.directory, 'external-link'));
+  current.git('add', '.');
+  current.git('commit', '-qm', 'symlink fixture');
+  const snapshot = await current.capture();
+  await assert.rejects(readOperatorWriteSourceFiles(snapshot, []), /source_symlink_unsupported/);
+});
+
+test('new-file bounds reject oversized/nontext content and cap the combined scope', async () => {
+  const current = await creationFixture();
+  await assert.rejects(current.prepare('x'.repeat(256 * 1024 + 1)), /text_invalid/);
+  await assert.rejects(current.prepare('nul\0content'), /text_invalid/);
+  await assert.rejects(current.prepare('\ud800'), /text_invalid/);
+  await assert.rejects(snapshotOperatorWriteWorkspace({ workspace: current.workspace, directory: current.directory,
+    files: ['other.txt'], createFiles: ['new.txt'], limits: { approvedFiles: 1 } }), /scope_invalid/);
+  await assert.rejects(access(join(current.directory, current.path)));
+});
+
+test('a clean existing repository with an empty commit can receive its first explicit file', async () => {
+  const current = await fixture();
+  current.git('rm', '-q', '-r', '.');
+  current.git('commit', '-qm', 'empty tree');
+  const snapshot = await snapshotOperatorWriteWorkspace({ workspace: current.workspace, directory: current.directory,
+    files: [], createFiles: ['first.txt'] });
+  const intent = await prepareOperatorFileMutation(snapshot, [], { id: 'first', path: 'first.txt', expectedBeforeSha256: 'absent', content: 'first\n' });
+  const receipt = await applyOperatorFileMutation(snapshot, [], intent);
+  assert.match((await operatorWriteArtifact(snapshot, [receipt])).diff, /\+first/);
+});
+
+test('literal ignored-path checks do not expand wildcard filenames and new text diff ignores binary attributes', async () => {
+  const current = await fixture();
+  await writeFile(join(current.directory, '.gitignore'), 'docs/specific.txt\n');
+  await writeFile(join(current.directory, '.gitattributes'), '*.txt binary\n');
+  current.git('add', '.');
+  current.git('commit', '-qm', 'literal ignore and attribute fixture');
+  const path = 'docs/*.txt';
+  const snapshot = await snapshotOperatorWriteWorkspace({ workspace: current.workspace, directory: current.directory, files: [], createFiles: [path] });
+  const intent = await prepareOperatorFileMutation(snapshot, [], { id: 'wildcard', path, expectedBeforeSha256: 'absent', content: 'must be visible\n' });
+  const receipt = await applyOperatorFileMutation(snapshot, [], intent);
+  const artifact = await operatorWriteArtifact(snapshot, [receipt]);
+  assert.ok(artifact.diff.includes('b/docs/*.txt'));
+  assert.match(artifact.diff, /\+must be visible/);
+  assert.doesNotMatch(artifact.diff, /Binary files/);
+});
+
+test('source-copy reader rejects a changed created hardlink before returning any bytes', async () => {
+  const current = await creationFixture();
+  const intent = await current.prepare();
+  const receipt = await applyOperatorFileMutation(current.snapshot, [], intent);
+  await link(join(current.directory, current.path), join(current.workspace, 'outside-alias'));
+  await assert.rejects(readOperatorWriteSourceFiles(current.snapshot, [receipt]), /source_changed/);
 });

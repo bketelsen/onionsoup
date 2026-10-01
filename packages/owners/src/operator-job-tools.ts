@@ -37,7 +37,7 @@ export async function operatorJobCaller(jobs: OperatorJobs, client: Client, cont
 export function operatorJobTool(jobs: OperatorJobs, supervisor: OperatorSupervisor, client: Client,
   guard: (agent: string) => void, permissions: OperatorRecoveryPermissions, writes?: OperatorWrites): ReturnType<typeof tool> {
   return tool({
-    description: 'Supervise your own investigations and explicitly approved named-file edits with two managed slots. Write tasks require access write and files in an existing clean Git workspace, with one-time human approval. Separate workspaces can run in parallel; conflicts refuse. Review-write shows the host diff and review digest; accept-write asks the person to accept that exact diff before releasing its workspace. No child shell, commits, pushes, owner delegation or persistent grants. Show includes evidence and job digest. Pause stops new launches; resume with childID continues a proven interrupted child in the same session. Cancel cannot release unaccepted write claims. Recovery-preview and abandon require explicit human recovery; write children qualify only with zero recorded mutations and verified absent or idle owned runtime state. Any recorded write remains held for review, never replayed. Synthesize requires current job digest and all accepted evidence IDs.',
+    description: 'Supervise your own investigations and explicitly approved named-file edits and creations with two managed slots. Named Node --test checks run only in a private source-copy sandbox. Write tasks require access write and exact files and/or createFiles in an existing clean Git workspace, plus optional named checks with exact command argv. One native scope approval covers these effects; exact retries reuse it. Plain-language text is not a native approval receipt. Separate workspaces can run in parallel; conflicts refuse. Review-write shows the host diff and review digest; accept-write asks the person to accept that exact diff before releasing its workspace. No general shell, package installs, commits, pushes, owner delegation or persistent grants. Final acceptance requires successful host checks for the current diff. Show includes evidence and job digest. Pause stops new launches; resume with childID continues a proven interrupted child in the same session. Cancel cannot release unaccepted write claims. Recovery-preview and abandon require explicit human recovery; write children qualify only with zero recorded mutations and verified absent or idle owned runtime state. Any recorded write remains held for review, never replayed. Synthesize requires current job digest and all accepted evidence IDs.',
     // OpenCode's bundled Zod differs from the host version; parse with the canonical schema at the boundary.
     args: {
       action: tool.schema.enum(['create', 'list', 'show', 'pause', 'resume', 'cancel', 'synthesize', 'recheck', 'recovery-preview', 'abandon', 'review-write', 'accept-write']),
@@ -45,6 +45,8 @@ export function operatorJobTool(jobs: OperatorJobs, supervisor: OperatorSupervis
       job: tool.schema.object({ key: tool.schema.string(), goal: tool.schema.string(), constraints: tool.schema.array(tool.schema.string()),
         tasks: tool.schema.array(tool.schema.object({ id: tool.schema.string(), goal: tool.schema.string(), directory: tool.schema.string(),
           access: tool.schema.enum(['read-only', 'write']), files: tool.schema.array(tool.schema.string()).optional(),
+          createFiles: tool.schema.array(tool.schema.string()).optional(),
+          checks: tool.schema.array(tool.schema.object({ id: tool.schema.string(), command: tool.schema.array(tool.schema.string()) })).optional(),
           dependsOn: tool.schema.array(tool.schema.string()).default([]) })) }).optional(),
       digest: tool.schema.string().optional(), evidenceIDs: tool.schema.array(tool.schema.string()).optional(), text: tool.schema.string().optional(),
     },
@@ -75,7 +77,7 @@ export function operatorJobTool(jobs: OperatorJobs, supervisor: OperatorSupervis
         'review-write': async () => {
           const preview = await required(writes, 'write_host').review(caller.origin, id(), required(args.childID, 'childID'));
           return { jobID: id(), childID: args.childID, digest: preview.digest, artifact: preview.artifact,
-            originalIntake: preview.job.intake, goal: preview.job.goal, constraints: preview.job.constraints, evidence: preview.child.evidence };
+            originalIntake: preview.job.intake, goal: preview.job.goal, constraints: preview.job.constraints, evidence: preview.child.evidence, checks: preview.child.write?.checks ?? [] };
         },
         'accept-write': () => required(writes, 'write_host').accept(caller.origin, id(), required(args.childID, 'childID'),
           required(args.digest, 'digest'), context),

@@ -1,13 +1,14 @@
 import type { Plugin } from '@opencode-ai/plugin';
 import { z } from 'zod';
 import { OPERATOR_INVESTIGATOR, type OperatorClientOptions, type OperatorSessionMessage, type OperatorSupervisorClient } from './operator-jobs-types.ts';
-import { OPERATOR_WRITE_TOOL } from './operator-write-call.ts';
+import { OPERATOR_WRITE_TOOL, OPERATOR_CHECK_TOOL } from './operator-write-call.ts';
 
 export const OPERATOR_SUPERVISOR_TRANSPORT_LIMITS = { timeoutMs: 10_000 };
 export const OPERATOR_CHILD_PERMISSION = [
   { permission: '*', pattern: '*', action: 'deny' },
   ...['read', 'glob', 'grep', 'list'].map(permission => ({ permission, pattern: '*', action: 'allow' })),
   { permission: OPERATOR_WRITE_TOOL, pattern: '*', action: 'allow' },
+  { permission: OPERATOR_CHECK_TOOL, pattern: '*', action: 'allow' },
   { permission: 'external_directory', pattern: '*', action: 'deny' },
 ] as const;
 const Session = z.object({ id: z.string(), title: z.string(), directory: z.string(), parentID: z.string().optional() });

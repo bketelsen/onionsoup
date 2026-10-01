@@ -726,7 +726,7 @@ gets the surface opencode's own server credentials blanked (the plugin's `shell.
 #### Durable operator investigations
 
 `onionsoup_operator_job` supervises the operator's own children, independently of owners and initiatives. It supports
-read-only investigations and explicitly approved edits to named existing files. Children have no arbitrary bash, native
+read-only investigations, explicitly approved edits and new text files, and scoped host-run checks. Children have no arbitrary bash, native
 edit, network, delegation or owner tools. No persistent grant is created; the operator's normal interactive permissions
 are unchanged.
 
@@ -793,33 +793,49 @@ these host sessions are not a filesystem sandbox against concurrent path replace
 
 #### Scoped operator file edits
 
-A write task uses `access: "write"` and an explicit `files` list. Its directory must already be a clean Git worktree
-root under the configured operator workspace. Only existing tracked UTF-8 files are eligible; new paths, deletions,
-symlinks, hard-linked files and Git metadata are excluded. Default limits allow eight approved files per task, each
-at most 256 KiB. Creation captures the original intake, goal, constraints, task paths and HEAD in an exact scope digest.
+A write task uses `access: "write"`, `files` for existing tracked UTF-8 files, and optional `createFiles` for exact new
+text paths. Its directory must already be a clean Git worktree root under the configured operator workspace. New files
+require existing parent directories and absent, nonignored paths; deletions, symlinks, hard-linked files and Git metadata
+are excluded. Default limits allow eight approved files per task, each
+at most 256 KiB. Creation captures the original intake, goal, constraints, existing/new paths, check commands and HEAD in an exact scope digest.
 The person must answer the matching native **Allow once** prompt before the job is admitted. Auto-allow, **Always**,
-a runtime notice or an earlier approval cannot substitute for this decision.
+a runtime notice or approval for a different task cannot substitute for this decision. Retrying the exact same bound
+`create` reuses its durable approval and child identities; it does not ask again or create another job. A natural-language
+request alone does not authorize inferred paths or commands. Removing the initial click requires a separate structured
+intake and authority decision; this slice adds no persistent grant.
 
 Workspace claims cover the whole canonical worktree, including overlapping parent/child directories. A conflicting
 read or write task is refused rather than run concurrently; two independent worktrees can use the two managed slots.
 The operator can keep answering its parent chat while these children work. Claims remain held after child inference
 finishes and until the person accepts the verified diff. Claims coordinate managed children, not external programs;
 use dedicated worktrees. Host checks cover tracked files and nonignored untracked paths. Ignored untracked files remain outside
-that integrity check, and no child can create or edit them through this tool.
+that integrity check, and no child can create or edit ignored paths through this tool.
 
 The child calls `onionsoup_operator_write_file` with an approved relative path, its expected current SHA256 and full
 replacement text. Host code records a mutation intent, checks the original Git and file identities, and passes a
 pinned file descriptor to a fixed writer in a network-isolated, memory-capped bwrap sandbox. The helper can write only
 that approved descriptor; pathname replacement cannot redirect it. This isolates the file mutation, not the trusted
-operator or every model session. Children receive no arbitrary shell, test execution, commit, push or merge capability.
+operator or every model session. Children receive no arbitrary shell, commit, push or merge capability. New-file
+creation uses the approved absent path and pinned parent identity; an unexpected existing path is never overwritten.
+New files remain untracked and their full contents appear in the review diff; the host does not stage them in Git.
+
+Optional `checks` name exact command arrays such as `{ "id": "title-test", "command": ["node", "--test", "test/title.test.mjs"] }`.
+The initial adapter accepts only Node's built-in test runner and literal relative test paths. It does not install
+packages, resolve additional dependencies, run package scripts or invoke a host shell. The runner receives a read-only
+copy of verified source files and approved creations, with the trusted Node runtime, network isolation and memory,
+process, time and output limits. It mounts neither the live worktree nor the host home or environment. The child requests only an
+approved check ID; host code records bounded output, exit code and the exact artifact digest. These receipts are
+separate from model claims. Editing after a check makes that receipt stale for acceptance; every configured check
+must have a current successful receipt. Failed or incomplete checks remain visible without implying completion.
 
 A completed child enters `needs-review`. `review-write { id, childID }` verifies current workspace and terminal runtime
 evidence and returns the exact host diff and review digest. The parent presents that diff, the original goal and
 constraints; `accept-write { id, childID, digest }` asks for another native **Allow once**, bound to that exact review.
-Both chat and inbox show the full diff in a scrolling view and label child conclusions as model claims. Fresh checks
+Both chat and inbox show the full diff, host check receipts and labeled bounded output, and distinguish child
+conclusions as model claims. Fresh checks
 before and after approval reject changed files, HEAD, scope or evidence. Acceptance releases the workspace claim and
-allows normal job synthesis once all children are complete. It does not certify tests, commit the edits or clean the
-worktree; a later write job needs a new clean baseline.
+allows normal job synthesis once all children are complete. Check success covers only the shown commands and artifact;
+acceptance does not certify other tests or independent review, commit the edits or clean the worktree; a later write job needs a new clean baseline.
 
 A prepared mutation with an unknown outcome remains blocked with its workspace reservation intact. Restart, cancel,
 read-only abandonment and a fresh tool call cannot replay or clear it. This slice provides no uncertain-write recovery

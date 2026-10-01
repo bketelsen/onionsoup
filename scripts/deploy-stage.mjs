@@ -18,7 +18,8 @@ export const HOST_BUS_TESTS = [
 ];
 // NODE_OPTIONS splits unquoted spaces; quote the whole value so the filter cannot become just ^a.
 export const STAGE_TEST_OPTIONS = `--test-skip-pattern=${JSON.stringify(`^(?:${HOST_BUS_TESTS.join('|')})$`)}`;
-export const STAGE_LIMITS = { memoryMax: '8G', tasksMax: 2048 };
+// Nested check runners have no host bus; retain their enforced caps through the outer stage cgroup.
+export const STAGE_LIMITS = { memoryMax: '6G', tasksMax: 512 };
 const STAGE_ENV = {
   HOME: PRIVATE_HOME,
   XDG_CONFIG_HOME: `${PRIVATE_HOME}/.config`,

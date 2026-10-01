@@ -479,6 +479,59 @@ test('scoped write cards present the original goal and full host diff as inert r
   assert.equal(operatorWriteApprovalOf({ permission: OPERATOR_WRITE_PERMISSION, metadata: { mode: 'accept-write', artifact: { diff } } }), undefined);
 });
 
+test('write scope cards separate new paths and approved argv from artifact-bound host check receipts', async () => {
+  const { PendingCard } = await import('../web/src/chat/cards.tsx');
+  const { Decision } = await import('../web/src/components/Decision.tsx');
+  const { operatorWriteApprovalOf } = await import('../src/operator-write-approval.ts');
+  const { OPERATOR_CHECK_DISPLAY_LIMITS } = await import('../web/src/components/OperatorWriteApproval.tsx');
+  const common = { originalIntake: { text: 'Add a focused title regression test' },
+    goal: 'Update the title and verify it', constraints: ['Only the two named paths', 'No commit or push'] };
+  const command = ['node', '--test', 'test/title.test.mjs'];
+  const output = '<script>test output is inert</script>' + 'x'.repeat(OPERATOR_CHECK_DISPLAY_LIMITS.outputChars) + 'HIDDEN_OUTPUT_TAIL';
+  const check = { id: 'receipt_one', checkID: 'title-test', command, callID: 'call_check', messageID: 'msg_check',
+    artifactDigest: 'a'.repeat(64), status: 'completed', startedAt: '2026-10-01T10:00:00.000Z',
+    completedAt: '2026-10-01T10:00:01.000Z', exitCode: 0, output, outputTruncated: true, digest: 'b'.repeat(64) };
+  const metadata = [
+    { mode: 'create-write', approvalScope: 'once', intake: common.originalIntake, input: { ...common },
+      workspaces: [{ id: 'title', directory: '/isolated/task', head: 'head_fixture',
+        files: ['README.md', 'test/title.test.mjs'], createFiles: ['test/title.test.mjs'], checks: [{ id: 'title-test', command }] }] },
+    { mode: 'accept-write', approvalScope: 'once', ...common, directory: '/isolated/task',
+      artifact: { head: 'head_fixture', diff: '+new test', files: [{ path: 'README.md' }, { path: 'test/title.test.mjs' }] }, checks: [check] },
+  ];
+  for (const details of metadata) {
+    const permission = { id: 'per_checks', sessionID: SESSION, permission: OPERATOR_WRITE_PERMISSION,
+      patterns: ['exact-scope-digest'], metadata: details, always: [] };
+    const operatorWriteApproval = operatorWriteApprovalOf(permission);
+    assert(operatorWriteApproval);
+    const entry = { kind: 'permission' as const, id: 'per_checks', owner: 'operator', title: 'Scoped checks', detail: '', sessionID: SESSION,
+      permission, operatorWriteApproval };
+    for (const html of [renderToStaticMarkup(createElement(PendingCard, { entry, onDone: () => {} })),
+      renderToStaticMarkup(createElement(Decision, { entry, onDone: () => {} }))]) {
+      assert.match(html, /title-test/);
+      assert.match(html, /&quot;node&quot;,&quot;--test&quot;,&quot;test\/title\.test\.mjs&quot;/);
+      assert.doesNotMatch(html, /Always/);
+      if (details.mode === 'create-write') {
+        assert.match(html, /Existing files:\nREADME\.md\nNew files:\ntest\/title\.test\.mjs/);
+        assert.match(html, /Approved check commands/);
+      } else {
+        assert.match(html, /Host check receipts/);
+        assert.match(html, /Exit code: 0/);
+        assert.match(html, /Artifact digest: a{64}/);
+        assert.match(html, /&lt;script&gt;test output is inert&lt;\/script&gt;/);
+        assert.match(html, /Check output display truncated/);
+        assert.match(html, /Host check output was truncated when recorded/);
+        assert.doesNotMatch(html, /HIDDEN_OUTPUT_TAIL|<script>/);
+        assert.match(html, /does not certify unrelated tests or independent review/);
+      }
+    }
+  }
+  const accept = metadata[1]!;
+  assert.equal(operatorWriteApprovalOf({ permission: OPERATOR_WRITE_PERMISSION,
+    metadata: { ...accept, checks: [{ ...check, exitCode: 'model says passed' }] } }), undefined);
+  assert.equal(operatorWriteApprovalOf({ permission: OPERATOR_WRITE_PERMISSION,
+    metadata: { ...metadata[0], workspaces: [{ ...metadata[0]!.workspaces![0], checks: [{ id: 'shell', command: ['sh', '-c', 'node --test'] }] }] } }), undefined);
+});
+
 test('the provider banner shows failing providers with their fix, a recovered one in green, and nothing when all is well', () => {
   const failing: ProviderHealthView = {
     provider: 'openai', name: 'OpenAI', status: 'failing', since: new Date().toISOString(), lastFailureAt: new Date().toISOString(), failures: 3,

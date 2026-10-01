@@ -34,39 +34,50 @@ remain preserved; no replacement is launched and no permission is remembered for
 These jobs do not drive domain owners. Read-only behavior is unchanged; write tasks use the separate gates below.
 See [durable operator investigations](design/owners.md#durable-operator-investigations) for recovery behavior.
 
-### Approve a bounded file edit
+### Approve bounded file edits and checks
 
 Use an existing clean Git worktree under the operator's configured directory. Ask for the exact goal, constraints and
-files, for example: “Update only the README title in this worktree; do not run commands or commit.” The operator can call:
+files and checks, for example: “Update the README title, add `test/title.test.mjs`, and run it with Node’s test runner;
+do not commit.” The `test` directory must already exist. The operator can call:
 
 ```json
 {
   "action": "create",
   "job": {
     "key": "readme-title",
-    "goal": "Update the README title",
-    "constraints": ["Only the title line", "No commands or commits"],
+    "goal": "Update the README title and add a regression test",
+    "constraints": ["Only the title line and named test", "No commits"],
     "tasks": [{
-      "id": "title", "goal": "Update only the title line",
+      "id": "title", "goal": "Update the title and verify it with the named test",
       "directory": "/home/you/projects/docs-worktree",
-      "access": "write", "files": ["README.md"], "dependsOn": []
+      "access": "write", "files": ["README.md"], "createFiles": ["test/title.test.mjs"],
+      "checks": [{ "id": "title-test", "command": ["node", "--test", "test/title.test.mjs"] }],
+      "dependsOn": []
     }]
   }
 }
 ```
 
-1. Inspect the original request, goal, approved paths and baseline HEAD in the permission card, then choose **Allow
-   once**. Only existing tracked UTF-8 files are eligible. A second independent worktree may run concurrently; an
+1. Inspect the original request, goal, existing/new paths, exact check commands and baseline HEAD in the permission
+   card, then choose **Allow once**. Existing files must be tracked UTF-8 text; new files must be explicitly named, absent
+   and nonignored, with existing parent directories. A second independent worktree may run concurrently; an
    overlapping workspace claim is refused even when it names different files.
-2. The child edits through the host's bounded file tool. It cannot run arbitrary commands, tests, commits or pushes.
-   You can keep talking to the operator while it runs.
+2. The child edits through the host’s bounded file tool and requests approved checks by ID. The initial check adapter
+   accepts only `node --test` plus literal relative paths: no shell, package scripts, dependency installation, commits
+   or pushes. You can keep talking to the operator while it runs.
 3. When the job reports `needs-review`, the operator calls `onionsoup_operator_job` with
-   `{ "action": "review-write", "id": "<job>", "childID": "title" }` and presents the returned host diff.
+   `{ "action": "review-write", "id": "<job>", "childID": "title" }` and presents the host diff and check receipts.
+   Every approved check must pass against the current artifact before acceptance; later edits require fresh checks.
 4. The operator requests `{ "action": "accept-write", "id": "<job>", "childID": "title", "digest": "<review digest>" }`.
-   Review the full diff and answer the new **Allow once** prompt. Changed evidence invalidates that decision; no
-   persistent permission is added. Acceptance releases the workspace claim, not a commit or test certificate.
+   Review the full diff, command/exit-code receipts and artifact digests, then answer the new **Allow once** prompt.
+   Changed evidence invalidates that decision; no persistent permission is added. Acceptance releases the workspace
+   claim. It neither commits the change nor certifies tests beyond the shown host-run checks or independent review.
 5. After every child is complete and required edits are accepted, `show` supplies the current job digest and evidence
    message IDs for `synthesize`. The edits remain in your worktree for your normal verification and Git workflow.
+
+Retrying the exact approved `create` call returns the same job without another scope prompt or child launch. This
+does not authorize changes to the request, paths or commands. The first scope prompt remains required: removing it
+needs an explicit structured-intake product decision, not natural-language inference or a new standing grant.
 
 An uncertain prepared write remains blocked and holds its reservation. Do not retry it, abandon it through read-only
 recovery or assume a restart undid the edit; this slice has no uncertain-write recovery. The file writer uses a pinned

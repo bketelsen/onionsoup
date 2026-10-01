@@ -27,7 +27,9 @@ async function assertStageMemoryBoundary() {
   const membership = (await readFile('/proc/self/cgroup', 'utf8')).split('\n').find(line => line.startsWith('0::'))?.slice(3);
   assert.ok(membership);
   const maximum = Number((await readFile(join('/sys/fs/cgroup', membership, 'memory.max'), 'utf8')).trim());
-  assert.ok(Number.isSafeInteger(maximum) && maximum > 0 && maximum <= 12 * 1024 ** 3);
+  assert.ok(Number.isSafeInteger(maximum) && maximum > 0 && maximum <= 6 * 1024 ** 3);
+  const tasks = Number((await readFile(join('/sys/fs/cgroup', membership, 'pids.max'), 'utf8')).trim());
+  assert.ok(Number.isSafeInteger(tasks) && tasks > 0 && tasks <= 512);
   const mount = (await readFile('/proc/self/mountinfo', 'utf8')).split('\n').find(line => line.split(' ')[4] === '/sys/fs/cgroup');
   assert.ok(mount?.split(' ')[5]?.split(',').includes('ro'));
   assert.equal(existsSync('/run/user'), false);
@@ -81,7 +83,9 @@ test('candidate stage hides host credentials and prevents runtime writes while i
     assert.equal(isNumber(42), true);
     const membership = readFileSync('/proc/self/cgroup', 'utf8').split('\\n').find(line => line.startsWith('0::')).slice(3);
     const maximum = Number(readFileSync('/sys/fs/cgroup' + membership + '/memory.max', 'utf8').trim());
-    assert.ok(Number.isSafeInteger(maximum) && maximum > 0 && maximum <= 12 * 1024 ** 3);
+    assert.ok(Number.isSafeInteger(maximum) && maximum > 0 && maximum <= 6 * 1024 ** 3);
+  const tasks = Number((await readFile(join('/sys/fs/cgroup', membership, 'pids.max'), 'utf8')).trim());
+  assert.ok(Number.isSafeInteger(tasks) && tasks > 0 && tasks <= 512);
     const mount = readFileSync('/proc/self/mountinfo', 'utf8').split('\\n').find(line => line.split(' ')[4] === '/sys/fs/cgroup');
     assert.ok(mount.split(' ')[5].split(',').includes('ro'));
     assert.equal(existsSync('/run/user'), false);

@@ -61,8 +61,8 @@ import { deliverOperatorJobWakes } from './operator-job-wake.ts';
 import { OperatorRecoveryPermissions } from './operator-recovery-permission.ts';
 import { OperatorWritePermissions } from './operator-write-permission.ts';
 import { OperatorWrites } from './operator-write-host.ts';
-import { OPERATOR_WRITE_TOOL, OperatorWriteCalls } from './operator-write-call.ts';
-import { operatorFileTool } from './operator-write-tool.ts';
+import { OPERATOR_WRITE_TOOL, OPERATOR_CHECK_TOOL, OperatorWriteCalls, OperatorCheckCalls } from './operator-write-call.ts';
+import { operatorFileTool, operatorCheckTool } from './operator-write-tool.ts';
 import {
   commitOperatorMemory, editsUnder, ensureOperatorMemory, isMemoryNudge, MEMORY_NUDGE_TEXT, memoryIndexBlock, memorySignature, OperatorActivityLog,
   operatorMemoryDirectory,
@@ -363,6 +363,8 @@ const server: Plugin = async (input, options) => {
   const operatorRecoveryPermissions = new OperatorRecoveryPermissions();
   const operatorWritePermissions = new OperatorWritePermissions();
   const operatorWriteCalls = new OperatorWriteCalls();
+  const operatorCheckCalls = new OperatorCheckCalls();
+  const operatorCalls = new Map<string, { prepare(input: { sessionID: string; callID: string }, args: Record<string, unknown>): void }>([[OPERATOR_WRITE_TOOL, operatorWriteCalls], [OPERATOR_CHECK_TOOL, operatorCheckCalls]]);
   const operatorClient = operator ? operatorSupervisorClient(input.client) : undefined;
   const operatorWrites = operatorJobs && operatorClient ? new OperatorWrites(operatorJobs, operatorClient, operatorWritePermissions) : undefined;
   const operatorSupervisor = operatorJobs && operatorClient ? new OperatorSupervisor(operatorJobs, operatorClient, undefined, operatorWrites) : undefined;
@@ -1196,7 +1198,7 @@ const server: Plugin = async (input, options) => {
         const lease = isAdmittedTurn ? undefined : await beginAdmission(runtime.stateDirectory, `tool:${input.tool}`);
         if (lease) toolLeases.set(key, lease);
         await prepareToolArguments(input, output);
-        if (input.tool === OPERATOR_WRITE_TOOL && operatorWrites) operatorWriteCalls.prepare(input, output.args);
+        if (operatorWrites) operatorCalls.get(input.tool)?.prepare(input, output.args);
         tracked.ready = true;
       } catch (error) {
         await clearTrackedTool(key, tracked);
@@ -1381,7 +1383,8 @@ const server: Plugin = async (input, options) => {
         if (ownerByAgent.has(agent)) requireOwner(agent);
         throw new Error('operator_job_operator_only');
       }, operatorRecoveryPermissions, operatorWrites) } : {}),
-      ...(operatorWrites ? { [OPERATOR_WRITE_TOOL]: operatorFileTool(operatorWrites, operatorWriteCalls) } : {}),
+      ...(operatorWrites ? { [OPERATOR_WRITE_TOOL]: operatorFileTool(operatorWrites, operatorWriteCalls),
+        [OPERATOR_CHECK_TOOL]: operatorCheckTool(operatorWrites, operatorCheckCalls) } : {}),
       onionsoup_friction: tool({
         description: 'Report unexpected onionsoup engine behavior with expected/actual and reproducible evidence. Host code adds observed failures and origin; repeats are counted, not re-triaged. Do not include secrets.',
         args: {

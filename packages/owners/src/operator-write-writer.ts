@@ -44,7 +44,9 @@ export async function preflightOperatorFileWriter() {
 }
 
 /** A nested staging sandbox may reuse an already enforced memory cgroup, never a caller's environment flag. */
-async function alreadyMemoryCapped() {
+export async function alreadyMemoryCapped(maxBytes = OPERATOR_WRITER_LIMITS.outerMemoryBytes, tasksMax?: number) {
+  let memoryCapped = false;
+  let tasksCapped = tasksMax === undefined;
   try {
     const membership = (await readFile('/proc/self/cgroup', 'utf8')).split('\n').find(line => line.startsWith('0::'))?.slice(3);
     if (!membership || membership.split('/').includes('..')) return false;
@@ -52,7 +54,12 @@ async function alreadyMemoryCapped() {
     while (directory.startsWith('/sys/fs/cgroup')) {
       const value = await readFile(join(directory, 'memory.max'), 'utf8').catch(() => 'max');
       const limit = Number(value.trim());
-      if (Number.isSafeInteger(limit) && limit > 0 && limit <= OPERATOR_WRITER_LIMITS.outerMemoryBytes) return true;
+      if (Number.isSafeInteger(limit) && limit > 0 && limit <= maxBytes) memoryCapped = true;
+      if (tasksMax !== undefined) {
+        const tasks = Number((await readFile(join(directory, 'pids.max'), 'utf8').catch(() => 'max')).trim());
+        if (Number.isSafeInteger(tasks) && tasks > 0 && tasks <= tasksMax) tasksCapped = true;
+      }
+      if (memoryCapped && tasksCapped) return true;
       if (directory === '/sys/fs/cgroup') return false;
       directory = dirname(directory);
     }
@@ -60,10 +67,10 @@ async function alreadyMemoryCapped() {
   return false;
 }
 
-export async function operatorWriterCommand() {
+export async function operatorWriterCommand(create = false) {
   const { node } = await preflightOperatorFileWriter();
   const args = ['--ro-bind', '/', '/', '--unshare-net', '--unshare-pid', '--proc', '/proc', '--dev', '/dev',
-    '--tmpfs', '/tmp', '--bind-fd', '3', '/tmp/operator-approved-file',
+    '--tmpfs', '/tmp', '--bind-fd', '3', create ? '/tmp/operator-approved-parent' : '/tmp/operator-approved-file',
     '--ro-bind-fd', '4', '/tmp/operator-write-file.mjs', '--ro-bind-fd', '5', '/tmp/operator-node',
     '--die-with-parent', '--new-session', '--clearenv',
     '--', '/tmp/operator-node', '--max-old-space-size=128', '/tmp/operator-write-file.mjs'];
@@ -72,7 +79,7 @@ export async function operatorWriterCommand() {
     '-p', 'MemorySwapMax=0', '-p', 'TasksMax=32', '--', '/usr/bin/bwrap', ...args] };
 }
 
-async function openPinnedFile(snapshot: OperatorWriteSnapshot, path: string) {
+async function openPinnedParent(snapshot: OperatorWriteSnapshot, path: string) {
   const handles: FileHandle[] = [];
   try {
     let directory = await open(snapshot.directory, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
@@ -88,21 +95,39 @@ async function openPinnedFile(snapshot: OperatorWriteSnapshot, path: string) {
       const expected = snapshot.parents.find(parent => parent.path === directories[index]);
       if (!expected || stat.dev !== expected.device || stat.ino !== expected.inode) throw new Error('operator_write_parent_changed');
     }
-    const file = await open(`/proc/self/fd/${directory.fd}/${components.at(-1)}`, constants.O_RDWR | constants.O_NOFOLLOW);
-    handles.push(file);
-    const stat = await file.stat();
-    const expected = snapshot.files.find(file => file.path === path);
-    if (!expected || !stat.isFile() || stat.nlink !== 1 || stat.dev !== expected.device || stat.ino !== expected.inode
-      || stat.mode !== expected.mode) throw new Error('operator_write_file_changed');
-    return { file, close: async () => { for (const handle of handles.reverse()) await handle.close(); } };
+    return { directory, close: async () => { for (const handle of handles.reverse()) await handle.close(); } };
   } catch (error) {
     for (const handle of handles.reverse()) await handle.close();
     throw error;
   }
 }
 
+async function openPinnedFile(snapshot: OperatorWriteSnapshot, path: string, identity: { device: number; inode: number; mode: number; birthtimeNs?: string }) {
+  const pinned = await openPinnedParent(snapshot, path);
+  let file: FileHandle | undefined;
+  try {
+    file = await open(`/proc/self/fd/${pinned.directory.fd}/${basename(path)}`, constants.O_RDWR | constants.O_NOFOLLOW);
+    const stat = await file.stat();
+    const expected = snapshot.files.find(file => file.path === path) ?? identity;
+    if (!stat.isFile() || stat.nlink !== 1 || stat.dev !== expected.device || stat.ino !== expected.inode
+      || stat.mode !== expected.mode) throw new Error('operator_write_file_changed');
+    if (expected.birthtimeNs && (await file.stat({ bigint: true })).birthtimeNs.toString() !== expected.birthtimeNs) {
+      throw new Error('operator_write_file_changed');
+    }
+    const handle = file;
+    return { file: handle, close: async () => {
+      await handle.close();
+      await pinned.close();
+    } };
+  } catch (error) {
+    await file?.close();
+    await pinned.close();
+    throw error;
+  }
+}
+
 async function executeWriterProcess(command: Awaited<ReturnType<typeof operatorWriterCommand>>, fds: number[], payload: object) {
-  await new Promise<void>((resolve, reject) => {
+  return new Promise<unknown>((resolve, reject) => {
     const child = spawn(command.command, command.args, { stdio: ['pipe', 'pipe', 'pipe', ...fds], detached: true,
       env: { PATH: '/usr/bin:/bin', XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR, DBUS_SESSION_BUS_ADDRESS: process.env.DBUS_SESSION_BUS_ADDRESS } });
     let output = '';
@@ -117,20 +142,30 @@ async function executeWriterProcess(command: Awaited<ReturnType<typeof operatorW
     child.stdout?.on('data', chunk => { output = (output + String(chunk)).slice(0, OPERATOR_WRITER_LIMITS.outputBytes); });
     child.stderr?.on('data', () => {});
     child.stdin?.on('error', () => {});
-    child.on('error', error => { clearTimeout(timeout); reject(error); });
+    child.on('error', error => {
+      clearTimeout(timeout);
+      reject(error);
+    });
     child.on('close', code => {
       clearTimeout(timeout);
       clearTimeout(killTimer);
-      if (timedOut || code !== 0 || output.trim() !== 'operator_write_applied') reject(new Error('operator_write_writer_uncertain'));
-      else resolve();
+      if (timedOut || code !== 0) {
+        reject(new Error('operator_write_writer_uncertain'));
+        return;
+      }
+      if (output.trim() === 'operator_write_applied') {
+        resolve(undefined);
+        return;
+      }
+      try { resolve(JSON.parse(output)); } catch { reject(new Error('operator_write_writer_uncertain')); }
     });
     child.stdin?.end(JSON.stringify(payload));
   });
 }
 
 /** Pin code and runtime as read-only files after /tmp is masked, including staged releases located under /tmp. */
-async function executeWriter(fd: number, payload: object) {
-  const command = await operatorWriterCommand();
+async function executeWriter(fd: number, payload: object, create = false) {
+  const command = await operatorWriterCommand(create);
   const handles: FileHandle[] = [];
   try {
     for (const path of [helper, command.node]) {
@@ -139,15 +174,28 @@ async function executeWriter(fd: number, payload: object) {
       const metadata = await handle.stat();
       if (!metadata.isFile() || path === command.node && metadata.mode & 0o022) throw new Error('operator_write_runtime_changed');
     }
-    await executeWriterProcess(command, [fd, ...handles.map(handle => handle.fd)], payload);
+    return await executeWriterProcess(command, [fd, ...handles.map(handle => handle.fd)], payload);
   } finally { for (const handle of handles.reverse()) await handle.close(); }
+}
+
+/** Only the fixed helper receives the pinned parent for an explicitly approved exclusive creation. */
+async function runCreator(snapshot: OperatorWriteSnapshot, mutation: OperatorWriteMutation) {
+  if (!(snapshot.createFiles ?? []).includes(mutation.path)) throw new Error('operator_write_creation_not_approved');
+  const pinned = await openPinnedParent(snapshot, mutation.path);
+  try {
+    const parent = await pinned.directory.stat();
+    return await executeWriter(pinned.directory.fd, { ...mutation, filename: basename(mutation.path),
+      parent: { device: parent.dev, inode: parent.ino }, maxBytes: snapshot.limits.fileBytes }, true);
+  } finally { await pinned.close(); }
 }
 
 /** The descriptor bind cannot be redirected by replacing a pathname after validation. */
 export async function runOperatorFileWriter(snapshot: OperatorWriteSnapshot, mutation: OperatorWriteMutation,
-  identity: { device: number; inode: number; mode: number }) {
-  const pinned = await openPinnedFile(snapshot, mutation.path);
+  identity?: { device: number; inode: number; mode: number; birthtimeNs?: string }) {
+  if (mutation.beforeSha256 === 'absent') return runCreator(snapshot, mutation);
+  if (!identity) throw new Error('operator_write_identity_required');
+  const pinned = await openPinnedFile(snapshot, mutation.path, identity);
   try {
-    await executeWriter(pinned.file.fd, { ...mutation, ...identity, maxBytes: snapshot.limits.fileBytes });
+    return await executeWriter(pinned.file.fd, { ...mutation, ...identity, maxBytes: snapshot.limits.fileBytes });
   } finally { await pinned.close(); }
 }
