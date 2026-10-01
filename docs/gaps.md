@@ -100,6 +100,8 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
   fresh replay-safety inventory, authenticated observation and exact operational approval. Unbound legacy
   openings, pending effects and stale notice cursors still block it; missing evidence is never fabricated.
   An uncertain observation startup or unconfirmed instance disposal remains held for investigation.
+  A crash between pending completion and the release receipt also remains quarantined; the exact saved
+  release digest is required to resume. The pending badge alone is not proof that admission is open.
   The [separate legacy recovery procedure](deployment.md#legacy-maintenance-recovery-plan) describes the
   required proof and operational decision rather than authorizing a restart or clearing records.
 - **snosi builds run only in CI.** mkosi needs root, so Murbella verifies with snosi's static checks and relies on

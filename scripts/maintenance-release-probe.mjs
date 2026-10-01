@@ -129,6 +129,23 @@ async function diagnosticRuntime(context, effects) {
   return runtime;
 }
 
+/** Rebind both service generations without initializing any OpenCode directory. */
+export async function verifyReleaseRuntimeIdentity(context, proof, effects = {}) {
+  let endpoint;
+  if (proof.endpoint) {
+    endpoint = await (effects.endpoint ?? readOpencodeEndpoint)(context.selection.state);
+    if (hash(endpointIdentity(endpoint)) !== hash(proof.endpoint)) throw fail('maintenance_release_endpoint_changed');
+  } else {
+    const surface = proof.runtime.units.find(unit => unit.unit === 'onionsoup-surface.service');
+    const process = surface?.processes.find(process => process.pid === surface.mainPID);
+    if (!process) throw fail('maintenance_release_runtime_changed');
+    endpoint = { surfacePid: process.pid, surfaceStartTime: process.startTime,
+      opencodePid: process.pid, opencodeStartTime: process.startTime };
+  }
+  const current = await (effects.runtimeIdentity ?? readMaintenanceRuntimeIdentity)(endpoint);
+  if (hash(current) !== hash(proof.runtime)) throw fail('maintenance_release_runtime_changed');
+}
+
 export async function observationProof(context, effects = {}) {
   await validateReleaseFence(context, effects);
   const runtime = await diagnosticRuntime(context, effects);
@@ -174,10 +191,18 @@ export async function reconciliationProof(context, observation, effects = {}) {
     const registry = await registrySnapshot(endpoint, read);
     const directories = [...new Set([...await knownDirectories(runtime), ...registry.map(session => session.directory)])].sort();
     const sessions = await sessionEvidence(endpoint, registry, read);
+    for (const original of context.receipt.proof.sessions) {
+      const restored = sessions.find(session => session.id === original.id);
+      if (!restored || restored.directory !== original.directory || restored.parentID !== original.parentID
+        || restored.transcriptDigest !== original.transcriptDigest || restored.childrenDigest !== original.childrenDigest) {
+        throw fail('maintenance_release_original_history_changed');
+      }
+    }
     await quietDirectories(endpoint, directories, read);
     // Directory reads instantiate the restricted plugin; global health alone never loads it.
     const acknowledgments = await releaseAcknowledgments(context, observation, runtimeIdentity, endpoint, effects);
     const storage = await storageEvidence(selection, endpoint, effects);
+    if (hash(storage) !== hash(context.receipt.proof.runtimeStorage)) throw fail('maintenance_release_storage_changed');
     const inventory = await inspectMaintenanceReleaseInventory(selection.state);
     const evidence = await (effects.fingerprint ?? fingerprintEvidence)(selection, directories);
     const admission = await createAdmission({ ...selection, admissionEffects: { ...effects, request: read } });

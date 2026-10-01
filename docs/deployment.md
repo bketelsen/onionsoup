@@ -452,6 +452,9 @@ unsettled application/child work, stale notice cursors and unknown files are nam
 abandons them nor treats human approval as proof they completed. This is replay-safety reconciliation;
 remote effect outcomes can remain unknown. Actual eligibility is established by the preview, not by
 passing synthetic tests or observing idle services.
+This inventory addresses replay of the two selected legacy plugin maintenance producers. Ordinary
+daemon duties, friction investigations and memory work resume under their existing gates after release;
+the inventory does not declare those unrelated workflows completed or grant them new authority.
 
 An eligible preview binds current processes, authenticated endpoint, all-project session/transcript
 and child evidence, configuration/workspace fingerprints, original backups and the exact inventory.

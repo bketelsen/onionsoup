@@ -10,7 +10,8 @@ import { writeHandoffFile } from '../packages/owners/src/operator-handoff-file.t
 import { MaintenanceReleaseObservation, MaintenanceReleaseReceipt, maintenanceReleasePaths } from '../packages/owners/src/maintenance-release-state.ts';
 import { inspectMaintenanceReleaseInventory } from '../packages/owners/src/maintenance-release-inventory.ts';
 import { fingerprintEvidence } from './maintenance-admission-probe.mjs';
-import { recoveryContext, observationProof, reconciliationProof, validateReleaseFence } from './maintenance-release-probe.mjs';
+import { recoveryContext, observationProof, reconciliationProof, validateReleaseFence,
+  verifyReleaseRuntimeIdentity } from './maintenance-release-probe.mjs';
 import { activationState, activationHealth, prepareMaintenanceActivation } from './maintenance-release-activation.mjs';
 import { durableExclusive, optionalRecord } from './maintenance-recovery-storage.mjs';
 import { fail, hash } from './admission-recovery-proof.mjs';
@@ -128,11 +129,13 @@ async function preparedProof(input, context, intent, effects) {
     || decision.proof.observationDigest !== hash(intent)) throw fail('maintenance_release_activation_receipt_invalid');
   await validateReleaseFence(context, effects);
   await activationHealth(context, decision.proof, effects);
+  await verifyReleaseRuntimeIdentity(context, decision.proof, effects);
   return decision.proof;
 }
 
 async function verifyLocalSnapshot(context, proof, effects) {
   const { selection, marker } = context;
+  await verifyReleaseRuntimeIdentity(context, proof, effects);
   if (hash(await leasesEvidence(selection.state)) !== hash(proof.admissions)) throw fail('maintenance_release_admissions_changed');
   if (hash(await inspectMaintenanceReleaseInventory(selection.state)) !== hash(proof.inventory)) {
     throw fail('maintenance_release_inventory_changed');

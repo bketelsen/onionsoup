@@ -11,7 +11,33 @@ import { fingerprintEvidence } from './maintenance-admission-probe.mjs';
 import { releaseMaintenance } from './release-maintenance.mjs';
 import { fixture, NEXT, OLD, OWNERS, SURFACE } from './maintenance-recovery-fixture.mjs';
 
-async function recovered(context) {
+
+function syntheticMessages(sessionID) {
+  return [
+    { info: { id: `${sessionID}-user`, sessionID, role: 'user' },
+      parts: [{ type: 'text', text: 'Inspect synthetic fixture source.' }] },
+    { info: { id: `${sessionID}-assistant`, sessionID, role: 'assistant', parentID: `${sessionID}-user`,
+      finish: 'stop', time: { completed: 1 } }, parts: [{ type: 'text', text: 'Synthetic inspection completed.' }] },
+  ];
+}
+
+function syntheticHistory(directory) {
+  const sessions = [{ id: 'ses_fixture_parent', directory },
+    { id: 'ses_fixture_child', directory, parentID: 'ses_fixture_parent' }];
+  return { sessions, messages: Object.fromEntries(sessions.map(session => [session.id, syntheticMessages(session.id)])) };
+}
+
+function historyResponse(sessions, messages, path) {
+  if (path.startsWith('/experimental/session') || path === '/session') return sessions;
+  const match = /^\/session\/([^/]+)(?:\/(message|children))?$/.exec(path);
+  if (!match || match[1] === 'status') return undefined;
+  const id = decodeURIComponent(match[1]);
+  if (match[2] === 'message') return messages[id];
+  if (match[2] === 'children') return sessions.filter(session => session.parentID === id);
+  return sessions.find(session => session.id === id);
+}
+
+async function recovered(context, options = {}) {
   const state = await fixture(context, { capabilities: { legacyMaintenanceRelease: 1 } });
   state.identity.bootID = (await readFile('/proc/sys/kernel/random/boot_id', 'utf8')).trim();
   state.identity.pidNamespace = await readlink('/proc/self/ns/pid');
@@ -21,6 +47,17 @@ async function recovered(context) {
     if (previousManifest === undefined) delete process.env.ONIONSOUP_RELEASE_MANIFEST;
     else process.env.ONIONSOUP_RELEASE_MANIFEST = previousManifest;
   });
+  const history = options.history ? syntheticHistory(state.workspace) : undefined;
+  if (history) {
+    const request = state.input.probeEffects.request;
+    state.input.probeEffects.request = async (endpoint, path) =>
+      historyResponse(history.sessions, history.messages, path) ?? request(endpoint, path);
+  }
+  if (options.storageSubdirectories) {
+    await mkdir(join(state.workspace, 'original-storage'));
+    await mkdir(join(state.workspace, 'other-storage'));
+    state.input.probeEffects.storageRoots = async () => [join(state.workspace, 'original-storage')];
+  }
   const preview = await recoverMaintenance(state.input);
   const receipt = await recoverMaintenance({ ...state.input, approveDigest: preview.digest });
   const originalFiles = [...state.leasePaths, join(state.workspace, 'source.txt'),
@@ -36,7 +73,8 @@ async function recovered(context) {
   const opencode = state.replacements.get(SURFACE)[1];
   const endpoint = { ...state.endpoint, instanceId: randomUUID(), surfacePid: surface.pid,
     surfaceStartTime: surface.startTime, opencodePid: opencode.pid, opencodeStartTime: opencode.startTime };
-  const activity = { acknowledgments: true, busy: false, sessions: [], beforeRequest: undefined,
+  const activity = { acknowledgments: true, busy: false, sessions: structuredClone(history?.sessions ?? []),
+    messages: structuredClone(history?.messages ?? {}), beforeRequest: undefined,
     disposed: false, disposals: 0, globalHealthReads: 0 };
   const probeEffects = { ...state.input.probeEffects,
     endpoint: async () => endpoint,
@@ -82,7 +120,8 @@ async function recovered(context) {
       await activity.beforeRequest?.(path);
       if (path === '/session/status') return activity.busy ? { ses_active: { type: 'busy' } } : {};
       if (path === '/permission' || path === '/question') return [];
-      if (path.startsWith('/experimental/session') || path === '/session') return activity.sessions;
+      const historical = historyResponse(activity.sessions, activity.messages, path);
+      if (historical !== undefined) return historical;
       throw new Error(`unexpected release fixture request: ${path}`);
     },
   };
@@ -453,3 +492,104 @@ for (const field of ['digest', 'endpointDigest']) {
     await assertQuarantined(state);
   });
 }
+
+const daemonGenerationChanges = {
+  invocation: unit => { unit.invocationID = randomUUID().replaceAll('-', ''); },
+  pid: unit => {
+    unit.mainPID += 100_000;
+    unit.processes[0].pid = unit.mainPID;
+  },
+  startTime: unit => { unit.processes[0].startTime = String(BigInt(unit.processes[0].startTime) + 1n); },
+};
+
+for (const [field, change] of Object.entries(daemonGenerationChanges)) {
+  test(`confirmed disposal retry rejects changed daemon ${field} without another disposal or scoped read`, async context => {
+    const state = await recovered(context);
+    const { input } = await preparedRelease(state);
+    state.releaseInput.probeEffects.afterPendingCommit = async () => { throw new Error('fixture-receipt-write-interrupted'); };
+    await assert.rejects(releaseMaintenance(input), /fixture-receipt-write-interrupted/);
+    delete state.releaseInput.probeEffects.afterPendingCommit;
+    assert.equal((await state.pending()).status, 'completed');
+    assert.equal(state.releaseActivity.disposals, 1);
+    change(state.runtimeIdentity.units.find(unit => unit.unit === OWNERS));
+    await assert.rejects(releaseMaintenance(input), /maintenance_release_runtime_changed/);
+    assert.equal(state.releaseActivity.disposals, 1);
+    assert.equal((await state.pending()).status, 'draining');
+    await assert.rejects(readFile(maintenanceReleasePaths(state.state).receipt), { code: 'ENOENT' });
+    await assertQuarantined(state);
+  });
+
+  test(`initial release commit rejects daemon ${field} changing after confirmed disposal`, async context => {
+    const state = await recovered(context);
+    const { input } = await preparedRelease(state);
+    state.releaseInput.probeEffects.beforeGateCommit = async () => {
+      assert.equal(state.releaseActivity.disposals, 1);
+      change(state.runtimeIdentity.units.find(unit => unit.unit === OWNERS));
+    };
+    await assert.rejects(releaseMaintenance(input), /maintenance_release_runtime_changed/);
+    assert.equal(state.releaseActivity.disposals, 1);
+    assert.equal((await state.pending()).status, 'draining');
+    await assert.rejects(readFile(maintenanceReleasePaths(state.state).receipt), { code: 'ENOENT' });
+    await assertQuarantined(state);
+  });
+}
+
+
+test('original synthetic parent and child transcripts survive recovery, observation and release unchanged', async context => {
+  const state = await recovered(context, { history: true });
+  assert.equal(state.recoveredReceipt.proof.sessions.length, 2);
+  const original = JSON.stringify({ sessions: state.releaseActivity.sessions, messages: state.releaseActivity.messages });
+  const { preview, input } = await preparedRelease(state);
+  assert.equal(preview.eligible, true);
+  assert.deepEqual(preview.proof.sessions, state.recoveredReceipt.proof.sessions);
+  assert.equal((await releaseMaintenance(input)).state, 'released');
+  assert.equal(JSON.stringify({ sessions: state.releaseActivity.sessions, messages: state.releaseActivity.messages }), original);
+  await state.assertHistory();
+});
+
+for (const change of ['missing', 'transcript', 'ancestry', 'directory', 'children']) {
+  test(`original ${change} history change cannot become a new release baseline`, async context => {
+    const state = await recovered(context, { history: true });
+    await observe(state);
+    const current = state.releaseActivity;
+    const changes = {
+      missing: () => { current.sessions = []; },
+      transcript: () => { current.messages.ses_fixture_child[1].parts[0].text = 'Different synthetic result'; },
+      ancestry: () => { delete current.sessions.find(session => session.id === 'ses_fixture_child').parentID; },
+      directory: () => { for (const session of current.sessions) session.directory = state.config; },
+      children: () => {
+        current.sessions.push({ id: 'ses_extra_child', directory: state.workspace, parentID: 'ses_fixture_parent' });
+        current.messages.ses_extra_child = syntheticMessages('ses_extra_child');
+      },
+    };
+    changes[change]();
+    await assert.rejects(releaseMaintenance({ ...state.releaseInput, mode: 'release' }),
+      /maintenance_release_original_history_changed/);
+    assert.equal(state.releaseActivity.disposals, 0);
+    await assertQuarantined(state);
+  });
+}
+
+test('an extra quiet independent session does not rewrite or invalidate preserved original history', async context => {
+  const state = await recovered(context, { history: true });
+  await observe(state);
+  state.releaseActivity.sessions.push({ id: 'ses_extra_root', directory: state.workspace });
+  state.releaseActivity.messages.ses_extra_root = syntheticMessages('ses_extra_root');
+  const preview = await releaseMaintenance({ ...state.releaseInput, mode: 'release' });
+  assert.equal(preview.eligible, true);
+  assert.equal(preview.proof.sessions.length, 3);
+  for (const original of state.recoveredReceipt.proof.sessions) {
+    assert.deepEqual(preview.proof.sessions.find(session => session.id === original.id), original);
+  }
+  assert.equal((await releaseMaintenance({ ...state.releaseInput, mode: 'release', releaseDigest: preview.digest })).state, 'released');
+  await state.assertHistory();
+});
+
+test('moving runtime storage within the selected evidence root cannot substitute for the recovered database', async context => {
+  const state = await recovered(context, { storageSubdirectories: true });
+  await observe(state);
+  state.releaseInput.probeEffects.storageRoots = async () => [join(state.workspace, 'other-storage')];
+  await assert.rejects(releaseMaintenance({ ...state.releaseInput, mode: 'release' }), /maintenance_release_storage_changed/);
+  assert.equal(state.releaseActivity.disposals, 0);
+  await assertQuarantined(state);
+});
