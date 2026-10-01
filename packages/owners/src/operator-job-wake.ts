@@ -14,7 +14,7 @@ const Wake = z.object({
   status: z.enum(['pending', 'sending', 'delivered', 'blocked', 'superseded']),
   messageID: z.string().optional(), reason: z.string().optional(),
 });
-type Wake = z.infer<typeof Wake>;
+export type Wake = z.infer<typeof Wake>;
 export const Wakes = z.array(Wake);
 const ACTIONABLE = new Set(['progress', 'blocked', 'ready', 'write-review']);
 const INACTIVE = new Set(['paused', 'cancelled', 'completed']);
@@ -52,7 +52,7 @@ async function transaction<T>(jobs: OperatorJobs, action: (wakes: Wake[]) => Pro
     return value;
   });
 }
-function candidate(job: OperatorJob): Wake | undefined {
+export function operatorJobWakeCandidate(job: OperatorJob): Wake | undefined {
   const event = job.events.at(-1);
   if (!event || !ACTIONABLE.has(event.kind) || INACTIVE.has(job.status)) return;
   const digest = createHash('sha256').update(JSON.stringify([operatorJobDigest(job), event.id, job.revision])).digest('hex');
@@ -64,7 +64,7 @@ function sameParent(left: Wake, right: Wake) {
 }
 async function isCurrent(jobs: OperatorJobs, wake: Wake) {
   const job = await jobs.get(wake.origin, wake.jobID);
-  return candidate(job)?.digest === wake.digest;
+  return operatorJobWakeCandidate(job)?.digest === wake.digest;
 }
 async function change(jobs: OperatorJobs, wake: Wake, status: Wake['status'], reason?: string) {
   await transaction(jobs, async wakes => {
@@ -163,7 +163,7 @@ export async function deliverOperatorJobWakes(jobs: OperatorJobs, client: PlanRe
     catch (error) { onError(wake.jobID, error); }
   }
   const settled = new Set((await read(jobs)).filter(wake => ['delivered', 'superseded'].includes(wake.status)).map(wake => wake.digest));
-  const candidates = (await jobs.snapshot()).flatMap(job => candidate(job) ?? []).filter(wake => !settled.has(wake.digest));
+  const candidates = (await jobs.snapshot()).flatMap(job => operatorJobWakeCandidate(job) ?? []).filter(wake => !settled.has(wake.digest));
   for (const wake of batch(jobs, 'candidates', candidates)) {
     try { await deliver(jobs, await prepare(jobs, wake), client); }
     catch (error) { onError(wake.jobID, error); }

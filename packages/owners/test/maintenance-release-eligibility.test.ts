@@ -195,7 +195,7 @@ for (const kept of ['kept-uncommitted', 'kept-unpublished', 'failed'] as const) 
     const original = await contents(path);
     const inventory = await inspectMaintenanceReleaseInventory(state, { now: () => observedMs });
     assert.equal(inventory.eligible, false);
-    assert.equal(inventory.decisions[0]?.reason, 'plan_cleanup_requires_separate_evidence');
+    assert.equal(inventory.decisions[0]?.reason, 'worktree_proof_read_failed');
     assert.equal(await contents(path), original);
   });
 }
@@ -246,7 +246,7 @@ test('mixed production-shaped inventory resolves inert history and future remind
   assert.equal(inventory.eligible, false);
   assert.equal(inventory.validUntil, dueAt);
   assert.deepEqual(inventory.decisions.filter(entry => entry.classification === 'blocked').map(entry => entry.reason).sort(),
-    ['job_wake_unsubmitted', 'plan_cleanup_requires_separate_evidence', 'request_continuation_gate']);
+    ['job_wake_unsubmitted', 'request_continuation_gate', 'worktree_proof_read_failed']);
   assert.equal(inventory.decisions.filter(entry => entry.classification === 'time-gated').length, 1);
   assert.equal(inventory.decisions.filter(entry => entry.classification === 'terminal').length, 3);
   assert.deepEqual(await Promise.all(Object.keys(records).map(contents)), original);

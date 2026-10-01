@@ -677,8 +677,11 @@ It starts OpenCode in observation mode, keeping execution, MCP servers, notebook
 wiki synchronization blocked. Inert terminal request history can retain its operation and checkpoints
 when no runner remains; this does not attest the historical outcome. Existing single-use-protected
 continuations also qualify. Future reminders qualify only before their due time, bound into the proof
-and checked again at release commit. Interrupted operations, tracking requests, finished-worktree cleanup
-candidates and unsubmitted actionable wakes still require separate evidence. After authenticated quiet proof,
+and checked again at release commit. Interrupted operations and actionable continuations remain blocked. Tracking requests may be retained
+when the shared outcome selector proves no current transition; obsolete unsent operator wakes require
+exact job/event/origin binding and no current candidate. Finished-worktree preservation requires current
+Git evidence plus either an existing keep guard or authenticated session metadata inside the existing
+retention window. Proofs bind record and Git changes, and retention deadlines expire at the release boundary. After authenticated quiet proof,
 the host disposes restricted instances once and commits release before normal instances can load.
 Original outcomes remain unknown in immutable archives; no lease, transcript or domain status is cleared.
 See [legacy recovery](../deployment.md#legacy-maintenance-recovery-plan).

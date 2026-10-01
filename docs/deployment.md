@@ -453,14 +453,30 @@ abandons them nor treats human approval as proof they completed. This is replay-
 remote effect outcomes can remain unknown. Actual eligibility is established by the preview, not by
 passing synthetic tests or observing idle services.
 Terminal requests may retain historical operations and checkpoints when no runner remains; this is
-evidence that no automatic request step runs, not a new conclusion about the old effect. Requests that
-are still tracking work or can reconcile an interrupted operation remain blocked. Pending reminders
-whose due time is in the future are classified as `time-gated`; the earliest such time is the inventory's
-`validUntil`. The digest stays stable before that boundary, but expiry or a record change requires new
-evidence. Expiry is checked after inventory reads and again immediately before committing release.
-No reminder is fired, cancelled or rescheduled by the preview. Finished worktrees remain blocked even
-with an old `kept-*` result: current cleanup eligibility needs separate proof. A pending operator wake
-without a message identity is an unsubmitted actionable continuation, not proof of delivery or duplication.
+evidence that no automatic request step runs, not a new conclusion about the old effect. A tracking
+request is preserved only when its exact linked owner-change item retains the original request/repository
+binding, has no runnable stage or missing session, and the shared runtime outcome selector would leave
+it unchanged. A newly merged publication, accepted closure or interrupted operation remains blocked.
+Historical observations and revised plan wording are retained; classification does not accept a request.
+
+Pending reminders and finished worktrees still within their existing 24-hour retention period are
+`time-gated`. Cleanup retention uses authenticated session metadata bound to the item's exact session
+and directory; missing metadata is not evidence of inactivity. Current Git evidence can instead prove
+that the ordinary cleanup guard retains unpublished or uncommitted work. Old `kept-*` labels alone do
+not qualify. Worktree contents and Git identity, index and refs are read again, and their proof digest
+is included in the inventory. Unknown or changed evidence fails closed. A retained worktree is not a
+claim that its work has completed, and inspection never removes it.
+
+An unsent operator wake is preserved as obsolete only when its origin, old event and revision match the
+retained job history and the shared runtime selector finds no current actionable wake. An unknown job,
+changed origin or actionable event remains blocked. Submitted wakes retain their existing receipt rules;
+no message is sent or marked delivered by this classification.
+
+The earliest retention/reminder deadline is the inventory's `validUntil`. The digest stays stable before
+that boundary, but expiry or a record, session or Git change requires new evidence. Expiry is checked
+after inventory reads and again immediately before committing release. Authenticated session metadata
+is retained across observation disposal only while the complete storage/workspace fingerprints still
+match. No reminder, request, wake, worktree or transcript is changed by the preview.
 This inventory addresses replay of the two selected legacy plugin maintenance producers. Ordinary
 daemon duties, friction investigations and memory work resume under their existing gates after release;
 the inventory does not declare those unrelated workflows completed or grant them new authority.

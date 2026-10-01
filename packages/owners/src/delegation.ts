@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { ChatOrigin } from './chat-origin.ts';
 import { ProposedWork } from './artifacts.ts';
+import type { WorkItem } from './ledger.ts';
 import { canChange, isDirectReport } from './declarations.ts';
 import { completeAcceptedRequest } from './request-closure-completion.ts';
 import { OWNER_CHANGE_WORKFLOW } from './plan-work.ts';
@@ -97,16 +98,22 @@ export async function decideWork(runtime: Runtime, request: ResourceRequest) {
   return accepted;
 }
 
+/** Shared with release proofs so a new terminal transition cannot silently become observational. */
+export function delegatedWorkOutcome(item: WorkItem): 'accepted' | 'failed' | 'completed' | undefined {
+  if (item.requestAcceptance) return 'accepted';
+  if (['failed', 'rejected', 'cancelled'].includes(item.status) || item.publication?.state === 'closed') return 'failed';
+  if (item.publication?.state === 'merged' || (item.status === 'landed' && Boolean(item.rebaseOf))) return 'completed';
+  return undefined;
+}
+
 export async function trackDelegatedWork(runtime: Runtime, request: ResourceRequest) {
   if (!request.workItem) throw new Error('delegation_work_item_missing');
   const item = await runtime.ledger.get(request.workItem);
-  if (item.requestAcceptance) return completeAcceptedRequest(runtime, item.id);
-  const failed = new Set(['failed', 'rejected', 'cancelled']).has(item.status) || item.publication?.state === 'closed';
-  const completed = item.publication?.state === 'merged' || (item.status === 'landed' && Boolean(item.rebaseOf));
-  if (!failed && !completed) return request;
-  const status = failed ? 'failed' : 'completed';
+  const status = delegatedWorkOutcome(item);
+  if (status === 'accepted') return completeAcceptedRequest(runtime, item.id);
+  if (!status) return request;
   const reason = `${request.workItem}: ${item.publication?.state ?? item.status}${item.reason ? `: ${item.reason}` : ''}`;
   const updated = await runtime.requests.save({ ...request, status, reason });
-  await journalRequest(runtime, updated, failed ? 'attention' : 'request-completed', reason);
+  await journalRequest(runtime, updated, status === 'failed' ? 'attention' : 'request-completed', reason);
   return updated;
 }

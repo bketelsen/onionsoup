@@ -203,7 +203,7 @@ export async function reconciliationProof(context, observation, effects = {}) {
     const acknowledgments = await releaseAcknowledgments(context, observation, runtimeIdentity, endpoint, effects);
     const storage = await storageEvidence(selection, endpoint, effects);
     if (hash(storage) !== hash(context.receipt.proof.runtimeStorage)) throw fail('maintenance_release_storage_changed');
-    const inventory = await inspectMaintenanceReleaseInventory(selection.state);
+    const inventory = await inspectMaintenanceReleaseInventory(selection.state, { sessions: cleanupSessionEvidence(sessions) });
     const evidence = await (effects.fingerprint ?? fingerprintEvidence)(selection, directories);
     const admission = await createAdmission({ ...selection, admissionEffects: { ...effects, request: read } });
     if (!await admission.bootstrapQuiet([], endpoint)) throw fail('maintenance_release_runtime_not_quiet');
@@ -213,4 +213,11 @@ export async function reconciliationProof(context, observation, effects = {}) {
       runtime: runtimeIdentity, acknowledgments, registryDigest: hash(registry), sessions, directories,
       storage, inventory, evidence, recoveryReceiptDigest: hash(context.receipt) };
   } finally { runtime.close(); }
+}
+
+/** Only authenticated session metadata enters the cleanup retention proof. Missing timestamps remain unknown. */
+export function cleanupSessionEvidence(sessions = []) {
+  return sessions.filter(session => Number.isSafeInteger(session.updatedAt)).map(session => ({
+    sessionID: session.id, directory: session.directory, updatedAt: session.updatedAt, sessionDigest: session.sessionDigest,
+  }));
 }

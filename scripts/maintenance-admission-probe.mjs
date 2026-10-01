@@ -44,7 +44,8 @@ export const MaintenanceLaunch = z.object({ units: z.array(z.object({ unit: z.en
   digest }).strict().refine(value => unique(value.units.map(unit => unit.unit)));
 const Session = z.object({ id: nonempty, directory: absolute, parentID: nonempty.optional() }).passthrough();
 const SessionProof = z.object({ id: nonempty, directory: absolute, parentID: nonempty.optional(),
-  sessionDigest: digest, transcriptDigest: digest, childrenDigest: digest }).strict();
+  sessionDigest: digest, transcriptDigest: digest, childrenDigest: digest,
+  updatedAt: z.number().int().nonnegative().optional() }).strict();
 export const MaintenanceProof = z.object({ selection: Selection,
   manifests: z.array(z.object({ build: commit, digest }).strict()).length(2), endpoint: EndpointIdentity,
   leases: z.array(AdmissionRecord.extend({ alive: z.literal(true) }).strict()),
@@ -487,8 +488,10 @@ export async function sessionEvidence(endpoint, registry, read) {
       || children.some(child => child.parentID !== session.id || child.directory !== session.directory)) {
       throw fail('maintenance_recovery_session_tree_changed');
     }
+    const updatedAt = Number.isSafeInteger(current.time?.updated) && current.time.updated >= 0 ? current.time.updated : undefined;
     evidence.push({ id: session.id, directory: session.directory, parentID: session.parentID,
-      sessionDigest: hash(current), transcriptDigest: hash(messages), childrenDigest: hash(children.sort((left, right) => left.id.localeCompare(right.id))) });
+      sessionDigest: hash(current), transcriptDigest: hash(messages), childrenDigest: hash(children.sort((left, right) => left.id.localeCompare(right.id))),
+      updatedAt });
   }
   return evidence;
 }
