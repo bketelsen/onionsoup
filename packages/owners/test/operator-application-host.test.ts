@@ -11,7 +11,10 @@ import { operatorApplicationEffects } from '../src/operator-application-files.ts
 import { operatorApplicationHoldsWorkspace } from '../src/operator-write-state.ts';
 import { operatorJobDigest } from '../src/operator-jobs.ts';
 import { listAdmissions } from '../src/deployment-admission.ts';
+import { OPERATOR_CHECK_RUNNER_LIMITS } from '../src/operator-check-runner.ts';
 import { acceptHandoffChildren, setupHandoffFixture } from './operator-handoff-fixture.ts';
+
+const APPLICATION_TEST_LIMITS = { settleOverheadMs: 30_000 };
 
 async function applicationFixture(options: { combinedFails?: boolean; newFile?: boolean } = {}) {
   const setup = await setupHandoffFixture(options);
@@ -61,7 +64,12 @@ async function assertDestinationBefore(context: Fixture) {
 }
 
 async function settled(applications: OperatorApplications, context: Fixture, expected: 'applied' | 'blocked') {
-  const deadline = Date.now() + 20_000;
+  const record = await applications.store.read(context.id);
+  assert.ok(record);
+  // A three-file application is sequential; a 20s fixture deadline was shorter than one supported publisher attempt.
+  const perFileMs = OPERATOR_CHECK_RUNNER_LIMITS.timeoutMs + OPERATOR_CHECK_RUNNER_LIMITS.killMs
+    + OPERATOR_CHECK_RUNNER_LIMITS.stopWaitMs;
+  const deadline = Date.now() + record.scope.mutations.length * perFileMs + APPLICATION_TEST_LIMITS.settleOverheadMs;
   while (Date.now() < deadline) {
     const report = await applications.show(context.origin, context.id);
     if (report.status === expected) return report;
