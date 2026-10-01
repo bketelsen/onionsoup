@@ -271,3 +271,23 @@ test('missing descriptor-bind support is an explicit preflight error, never a pa
   assert.throws(() => requireOperatorWriterBwrapFeatures('    --bind-fd FD DEST\n'), /operator_write_bwrap_unsupported/);
   assert.doesNotThrow(() => requireOperatorWriterBwrapFeatures('    --bind-fd FD DEST\n    --ro-bind-fd FD DEST\n'));
 });
+
+test('approved colon-magic filenames remain literal and visible in the host review diff', async () => {
+  const fixtureState = await fixture();
+  const path = ':(exclude)*';
+  await writeFile(join(fixtureState.directory, path), 'literal original\n');
+  fixtureState.git('add', '.');
+  fixtureState.git('commit', '-qm', 'literal filename fixture');
+  const snapshot = await fixtureState.capture([path]);
+  const mutation = await prepareOperatorFileMutation(snapshot, [], { id: 'literal-path', path,
+    expectedBeforeSha256: operatorWriteSha256('literal original\n'), content: 'literal changed\n' });
+  const receipt = await applyOperatorFileMutation(snapshot, [], mutation);
+  const artifact = await operatorWriteArtifact(snapshot, [receipt]);
+  assert.ok(artifact.diff.includes('a/:(exclude)*'));
+  assert.match(artifact.diff, /-literal original\n\+literal changed/);
+  assert.equal(artifact.diffSha256, operatorWriteSha256(artifact.diff));
+  assert.deepEqual(artifact.files.map(file => file.path), [path]);
+  assert.equal(await readFile(join(fixtureState.directory, 'other.txt'), 'utf8'), 'untouched\n');
+  // Without literal pathspec handling this exact approved filename excludes every diff entry.
+  assert.equal(fixtureState.git('diff', '--no-ext-diff', '--no-textconv', '--', path), '');
+});

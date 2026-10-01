@@ -39,7 +39,7 @@ function inside(root: string, path: string) {
   if (distance === '..' || distance.startsWith(`..${sep}`) || isAbsolute(distance)) error('outside_workspace');
 }
 async function git(directory: string, args: string[], limits = OPERATOR_WRITE_LIMITS, allowMissing = false) {
-  const reply = await execute('/usr/bin/git', ['--no-optional-locks', '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null',
+  const reply = await execute('/usr/bin/git', ['--no-optional-locks', '--literal-pathspecs', '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null',
     '-c', 'core.pager=cat', '-c', 'diff.external=', '-C', directory, ...args], {
     env: { PATH: '/usr/bin:/bin', HOME: '/nonexistent', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0', GIT_NO_LAZY_FETCH: '1' },
     encoding: 'utf8', timeout: limits.gitTimeoutMs, maxBuffer: limits.treeBytes,
