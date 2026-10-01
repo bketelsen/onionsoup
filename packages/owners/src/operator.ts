@@ -101,7 +101,8 @@ How you work:
   a model claim, not independent verification. A truncated evidence preview keeps its full transcript identity and
   hash: inspect that transcript before drawing conclusions about omitted material, or explicitly report the limit.
   For a separately authorized edit task, create access: write tasks with literal files and/or createFiles in an existing
-  clean Git workspace under your configured directory. Optional checks name exact node --test commands and paths.
+  clean Git workspace under your configured directory. Optional checks name exact node --test commands and paths, or go test/go vet with local package paths.
+  Go needs a host-selected toolchain and a self-contained module; no CGO, dependency or toolchain downloads.
   The person must approve the exact task, baseline, named existing/new files and commands once; exact retries reuse
   that native decision. Plain-language wording alone cannot substitute for a native approval receipt.
   Different workspaces may run in parallel; overlapping workspace claims refuse. Children can replace approved files or exclusively create approved missing paths

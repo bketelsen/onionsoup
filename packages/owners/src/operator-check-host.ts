@@ -49,7 +49,7 @@ export class OperatorChecks {
       throw new Error('operator_check_source_changed');
     }
     validateOperatorCheckInput(check.command, source);
-    await preflightOperatorCheck();
+    await preflightOperatorCheck(check.command);
     const prepared: OperatorCheckRecord = { id: `check_${randomUUID()}`, checkID: check.id, command: check.command,
       callID, messageID: context.messageID, artifactDigest: artifact.digest, status: 'prepared', startedAt: new Date().toISOString() };
     await this.prepare(origin, id, child, prepared, context);

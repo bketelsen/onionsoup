@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import childProcess, { type SpawnOptions } from 'node:child_process';
 import { constants } from 'node:fs';
-import { chmod, copyFile, cp, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import filesystem, { chmod, copyFile, cp, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { test } from 'node:test';
+import { test, type TestContext } from 'node:test';
+import type { Duplex } from 'node:stream';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { OPERATOR_CHECK_LIMITS } from '../src/operator-check-types.ts';
 import { OPERATOR_CHECK_RUNNER_LIMITS, preflightOperatorCheck, runOperatorCheck,
@@ -133,7 +134,7 @@ test('sandbox supports a staged runner and pinned Node under tmp without mountin
   const directory = await mkdtemp(join(tmpdir(), 'operator-check-staged-'));
   const previous = process.env.ONIONSOUP_HOST_NODE;
   try {
-    for (const name of ['operator-check-runner.ts', 'operator-check-types.ts', 'operator-write-writer.ts']) {
+    for (const name of ['operator-check-runner.ts', 'operator-check-go.ts', 'operator-check-process.ts', 'operator-check-types.ts', 'operator-write-writer.ts']) {
       await cp(new URL(`../src/${name}`, import.meta.url), join(directory, name));
     }
     await symlink(fileURLToPath(new URL('../src/sandbox.ts', import.meta.url)), join(directory, 'sandbox.ts'));
@@ -172,9 +173,11 @@ async function fixtureProcesses(marker: string) {
 test('PID namespace reaps a detached subprocess before a successful check returns', async () => {
   const marker = `operator-check-daemon-${crypto.randomUUID()}`;
   const daemon = file('daemon.test.mjs', `import {spawn} from 'node:child_process';
+for (let index = 0; index < 12; index++) {
 const child = spawn(process.execPath, ['-e', ${JSON.stringify(`setInterval(() => {}, 1000); // ${marker}`)}],
   {detached:true, stdio:'ignore'});
-child.unref();`);
+child.unref();
+}`);
   const checked = await runOperatorCheck(['node', '--test', daemon.path], [daemon]);
   assert.equal(checked.exitCode, 0, checked.output);
   assert.deepEqual(await fixtureProcesses(marker), []);
@@ -184,8 +187,10 @@ test('timeout kills and waits for the isolated process tree, leaving no fixture 
   const previous = OPERATOR_CHECK_RUNNER_LIMITS.timeoutMs;
   const marker = `operator-check-timeout-${crypto.randomUUID()}`;
   const hangs = file('hangs.test.mjs', `import {spawn} from 'node:child_process';
+for (let index = 0; index < 12; index++) {
 spawn(process.execPath, ['-e', ${JSON.stringify(`setInterval(() => {}, 1000); // ${marker}`)}],
   {detached:true, stdio:'ignore'}).unref();
+}
 process.on('SIGTERM', () => {});
 setInterval(() => {}, 1000);`);
   try {
@@ -251,8 +256,167 @@ test('a missing launch executable has no process and completes with125', async c
   }
 });
 
-test('an isolated test runner killed by signal completes with a nonzero exit after its namespace stops', async () => {
-  const killed = file('killed.test.mjs', `process.kill(process.ppid, 'SIGKILL');`);
-  const checked = await runOperatorCheck(['node', '--test', killed.path], [killed]);
-  assert.equal(checked.exitCode, 137, checked.output);
+async function ownedCheckProcess(parent: number, command: string): Promise<number | undefined> {
+  const children = await readFile(`/proc/${parent}/task/${parent}/children`, 'utf8').catch(() => '');
+  for (const child of children.trim().split(/\s+/).filter(Boolean)) {
+    const arguments_ = await readFile(`/proc/${child}/cmdline`, 'utf8').catch(() => '');
+    if (arguments_ === command) return Number(child);
+    const descendant = await ownedCheckProcess(Number(child), command);
+    if (descendant) return descendant;
+  }
+}
+
+test('an isolated test runner killed by signal completes with a nonzero exit after its namespace stops', async context => {
+  const originalSpawn = childProcess.spawn;
+  const killed = file(`signal-${crypto.randomUUID()}.test.mjs`, 'setTimeout(() => {}, 5000);');
+  let observed: Promise<number | undefined> | undefined;
+  const override = context.mock.method(childProcess, 'spawn', (command: string, args: readonly string[], options: SpawnOptions) => {
+    const child = originalSpawn(command, args, options);
+    observed = (async () => {
+      for (let attempt = 0; attempt < 100 && child.pid; attempt++) {
+        const target = await ownedCheckProcess(child.pid, `/runtime/node\0--test\0${killed.path}\0`);
+        if (target) {
+          process.kill(target, 'SIGKILL');
+          return target;
+        }
+        await new Promise(resolve => setTimeout(resolve, 20));
+      }
+    })();
+    return child;
+  });
+  syncBuiltinESMExports();
+  try {
+    const checked = await runOperatorCheck(['node', '--test', killed.path], [killed]);
+    assert.ok(await observed, 'The observer targeted only the uniquely named runtime beneath its own spawned sandbox.');
+    assert.equal(checked.exitCode, 137, checked.output);
+  } finally {
+    override.mock.restore();
+    syncBuiltinESMExports();
+  }
+});
+
+function interceptCheckSpawn(context: TestContext, inspect: (child: childProcess.ChildProcess, args: readonly string[]) => void) {
+  const originalSpawn = childProcess.spawn;
+  const override = context.mock.method(childProcess, 'spawn', (command: string, args: readonly string[], options: SpawnOptions) => {
+    const child = originalSpawn(command, args, options);
+    inspect(child, args);
+    return child;
+  });
+  syncBuiltinESMExports();
+  return () => { override.mock.restore(); syncBuiltinESMExports(); };
+}
+
+test('malformed trusted startup metadata never releases the check payload', async context => {
+  let observed = '';
+  const restore = interceptCheckSpawn(context, (child, args) => {
+    child.stdout?.on('data', chunk => { observed += String(chunk); });
+    const information = child.stdio[Number(args[args.indexOf('--info-fd') + 1])] as Duplex;
+    const emit = information.emit.bind(information);
+    context.mock.method(information, 'emit', (event: string | symbol, ...values: unknown[]) =>
+      emit(event, ...(event === 'data' ? [Buffer.from('malformed')] : values)));
+  });
+  try {
+    const checked = await runOperatorCheck(['node', '--test', 'gate.test.mjs'], [file('gate.test.mjs', 'console.log("PAYLOAD_EXECUTED");')]);
+    assert.equal(checked.exitCode, 125);
+    assert.equal(observed.includes('PAYLOAD_EXECUTED'), false);
+  } finally { restore(); }
+});
+
+test('inaccessible namespace identity prevents execution and returns a proved setup failure', async context => {
+  const originalOpen = filesystem.open;
+  const override = context.mock.method(filesystem, 'open', async (...args: Parameters<typeof filesystem.open>) => {
+    if (/^\/proc\/\d+$/.test(String(args[0]))) throw Object.assign(new Error('fixture pin denied'), { code: 'EACCES' });
+    return originalOpen(...args);
+  });
+  syncBuiltinESMExports();
+  try {
+    const checked = await runOperatorCheck(['node', '--test', 'gate.test.mjs'], [file('gate.test.mjs', 'console.log("PAYLOAD_EXECUTED");')]);
+    assert.equal(checked.exitCode, 125);
+    assert.equal(checked.output.includes('PAYLOAD_EXECUTED'), false);
+  } finally {
+    override.mock.restore();
+    syncBuiltinESMExports();
+  }
+});
+
+test('a zombie namespace leader cannot complete the check until its pinned identity disappears', async context => {
+  const originalRead = filesystem.readFile;
+  let wrapperExited = false;
+  let allowExit = false;
+  let capturedStat = '';
+  let pinnedPath = '';
+  let observed!: () => void;
+  const polling = new Promise<void>(resolve => { observed = resolve; });
+  const restoreSpawn = interceptCheckSpawn(context, child => { child.once('close', () => { wrapperExited = true; }); });
+  const override = context.mock.method(filesystem, 'readFile', async (...args: Parameters<typeof filesystem.readFile>) => {
+    const path = String(args[0]);
+    if (wrapperExited && path === pinnedPath && !allowExit) {
+      observed();
+      return capturedStat;
+    }
+    const content = await originalRead(...args);
+    if (!wrapperExited && /^\/proc\/self\/fd\/\d+\/stat$/.test(path)) {
+      pinnedPath = path;
+      capturedStat = content.toString();
+      const state = capturedStat.lastIndexOf(') ') + 2;
+      capturedStat = `${capturedStat.slice(0, state)}Z${capturedStat.slice(state + 1)}`;
+    }
+    return content;
+  });
+  syncBuiltinESMExports();
+  try {
+    let completed = false;
+    const pending = runOperatorCheck(['node', '--test', passing.path], [module, passing]).then(checked => {
+      completed = true;
+      return checked;
+    });
+    await polling;
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(completed, false);
+    allowExit = true;
+    assert.equal((await pending).exitCode, 0);
+  } finally {
+    override.mock.restore();
+    restoreSpawn();
+    syncBuiltinESMExports();
+  }
+});
+
+test('unproved shutdown before startup approval cannot release the barrier through cleanup', async context => {
+  const originalKill = process.kill.bind(process);
+  let launched: childProcess.ChildProcess | undefined;
+  let barrier: Duplex | undefined;
+  let output = '';
+  const restore = interceptCheckSpawn(context, (child, args) => {
+    launched = child;
+    barrier = child.stdio[Number(args[args.indexOf('--block-fd') + 1])] as Duplex;
+    child.stdout?.on('data', chunk => { output += String(chunk); });
+    const information = child.stdio[Number(args[args.indexOf('--info-fd') + 1])] as Duplex;
+    const emit = information.emit.bind(information);
+    context.mock.method(information, 'emit', (event: string | symbol, ...values: unknown[]) => {
+      const delivered = emit(event, ...(event === 'data' ? [Buffer.from('malformed')] : values));
+      if (event === 'end') child.emit('close', 1, null);
+      return delivered;
+    });
+  });
+  context.mock.method(process, 'kill', (pid: number, signal: NodeJS.Signals | number = 'SIGTERM') => {
+    if (pid < 0) throw Object.assign(new Error('fixture cannot prove or stop group'), { code: 'EPERM' });
+    return originalKill(pid, signal);
+  });
+  try {
+    await assert.rejects(runOperatorCheck(['node', '--test', 'gate.test.mjs'],
+      [file('gate.test.mjs', 'console.log("PAYLOAD_EXECUTED");setTimeout(()=>{},5000);')]), /operator_check_process_uncertain/);
+    assert.equal(output.includes('PAYLOAD_EXECUTED'), false);
+    assert.equal(barrier?.destroyed, false, 'The unproved, unreleased barrier must remain held, not closed as EOF.');
+    assert.ok(launched?.pid);
+    const stopped = new Promise<void>(resolve => launched!.once('exit', () => resolve()));
+    originalKill(-launched.pid, 'SIGKILL');
+    await stopped;
+    assert.equal(output.includes('PAYLOAD_EXECUTED'), false);
+  } finally {
+    if (launched?.pid && launched.exitCode === null && launched.signalCode === null) {
+      try { originalKill(-launched.pid, 'SIGKILL'); } catch { /* Fixture already exited. */ }
+    }
+    restore();
+  }
 });

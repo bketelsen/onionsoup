@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { access, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -53,7 +53,18 @@ async function existingReadOnly(source, target = source) {
   }
 }
 
-async function stageArguments(command, args, location, privateFiles, skipHostBusTest) {
+async function stageGoRuntime(root) {
+  if (!root) return [];
+  if (!isAbsolute(root) || resolve(root) !== root || await realpath(root) !== root) {
+    throw new Error('stage_go_root_invalid');
+  }
+  if (!(await stat(root)).isDirectory() || !(await stat(join(root, 'bin/go'))).isFile()) {
+    throw new Error('stage_go_root_invalid');
+  }
+  return ['--ro-bind', root, '/opt/go', '--setenv', 'ONIONSOUP_HOST_GO_ROOT', '/opt/go'];
+}
+
+async function stageArguments(command, args, location, privateFiles, skipHostBusTest, goRoot) {
   if (!isAbsolute(location) || resolve(location) !== location) throw new Error('stage_absolute_location_required');
   const physicalLocation = await realpath(location);
   if (physicalLocation !== location) throw new Error('stage_symlink_location_forbidden');
@@ -85,6 +96,7 @@ async function stageArguments(command, args, location, privateFiles, skipHostBus
     '--unshare-pid', '--unshare-ipc', '--unshare-uts',
     '--die-with-parent', '--new-session', '--clearenv',
     ...Object.entries(STAGE_ENV).flatMap(([key, value]) => ['--setenv', key, value]),
+    ...await stageGoRuntime(goRoot),
     ...(skipHostBusTest ? ['--setenv', 'NODE_OPTIONS', STAGE_TEST_OPTIONS] : []),
     '--chdir', location, '--',
     command === 'npm' ? '/opt/node/bin/npm' : command,
@@ -106,7 +118,7 @@ export async function runStageCommand(command, args, location, hostEnvironment =
     await writeFile(privateFiles.passwd, `stage:x:${process.getuid()}:${process.getgid()}:Stage:/home/stage:/bin/sh\n`, { mode: 0o600 });
     await writeFile(privateFiles.gitconfig, '[user]\n\tname = Onionsoup Stage Test\n\temail = stage-test@onionsoup.invalid\n', { mode: 0o600 });
     const skipHostBusTest = command === 'npm' && args[0] === 'run' && args[1] === 'verify';
-    const sandboxArgs = await stageArguments(command, args, location, privateFiles, skipHostBusTest);
+    const sandboxArgs = await stageArguments(command, args, location, privateFiles, skipHostBusTest, hostEnvironment.ONIONSOUP_HOST_GO_ROOT);
     const runnerEnvironment = {
       PATH: '/usr/bin:/bin',
       XDG_RUNTIME_DIR: hostEnvironment.XDG_RUNTIME_DIR,

@@ -50,8 +50,10 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
   `state/notebooks/operator/journal/*.jsonl`.
 - **Operator writes and checks require exact approved scope.** Durable jobs support read-only investigations and
   named-file edits/creation in clean Git worktrees, with separate human decisions for exact paths/check commands and
-  the completed diff. Checks currently support only `node --test` with literal relative paths, without package installs,
-  package scripts or extra dependencies. They do not run arbitrary shell commands, delete paths, commit or push. Whole-workspace conflicts
+  the completed diff. Checks support `node --test` with literal test paths and `go test` / `go vet` with local package paths.
+  Go requires a host-selected toolchain and self-contained module; no CGO, host caches or dependency downloads.
+  Package installs, package scripts and other toolchains remain unsupported. Each Go check deliberately snapshots
+  its runtime again; copy-on-write is used when available, but unsupported filesystems incur a bounded full copy. They do not run arbitrary shell commands, delete paths, commit or push. Whole-workspace conflicts
   are refused; accepted edits remain uncommitted. An uncertain prepared mutation keeps its reservation and has no
   replay or recovery path in this slice, including failures after intent is recorded but before the writer starts.
   Zero-mutation write children can use explicit human recovery only after verified absent or idle owned runtime

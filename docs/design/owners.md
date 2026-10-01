@@ -820,13 +820,21 @@ creation uses the approved absent path and pinned parent identity; an unexpected
 New files remain untracked and their full contents appear in the review diff; the host does not stage them in Git.
 
 Optional `checks` name exact command arrays such as `{ "id": "title-test", "command": ["node", "--test", "test/title.test.mjs"] }`.
-The initial adapter accepts only Node's built-in test runner and literal relative test paths. It does not install
-packages, resolve additional dependencies, run package scripts or invoke a host shell. The runner receives a read-only
-copy of verified source files and approved creations, with the trusted Node runtime, network isolation and memory,
+Supported commands are `node --test` with literal relative test paths and `go test` / `go vet` with local package
+paths (`./...`, `./pkg`, `./pkg/...`). Go checks require a host-selected `ONIONSOUP_HOST_GO_ROOT`; the task cannot
+select a compiler. They support self-contained modules: CGO, workspace discovery, toolchain downloads, module
+downloads and host caches are disabled. Neither adapter installs dependencies, runs package scripts nor invokes
+a host shell. The runner receives a read-only copy of verified source files and approved creations, with a
+private trusted runtime, network isolation and memory,
 process, time and output limits. It mounts neither the live worktree nor the host home or environment. The child requests only an
-approved check ID; host code records bounded output, exit code and the exact artifact digest. These receipts are
+approved check ID; host code records bounded output, exit code and the exact artifact digest. Go receipts also
+record the selected runtime version and Go executable SHA256 (not a digest of the entire toolchain). These receipts are
 separate from model claims. Editing after a check makes that receipt stale for acceptance; every configured check
 must have a current successful receipt. Failed or incomplete checks remain visible without implying completion.
+Before execution, a startup barrier lets the host pin the sandbox namespace-init process identity. Both normal
+completion and forced shutdown require that pinned identity to disappear, alongside the existing bounded
+process-group exit proof; a zombie leader alone is insufficient while its threads may still be exiting.
+Unproved exit remains uncertain. This does not independently attest an empty cgroup.
 
 A completed child enters `needs-review`. `review-write { id, childID }` verifies current workspace and terminal runtime
 evidence and returns the exact host diff and review digest. The parent presents that diff, the original goal and

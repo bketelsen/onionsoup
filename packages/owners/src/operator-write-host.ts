@@ -43,8 +43,8 @@ export class OperatorWrites {
     const proof = await this.permissions.ask(context, { patterns: [`create-write/${scopeDigest}`], metadata: {
       approvalScope: 'once', mode: 'create-write', action: 'Approve this exact write task', warning: WARNING, origin, intake, input,
       workspaces: Object.entries(baselines).map(([id, baseline]) => ({ id, directory: baseline.directory,
-        head: baseline.head, files: baseline.approvedPaths, createFiles: baseline.createFiles,
-        checks: input.tasks.find(task => task.id === id)?.checks, digest: baseline.digest })), scopeDigest,
+        head: baseline.head, files: baseline.approvedPaths, createFiles: baseline.createFiles ?? [],
+        checks: input.tasks.find(task => task.id === id)?.checks ?? [], digest: baseline.digest })), scopeDigest,
     } });
     checkContext(origin, context);
     const current = await this.baselines(input);
