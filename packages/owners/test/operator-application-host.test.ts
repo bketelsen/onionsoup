@@ -403,3 +403,58 @@ test('restart finishes a failed post-result reservation release without replay o
   assert.equal(context.asks.length, 4);
   await assertOriginalWorkPreserved(context);
 });
+
+test('exact retries of an unproven publisher retain only the original admission and never launch again', async () => {
+  const context = await applicationFixture();
+  let runs = 0;
+  const effects = { ...operatorApplicationEffects, run: async () => {
+    runs++;
+    // No witness or stop proof was returned: the live owner must remain conservatively unknown.
+    throw new Error('operator_application_fixture_before_witness');
+  } };
+  const applications = new OperatorApplications(context.handoffs, context.permissions, effects);
+  const preview = await applications.preview(context.origin, context.id, context.target);
+  await applications.apply(context.origin, context.id, context.target, preview.digest, context.parent());
+  await settled(applications, context, 'blocked');
+  const initialDeadline = Date.now() + 5_000;
+  let initialJob = await context.jobs.get(context.origin, context.id);
+  while (!initialJob.events.some(event => event.detail.includes('operator_application_fixture_before_witness'))
+    && Date.now() < initialDeadline) {
+    await delay(20);
+    initialJob = await context.jobs.get(context.origin, context.id);
+  }
+  assert.ok(initialJob.events.some(event => event.detail.includes('operator_application_fixture_before_witness')));
+  const original = (await applications.store.read(context.id))!;
+  assert.equal(original.workers.length, 1);
+  assert.equal(original.operations.length, 1);
+  assert.equal(original.operations[0]!.attempts.length, 1);
+  assert.equal(original.operations[0]!.attempts[0]!.witness, undefined);
+  assert.equal(original.operations[0]!.attempts[0]!.inspection, undefined);
+  const leases = async () => (await listAdmissions(context.jobs.home))
+    .filter(lease => lease.kind === 'plugin:operator-application' && lease.alive);
+  const originalLeases = await leases();
+  assert.equal(originalLeases.length, 1);
+  for (let retry = 0; retry < 3; retry++) {
+    const priorEvents = (await context.jobs.get(context.origin, context.id)).events.length;
+    const reopened = new OperatorApplications(context.handoffs, context.permissions, effects);
+    await reopened.apply(context.origin, context.id, context.target, preview.digest, context.parent());
+    const deadline = Date.now() + 5_000;
+    let job = await context.jobs.get(context.origin, context.id);
+    while (job.events.length === priorEvents && Date.now() < deadline) {
+      await delay(20);
+      job = await context.jobs.get(context.origin, context.id);
+    }
+    assert.ok(job.events.length > priorEvents, 'the retry must finish its blocked-event transition before asserting no admission');
+    const record = (await reopened.store.read(context.id))!;
+    assert.equal(record.status, 'blocked');
+    assert.equal(record.reason, 'operator_application_execution_unproven');
+    assert.deepEqual(record.workers, original.workers);
+    assert.deepEqual(record.operations, original.operations);
+    assert.deepEqual(await leases(), originalLeases);
+    assert.equal(runs, 1);
+    assert.equal(context.asks.length, 4);
+  }
+  await assertClaimHeld(context);
+  await assertDestinationBefore(context);
+  await assertOriginalWorkPreserved(context);
+});

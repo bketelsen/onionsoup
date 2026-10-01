@@ -115,6 +115,7 @@ export class OperatorApplicationWorker {
       await this.releaseClaim(record);
       return;
     }
+    await this.assertPriorStopped(record);
     await this.reserve(record);
     const owner = await readOperatorCheckOwner();
     const admission = await beginAdmission(this.handoffs.jobs.home, 'plugin:operator-application');
@@ -131,6 +132,14 @@ export class OperatorApplicationWorker {
     }
     await this.finish(id);
     await this.releaseClaim(await this.record(id));
+  }
+  private async assertPriorStopped(record: OperatorApplication) {
+    for (const operation of record.operations) {
+      for (const attempt of operation.attempts) {
+        const inspection = await applicationAttemptInspection(attempt);
+        if (inspection.state !== 'stopped' || !inspection.proof) throw new Error('operator_application_execution_unproven');
+      }
+    }
   }
   private async work(id: string) {
     try { await this.execute(id); }
