@@ -66,6 +66,10 @@ for (const status of inertStatuses) {
     assert.equal(requestCanRun(record), false);
     assert.equal(inventory.eligible, true);
     assert.notEqual(inventory.decisions.find(entry => entry.resource === path)?.classification, 'blocked');
+    if (status.startsWith('awaiting-')) {
+      assert.equal(inventory.decisions[0]?.classification, 'human-gated');
+      assert.equal(inventory.decisions[0]?.reason, 'request_human_gate_retained');
+    }
     assert.equal(await contents(path), original);
     assert.deepEqual(await readdir(join(state, 'requests')), ['request_fixture.json']);
   });

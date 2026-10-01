@@ -32,7 +32,7 @@ export const MAINTENANCE_RELEASE_INVENTORY_LIMITS = { entries: 100_000, bytes: 1
 export interface MaintenanceInventoryEntry { path: string; type: 'absent' | 'directory' | 'file'; digest: string }
 export interface MaintenanceInventoryDecision {
   resource: string;
-  classification: 'terminal' | 'single-use-protected' | 'time-gated' | 'blocked';
+  classification: 'terminal' | 'human-gated' | 'single-use-protected' | 'time-gated' | 'blocked';
   reason: string;
   validUntil?: string;
 }
@@ -242,6 +242,9 @@ const INERT_REQUEST_STATUSES = new Set<ResourceRequest['status']>(['declined', '
 
 function classifyRequest(path: string, request: ResourceRequest) {
   if (request.operation?.runner !== undefined) return decision(path, false, 'request_runner_unresolved');
+  if (['awaiting-create-approval', 'awaiting-delete-approval'].includes(request.status)) {
+    return decision(path, true, 'request_human_gate_retained', 'human-gated');
+  }
   if (INERT_REQUEST_STATUSES.has(request.status)) {
     return decision(path, true, request.operation ? 'request_historical_operation_retained' : 'request_no_automatic_step');
   }
