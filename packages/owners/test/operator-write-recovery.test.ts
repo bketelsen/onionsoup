@@ -7,8 +7,9 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { test } from 'node:test';
 import type { ToolContext } from '@opencode-ai/plugin';
-import { OperatorJobs, operatorWriteScopeDigest } from '../src/operator-jobs.ts';
+import { OperatorJobs, operatorJobDigest, operatorWriteScopeDigest } from '../src/operator-jobs.ts';
 import { abandonOperatorChild, prepareOperatorRecovery } from '../src/operator-job-recovery.ts';
+import { OperatorSupervisor } from '../src/operator-supervisor.ts';
 import { OperatorRecoveryPermissions } from '../src/operator-recovery-permission.ts';
 import { OperatorWritePermissions } from '../src/operator-write-permission.ts';
 import { OperatorWrites } from '../src/operator-write-host.ts';
@@ -234,4 +235,36 @@ test('a competing accepted-diff receipt invalidates a pending zero-operation aba
   assert.equal(child.status, 'completed');
   assert.equal(child.abandonment, undefined);
   assert.equal(child.write!.acceptance!.digest, 'competing-accepted-artifact');
+});
+
+
+test('explicit parent cancel succeeds after zero-operation release without accepting or altering abandoned history', async () => {
+  const f = await fixture(); await f.blocked();
+  const abandoned = await f.abandon((await f.preview()).digest);
+  const supervisor = new OperatorSupervisor(f.jobs, f.client);
+  await assert.rejects(f.jobs.synthesize(f.origin, f.job.id, operatorJobDigest(abandoned), [], 'Pretend complete'), /operator_job_synthesis_stale/);
+  const cancelled = await supervisor.intervene(f.origin, f.job.id, 'cancel');
+  assert.equal(cancelled.status, 'cancelled');
+  assert.deepEqual(cancelled.children, abandoned.children);
+  assert.deepEqual(cancelled.intake, abandoned.intake);
+  assert.deepEqual(cancelled.constraints, abandoned.constraints);
+  assert.equal(cancelled.goal, abandoned.goal);
+  assert.deepEqual(cancelled.events.slice(0, abandoned.events.length), abandoned.events);
+  assert.equal(cancelled.synthesis, undefined);
+  assert.equal(f.effects(), 0, 'cancelling the released parent never aborts or launches a child');
+  assert.deepEqual(await supervisor.intervene(f.origin, f.job.id, 'cancel'), cancelled);
+  await assert.rejects(f.jobs.synthesize(f.origin, f.job.id, operatorJobDigest(cancelled), [], 'Pretend complete'), /operator_job_synthesis_stale/);
+});
+
+test('parent cancel still refuses unreleased zero-operation and every recorded-mutation write child', async () => {
+  for (const status of ['zero', 'prepared', 'applied', 'not-applied'] as const) {
+    const f = await fixture(); await f.blocked();
+    if (status !== 'zero') await f.mutate(child => child.write!.operations.push(f.operation(status)));
+    const before = await f.jobs.get(f.origin, f.job.id);
+    const supervisor = new OperatorSupervisor(f.jobs, f.client);
+    await assert.rejects(supervisor.intervene(f.origin, f.job.id, 'cancel'), /operator_write_review_required/);
+    assert.deepEqual(await f.jobs.get(f.origin, f.job.id), before);
+    assert.equal(operatorChildHoldsWorkspace(before.children[0]!), true);
+    assert.equal(f.effects(), 0);
+  }
 });

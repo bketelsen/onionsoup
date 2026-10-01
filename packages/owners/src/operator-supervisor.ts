@@ -7,7 +7,7 @@ import { OperatorScheduler, OPERATOR_OPERATION_LIMITS, OPERATOR_TERMINAL_JOBS, O
   OPERATOR_CREATION_BLOCKERS, operatorChildUnsettled, operatorChildOccupiesSlot, operatorChildBlock,
   settleOperatorJob, operatorParentControlVersion, type OperatorClaim } from './operator-scheduler.ts';
 import { assertOperatorCurrentTurn, operatorChildHasNewEvidence, observeOperatorChild } from './operator-child-observation.ts';
-import { assertOperatorWriteArtifact } from './operator-write-state.ts';
+import { assertOperatorWriteArtifact, operatorWriteWasAbandonedWithoutEffects } from './operator-write-state.ts';
 import { OperatorWriteArtifact } from './operator-write-workspace.ts';
 import { OPERATOR_UNCERTAINTY_LIMITS, canObserveOperatorChild, clearOperatorUncertainty, recordOperatorUncertainty } from './operator-uncertainty.ts';
 
@@ -362,7 +362,8 @@ export class OperatorSupervisor {
   private async cancel(origin: OperatorJobOrigin, id: string) {
     const initial = await this.jobs.get(origin, id);
     if (initial.status === 'cancelled') return;
-    if (initial.children.some(child => child.access === 'write' && !child.write?.acceptance)) throw new Error('operator_write_review_required');
+    if (initial.children.some(child => child.access === 'write' && !child.write?.acceptance
+      && !operatorWriteWasAbandonedWithoutEffects(child))) throw new Error('operator_write_review_required');
     await this.changeJob(origin, id, 'pause');
     const job = await this.jobs.get(origin, id);
     for (const child of job.children) await this.cancelChild(job, child);
