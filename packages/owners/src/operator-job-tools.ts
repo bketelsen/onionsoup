@@ -7,6 +7,8 @@ import { abandonOperatorChild, prepareOperatorRecovery } from './operator-job-re
 import type { OperatorRecoveryPermissions } from './operator-recovery-permission.ts';
 import { OPERATOR_SUPERVISOR_TRANSPORT_LIMITS } from './operator-supervisor-client.ts';
 import type { OperatorWrites } from './operator-write-host.ts';
+import type { OperatorHandoffs } from './operator-handoff-host.ts';
+import { operatorHandoffToolView } from './operator-handoff-view.ts';
 
 export const OPERATOR_JOB_TOOL = 'onionsoup_operator_job';
 type Client = Parameters<Plugin>[0]['client'];
@@ -35,13 +37,13 @@ export async function operatorJobCaller(jobs: OperatorJobs, client: Client, cont
 }
 
 export function operatorJobTool(jobs: OperatorJobs, supervisor: OperatorSupervisor, client: Client,
-  guard: (agent: string) => void, permissions: OperatorRecoveryPermissions, writes?: OperatorWrites): ReturnType<typeof tool> {
+  guard: (agent: string) => void, permissions: OperatorRecoveryPermissions, writes?: OperatorWrites, handoffs?: OperatorHandoffs): ReturnType<typeof tool> {
   return tool({
-    description: 'Supervise your own investigations and explicitly approved named-file edits and creations with two managed slots. Named Node --test or Go test/vet checks run only in a private source-copy sandbox. Write tasks require access write and exact files and/or createFiles in an existing clean Git workspace, plus optional named checks with exact command argv. One native scope approval covers these effects; exact retries reuse it. Plain-language text is not a native approval receipt. Separate workspaces can run in parallel; conflicts refuse. Review-write shows the host diff and review digest; accept-write asks the person to accept that exact diff before releasing its workspace. No general shell, package installs, commits, pushes, owner delegation or persistent grants. Final acceptance requires successful host checks for the current diff. Show includes evidence and job digest. Pause stops new launches; resume with childID continues a proven interrupted child in the same session. Cancel cannot release unaccepted write claims. Recovery-preview and abandon require explicit human recovery; write children qualify only with zero recorded mutations and verified absent or idle owned runtime state. Any recorded write remains held for review, never replayed. Synthesize requires current job digest and all accepted evidence IDs.',
+    description: 'Supervise your own investigations and explicitly approved named-file edits and creations with two managed slots. Named Node --test or Go test/vet checks run only in a private source-copy sandbox. Write tasks require access write and exact files and/or createFiles in an existing clean Git workspace, plus optional named checks with exact command argv. One native scope approval covers these effects; exact retries reuse it. Plain-language text is not a native approval receipt. Separate workspaces can run in parallel; conflicts refuse. Review-write shows the host diff and review digest; accept-write asks the person to accept that exact diff before releasing its workspace. No general shell, package installs, commits, pushes, owner delegation or persistent grants. Final acceptance requires successful host checks for the current diff. Show includes evidence and job digest. Pause stops new launches; resume with childID continues a proven interrupted child in the same session. Cancel cannot release unaccepted write claims. Recovery-preview and abandon require explicit human recovery; write children qualify only with zero recorded mutations and verified absent or idle owned runtime state. Any recorded write remains held for review, never replayed. Synthesize requires current job digest and all accepted evidence IDs. After all children are accepted, prepare-handoff creates an isolated combined diff for one repository/base with disjoint scopes; check-handoff runs only its existing approved commands, asynchronously, using digest and checkID. Show-handoff returns current checks and exact patch/report paths. Uncertain checks are never relaunched. Ready means combined checks passed, not applied, committed, published or independently reviewed.',
     // OpenCode's bundled Zod differs from the host version; parse with the canonical schema at the boundary.
     args: {
-      action: tool.schema.enum(['create', 'list', 'show', 'pause', 'resume', 'cancel', 'synthesize', 'recheck', 'recovery-preview', 'abandon', 'review-write', 'accept-write']),
-      id: tool.schema.string().optional(), childID: tool.schema.string().optional(),
+      action: tool.schema.enum(['create', 'list', 'show', 'pause', 'resume', 'cancel', 'synthesize', 'recheck', 'recovery-preview', 'abandon', 'review-write', 'accept-write', 'prepare-handoff', 'check-handoff', 'show-handoff']),
+      checkID: tool.schema.string().optional(), id: tool.schema.string().optional(), childID: tool.schema.string().optional(),
       job: tool.schema.object({ key: tool.schema.string(), goal: tool.schema.string(), constraints: tool.schema.array(tool.schema.string()),
         tasks: tool.schema.array(tool.schema.object({ id: tool.schema.string(), goal: tool.schema.string(), directory: tool.schema.string(),
           access: tool.schema.enum(['read-only', 'write']), files: tool.schema.array(tool.schema.string()).optional(),
@@ -79,10 +81,15 @@ export function operatorJobTool(jobs: OperatorJobs, supervisor: OperatorSupervis
           return { jobID: id(), childID: args.childID, digest: preview.digest, artifact: preview.artifact,
             originalIntake: preview.job.intake, goal: preview.job.goal, constraints: preview.job.constraints, evidence: preview.child.evidence, checks: preview.child.write?.checks ?? [] };
         },
+        'prepare-handoff': () => required(handoffs, 'handoff_host').prepare(caller.origin, id(), context),
+        'show-handoff': () => required(handoffs, 'handoff_host').show(caller.origin, id()),
+        'check-handoff': () => required(handoffs, 'handoff_host').check(caller.origin, id(),
+          required(args.digest, 'digest'), required(args.checkID, 'checkID'), context),
         'accept-write': () => required(writes, 'write_host').accept(caller.origin, id(), required(args.childID, 'childID'),
           required(args.digest, 'digest'), context),
       };
       const result = await actions[args.action]();
+      if ('kind' in result && result.kind === 'operator-handoff') return JSON.stringify(operatorHandoffToolView(result));
       if (args.action === 'recovery-preview' || args.action === 'review-write') return JSON.stringify(result);
       if (Array.isArray(result)) return JSON.stringify(result.map(job => ({ ...job, digest: operatorJobDigest(job) })));
       return JSON.stringify('origin' in result ? { ...result, digest: operatorJobDigest(result) } : result);

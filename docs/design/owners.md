@@ -785,6 +785,23 @@ Completed child evidence retains exact session, prompt, final message and tool-c
 current job digest, all final evidence message IDs and the operator's explanation, then completes the job once. This
 binds the summary to observed transcripts; it does not certify the truth of a model's conclusions.
 
+`prepare-handoff { id }` builds a separate combined preview only after all children are complete and writes are
+accepted. It requires one Git repository, one exact base and baseline manifest, and disjoint approved paths. It
+retains original intake, constraints, child evidence, approvals and exact diff provenance without modifying a job,
+worktree, commit or synthesis. `check-handoff { id, digest, checkID }` runs one of the already approved Node/Go
+commands on the private combined source snapshot. Identical commands are deduplicated with every original check
+recorded as provenance; more than four distinct commands is refused rather than silently dropping checks.
+
+Combined checks have their own durable ledger and deployment admission, with at most two prepared checks globally
+and one per handoff. They run asynchronously outside mutation locks. A prepared check is never replayed: known exits
+(including setup failure) produce reusable receipts, while unproven process termination retains admission and an
+uncertain record. Restart preserves that uncertainty; there is no automatic retry or claim that a crash undid work.
+`show-handoff { id }` rechecks live child evidence and workspace freshness and provides an exact patch and JSON report
+under `state/operator-handoffs/`. `ready` means all configured combined checks passed for the current artifact;
+`unchecked` means none were configured. Neither means applied, independently reviewed, committed or published.
+The human's existing exact scope/check authorization covers these commands; preparing or checking a combined preview
+does not add another permission click or standing grant. Applying and publishing remain separate user-directed work.
+
 The acceptance scenario is two parallel investigations, another message answered in the same parent chat, a restart
 of a disposable OpenCode server, recovery of the same child IDs and evidence, and a recorded synthesis. Production
 sessions must not be restarted to test it. Native permissions and canonical-path checks constrain reading tools, but

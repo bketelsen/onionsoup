@@ -75,6 +75,21 @@ do not commit.” The `test` directory must already exist. The operator can call
 5. After every child is complete and required edits are accepted, `show` supplies the current job digest and evidence
    message IDs for `synthesize`. The edits remain in your worktree for your normal verification and Git workflow.
 
+For accepted changes in sibling worktrees of one repository at one base, ask for a combined handoff:
+
+1. `onionsoup_operator_job { "action": "prepare-handoff", "id": "<job>" }` returns its digest and named checks.
+2. Call `{ "action": "check-handoff", "id": "<job>", "digest": "<handoff digest>", "checkID": "<returned check ID>" }`
+   for each returned check, sequentially. Only commands already approved for that job can run; no new scope prompt is needed.
+3. `{ "action": "show-handoff", "id": "<job>" }` reports progress and the complete patch/JSON report paths.
+   The operator remains available while checks run. A failed combined check is useful evidence even when each child
+   passed alone. Unknown completion is preserved across restart, never automatically retried.
+4. Review the exact combined diff and check receipts before your normal application/publication workflow. This action
+   never applies changes, commits or pushes. A report with no configured checks is `unchecked`, not verified.
+
+Overlapping approved paths, different repositories/bases, stale files, unaccepted children or incomplete runtime
+evidence block a handoff. Its report preserves the original task, approvals and child history separately from combined
+verification. Previously recorded synthesis is not rewritten or retroactively presented as combined verification.
+
 To enable Go checks, the trusted service environment must set `ONIONSOUP_HOST_GO_ROOT` to the canonical absolute
 root of an installed Go toolchain (for example `/opt/go`). This selects runtime files, not a new authority grant.
 Missing or invalid toolchains fail before check intent is recorded. A task supplies only commands such as

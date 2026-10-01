@@ -15,7 +15,7 @@ import { type OperatorCheckInput } from './operator-write-call.ts';
 import { writeChild, writeReceipts as receipts, operatorWriteLock, assertOperatorWriteCall, assertOperatorWriteUnchanged,
   type OperatorWriteContext as Context } from './operator-write-context.ts';
 
-const WARNING = 'Approve only these named existing/new text files, exact Node test commands and original task. No shell, unapproved paths, deletes, '
+const WARNING = 'Approve only these named existing/new text files, exact Node/Go check commands and original task. Approved commands may also check the isolated combined preview of this same job. No shell, unapproved paths, deletes, '
   + 'commits, pushes or persistent grants. Each workspace remains reserved until its exact diff is accepted after verified completion. '
   + 'Unknown writes stay blocked; approval does not authorize retrying them.';
 
