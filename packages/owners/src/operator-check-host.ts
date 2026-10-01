@@ -10,6 +10,7 @@ import { operatorWriteArtifact, readOperatorWriteSourceFiles } from './operator-
 import { runOperatorCheck, validateOperatorCheckInput, preflightOperatorCheck } from './operator-check-runner.ts';
 import { writeChild, writeReceipts, operatorWriteLock, assertOperatorWriteCall, assertOperatorWriteUnchanged,
   type OperatorWriteContext } from './operator-write-context.ts';
+import { currentOperatorWriteChecks } from './operator-write-state.ts';
 
 /** Check commands come from the native-approved task, never from the child's invocation. */
 export class OperatorChecks {
@@ -35,7 +36,7 @@ export class OperatorChecks {
     const receipts = writeReceipts(child);
     const artifact = await operatorWriteArtifact(child.write.baseline, receipts);
     const matching = records.filter(record => record.checkID === check.id);
-    const previous = matching.at(-1);
+    const previous = currentOperatorWriteChecks(child).filter(record => record.checkID === check.id).at(-1);
     if (previous?.status === 'completed' && previous.exitCode === 0 && previous.artifactDigest === artifact.digest) {
       if (operatorCheckRecordDigest(previous) !== previous.digest) throw new Error('operator_check_receipt_invalid');
       return previous;

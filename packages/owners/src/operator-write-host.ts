@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { type OperatorJobInput, OPERATOR_INVESTIGATOR, type OperatorChild, type OperatorJob,
   type OperatorJobIntake, type OperatorJobOrigin, type OperatorSessionSnapshot, type OperatorSupervisorClient } from './operator-jobs-types.ts';
 import { OperatorJobs, operatorJobEvent, operatorWriteScopeDigest, operatorWriteReviewDigest } from './operator-jobs.ts';
-import { assertOperatorWriteTerminal, assertOperatorWriteChecks } from './operator-write-state.ts';
+import { assertOperatorWriteTerminal, assertOperatorWriteChecks, currentOperatorWriteChecks } from './operator-write-state.ts';
+import { reviseOperatorWrite } from './operator-write-revision.ts';
 import { operatorChild } from './operator-child-scope.ts';
 import { withRecordLock } from './record-lock.ts';
 import { snapshotOperatorWriteWorkspace, prepareOperatorFileMutation, applyOperatorFileMutation,
@@ -115,7 +116,7 @@ export class OperatorWrites {
         + 'The workspace remains dirty; future jobs require a new clean baseline.',
       jobID: id, childID, directory: preview.child.directory,
       originalIntake: preview.job.intake, goal: preview.job.goal, constraints: preview.job.constraints,
-      artifact: preview.artifact, evidence: preview.child.evidence, checks: preview.child.write.checks, digest,
+      artifact: preview.artifact, evidence: preview.child.evidence, checks: currentOperatorWriteChecks(preview.child), digest,
     } });
     checkContext(origin, context);
     const afterApproval = await this.jobs.get(origin, id);
@@ -127,6 +128,11 @@ export class OperatorWrites {
     const current = await this.review(origin, id, childID);
     if (current.digest !== digest) throw new Error('operator_write_review_stale');
     return this.jobs.acceptWrite(origin, id, childID, digest, current.artifact, proof, current.snapshot);
+  }
+
+  async revise(origin: OperatorJobOrigin, id: string, childID: string, digest: string, text: string, context: Context) {
+    checkContext(origin, context);
+    return reviseOperatorWrite(this, origin, id, childID, digest, text, context);
   }
 
   async file(context: Context, callID: string, input: OperatorFileInput) {
