@@ -354,8 +354,8 @@ lock helper cannot fill that gap. Chat/notice/failed-tool recovery commands do n
    still act. Kernel-lock release alone proves neither. Older records normally cannot supply this proof;
    a new prevention build must not backfill invented identities or silently adopt them.
 3. When proof is unavailable, a person must separately decide whether to interrupt the exact old runtime
-   while preserving unknown effects. A reviewed supported procedure would need to drain new work,
-   recheck all genuine chats, tools, children, host checks and descendants, and invalidate its preview
+   while preserving unknown effects. The supported procedure drains new work,
+   rechecks all genuine chats, tools, children, host checks and descendants, and invalidates its preview
    on any new activity, changed PID/start/build or changed evidence. It must positively establish process
    termination and contain possible outstanding effects before restart. An apparently idle snapshot
    is insufficient. The ordinary guarded-release worker refuses this recovery's checkpoint and quarantine.
@@ -367,14 +367,20 @@ lock helper cannot fill that gap. Chat/notice/failed-tool recovery commands do n
 The command's acceptance checks include a disposable-runtime stop with
 matching process identity; foreign/new activity invalidating a prepared digest; pending external effects
 remaining protected; duplicate/uncertain restart refusal; unchanged transcripts and workspace evidence;
-and no notice, opening or child replay. Until that procedure is implemented, independently reviewed and
-explicitly approved, the correct outcome for unproven legacy leases remains **blocked**. The prevention
+and no notice, opening or child replay. Until the procedure is independently reviewed and its exact
+preview explicitly approved, the correct outcome for unproven legacy leases remains **blocked**. The prevention
 change alone does not clear them or make an ordinary guarded rollout eligible.
 
 Run the command from a stable, reviewed checkout outside the immutable release root. The target must
 already be staged with `capabilities.legacyMaintenanceQuarantine: 1`. Supply the exact legacy lease IDs
 and evidence directories covering the selected runtime's OpenCode database and WAL, in addition to
 the configuration, durable state and workspaces automatically inventoried by the probe:
+
+The supported launch profile is Linux user systemd with cgroup v2, direct execution through
+`~/.local/share/mise/shims/node --conditions=onionsoup-source --import tsx`, the source entrypoints under
+`<release_root>/current`, and the declared service environment. Wrappers, environment files, extra
+execution hooks, different launch profiles and unrecognized database layouts are refused rather than
+assumed equivalent. No live eligibility follows from synthetic tests of this profile.
 
 ```sh
 node --conditions=onionsoup-source --import tsx scripts/recover-maintenance.mjs \

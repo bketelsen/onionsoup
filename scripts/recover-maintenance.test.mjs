@@ -513,3 +513,77 @@ test('a self-consistent quarantine with changed admissions cannot replace the ch
   await assert.rejects(recoverMaintenance(input), /maintenance_recovery_quarantine_changed/);
   assert.equal(state.calls.length, 0);
 });
+
+test('new busy activity in final preflight leaves no stop-attempt record and remains retryable', async context => {
+  const state = await fixture(context);
+  const { input } = await approve(state);
+  const inspect = input.probeEffects.inspectUnit;
+  let surfaceObservations = 0;
+  input.probeEffects.inspectUnit = async (identity, unit) => {
+    const observed = await inspect(identity, unit);
+    if (unit === SURFACE) {
+      // The original surface is sampled at entry and exit of the first full preflight.
+      // New activity begins after that first verified read, before final preflight.
+      surfaceObservations++;
+      if (surfaceObservations === 2) state.activity.busy = true;
+    }
+    return observed;
+  };
+  await assert.rejects(recoverMaintenance(input), /maintenance_recovery_active_runtime/);
+  assert.equal(state.calls.length, 0);
+  const attempt = join(state.root, 'maintenance-recoveries', input.approveDigest, 'actions', `stop-${OWNERS}.json`);
+  await assert.rejects(readFile(attempt), { code: 'ENOENT' });
+  await assertHeld(state);
+  input.probeEffects.inspectUnit = inspect;
+  state.activity.busy = false;
+  assert.equal((await recoverMaintenance(input)).state, 'restored-quarantined');
+  assert.equal(state.calls.length, 4);
+});
+
+async function interruptedSwitch(context, withStartAttempt = false) {
+  const state = await fixture(context);
+  const { input } = await approve(state);
+  state.activity.beforeService = async (action, unit) => {
+    if (action === 'stop' && unit === SURFACE) {
+      await Promise.all(state.units.get(unit).map(process => process.stop()));
+      throw new Error('fixture-stopped-reply-lost');
+    }
+  };
+  await assert.rejects(recoverMaintenance(input), /fixture-stopped-reply-lost/);
+  state.activity.beforeService = undefined;
+  assert.equal(await state.inspectUnit(undefined, OWNERS), 'stopped');
+  assert.equal(await state.inspectUnit(undefined, SURFACE), 'stopped');
+  const directory = join(state.root, 'maintenance-recoveries', input.approveDigest, 'actions');
+  const switchPath = join(directory, 'switch.json');
+  const saved = JSON.stringify({ version: 1, digest: input.approveDigest, action: 'switch', at: new Date().toISOString() });
+  await writeFile(switchPath, saved, { flag: 'wx' });
+  if (withStartAttempt) {
+    await writeFile(join(directory, `start-${OWNERS}.json`), JSON.stringify({ version: 1,
+      digest: input.approveDigest, action: `start-${OWNERS}`, at: new Date().toISOString() }), { flag: 'wx' });
+  }
+  return { state, input, switchPath, saved };
+}
+
+test('interrupted pointer intent can resume only with old pointer, stopped processes and no start attempts', async context => {
+  const { state, input, switchPath, saved } = await interruptedSwitch(context);
+  assert.equal(await readlink(join(state.root, 'current')), join(state.root, 'releases', OLD));
+  const receipt = await recoverMaintenance(input);
+  assert.equal(receipt.state, 'restored-quarantined');
+  assert.equal(await readlink(join(state.root, 'current')), join(state.root, 'releases', NEXT));
+  assert.equal(await readFile(switchPath, 'utf8'), saved);
+  assert.deepEqual(state.calls, [
+    { action: 'stop', unit: OWNERS }, { action: 'stop', unit: SURFACE },
+    { action: 'start', unit: OWNERS }, { action: 'start', unit: SURFACE },
+  ]);
+  assert.deepEqual(await recoverMaintenance(input), receipt);
+  assert.equal(state.calls.length, 4);
+});
+
+test('a recorded target start with an old pointer blocks interrupted-switch retry without new effects', async context => {
+  const { state, input, switchPath, saved } = await interruptedSwitch(context, true);
+  await assert.rejects(recoverMaintenance(input), /maintenance_recovery_switch/);
+  assert.equal(await readlink(join(state.root, 'current')), join(state.root, 'releases', OLD));
+  assert.equal(await readFile(switchPath, 'utf8'), saved);
+  assert.deepEqual(state.calls, [{ action: 'stop', unit: OWNERS }, { action: 'stop', unit: SURFACE }]);
+  await assertHeld(state);
+});

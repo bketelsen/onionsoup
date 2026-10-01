@@ -3,6 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { z } from 'zod';
 import { withRecordLock } from './record-lock.ts';
+import { AdmissionRecord } from './admission-record.ts';
+export { AdmissionRecord } from './admission-record.ts';
 import { assertMaintenanceAllowed } from './maintenance-quarantine.ts';
 
 /** Shared with the surface's deployment badge: state/deploy/pending.json. */
@@ -11,14 +13,6 @@ export const DeploymentIntent = z.object({
   targetBuildId: z.string().trim().min(1),
 });
 export type DeploymentIntent = z.infer<typeof DeploymentIntent>;
-
-export const AdmissionRecord = z.object({
-  id: z.uuid(),
-  kind: z.string().trim().min(1),
-  pid: z.number().int().positive(),
-  startTime: z.string().regex(/^\d+$/),
-  maintenance: z.object({ instanceID: z.uuid(), operationID: z.uuid(), directory: z.string() }).optional(),
-});
 
 export type Admission = z.infer<typeof AdmissionRecord> & { alive: boolean };
 export type AdmissionLease = Admission & { release(): Promise<void> };

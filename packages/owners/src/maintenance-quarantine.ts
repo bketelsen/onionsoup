@@ -3,14 +3,14 @@ import { lstat, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
-import { AdmissionRecord } from './deployment-admission.ts';
+import { AdmissionRecord } from './admission-record.ts';
 import { readOperatorCheckOwner } from './operator-check-execution.ts';
 import { writeHandoffFile } from './operator-handoff-file.ts';
 import { withRecordLock } from './record-lock.ts';
 
 const Hash = z.string().regex(/^[a-f0-9]{64}$/);
 const Build = z.string().regex(/^[a-f0-9]{40}$/);
-const LegacyAdmission = z.lazy(() => AdmissionRecord.omit({ maintenance: true }).strict());
+const LegacyAdmission = AdmissionRecord.omit({ maintenance: true }).strict();
 export const MaintenanceQuarantineBody = z.object({ version: z.literal(1), recoveryDigest: Hash,
   targetBuildId: Build, oldBuildId: Build, admissions: z.array(LegacyAdmission).min(1), createdAt: z.iso.datetime() }).strict();
 export type MaintenanceQuarantineBody = z.infer<typeof MaintenanceQuarantineBody>;

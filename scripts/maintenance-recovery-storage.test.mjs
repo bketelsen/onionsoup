@@ -57,3 +57,17 @@ test('required missing archives and changed approved bytes refuse instead of inv
   await writeFile(join(setup.selection.state, 'item.json'), '{}');
   await assert.rejects(backupMaintenanceEvidence(proof, join(setup.scratch, 'changed')), /backup_evidence_changed/);
 });
+
+test('repository lockfiles and regular sock-suffix evidence are copied instead of treated as coordination files', async context => {
+  const setup = await fixture(context);
+  const workspace = setup.selection.evidenceRoots[0];
+  for (const name of ['yarn.lock', 'Cargo.lock', 'flake.lock', 'poetry.lock', 'regular.sock']) {
+    await writeFile(join(workspace, name), `preserve ${name}\n`);
+  }
+  const proof = await setup.proof();
+  const receipt = await backupMaintenanceEvidence(proof, join(setup.scratch, 'backup'));
+  const copy = receipt.copies.find(copy => copy.source === workspace);
+  for (const name of ['yarn.lock', 'Cargo.lock', 'flake.lock', 'poetry.lock', 'regular.sock']) {
+    assert.equal(await readFile(join(copy.destination, name), 'utf8'), `preserve ${name}\n`);
+  }
+});

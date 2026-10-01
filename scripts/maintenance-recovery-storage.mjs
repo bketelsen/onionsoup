@@ -145,7 +145,11 @@ export async function backupMaintenanceEvidence(proof, directory, verifyOriginal
     if (!(await lstat(source)).isDirectory()) throw fail('maintenance_recovery_backup_root_invalid');
     const destination = join(attemptDirectory, String(index));
     await cp(source, destination, { recursive: true, dereference: false, verbatimSymlinks: true,
-      filter: path => !path.endsWith('.lock') && !path.endsWith('.sock') });
+      filter: async path => {
+        const relative = path.slice(source.length + 1);
+        if (source === proof.selection.state && relative.split(sep).some(name => name.endsWith('.lock') || name.endsWith('.tmp'))) return false;
+        return !(await lstat(path)).isSocket();
+      } });
     const databases = [];
     for (const database of await sqliteFiles(source)) {
       const consistent = join(attemptDirectory, `${index}-${hash(database)}.sqlite`);

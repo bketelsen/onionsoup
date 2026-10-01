@@ -141,11 +141,11 @@ async function stopOriginal(input, selection, paths, checkpoint, marker, effects
     if (observation === 'stopped') continue;
     if (observation !== 'original') throw fail('maintenance_recovery_original_process_unverified');
     await revalidateMaintenanceBeforeStop(checkpoint.proof, input.probeEffects);
-    if (!await attempt(paths, checkpoint, `stop-${unit}`)) throw fail('maintenance_recovery_stop_uncertain_gate_held');
-    // The checkpoint is durable before the side effect; an uncertain stop is never repeated.
     await revalidateMaintenanceBeforeStop(checkpoint.proof, input.probeEffects);
     const checked = await inspectMaintenanceUnit(checkpoint.proof, unit, input.probeEffects);
     if (checked !== 'original') throw fail('maintenance_recovery_original_process_unverified');
+    // Persist the attempt only after all preconditions pass, immediately before the effect.
+    if (!await attempt(paths, checkpoint, `stop-${unit}`)) throw fail('maintenance_recovery_stop_uncertain_gate_held');
     await effects.systemctl('stop', unit);
   }
   if ((await inspectStoppedMaintenance(checkpoint.proof, input.probeEffects)).state !== 'stopped') {
@@ -164,7 +164,18 @@ async function activateTarget(input, selection, paths, checkpoint, marker, effec
   if (![old, target].includes(current)) throw fail('maintenance_recovery_pointer_changed');
   if (current === old) {
     await held(selection, checkpoint, marker);
-    if (!await attempt(paths, checkpoint, 'switch')) throw fail('maintenance_recovery_switch_uncertain_gate_held');
+    const firstAttempt = await attempt(paths, checkpoint, 'switch');
+    if (!firstAttempt) {
+      for (const unit of UNITS) {
+        if (await optionalRecord(join(paths.archive, 'actions', `start-${unit}.json`), Attempt)) {
+          throw fail('maintenance_recovery_switch_uncertain_gate_held');
+        }
+      }
+      if ((await inspectStoppedMaintenance(checkpoint.proof, input.probeEffects)).state !== 'stopped') {
+        throw fail('maintenance_recovery_stop_unverified_gate_held');
+      }
+    }
+    if (await realpath(pointer) !== old) throw fail('maintenance_recovery_pointer_changed');
     await switchPointer(pointer, target);
   } else {
     const switched = await optionalRecord(join(paths.archive, 'actions/switch.json'), Attempt);
