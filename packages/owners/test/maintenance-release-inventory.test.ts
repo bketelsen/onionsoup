@@ -202,7 +202,7 @@ test('request progress history uses its existing schema and unresolved pending c
 test('finished cleanup candidates require workspace evidence; failed work keeps its existing workspace', async context => {
   const { state, save } = await fixture(context);
   await save('items/work_fixture.json', { ...item('cancelled'), planWorktree: '/synthetic/worktree' });
-  assert.equal((await inspectMaintenanceReleaseInventory(state)).decisions[0].reason, 'plan_cleanup_requires_separate_evidence');
+  assert.equal((await inspectMaintenanceReleaseInventory(state)).decisions[0].reason, 'worktree_proof_read_failed');
   await save('items/work_fixture.json', { ...item('failed'), planWorktree: '/synthetic/worktree' });
   assert.equal((await inspectMaintenanceReleaseInventory(state)).eligible, true);
 });

@@ -13,9 +13,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  verify:
+  verify-shard:
+    name: verify shard ${{ matrix.shard }}/4
     runs-on: ubuntu-22.04
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -59,9 +64,20 @@ jobs:
           echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> "$GITHUB_ENV"
           mkdir -p ~/.config/opencode ~/.local/state/opencode ~/.local/share/opencode ~/.cache ~/.npm ~/go
       - run: npm ci
-      # Full real-sandbox fixtures can exceed five minutes on hosted runners.
-      # Keep all tests and their individual limits; bound only the complete suite here.
+      # Real sandbox application and handoff suites dominate the serial file queues.
+      # Native file shards spread those workloads across runners without skipping tests
+      # or changing individual limits. Every shard also runs the configured build checks.
       - run: timeout 600s npm run verify
         env:
+          ONIONSOUP_TEST_SHARD: ${{ matrix.shard }}/4
           ONIONSOUP_HOME: ${{ runner.temp }}/onionsoup-home
           ONIONSOUP_CONFIG: ${{ runner.temp }}/onionsoup-config
+  verify:
+    if: ${{ always() }}
+    needs: verify-shard
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Require every verification shard
+        env:
+          SHARDS_RESULT: ${{ needs.verify-shard.result }}
+        run: test "$SHARDS_RESULT" = success

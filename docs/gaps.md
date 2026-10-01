@@ -100,8 +100,9 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
   fresh replay-safety inventory, authenticated observation and exact operational approval. Unbound legacy
   openings, pending effects and stale notice cursors still block it; missing evidence is never fabricated.
   Terminal request operations without runners are retained as history. Future reminders have a release
-  deadline, not a fabricated fired receipt. Tracking requests, cleanup candidates (even ones previously
-  kept), and unsubmitted operator wakes still block; this classification does not supply their missing proof.
+  deadline, not a fabricated fired receipt. Tracking requests require exact no-transition bindings; worktree retention requires current session/Git
+  proof, and an unsent operator wake requires a bound obsolete event with no current actionable candidate.
+  Missing, expired or changed proof still blocks. Historical outcomes remain unknown where their evidence is unknown.
   An uncertain observation startup or unconfirmed instance disposal remains held for investigation.
   A crash between pending completion and the release receipt also remains quarantined; the exact saved
   release digest is required to resume. The pending badge alone is not proof that admission is open.

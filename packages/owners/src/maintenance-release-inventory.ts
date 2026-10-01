@@ -22,6 +22,8 @@ import { Cursor, Baseline } from './request-status.ts';
 import { WorkNotice, describeChange } from './notices.ts';
 import { ExchangeNotice } from './exchange-notices.ts';
 import { WorkNoticeDelivery } from './work-notice-delivery.ts';
+import { trackingRequestPreserved, obsoleteUnsubmittedWake } from './maintenance-tracking-proof.ts';
+import { inspectWorktreePreservation, type MaintenanceSessionActivity } from './maintenance-worktree-proof.ts';
 
 /** Only continuation stores are covered here. Configuration, processes, workspaces and
  * OpenCode transcripts must independently match the encompassing recovery proof. */
@@ -35,6 +37,7 @@ export interface MaintenanceInventoryDecision {
   classification: 'terminal' | 'human-gated' | 'single-use-protected' | 'time-gated' | 'blocked';
   reason: string;
   validUntil?: string;
+  proofDigest?: string;
 }
 export interface MaintenanceReleaseInventory {
   version: 1;
@@ -99,16 +102,25 @@ function openingProtected(opening: SessionOpening | undefined) {
   return Boolean(opening && (opening.phase !== 'blocked'
     || opening.history.some(entry => ['creating', 'created', 'prompting', 'opened', 'uncertain'].includes(entry.phase))));
 }
-function classifyItems(state: string, files: Map<string, string>) {
+async function classifyItems(state: string, files: Map<string, string>, now: number, sessions: MaintenanceSessionActivity[]) {
   const store = new SessionOpeningStore(state);
-  return jsonFiles(files, 'items').map(path => {
+  const decisions: MaintenanceInventoryDecision[] = [];
+  for (const path of jsonFiles(files, 'items')) {
+    decisions.push(await classifyItem(path));
+  }
+  return decisions;
+  async function classifyItem(path: string): Promise<MaintenanceInventoryDecision> {
     const item = WorkItem.parse(parsed(files, path));
     boundPath(path, `items/${item.id}.json`);
     if (item.activeRunner) return decision(path, false, 'work_runner_unresolved');
     if (item.deskPublication && item.deskPublication.stage !== 'complete') return decision(path, false, 'publication_unresolved');
     const cleanup = item.status === 'cancelled' || (item.status === 'landed'
       && ['merged', 'closed'].includes(item.publication?.state ?? ''));
-    if (cleanup && item.planWorktree) return decision(path, false, 'plan_cleanup_requires_separate_evidence');
+    if (cleanup && item.planWorktree) {
+      const observations = sessions.filter(session => session.sessionID === item.session?.sessionID);
+      if (observations.length > 1) return decision(path, false, 'plan_cleanup_session_ambiguous');
+      return { resource: path, ...await inspectWorktreePreservation(item, observations[0], now) };
+    }
     const kind = neededSession(item);
     if (kind) {
       const key = { entity: 'owner-item' as const, id: item.id, owner: item.owner, kind };
@@ -121,7 +133,7 @@ function classifyItems(state: string, files: Map<string, string>) {
     const safe = isFinished(item) || ['interrupted', 'proposed', 'awaiting-plan-approval'].includes(item.status)
       || (item.workflow === OWNER_CHANGE_WORKFLOW && Boolean(item.origin || item.session));
     return decision(path, safe, safe ? 'no_automatic_work_execution' : 'work_continuation_requires_evidence');
-  });
+  }
 }
 function classifyReminders(state: string, files: Map<string, string>, now: number) {
   const store = new SessionOpeningStore(state);
@@ -175,8 +187,12 @@ function classifyDeliveries(files: Map<string, string>) {
   }
   const path = 'operator-job-wakes/wakes.json';
   if (files.has(path)) for (const wake of OperatorWakes.parse(parsed(files, path))) {
-    decisions.push(decision(`${path}#${wake.digest}`, Boolean(wake.messageID) || ['delivered', 'superseded'].includes(wake.status),
-      wake.messageID ? 'job_wake_submission_claim_retained' : 'job_wake_unsubmitted', 'single-use-protected'));
+    const ledgerPath = 'operator-jobs/jobs.json';
+    const jobs = files.has(ledgerPath) ? OperatorJobLedger.parse(parsed(files, ledgerPath)).jobs : [];
+    const matches = jobs.filter(job => job.id === wake.jobID);
+    const obsolete = matches.length === 1 && obsoleteUnsubmittedWake(wake, matches[0]!);
+    decisions.push(decision(`${path}#${wake.digest}`, obsolete || Boolean(wake.messageID) || ['delivered', 'superseded'].includes(wake.status),
+      obsolete ? 'job_wake_obsolete_unsubmitted' : wake.messageID ? 'job_wake_submission_claim_retained' : 'job_wake_unsubmitted', 'single-use-protected'));
   }
   return decisions;
 }
@@ -240,7 +256,7 @@ function classifyRouting(files: Map<string, string>) {
 const INERT_REQUEST_STATUSES = new Set<ResourceRequest['status']>(['declined', 'denied', 'deleted', 'published',
   'updated', 'failed', 'completed', 'awaiting-create-approval', 'awaiting-delete-approval']);
 
-function classifyRequest(path: string, request: ResourceRequest) {
+function classifyRequest(path: string, request: ResourceRequest, files: Map<string, string>) {
   if (request.operation?.runner !== undefined) return decision(path, false, 'request_runner_unresolved');
   if (['awaiting-create-approval', 'awaiting-delete-approval'].includes(request.status)) {
     return decision(path, true, 'request_human_gate_retained', 'human-gated');
@@ -248,16 +264,22 @@ function classifyRequest(path: string, request: ResourceRequest) {
   if (INERT_REQUEST_STATUSES.has(request.status)) {
     return decision(path, true, request.operation ? 'request_historical_operation_retained' : 'request_no_automatic_step');
   }
+  const itemPath = request.workItem && `items/${request.workItem}.json`;
+  const item = itemPath && files.has(itemPath) ? WorkItem.parse(parsed(files, itemPath)) : undefined;
+  if (item && trackingRequestPreserved(request, item)) {
+    boundPath(itemPath!, `items/${item.id}.json`);
+    return decision(path, true, 'request_tracking_without_transition');
+  }
   return decision(path, request.status === 'interrupted' && !request.operation, 'request_continuation_gate');
 }
 
-async function classify(state: string, files: Map<string, string>, now: number) {
-  const decisions = [...classifyItems(state, files), ...classifyReminders(state, files, now), ...classifyJobs(files),
+async function classify(state: string, files: Map<string, string>, now: number, sessions: MaintenanceSessionActivity[]) {
+  const decisions = [...await classifyItems(state, files, now, sessions), ...classifyReminders(state, files, now), ...classifyJobs(files),
     ...classifyDeliveries(files), ...classifyNotices(files)];
   for (const path of jsonFiles(files, 'requests')) {
     const request = ResourceRequest.parse(parsed(files, path));
     boundPath(path, `requests/${request.id}.json`);
-    decisions.push(classifyRequest(path, request));
+    decisions.push(classifyRequest(path, request, files));
   }
   for (const path of jsonFiles(files, 'initiatives')) {
     const initiative = Initiative.parse(parsed(files, path));
@@ -307,14 +329,18 @@ async function classify(state: string, files: Map<string, string>, now: number) 
 
 /** Read twice: a valid classification over torn or changed input is not release evidence. */
 export async function inspectMaintenanceReleaseInventory(stateDirectory: string,
-  effects: { afterSnapshot?: () => Promise<void>; now?: () => number } = {}): Promise<MaintenanceReleaseInventory> {
+  effects: { afterSnapshot?: () => Promise<void>; now?: () => number; sessions?: MaintenanceSessionActivity[] } = {}): Promise<MaintenanceReleaseInventory> {
   const state = resolve(stateDirectory);
   const now = effects.now ?? Date.now;
   const first = await snapshot(state);
-  const decisions = await classify(state, first.files, now());
+  const sessions = effects.sessions ?? [];
+  const observedAt = now();
+  const decisions = await classify(state, first.files, observedAt, sessions);
   await effects.afterSnapshot?.();
   const second = await snapshot(state);
   if (JSON.stringify(first.entries) !== JSON.stringify(second.entries)) throw new Error('maintenance_inventory_changed');
+  const confirmed = await classify(state, second.files, observedAt, sessions);
+  if (JSON.stringify(decisions) !== JSON.stringify(confirmed)) throw new Error('maintenance_inventory_changed');
   const validUntil = decisions.flatMap(entry => entry.validUntil ? [entry.validUntil] : [])
     .sort((left, right) => Date.parse(left) - Date.parse(right))[0];
   const digest = hash(JSON.stringify({ version: 1, state, entries: first.entries, decisions, validUntil }));
@@ -333,7 +359,7 @@ export function assertMaintenanceReleaseInventoryFresh(inventory: Pick<Maintenan
   }
 }
 export async function assertMaintenanceReleaseInventoryUnchanged(stateDirectory: string, expectedDigest: string,
-  effects: { now?: () => number } = {}) {
+  effects: { now?: () => number; sessions?: MaintenanceSessionActivity[] } = {}) {
   const current = await inspectMaintenanceReleaseInventory(stateDirectory, effects);
   if (current.digest !== expectedDigest) throw new Error('maintenance_inventory_changed');
   return current;

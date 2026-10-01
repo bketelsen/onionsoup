@@ -14,6 +14,7 @@ import { recoveryContext, observationProof, reconciliationProof, validateRelease
   verifyReleaseRuntimeIdentity } from './maintenance-release-probe.mjs';
 import { activationState, activationHealth, prepareMaintenanceActivation } from './maintenance-release-activation.mjs';
 import { durableExclusive, optionalRecord } from './maintenance-recovery-storage.mjs';
+import { cleanupSessionEvidence } from './maintenance-release-probe.mjs';
 import { fail, hash } from './admission-recovery-proof.mjs';
 
 const Digest = z.string().regex(/^[a-f0-9]{64}$/);
@@ -133,15 +134,17 @@ async function preparedProof(input, context, intent, effects) {
   return decision.proof;
 }
 
-async function verifyLocalSnapshot(context, proof, effects) {
+async function verifyLocalSnapshot(context, proof, effects, pendingStatus = 'draining') {
   const { selection, marker } = context;
   await verifyReleaseRuntimeIdentity(context, proof, effects);
   if (hash(await leasesEvidence(selection.state)) !== hash(proof.admissions)) throw fail('maintenance_release_admissions_changed');
-  if (hash(await inspectMaintenanceReleaseInventory(selection.state)) !== hash(proof.inventory)) {
+  // Saved metadata came from authenticated observation. The full storage fingerprint below
+  // must still match after disposal, when another API read could recreate a restricted instance.
+  if (hash(await inspectMaintenanceReleaseInventory(selection.state, { sessions: cleanupSessionEvidence(proof.sessions) })) !== hash(proof.inventory)) {
     throw fail('maintenance_release_inventory_changed');
   }
   const pending = JSON.parse(await readFile(join(selection.state, 'deploy/pending.json'), 'utf8'));
-  if (pending.status !== 'draining' || pending.targetBuildId !== selection.expectedTarget) throw fail('maintenance_release_drain_lost');
+  if (pending.status !== pendingStatus || pending.targetBuildId !== selection.expectedTarget) throw fail('maintenance_release_drain_lost');
   if (hash(JSON.parse(await readFile(join(selection.state, 'deploy/maintenance-quarantine.json'), 'utf8'))) !== hash(marker)) {
     throw fail('maintenance_release_quarantine_changed');
   }
@@ -256,6 +259,8 @@ async function release(input, effects) {
     // Receipt is the single commit point. A crash before it retains the quarantine even after pending completes.
     await writeHandoffFile(paths.pending, JSON.stringify({ status: 'completed', targetBuildId: intent.targetBuildId }) + '\n');
     await effects.afterPendingCommit?.();
+    assertMaintenanceReleaseInventoryFresh(proof.inventory);
+    await verifyLocalSnapshot(context, proof, effects, 'completed');
     assertMaintenanceReleaseInventoryFresh(proof.inventory);
     await durableExclusive(paths.receipt, receipt);
     await effects.afterReleaseCommit?.();

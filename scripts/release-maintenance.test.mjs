@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -21,9 +22,10 @@ function syntheticMessages(sessionID) {
   ];
 }
 
-function syntheticHistory(directory) {
+function syntheticHistory(directory, updatedAt) {
   const sessions = [{ id: 'ses_fixture_parent', directory },
-    { id: 'ses_fixture_child', directory, parentID: 'ses_fixture_parent' }];
+    { id: 'ses_fixture_child', directory, parentID: 'ses_fixture_parent' }]
+    .map(session => updatedAt === undefined ? session : { ...session, time: { updated: updatedAt } });
   return { sessions, messages: Object.fromEntries(sessions.map(session => [session.id, syntheticMessages(session.id)])) };
 }
 
@@ -47,7 +49,7 @@ async function recovered(context, options = {}) {
     if (previousManifest === undefined) delete process.env.ONIONSOUP_RELEASE_MANIFEST;
     else process.env.ONIONSOUP_RELEASE_MANIFEST = previousManifest;
   });
-  const history = options.history ? syntheticHistory(state.workspace) : undefined;
+  const history = options.history ? syntheticHistory(state.workspace, options.updatedAt) : undefined;
   if (history) {
     const request = state.input.probeEffects.request;
     state.input.probeEffects.request = async (endpoint, path) =>
@@ -636,3 +638,57 @@ test('moving runtime storage within the selected evidence root cannot substitute
   assert.equal(state.releaseActivity.disposals, 0);
   await assertQuarantined(state);
 });
+
+test('changed workspace between pending completion and immutable receipt keeps quarantine and original evidence', async context => {
+  const state = await recovered(context);
+  const { input } = await preparedRelease(state);
+  input.probeEffects.afterPendingCommit = () => writeFile(join(state.workspace, 'source.txt'), 'new genuine work\n');
+  await assert.rejects(releaseMaintenance(input), /maintenance_release_evidence_changed/);
+  await assert.rejects(readFile(maintenanceReleasePaths(state.state).receipt), { code: 'ENOENT' });
+  assert.equal(await readFile(join(state.workspace, 'source.txt'), 'utf8'), 'new genuine work\n');
+  assert.equal(state.releaseActivity.disposals, 1);
+  assert.equal((await readMaintenanceQuarantine(state.state)).targetBuildId, NEXT);
+  await assert.rejects(beginAdmission(state.state, 'fixture:new-work'), /maintenance_quarantined/);
+});
+
+async function retainedWorktree(state, lastActive) {
+  const git = (...args) => execFileSync('git', ['-C', state.workspace, ...args], { encoding: 'utf8' }).trim();
+  git('init', '--quiet');
+  git('config', 'user.name', 'Fixture');
+  git('config', 'user.email', 'fixture@example.invalid');
+  git('add', 'source.txt');
+  git('commit', '--quiet', '-m', 'fixture');
+  state.releaseActivity.sessions = state.releaseActivity.sessions.map(session => ({ ...session, time: { updated: lastActive } }));
+  const work = { id: 'work_retained', owner: 'clippy', workflow: 'owner-change', status: 'cancelled',
+    proposal: { title: 'Retained fixture', goal: 'Preserve all original evidence', rationale: 'Fixture',
+      acceptance: ['No cleanup'], size: 'small' }, session: { sessionID: 'ses_fixture_parent', directory: state.workspace },
+    planWorktree: state.workspace, landedCommit: git('rev-parse', 'HEAD'),
+    createdAt: new Date(lastActive).toISOString(), updatedAt: new Date(lastActive).toISOString() };
+  const path = join(state.state, 'items', 'work_retained.json');
+  const bytes = JSON.stringify(work);
+  await writeFile(path, bytes);
+  return { path, bytes };
+}
+
+for (const expires of [false, true]) {
+  test(`authenticated worktree retention ${expires ? 'expires at receipt boundary' : 'survives observation disposal without another scoped read'}`, async context => {
+    const clock = Date.now();
+    const deadline = clock + 60_000;
+    const state = await recovered(context, { history: true, updatedAt: deadline - 86_400_000 });
+    context.mock.timers.enable({ apis: ['Date'], now: clock });
+    const retained = await retainedWorktree(state, deadline - 86_400_000);
+    const { preview, input } = await preparedRelease(state);
+    assert.equal(preview.eligible, true);
+    assert.equal(preview.proof.inventory.validUntil, new Date(deadline).toISOString());
+    if (expires) {
+      input.probeEffects.afterPendingCommit = async () => context.mock.timers.setTime(deadline);
+      await assert.rejects(releaseMaintenance(input), /maintenance_inventory_expired/);
+      await assert.rejects(readFile(maintenanceReleasePaths(state.state).receipt), { code: 'ENOENT' });
+      await assertQuarantined(state);
+    } else assert.equal((await releaseMaintenance(input)).state, 'released');
+    assert.equal(state.releaseActivity.disposals, 1);
+    assert.equal(await readFile(retained.path, 'utf8'), retained.bytes);
+    assert.equal(await readFile(join(state.workspace, 'source.txt'), 'utf8'), 'unchanged source\n');
+    await state.assertHistory();
+  });
+}
