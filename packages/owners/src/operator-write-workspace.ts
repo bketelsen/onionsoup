@@ -5,7 +5,7 @@ import { lstat, open, readFile, readlink, realpath, type FileHandle } from 'node
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { z } from 'zod';
-import { runOperatorFileWriter } from './operator-write-writer.ts';
+import { preflightOperatorFileWriter, runOperatorFileWriter } from './operator-write-writer.ts';
 
 export const OPERATOR_WRITE_LIMITS = { approvedFiles: 8, trackedFiles: 4096, fileBytes: 256 * 1024, treeBytes: 128 * 1024 * 1024, gitTimeoutMs: 10_000 };
 const Hash = z.string().regex(/^[a-f0-9]{64}$/);
@@ -207,6 +207,7 @@ export async function prepareOperatorFileMutation(snapshot: OperatorWriteSnapsho
   await inspectWorkspace(snapshot, expected);
   const afterSha256 = operatorWriteSha256(textBytes(input.content, snapshot.limits.fileBytes));
   if (afterSha256 === input.expectedBeforeSha256) error('no_change');
+  await preflightOperatorFileWriter();
   return OperatorWriteMutation.parse({ id: input.id, path: input.path, content: input.content,
     beforeSha256: input.expectedBeforeSha256, afterSha256, snapshotDigest: snapshot.digest });
 }

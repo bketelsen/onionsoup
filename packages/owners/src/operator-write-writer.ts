@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import type { OperatorWriteMutation, OperatorWriteSnapshot } from './operator-write-workspace.ts';
 
-export const OPERATOR_WRITER_LIMITS = { memoryBytes: 6 * 1024 ** 3, outerMemoryBytes: 12 * 1024 ** 3, timeoutMs: 15_000, killMs: 1_000, outputBytes: 4096 };
+export const OPERATOR_WRITER_LIMITS = { memoryBytes: 6 * 1024 ** 3, outerMemoryBytes: 12 * 1024 ** 3, timeoutMs: 15_000, killMs: 1_000, outputBytes: 4096, capabilityOutputBytes: 16 * 1024 };
 const helper = fileURLToPath(new URL('./operator-write-file.mjs', import.meta.url));
 
 const execute = promisify(execFile);
@@ -27,6 +27,22 @@ export async function resolveOperatorWriterNode(): Promise<string> {
   return canonical;
 }
 
+export function requireOperatorWriterBwrapFeatures(help: string) {
+  if (!/^\s+--bind-fd\s/m.test(help) || !/^\s+--ro-bind-fd\s/m.test(help)) {
+    throw new Error('operator_write_bwrap_unsupported: bubblewrap >= 0.10 with descriptor binds is required');
+  }
+}
+
+/** Read-only host checks run before durable mutation intent; old bubblewrap never falls back to pathname binds. */
+export async function preflightOperatorFileWriter() {
+  const node = await resolveOperatorWriterNode();
+  const help = await execute('/usr/bin/bwrap', ['--help'], { env: {}, timeout: OPERATOR_WRITER_LIMITS.timeoutMs,
+    maxBuffer: OPERATOR_WRITER_LIMITS.capabilityOutputBytes }).catch(() => undefined);
+  if (!help) throw new Error('operator_write_bwrap_unavailable');
+  requireOperatorWriterBwrapFeatures(help.stdout);
+  return { node };
+}
+
 /** A nested staging sandbox may reuse an already enforced memory cgroup, never a caller's environment flag. */
 async function alreadyMemoryCapped() {
   try {
@@ -45,12 +61,14 @@ async function alreadyMemoryCapped() {
 }
 
 export async function operatorWriterCommand() {
-  const node = await resolveOperatorWriterNode();
+  const { node } = await preflightOperatorFileWriter();
   const args = ['--ro-bind', '/', '/', '--unshare-net', '--unshare-pid', '--proc', '/proc', '--dev', '/dev',
-    '--tmpfs', '/tmp', '--bind-fd', '3', '/tmp/operator-approved-file', '--die-with-parent', '--new-session', '--clearenv',
-    '--', node, '--max-old-space-size=128', helper];
-  if (await alreadyMemoryCapped()) return { command: '/usr/bin/bwrap', args };
-  return { command: '/usr/bin/systemd-run', args: ['--user', '--scope', '--quiet', '-p', `MemoryMax=${OPERATOR_WRITER_LIMITS.memoryBytes}`,
+    '--tmpfs', '/tmp', '--bind-fd', '3', '/tmp/operator-approved-file',
+    '--ro-bind-fd', '4', '/tmp/operator-write-file.mjs', '--ro-bind-fd', '5', '/tmp/operator-node',
+    '--die-with-parent', '--new-session', '--clearenv',
+    '--', '/tmp/operator-node', '--max-old-space-size=128', '/tmp/operator-write-file.mjs'];
+  if (await alreadyMemoryCapped()) return { command: '/usr/bin/bwrap', args, node };
+  return { command: '/usr/bin/systemd-run', node, args: ['--user', '--scope', '--quiet', '-p', `MemoryMax=${OPERATOR_WRITER_LIMITS.memoryBytes}`,
     '-p', 'MemorySwapMax=0', '-p', 'TasksMax=32', '--', '/usr/bin/bwrap', ...args] };
 }
 
@@ -83,10 +101,9 @@ async function openPinnedFile(snapshot: OperatorWriteSnapshot, path: string) {
   }
 }
 
-async function executeWriter(fd: number, payload: object) {
-  const command = await operatorWriterCommand();
+async function executeWriterProcess(command: Awaited<ReturnType<typeof operatorWriterCommand>>, fds: number[], payload: object) {
   await new Promise<void>((resolve, reject) => {
-    const child = spawn(command.command, command.args, { stdio: ['pipe', 'pipe', 'pipe', fd], detached: true,
+    const child = spawn(command.command, command.args, { stdio: ['pipe', 'pipe', 'pipe', ...fds], detached: true,
       env: { PATH: '/usr/bin:/bin', XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR, DBUS_SESSION_BUS_ADDRESS: process.env.DBUS_SESSION_BUS_ADDRESS } });
     let output = '';
     let timedOut = false;
@@ -109,6 +126,21 @@ async function executeWriter(fd: number, payload: object) {
     });
     child.stdin?.end(JSON.stringify(payload));
   });
+}
+
+/** Pin code and runtime as read-only files after /tmp is masked, including staged releases located under /tmp. */
+async function executeWriter(fd: number, payload: object) {
+  const command = await operatorWriterCommand();
+  const handles: FileHandle[] = [];
+  try {
+    for (const path of [helper, command.node]) {
+      const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+      handles.push(handle);
+      const metadata = await handle.stat();
+      if (!metadata.isFile() || path === command.node && metadata.mode & 0o022) throw new Error('operator_write_runtime_changed');
+    }
+    await executeWriterProcess(command, [fd, ...handles.map(handle => handle.fd)], payload);
+  } finally { for (const handle of handles.reverse()) await handle.close(); }
 }
 
 /** The descriptor bind cannot be redirected by replacing a pathname after validation. */

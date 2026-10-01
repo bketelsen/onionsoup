@@ -70,7 +70,9 @@ files, for example: “Update only the README title in this worktree; do not run
 
 An uncertain prepared write remains blocked and holds its reservation. Do not retry it, abandon it through read-only
 recovery or assume a restart undid the edit; this slice has no uncertain-write recovery. The file writer uses a pinned
-descriptor in a sandbox; the parent operator remains trusted and unsandboxed.
+descriptor in a sandbox; the parent operator remains trusted and unsandboxed. Scoped writes require bubblewrap
+descriptor binds (`--bind-fd` and `--ro-bind-fd`, version 0.10 or newer); unsupported hosts refuse before recording
+a mutation intent. CI builds the pinned 0.12 release and runs the actual writer tests.
 
 ## Create an owner
 

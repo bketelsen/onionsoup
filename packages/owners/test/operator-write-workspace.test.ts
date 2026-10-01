@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { access, chmod, link, mkdir, mkdtemp, readFile, rename, symlink, unlink, writeFile } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { access, chmod, copyFile, cp, link, mkdir, mkdtemp, readFile, rename, symlink, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { operatorWriterCommand, resolveOperatorWriterNode, runOperatorFileWriter } from '../src/operator-write-writer.ts';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { operatorWriterCommand, requireOperatorWriterBwrapFeatures, resolveOperatorWriterNode, runOperatorFileWriter } from '../src/operator-write-writer.ts';
 import { applyOperatorFileMutation, inspectOperatorFileMutation, operatorWriteArtifact, operatorWriteSha256,
   prepareOperatorFileMutation, snapshotOperatorWriteWorkspace } from '../src/operator-write-workspace.ts';
 
@@ -204,7 +206,8 @@ test('host-pinned Node selection ignores OpenCode execPath and rejects relative/
     process.env.ONIONSOUP_HOST_NODE = executable;
     const resolved = await resolveOperatorWriterNode();
     const command = await operatorWriterCommand();
-    assert.equal(command.args[command.args.indexOf('--max-old-space-size=128') - 1], resolved);
+    assert.equal(command.node, resolved);
+    assert.equal(command.args[command.args.indexOf('--max-old-space-size=128') - 1], '/tmp/operator-node');
     assert.notEqual(resolved, process.execPath);
     process.env.ONIONSOUP_HOST_NODE = 'node';
     await assert.rejects(resolveOperatorWriterNode(), /operator_write_node_unavailable/);
@@ -230,4 +233,41 @@ test('Bun without an explicit host Node path fails closed instead of invoking it
     if (originalHost === undefined) delete process.env.ONIONSOUP_HOST_NODE;
     else process.env.ONIONSOUP_HOST_NODE = originalHost;
   }
+});
+
+test('a staged helper and trusted Node under temporary paths survive the writer tmpfs without exposing that directory', async () => {
+  const fixtureState = await fixture();
+  const source = await mkdtemp(join(tmpdir(), 'operator-write-staged-'));
+  for (const name of ['operator-write-workspace.ts', 'operator-write-writer.ts', 'operator-write-file.mjs']) {
+    await cp(new URL(`../src/${name}`, import.meta.url), join(source, name));
+  }
+  await symlink(fileURLToPath(new URL('../../../node_modules', import.meta.url)), join(source, 'node_modules'));
+  const node = join(source, 'node');
+  await copyFile(await resolveOperatorWriterNode(), node, constants.COPYFILE_FICLONE);
+  await chmod(node, 0o755);
+  const api = await import(pathToFileURL(join(source, 'operator-write-workspace.ts')).href);
+  const intent = await fixtureState.prepare('staged successfully\n');
+  const originalNode = process.env.ONIONSOUP_HOST_NODE;
+  try {
+    process.env.ONIONSOUP_HOST_NODE = node;
+    const receipt = await api.applyOperatorFileMutation(fixtureState.snapshot, [], intent);
+    assert.equal(receipt.afterSha256, operatorWriteSha256('staged successfully\n'));
+    assert.equal(await readFile(join(fixtureState.directory, intent.path), 'utf8'), 'staged successfully\n');
+    const command = await operatorWriterCommand();
+    const mask = command.args.indexOf('--tmpfs');
+    assert.equal(command.args[mask + 1], '/tmp');
+    assert.ok(command.args.indexOf('--ro-bind-fd') > mask);
+    assert.equal(command.args.filter(arg => arg === '--bind-fd').length, 1);
+    assert.equal(command.args.filter(arg => arg === '--ro-bind-fd').length, 2);
+    assert.ok(!command.args.includes(source));
+  } finally {
+    if (originalNode === undefined) delete process.env.ONIONSOUP_HOST_NODE;
+    else process.env.ONIONSOUP_HOST_NODE = originalNode;
+  }
+});
+
+test('missing descriptor-bind support is an explicit preflight error, never a pathname fallback', async () => {
+  assert.throws(() => requireOperatorWriterBwrapFeatures('    --bind SRC DEST\n    --ro-bind SRC DEST\n'), /operator_write_bwrap_unsupported/);
+  assert.throws(() => requireOperatorWriterBwrapFeatures('    --bind-fd FD DEST\n'), /operator_write_bwrap_unsupported/);
+  assert.doesNotThrow(() => requireOperatorWriterBwrapFeatures('    --bind-fd FD DEST\n    --ro-bind-fd FD DEST\n'));
 });
