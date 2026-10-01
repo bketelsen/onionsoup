@@ -1,15 +1,15 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, realpath, rename, writeFile } from 'node:fs/promises';
+import { mkdir, open, readFile, realpath, rename, unlink } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative } from 'node:path';
 import { withRecordLock } from './record-lock.ts';
 import {
   OperatorJob, OperatorJobInput, OperatorJobIntake, OperatorJobLedger, OperatorJobOrigin,
   OPERATOR_JOB_LIMITS, OperatorWriteCreateApproval, OperatorPermissionProof, type OperatorJobEvent,
-  type OperatorSessionSnapshot,
+  type OperatorSessionSnapshot, OperatorApplicationClaimBinding, OperatorApplicationRelease, type OperatorApplicationClaim,
 } from './operator-jobs-types.ts';
 import { OperatorWriteArtifact } from './operator-write-workspace.ts';
 import { assertOperatorWriteApproval, assertOperatorWorkspaceClaims, assertOperatorWriteArtifact,
-  assertOperatorWriteTerminal, assertOperatorWriteChecks, operatorWriteReviewDigest } from './operator-write-state.ts';
+  assertOperatorWriteTerminal, assertOperatorWriteChecks, operatorWriteReviewDigest, assertOperatorApplicationWorkspaceClaims } from './operator-write-state.ts';
 export { operatorWriteScopeDigest, operatorWriteReviewDigest } from './operator-write-state.ts';
 
 export function operatorJobDigest(job: OperatorJob) {
@@ -67,10 +67,7 @@ export class OperatorJobs {
     return withRecordLock(`${this.path}.lock`, async () => {
       const ledger = await this.read();
       const save = async () => {
-        const temporary = `${this.path}.${randomUUID()}.tmp`;
-        await mkdir(dirname(this.path), { recursive: true });
-        await writeFile(temporary, JSON.stringify(OperatorJobLedger.parse(ledger), null, 2), { mode: 0o600 });
-        await rename(temporary, this.path);
+        await saveOperatorJobs(this.path, JSON.stringify(OperatorJobLedger.parse(ledger), null, 2));
       };
       return action(ledger, save);
     });
@@ -104,6 +101,58 @@ export class OperatorJobs {
     const job = ledger.jobs.find(candidate => candidate.id === id);
     if (!job || !sameOrigin(job.origin, origin)) throw new Error('operator_job_origin_mismatch');
     return job;
+  }
+
+  /** Host-only reservation; the application host separately proves native authority and exact target identity. */
+  async reserveApplication(originInput: OperatorJobOrigin, id: string, expectedJobRevision: number,
+    bindingInput: OperatorApplicationClaimBinding): Promise<OperatorApplicationClaim> {
+    const origin = await this.origin(originInput);
+    const binding = OperatorApplicationClaimBinding.parse(bindingInput);
+    const directory = await this.canonicalDirectory(binding.target.directory);
+    if (directory !== binding.target.directory) throw new Error('operator_application_target_not_canonical');
+    return this.transaction(async (ledger, save) => {
+      const job = this.bound(ledger, origin, id);
+      const prior = job.applicationClaims?.find(claim => claim.id === binding.id);
+      if (prior) {
+        if (JSON.stringify(OperatorApplicationClaimBinding.parse(prior)) !== JSON.stringify(binding)) {
+          throw new Error('operator_application_claim_conflict');
+        }
+        return prior;
+      }
+      if (job.revision !== expectedJobRevision) throw new Error('operator_application_job_stale');
+      if (!['needs-synthesis', 'completed'].includes(job.status)) throw new Error('operator_application_job_not_ready');
+      if (ledger.jobs.some(other => other.applicationClaims?.some(claim => claim.id === binding.id || claim.token === binding.token))) {
+        throw new Error('operator_application_claim_reused');
+      }
+      assertOperatorApplicationWorkspaceClaims(ledger, directory);
+      const claim: OperatorApplicationClaim = { ...binding, createdAt: new Date().toISOString() };
+      (job.applicationClaims ??= []).push(claim);
+      operatorJobEvent(job, 'application-reserved', `Application ${claim.id} holds the exact destination ${directory}; original child evidence remains unchanged.`);
+      await save();
+      return claim;
+    });
+  }
+
+  /** Only verified application host evidence may release a claim; pause, cancel, and restart never do. */
+  async releaseApplication(originInput: OperatorJobOrigin, id: string, applicationID: string, token: string,
+    evidenceInput: OperatorApplicationRelease): Promise<OperatorApplicationClaim> {
+    const origin = await this.origin(originInput);
+    const evidence = OperatorApplicationRelease.parse(evidenceInput);
+    return this.transaction(async (ledger, save) => {
+      const job = this.bound(ledger, origin, id);
+      const claim = job.applicationClaims?.find(candidate => candidate.id === applicationID);
+      if (!claim || claim.token !== token) throw new Error('operator_application_claim_mismatch');
+      if (claim.release) {
+        if (claim.release.kind !== evidence.kind || claim.release.evidenceDigest !== evidence.evidenceDigest) {
+          throw new Error('operator_application_release_conflict');
+        }
+        return claim;
+      }
+      claim.release = { ...evidence, at: new Date().toISOString() };
+      operatorJobEvent(job, 'application-released', `Application ${claim.id} released its destination with ${evidence.kind} host evidence; no child acceptance was changed.`);
+      await save();
+      return claim;
+    });
   }
 
   async prepare(originInput: OperatorJobOrigin, intakeInput: OperatorJobIntake, inputValue: OperatorJobInput) {
@@ -237,4 +286,31 @@ function assertSameInput(existing: OperatorJob, intake: OperatorJobIntake, input
 function permissionUsed(ledger: OperatorJobLedger, nonce: string) {
   return ledger.jobs.some(job => job.children.some(child => child.write?.approval.proof.nonce === nonce
     || child.write?.acceptance?.proof.nonce === nonce));
+}
+
+
+/** Persist the reservation before returning control to a host that may perform filesystem effects. */
+async function saveOperatorJobs(path: string, contents: string) {
+  await mkdir(dirname(path), { recursive: true });
+  const temporary = `${path}.${randomUUID()}.tmp`;
+  try {
+    const file = await open(temporary, 'wx', 0o600);
+    try {
+      await file.writeFile(contents);
+      await file.sync();
+    } finally {
+      await file.close();
+    }
+    await rename(temporary, path);
+    const directory = await open(dirname(path), 'r');
+    try {
+      await directory.sync();
+    } finally {
+      await directory.close();
+    }
+  } finally {
+    await unlink(temporary).catch(error => {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    });
+  }
 }

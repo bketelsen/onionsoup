@@ -83,12 +83,32 @@ For accepted changes in sibling worktrees of one repository at one base, ask for
 3. `{ "action": "show-handoff", "id": "<job>" }` reports progress and the complete patch/JSON report paths.
    The operator remains available while checks run. A failed combined check is useful evidence even when each child
    passed alone. Unknown completion is preserved across restart, never automatically retried. Use the recovery actions below for a supported resolution.
-4. Review the exact combined diff and check receipts before your normal application/publication workflow. This action
-   never applies changes, commits or pushes. A report with no configured checks is `unchecked`, not verified.
+4. Review the exact combined diff and check receipts. A report with no configured checks is `unchecked`, not verified.
+   Preparing/checking alone never applies changes, commits or pushes.
 
 Overlapping approved paths, different repositories/bases, stale files, unaccepted children or incomplete runtime
 evidence block a handoff. Its report preserves the original task, approvals and child history separately from combined
 verification. Previously recorded synthesis is not rewritten or retroactively presented as combined verification.
+
+To apply a ready combined result into a designated clean integration worktree of that same repository/base:
+
+1. `{ "action": "preview-application", "id": "<job>", "directory": "<absolute integration worktree>" }`
+   binds the original goal, accepted child evidence, successful combined checks and exact destination baseline.
+2. `{ "action": "apply-handoff", "id": "<job>", "directory": "<same destination>", "digest": "<application digest>" }`
+   presents **Apply combined result** with the full diff, checks and destination. **Allow once** authorizes only that
+   exact application; it does not authorize a commit, push, merge or publication. The parent returns while it runs.
+3. `{ "action": "show-application", "id": "<job>" }` reports file progress, any blocker, the durable evidence path,
+   and the final source digest. `show-handoff` also exposes this separate application status.
+4. An exact retry uses the saved approval and destination. After restart, positively stopped completed file writes
+   are recognized from their durable identities and never repeated. An unchanged preimage may resume within the
+   bounded attempt limit. Partial, foreign, missing or unproven outcomes keep the exclusive reservation. Do not
+   delete staging files or edit records to bypass a blocker.
+
+The target must be a clean sibling worktree, not a child workspace or another checkout with merely matching commits.
+One application per job and one active application worker are supported. Original child artifacts, HEAD and index are
+preserved; the destination deliberately remains uncommitted. Managed workspace claims exclude other onionsoup work,
+not unrelated editors. Preparation interrupted before its staging identity is saved remains blocked for inspection.
+Applying to another destination needs a new scoped job; approval is never rebound silently.
 
 For a combined check left `uncertain`, use the receipt ID returned by `show-handoff`:
 

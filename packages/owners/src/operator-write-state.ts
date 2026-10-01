@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { isAbsolute, relative } from 'node:path';
 import type { OperatorChild, OperatorJob, OperatorJobInput, OperatorJobIntake, OperatorJobLedger,
-  OperatorJobOrigin, OperatorWriteCreateApproval, OperatorSessionSnapshot } from './operator-jobs-types.ts';
+  OperatorJobOrigin, OperatorWriteCreateApproval, OperatorSessionSnapshot, OperatorApplicationClaim } from './operator-jobs-types.ts';
 import type { OperatorWriteSnapshot, OperatorWriteArtifact } from './operator-write-workspace.ts';
 import { operatorCheckRecordDigest, validateOperatorCheckSourcePaths } from './operator-check-types.ts';
 
@@ -63,9 +63,38 @@ export function operatorChildHoldsWorkspace(child: OperatorChild) {
   return !['completed', 'cancelled', 'abandoned'].includes(child.status);
 }
 
+export function operatorApplicationHoldsWorkspace(claim: OperatorApplicationClaim) {
+  return !claim.release;
+}
+
+function heldApplications(ledger: OperatorJobLedger) {
+  return ledger.jobs.flatMap(job => job.applicationClaims ?? []).filter(operatorApplicationHoldsWorkspace);
+}
+
+function assertNoApplicationOverlap(ledger: OperatorJobLedger, directory: string) {
+  for (const claim of heldApplications(ledger)) {
+    if (overlaps(directory, claim.target.directory)) {
+      throw new Error(`operator_workspace_conflict: application ${claim.id} holds ${claim.target.directory}`);
+    }
+  }
+}
+
+/** Application targets are exclusive against readers, writers, and other applications under the jobs lock. */
+export function assertOperatorApplicationWorkspaceClaims(ledger: OperatorJobLedger, directory: string) {
+  assertNoApplicationOverlap(ledger, directory);
+  for (const job of ledger.jobs) {
+    for (const child of job.children.filter(operatorChildHoldsWorkspace)) {
+      if (overlaps(directory, child.write?.baseline.directory ?? child.directory)) {
+        throw new Error(`operator_workspace_conflict: application target conflicts with ${job.id}/${child.id}`);
+      }
+    }
+  }
+}
+
 export function assertOperatorWorkspaceClaims(ledger: OperatorJobLedger, incoming: OperatorJob) {
   const claimed = ledger.jobs.flatMap(job => job.children).filter(operatorChildHoldsWorkspace);
   for (const child of incoming.children) {
+    assertNoApplicationOverlap(ledger, child.write?.baseline.directory ?? child.directory);
     for (const other of claimed) {
       if (child.access !== 'write' && other.access !== 'write') continue;
       if (overlaps(child.write?.baseline.directory ?? child.directory, other.write?.baseline.directory ?? other.directory)) {

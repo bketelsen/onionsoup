@@ -13,10 +13,12 @@ import { beginAdmission, releaseMatchedAdmission, AdmissionRecord, type Admissio
 import { readOperatorCheckOwner, type OperatorCheckOwner } from './operator-check-execution.ts';
 import { OperatorHandoffExecutionJournal, operatorHandoffPreparedDigest, type OperatorHandoffExecutionBinding } from './operator-handoff-execution.ts';
 import { OPERATOR_SUPERVISOR_TRANSPORT_LIMITS } from './operator-supervisor-client.ts';
+import { OperatorApplicationStore } from './operator-application-store.ts';
 
 export const OPERATOR_HANDOFF_HOST_LIMITS = { concurrentChecks: 2 };
 export interface OperatorHandoffReport {
-  kind: 'operator-handoff'; application: 'not-applied'; observedAt: string;
+  kind: 'operator-handoff'; application: 'not-applied' | 'approved' | 'applying' | 'blocked' | 'applied'; observedAt: string;
+  applicationEvidence?: { digest: string; target: string; reason?: string; recordPath: string; sourceDigest?: string };
   status: 'needs-checks' | 'checking' | 'uncertain' | 'failed' | 'ready' | 'unchecked' | 'stale' | 'unverified';
   current: boolean; reason?: string; artifact: OperatorHandoffRecord['artifact']; checks: OperatorCheckRecord[];
   originalChecks: OperatorCheckRecord[]; resolutions: NonNullable<OperatorHandoffRecord['resolutions']>;
@@ -131,7 +133,12 @@ export class OperatorHandoffs {
   private async report(record: OperatorHandoffRecord, reason?: string): Promise<OperatorHandoffReport> {
     const directory = join(this.jobs.home, 'operator-handoffs', record.artifact.digest);
     const paths = { patch: join(directory, 'combined.patch'), report: join(directory, 'report.json') };
-    const report: OperatorHandoffReport = { kind: 'operator-handoff', application: 'not-applied',
+    const applications = new OperatorApplicationStore(this.jobs.home);
+    const application = await applications.read(record.artifact.jobID);
+    if (application && application.scope.artifact.digest !== record.artifact.digest) throw new Error('operator_application_source_stale');
+    const report: OperatorHandoffReport = { kind: 'operator-handoff', application: application?.status ?? 'not-applied',
+      ...(application ? { applicationEvidence: { digest: application.scope.digest, target: application.scope.target.directory,
+        reason: application.reason, recordPath: applications.path(record.artifact.jobID), sourceDigest: application.result?.sourceDigest } } : {}),
       observedAt: new Date().toISOString(), current: !reason,
       status: reason ? 'stale' : this.status(record), ...(reason ? { reason } : {}), artifact: record.artifact,
       checks: effectiveHandoffChecks(record), originalChecks: record.checks, resolutions: record.resolutions ?? [], paths };

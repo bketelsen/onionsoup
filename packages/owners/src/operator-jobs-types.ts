@@ -79,8 +79,25 @@ export const OperatorChild = OperatorTaskInput.safeExtend({
     approval: OperatorRecoveryPermissionProof }).optional(),
 });
 export type OperatorChild = z.infer<typeof OperatorChild>;
+const ApplicationDigest = z.string().regex(/^[a-f0-9]{64}$/);
+export const OperatorApplicationClaimBinding = z.object({
+  id: Identifier, token: z.uuid(), artifactDigest: ApplicationDigest,
+  target: z.object({ directory: Text, identityDigest: ApplicationDigest }),
+  approvalDigest: ApplicationDigest,
+});
+export type OperatorApplicationClaimBinding = z.infer<typeof OperatorApplicationClaimBinding>;
+export const OperatorApplicationRelease = z.object({
+  kind: z.enum(['applied-verified', 'no-effects']), evidenceDigest: ApplicationDigest,
+});
+export type OperatorApplicationRelease = z.infer<typeof OperatorApplicationRelease>;
+export const OperatorApplicationClaim = OperatorApplicationClaimBinding.extend({
+  createdAt: Text,
+  release: OperatorApplicationRelease.extend({ at: Text }).optional(),
+});
+export type OperatorApplicationClaim = z.infer<typeof OperatorApplicationClaim>;
+
 export const OperatorJobEvent = z.object({
-  id: Identifier, at: Text, kind: z.enum(['created', 'progress', 'blocked', 'ready', 'paused', 'resumed', 'cancelled', 'synthesized', 'abandoned', 'recovery-denied', 'write-review', 'write-accepted']),
+  id: Identifier, at: Text, kind: z.enum(['created', 'progress', 'blocked', 'ready', 'paused', 'resumed', 'cancelled', 'synthesized', 'abandoned', 'recovery-denied', 'write-review', 'write-accepted', 'application-reserved', 'application-released']),
   childID: Identifier.optional(), detail: Text,
 });
 export type OperatorJobEvent = z.infer<typeof OperatorJobEvent>;
@@ -90,6 +107,7 @@ export const OperatorJob = z.object({
   createdAt: Text, updatedAt: Text, revision: z.number().int(),
   status: z.enum(['running', 'paused', 'blocked', 'needs-synthesis', 'needs-review', 'completed', 'cancelled']),
   children: z.array(OperatorChild), events: z.array(OperatorJobEvent),
+  applicationClaims: z.array(OperatorApplicationClaim).optional(),
   synthesis: z.object({ digest: Text, evidenceIDs: z.array(Identifier), text: Text, at: Text }).optional(),
 });
 export type OperatorJob = z.infer<typeof OperatorJob>;

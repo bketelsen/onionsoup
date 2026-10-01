@@ -92,7 +92,7 @@ async function pinFile(path: string, destination: string, mounts: PinnedOperator
 }
 
 /** Only the trusted Node runtime is inspected; no repository executable runs on the host. */
-async function pinRuntime(node: string, mounts: PinnedOperatorCheckMount[]) {
+export async function pinOperatorCheckRuntime(node: string, mounts: PinnedOperatorCheckMount[]) {
   await pinFile(node, '/runtime/node', mounts);
   const libraries = await execute('/usr/bin/ldd', [node], { env: {},
     timeout: OPERATOR_WRITER_LIMITS.timeoutMs, maxBuffer: OPERATOR_WRITER_LIMITS.capabilityOutputBytes })
@@ -114,13 +114,13 @@ async function pinRuntime(node: string, mounts: PinnedOperatorCheckMount[]) {
 async function preflightNodeCheck() {
   const { node } = await preflightOperatorFileWriter();
   const mounts: PinnedOperatorCheckMount[] = [];
-  try { await pinRuntime(node, mounts); }
+  try { await pinOperatorCheckRuntime(node, mounts); }
   finally { for (const mount of mounts.reverse()) await mount.handle.close(); }
 }
 
 async function prepareNodeCheck(_directory: string, mounts: PinnedOperatorCheckMount[]) {
   const { node } = await preflightOperatorFileWriter();
-  await pinRuntime(node, mounts);
+  await pinOperatorCheckRuntime(node, mounts);
   return { executable: '/runtime/node', environment: {} };
 }
 
@@ -192,7 +192,7 @@ function failureOutcome(exitCode: number, reason: string,
     outputTruncated: captured.outputTruncated || output.length > OPERATOR_CHECK_LIMITS.outputChars };
 }
 
-async function executeCheck(command: Awaited<ReturnType<typeof isolatedCommand>>, mounts: PinnedOperatorCheckMount[],
+export async function executeOperatorSandbox(command: Awaited<ReturnType<typeof isolatedCommand>>, mounts: PinnedOperatorCheckMount[],
   options?: OperatorCheckExecutionOptions): Promise<OperatorCheckRun> {
   return new Promise((resolve, reject) => {
     let child: ReturnType<typeof spawn>;
@@ -283,7 +283,7 @@ export async function runOperatorCheck(command: string[], sourceFiles: OperatorC
     }
     const launch = await isolatedCommand(approved, mounts, runtime, !!options);
     started = true;
-    outcome = await executeCheck(launch, mounts, options);
+    outcome = await executeOperatorSandbox(launch, mounts, options);
     if (runtime.evidence) outcome.runtime = runtime.evidence;
   } catch (error) {
     if (started) {
