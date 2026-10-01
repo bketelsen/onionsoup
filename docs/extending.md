@@ -31,8 +31,53 @@ and `cancel` are scoped to that chat's jobs; `synthesize` records a summary agai
 If a runtime outcome remains unknown, `recheck` inspects the same child once. `recovery-preview` and `abandon` let
 the person release that exact reservation through a one-time permission decision. The unknown outcome and transcript
 remain preserved; no replacement is launched and no permission is remembered for later jobs.
-This stage rejects write scopes and does not drive domain owners. See [durable operator investigations](design/owners.md#durable-operator-investigations)
-for recovery behavior and the current limits.
+These jobs do not drive domain owners. Read-only behavior is unchanged; write tasks use the separate gates below.
+See [durable operator investigations](design/owners.md#durable-operator-investigations) for recovery behavior.
+
+### Approve a bounded file edit
+
+Use an existing clean Git worktree under the operator's configured directory. Ask for the exact goal, constraints and
+files, for example: “Update only the README title in this worktree; do not run commands or commit.” The operator can call:
+
+```json
+{
+  "action": "create",
+  "job": {
+    "key": "readme-title",
+    "goal": "Update the README title",
+    "constraints": ["Only the title line", "No commands or commits"],
+    "tasks": [{
+      "id": "title", "goal": "Update only the title line",
+      "directory": "/home/you/projects/docs-worktree",
+      "access": "write", "files": ["README.md"], "dependsOn": []
+    }]
+  }
+}
+```
+
+1. Inspect the original request, goal, approved paths and baseline HEAD in the permission card, then choose **Allow
+   once**. Only existing tracked UTF-8 files are eligible. A second independent worktree may run concurrently; an
+   overlapping workspace claim is refused even when it names different files.
+2. The child edits through the host's bounded file tool. It cannot run arbitrary commands, tests, commits or pushes.
+   You can keep talking to the operator while it runs.
+3. When the job reports `needs-review`, the operator calls `onionsoup_operator_job` with
+   `{ "action": "review-write", "id": "<job>", "childID": "title" }` and presents the returned host diff.
+4. The operator requests `{ "action": "accept-write", "id": "<job>", "childID": "title", "digest": "<review digest>" }`.
+   Review the full diff and answer the new **Allow once** prompt. Changed evidence invalidates that decision; no
+   persistent permission is added. Acceptance releases the workspace claim, not a commit or test certificate.
+5. After every child is complete and required edits are accepted, `show` supplies the current job digest and evidence
+   message IDs for `synthesize`. The edits remain in your worktree for your normal verification and Git workflow.
+
+An uncertain prepared write remains blocked and holds its reservation. Do not retry it, abandon it through read-only
+recovery or assume a restart undid the edit; this slice has no uncertain-write recovery. The file writer uses a pinned
+descriptor in a sandbox; the parent operator remains trusted and unsandboxed. Scoped writes require bubblewrap
+descriptor binds (`--bind-fd` and `--ro-bind-fd`, version 0.10 or newer); unsupported hosts refuse before recording
+a mutation intent. CI builds the pinned 0.12 release and runs the actual writer tests.
+
+If a queued, blocked or needs-review write child recorded no mutation, use `recovery-preview` and its exact digest with `abandon`.
+The host must verify absent or idle owned runtime state without live tools, and the person must answer the existing
+one-time recovery prompt. This releases the reservation without completion or replacement. Unavailable, busy,
+foreign or any recorded-mutation state is ineligible.
 
 ## Create an owner
 

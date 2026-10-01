@@ -191,3 +191,22 @@ test('a later actionable event gets a new receipt while original delivered evide
   assert.notEqual(receipts[1].digest, first.digest);
   assert.equal(receipts[1].status, 'delivered');
 });
+
+test('write review wakes the parent once to present the exact diff and request human acceptance without changing lifecycle', async context => {
+  const fixture = await setup(context);
+  await fixture.event('write-review', 'needs-review');
+  fixture.state.idle = false;
+  await fixture.deliver();
+  assert.equal(fixture.calls.length, 0);
+  fixture.state.idle = true;
+  await fixture.deliver();
+  await fixture.deliver();
+  assert.equal(fixture.calls.length, 1);
+  assert.match(fixture.calls[0].text, /host-recorded diff, baseline head, allowed paths/);
+  assert.match(fixture.calls[0].text, /native Allow once decision/);
+  assert.match(fixture.calls[0].text, /Do not synthesize while required human acceptance is pending/);
+  const persisted = await fixture.jobs.get(fixture.origin, fixture.job.id);
+  assert.equal(persisted.status, 'needs-review');
+  assert.equal(persisted.synthesis, undefined);
+  assert.equal((await operatorJobWakeStatus(fixture.jobs, fixture.job.id))[0].status, 'delivered');
+});

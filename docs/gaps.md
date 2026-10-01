@@ -48,12 +48,17 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
   API, but a prompt injection can still do anything the person's account and the CLI can. Its journal has no view in
   the surface yet: read
   `state/notebooks/operator/journal/*.jsonl`.
-- **Durable operator jobs initially cover read-only investigations.** They preserve child identities, attempts,
-  progress wakes and evidence-backed synthesis while the parent remains responsive. Write scopes are rejected;
-  exclusive workspace claims and scoped editing are a separate stage. An uncertain child stops automatic checks after
-  a bounded budget; explicit native human approval can abandon its logical reservation without claiming the inference
-  stopped or launching a replacement. An uncertain parent wake with no receipt stays blocked rather than being replayed.
-  These host sessions are not a filesystem sandbox.
+- **Operator writes are limited to approved existing text files.** Durable jobs support read-only investigations and
+  named-file edits in clean Git worktrees, with separate human decisions for the exact scope and completed diff.
+  They do not run arbitrary shell commands or tests, create/delete paths, commit or push. Whole-workspace conflicts
+  are refused; accepted edits remain uncommitted. An uncertain prepared mutation keeps its reservation and has no
+  replay or recovery path in this slice, including failures after intent is recorded but before the writer starts.
+  Zero-mutation write children can use explicit human recovery only after verified absent or idle owned runtime
+  state. An offline runtime cannot establish that proof, even for a never-launched child with a session ID.
+  Read-only children retain their existing bounded observation and human abandonment path. Unknown parent wakes
+  are not replayed. Only the fixed file writer is sandboxed; the parent operator remains trusted and unsandboxed.
+  The surface supplies the fixed writer's trusted Node runtime. Externally launched OpenCode must receive that
+  host runtime explicitly or scoped writes fail closed.
 - **Plan approvals in chat do not survive a restart.** A plan approval pending in a chat is lost if the surface restarts (the
   permission prompt lives in its opencode); the item stays `awaiting-plan-approval` and the owner resubmits it with
   `item`.

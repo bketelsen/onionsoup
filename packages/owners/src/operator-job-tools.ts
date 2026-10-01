@@ -6,6 +6,7 @@ import { NOTICE_PREFIX } from './notices.ts';
 import { abandonOperatorChild, prepareOperatorRecovery } from './operator-job-recovery.ts';
 import type { OperatorRecoveryPermissions } from './operator-recovery-permission.ts';
 import { OPERATOR_SUPERVISOR_TRANSPORT_LIMITS } from './operator-supervisor-client.ts';
+import type { OperatorWrites } from './operator-write-host.ts';
 
 export const OPERATOR_JOB_TOOL = 'onionsoup_operator_job';
 type Client = Parameters<Plugin>[0]['client'];
@@ -34,16 +35,17 @@ export async function operatorJobCaller(jobs: OperatorJobs, client: Client, cont
 }
 
 export function operatorJobTool(jobs: OperatorJobs, supervisor: OperatorSupervisor, client: Client,
-  guard: (agent: string) => void, permissions: OperatorRecoveryPermissions): ReturnType<typeof tool> {
+  guard: (agent: string) => void, permissions: OperatorRecoveryPermissions, writes?: OperatorWrites): ReturnType<typeof tool> {
   return tool({
-    description: 'Supervise your own durable read-only investigations with two managed scheduling slots. Show includes evidence and digest. Pause stops new launches; cancel preserves transcripts; resume with childID continues a proven interrupted child in the same session. Recheck performs one fresh observation. Recovery-preview shows unresolved uncertainty; abandon requires its exact digest, childID, factual text note and a one-time human permission. Abandon releases a reservation without proving earlier inference stopped, never relaunches the child, and creates no grant. Synthesize requires the current digest and all evidence message IDs. No owner delegation or write authority.',
+    description: 'Supervise your own investigations and explicitly approved named-file edits with two managed slots. Write tasks require access write and files in an existing clean Git workspace, with one-time human approval. Separate workspaces can run in parallel; conflicts refuse. Review-write shows the host diff and review digest; accept-write asks the person to accept that exact diff before releasing its workspace. No child shell, commits, pushes, owner delegation or persistent grants. Show includes evidence and job digest. Pause stops new launches; resume with childID continues a proven interrupted child in the same session. Cancel cannot release unaccepted write claims. Recovery-preview and abandon require explicit human recovery; write children qualify only with zero recorded mutations and verified absent or idle owned runtime state. Any recorded write remains held for review, never replayed. Synthesize requires current job digest and all accepted evidence IDs.',
     // OpenCode's bundled Zod differs from the host version; parse with the canonical schema at the boundary.
     args: {
-      action: tool.schema.enum(['create', 'list', 'show', 'pause', 'resume', 'cancel', 'synthesize', 'recheck', 'recovery-preview', 'abandon']),
+      action: tool.schema.enum(['create', 'list', 'show', 'pause', 'resume', 'cancel', 'synthesize', 'recheck', 'recovery-preview', 'abandon', 'review-write', 'accept-write']),
       id: tool.schema.string().optional(), childID: tool.schema.string().optional(),
       job: tool.schema.object({ key: tool.schema.string(), goal: tool.schema.string(), constraints: tool.schema.array(tool.schema.string()),
         tasks: tool.schema.array(tool.schema.object({ id: tool.schema.string(), goal: tool.schema.string(), directory: tool.schema.string(),
-          access: tool.schema.literal('read-only'), dependsOn: tool.schema.array(tool.schema.string()).default([]) })) }).optional(),
+          access: tool.schema.enum(['read-only', 'write']), files: tool.schema.array(tool.schema.string()).optional(),
+          dependsOn: tool.schema.array(tool.schema.string()).default([]) })) }).optional(),
       digest: tool.schema.string().optional(), evidenceIDs: tool.schema.array(tool.schema.string()).optional(), text: tool.schema.string().optional(),
     },
     async execute(args, context) {
@@ -51,8 +53,15 @@ export function operatorJobTool(jobs: OperatorJobs, supervisor: OperatorSupervis
       const caller = await operatorJobCaller(jobs, client, context, args.action === 'create');
       const required = <T>(value: T | undefined, name: string): T => { if (value === undefined) throw new Error(`operator_job_missing_${name}`); return value; };
       const id = () => required(args.id, 'id');
+      const create = () => {
+        const input = OperatorJobInput.parse(args.job);
+        const intake = required(caller.intake, 'intake');
+        return input.tasks.some(task => task.access === 'write')
+          ? required(writes, 'write_host').create(caller.origin, intake, input, context)
+          : jobs.create(caller.origin, intake, input);
+      };
       const actions = {
-        create: () => jobs.create(caller.origin, required(caller.intake, 'intake'), OperatorJobInput.parse(args.job)),
+        create,
         list: () => jobs.list(caller.origin),
         show: () => jobs.get(caller.origin, id()),
         pause: () => supervisor.intervene(caller.origin, id(), 'pause'),
@@ -63,9 +72,16 @@ export function operatorJobTool(jobs: OperatorJobs, supervisor: OperatorSupervis
         abandon: () => abandonOperatorChild(jobs, supervisor.client, caller.origin, id(), required(args.childID, 'childID'),
           required(args.digest, 'digest'), required(args.text, 'text'), context, permissions),
         synthesize: () => jobs.synthesize(caller.origin, id(), required(args.digest, 'digest'), required(args.evidenceIDs, 'evidenceIDs'), required(args.text, 'text')),
+        'review-write': async () => {
+          const preview = await required(writes, 'write_host').review(caller.origin, id(), required(args.childID, 'childID'));
+          return { jobID: id(), childID: args.childID, digest: preview.digest, artifact: preview.artifact,
+            originalIntake: preview.job.intake, goal: preview.job.goal, constraints: preview.job.constraints, evidence: preview.child.evidence };
+        },
+        'accept-write': () => required(writes, 'write_host').accept(caller.origin, id(), required(args.childID, 'childID'),
+          required(args.digest, 'digest'), context),
       };
       const result = await actions[args.action]();
-      if (args.action === 'recovery-preview') return JSON.stringify(result);
+      if (args.action === 'recovery-preview' || args.action === 'review-write') return JSON.stringify(result);
       if (Array.isArray(result)) return JSON.stringify(result.map(job => ({ ...job, digest: operatorJobDigest(job) })));
       return JSON.stringify('origin' in result ? { ...result, digest: operatorJobDigest(result) } : result);
     },

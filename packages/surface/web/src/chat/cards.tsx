@@ -6,6 +6,7 @@ import { Markdown } from './Markdown.tsx';
 import { CARD_ACTION } from './cardStyles.ts';
 import { QuestionCard } from './QuestionCard.tsx';
 import { ToolIcon } from './tools.tsx';
+import { OperatorWriteApprovalView } from '../components/OperatorWriteApproval.tsx';
 
 // Permission and question cards as OpenChamber draws them (PermissionCard.tsx, QuestionCard.tsx; MIT, see
 // ../../NOTICE), shown after the messages of the chat they belong to.
@@ -44,7 +45,8 @@ export function PermissionCard({ entry, onDone }: { entry: InboxEntry; onDone: (
               <div className="typography-meta text-muted-foreground mb-1">Patterns</div>
               <code className="typography-meta px-2 py-1 bg-muted/30 rounded block break-all">{permission.patterns.join(', ')}</code>
             </div>
-            {action && (
+            {entry.operatorWriteApproval && <OperatorWriteApprovalView approval={entry.operatorWriteApproval} />}
+            {!entry.operatorWriteApproval && action && (
               <div>
                 <div className="typography-meta text-muted-foreground mb-1">{command ? 'Command' : 'Action'}</div>
                 <pre className="typography-meta font-mono px-2 py-1 bg-muted/30 rounded whitespace-pre-wrap break-all max-h-32 overflow-y-auto">{action}</pre>

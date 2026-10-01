@@ -9,7 +9,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { ITEM_SECTIONS } from '../web/src/components/ItemSections.tsx';
 import {
-  OPERATOR_ID, OPERATOR_RECOVERY_PERMISSION, OperatorDeclaration, Runtime, approveInitiative, armDeployment, beginDrain, draftInitiative, listAdmissions,
+  OPERATOR_ID, OPERATOR_RECOVERY_PERMISSION, OPERATOR_WRITE_PERMISSION, OperatorDeclaration, Runtime, approveInitiative, armDeployment, beginDrain, draftInitiative, listAdmissions,
   recordProviderFailure, recordProviderSuccess, releaseDrain, reportFriction, setReminder,
   effectiveProposalDigest, writeRevision,
   readFrictionTriage, sourceSnapshot,
@@ -654,6 +654,38 @@ test('operator recovery always waits for the person despite chat auto-accept, in
     const rejected = await call('POST', '/api/owners/operator/permissions/per_recovery', { reply: 'reject' });
     assert.equal(rejected.status, 200);
     assert.deepEqual(calls.at(-1), ['permission', directory, 'per_recovery', 'reject']);
+  } finally {
+    server.close();
+  }
+});
+
+test('operator write creation and reviewed-diff acceptance are never auto-accepted', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'operator-write-gate-'));
+  const { runtime, server, call, calls, state } = await start(api => {
+    api.listSessions = async candidate => candidate === directory ? [
+      { id: 'ses_operator', title: 'Duncan chat', directory, time: { created: 0, updated: 0 } },
+      { id: 'ses_child', parentID: 'ses_operator', title: 'Native child', directory, time: { created: 0, updated: 0 } },
+    ] : [];
+    api.permissions = async candidate => candidate === directory ? [
+      ...['create-write', 'accept-write'].flatMap(mode => ['ses_operator', 'ses_child'].map(sessionID => ({
+        id: `per_${mode}_${sessionID}`, sessionID, permission: OPERATOR_WRITE_PERMISSION,
+        patterns: [`${mode}/job/child/exact-digest`], metadata: { mode, approvalScope: 'once' }, always: [],
+      }))),
+      { id: 'per_read', sessionID: 'ses_operator', permission: 'read', patterns: ['README.md'], metadata: {}, always: [] },
+    ].filter(entry => !calls.some(call => call[0] === 'permission' && call[2] === entry.id)) : [];
+  });
+  try {
+    runtime.declarations.operator = OperatorDeclaration.parse({ name: 'Duncan', title: 'Operator', model: 'github-copilot/gpt-6-sol', directory });
+    assert.deepEqual((await call('PUT', '/api/owners/operator/sessions/ses_operator/auto-accept', { enabled: true })).body,
+      { enabled: true, answered: 1 });
+    await state.autoAnswerAll();
+    assert.deepEqual(calls.filter(entry => entry[0] === 'permission').map(entry => entry[2]), ['per_read']);
+    const inbox = (await call('GET', '/api/state')).body.inbox as { id: string; owner: string }[];
+    assert.equal(inbox.filter(entry => entry.owner === OPERATOR_ID && /^per_(create|accept)-write_/.test(entry.id)).length, 4);
+    assert.equal((await call('POST', '/api/owners/operator/permissions/per_create-write_ses_operator', { reply: 'once' })).status, 200);
+    assert.equal((await call('POST', '/api/owners/operator/permissions/per_accept-write_ses_operator', { reply: 'reject' })).status, 200);
+    assert.deepEqual(calls.filter(entry => entry[0] === 'permission').map(entry => [entry[2], entry[3]]),
+      [['per_read', 'once'], ['per_create-write_ses_operator', 'once'], ['per_accept-write_ses_operator', 'reject']]);
   } finally {
     server.close();
   }

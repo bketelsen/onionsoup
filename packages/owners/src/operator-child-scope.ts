@@ -2,6 +2,7 @@ import { realpath } from 'node:fs/promises';
 import { isAbsolute, relative, resolve } from 'node:path';
 import { OPERATOR_INVESTIGATOR } from './operator-jobs-types.ts';
 import type { OperatorJobs } from './operator-jobs.ts';
+import { OPERATOR_WRITE_TOOL } from './operator-write-call.ts';
 
 export async function operatorChild(jobs: OperatorJobs, sessionID: string) {
   for (const job of await jobs.snapshot()) {
@@ -25,6 +26,11 @@ export async function checkOperatorChildTool(jobs: OperatorJobs, sessionID: stri
   if (!bound) return;
   const child = bound.child;
   if (child.status === 'abandoned' || child.abandonment || !child.attempts.length || child.attempts.at(-1)?.endedAt) throw new Error('operator_child_not_running');
+  if (tool === OPERATOR_WRITE_TOOL) {
+    if (child.access !== 'write' || !child.write?.approval || child.write.acceptance
+      || !['running', 'dispatching'].includes(child.status)) throw new Error('operator_child_write_not_approved');
+    return;
+  }
   if (!['read', 'glob', 'grep', 'list'].includes(tool)) throw new Error('operator_child_read_only');
   const path = tool === 'read' ? args.filePath : args.path ?? child.directory;
   if (typeof path !== 'string') throw new Error('operator_child_path_required');

@@ -62,4 +62,4 @@ export { SessionHistory, rememberSession, rememberedSession, sessionHistory, ite
 
 export { readChildAbandonment, listChildAbandonments, abandonedChildMessages, ChildAbandonment } from './child-recovery.ts';
 
-export { OPERATOR_RECOVERY_PERMISSION } from './operator-jobs-types.ts';
+export { OPERATOR_RECOVERY_PERMISSION, OPERATOR_WRITE_PERMISSION } from './operator-jobs-types.ts';

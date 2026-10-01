@@ -11,7 +11,7 @@ import { DecisionActions } from '../web/src/components/DecisionActions.tsx';
 import { WorkRecovery } from '../web/src/components/WorkRecovery.tsx';
 import { ReminderCard } from '../web/src/components/ReminderCard.tsx';
 import { ITEM_SECTIONS } from '../web/src/components/ItemSections.tsx';
-import { WorkItem } from '@onionsoup/owners';
+import { OPERATOR_WRITE_PERMISSION, WorkItem } from '@onionsoup/owners';
 import type { FrictionRecord, PublicInitiative } from '../web/src/types.ts';
 import { applyChatEvent, orderedMessages, type Messages } from '../web/src/chat/chatState.ts';
 import { addedFile, languageOf, parseUnifiedDiff } from '../web/src/chat/diff.ts';
@@ -412,6 +412,71 @@ test('a pending plan approval gets the plan card: approve or send back with a no
   const html = renderToStaticMarkup(createElement(PendingCard, { entry: generic, onDone: () => {} }));
   assert.match(html, /Permission Required/);
   assert.match(html, /Always Allow/);
+});
+
+test('operator write gate cards expose only Allow once and denial for both approval stages', async () => {
+  const { PendingCard } = await import('../web/src/chat/cards.tsx');
+  for (const mode of ['create-write', 'accept-write']) {
+    const entry = { kind: 'permission' as const, id: `per_${mode}`, owner: 'operator', title: mode, detail: '', sessionID: SESSION,
+      permission: { id: `per_${mode}`, sessionID: SESSION, permission: OPERATOR_WRITE_PERMISSION,
+        patterns: [`${mode}/exact-digest`], always: [],
+        metadata: { mode, approvalScope: 'once', action: 'Approve only this exact scope', warning: 'No persistent grant.' } } };
+    const card = renderToStaticMarkup(createElement(PendingCard, { entry, onDone: () => {} }));
+    const inbox = renderToStaticMarkup(createElement(DecisionActions, { entry, busy: false, text: '', withDelete: false,
+      setWithDelete: () => {}, decide: async () => {}, permission: async () => {} }));
+    assert.match(card, /Allow Once/);
+    assert.match(card, /Deny/);
+    assert.match(card, /No persistent grant/);
+    assert.doesNotMatch(card, /Always/);
+    assert.match(inbox, /Allow once/);
+    assert.match(inbox, /Reject/);
+    assert.doesNotMatch(inbox, /Always/);
+  }
+});
+
+test('scoped write cards present the original goal and full host diff as inert reviewable text', async () => {
+  const { PendingCard } = await import('../web/src/chat/cards.tsx');
+  const { Decision } = await import('../web/src/components/Decision.tsx');
+  const { operatorWriteApprovalOf } = await import('../src/operator-write-approval.ts');
+  const common = { originalIntake: { text: 'Fix only the requested title <script>unchanged</script>' },
+    goal: 'Use the requested title', constraints: ['Only README.md', 'No commit or push'] };
+  const diff = ['diff --git a/README.md b/README.md', '-old title', '+requested title', ...Array.from({ length: 150 }, (_, index) => ` context ${index}`), '+last reviewable line'].join('\n');
+  const metadata = [
+    { mode: 'create-write', approvalScope: 'once', intake: common.originalIntake, input: { ...common, tasks: [{ id: 'child_one', goal: 'Change only the title line' }] },
+      workspaces: [{ id: 'child_one', directory: '/isolated/task', head: 'head_fixture', files: ['README.md'] }] },
+    { mode: 'accept-write', approvalScope: 'once', ...common, directory: '/isolated/task',
+      artifact: { head: 'head_fixture', diff, files: [{ path: 'README.md' }] },
+      evidence: { sessionID: 'ses_child', messageID: 'msg_evidence' } },
+  ];
+  for (const details of metadata) {
+    const permission = { id: 'per_write', sessionID: SESSION, permission: OPERATOR_WRITE_PERMISSION,
+      patterns: ['exact-scope-digest'], metadata: details, always: [] };
+    const operatorWriteApproval = operatorWriteApprovalOf(permission);
+    assert(operatorWriteApproval);
+    const entry = { kind: 'permission' as const, id: 'per_write', owner: 'operator', title: 'Scoped change', detail: '', sessionID: SESSION,
+      permission, operatorWriteApproval };
+    for (const html of [renderToStaticMarkup(createElement(PendingCard, { entry, onDone: () => {} })),
+      renderToStaticMarkup(createElement(Decision, { entry, onDone: () => {} }))]) {
+      assert.match(html, /Original request/);
+      assert.match(html, /Use the requested title/);
+      assert.match(html, /Only README\.md/);
+      assert.match(html, /No commit or push/);
+      assert.match(html, /head_fixture/);
+      assert.match(html, /\/isolated\/task/);
+      assert.match(html, /&lt;script&gt;unchanged&lt;\/script&gt;/);
+      assert.doesNotMatch(html, /<script>/);
+      assert.doesNotMatch(html, /Always/);
+      if (details.mode === 'create-write') assert.match(html, /Change only the title line/);
+      if (details.mode === 'accept-write') {
+        assert.match(html, /Exact host-recorded diff/);
+        assert.match(html, /last reviewable line/);
+        assert.match(html, /Child conclusions are model claims/);
+        assert.match(html, /msg_evidence/);
+      }
+    }
+  }
+  assert.equal(operatorWriteApprovalOf({ permission: 'read', metadata: metadata[0] }), undefined);
+  assert.equal(operatorWriteApprovalOf({ permission: OPERATOR_WRITE_PERMISSION, metadata: { mode: 'accept-write', artifact: { diff } } }), undefined);
 });
 
 test('the provider banner shows failing providers with their fix, a recovered one in green, and nothing when all is well', () => {

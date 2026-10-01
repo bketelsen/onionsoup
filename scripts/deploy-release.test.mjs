@@ -23,6 +23,16 @@ async function unsealDirectories(directory) {
   }
 }
 
+async function assertStageMemoryBoundary() {
+  const membership = (await readFile('/proc/self/cgroup', 'utf8')).split('\n').find(line => line.startsWith('0::'))?.slice(3);
+  assert.ok(membership);
+  const maximum = Number((await readFile(join('/sys/fs/cgroup', membership, 'memory.max'), 'utf8')).trim());
+  assert.ok(Number.isSafeInteger(maximum) && maximum > 0 && maximum <= 12 * 1024 ** 3);
+  const mount = (await readFile('/proc/self/mountinfo', 'utf8')).split('\n').find(line => line.split(' ')[4] === '/sys/fs/cgroup');
+  assert.ok(mount?.split(' ')[5]?.split(',').includes('ro'));
+  assert.equal(existsSync('/run/user'), false);
+}
+
 test('candidate stage hides host credentials and prevents runtime writes while installing and verifying', async () => {
   // npm run verify within a staged release already runs inside the scoped bwrap.
   // Its own test process has no user bus, so check that boundary directly there.
@@ -41,7 +51,7 @@ test('candidate stage hides host credentials and prevents runtime writes while i
     assert.equal(process.env.FAKE_CREDENTIAL, undefined);
     assert.equal(process.env.OPENCODE_SERVER_PASSWORD, undefined);
     assert.equal(process.env.ONIONSOUP_HOME, undefined);
-    assert.equal(existsSync('/run/user'), false);
+    await assertStageMemoryBoundary();
     return;
   }
   const scratch = await mkdtemp(join(tmpdir(), 'onionsoup-stage-policy-'));
@@ -69,6 +79,12 @@ test('candidate stage hides host credentials and prevents runtime writes while i
     import { execFileSync } from 'node:child_process';
     import isNumber from 'is-number';
     assert.equal(isNumber(42), true);
+    const membership = readFileSync('/proc/self/cgroup', 'utf8').split('\\n').find(line => line.startsWith('0::')).slice(3);
+    const maximum = Number(readFileSync('/sys/fs/cgroup' + membership + '/memory.max', 'utf8').trim());
+    assert.ok(Number.isSafeInteger(maximum) && maximum > 0 && maximum <= 12 * 1024 ** 3);
+    const mount = readFileSync('/proc/self/mountinfo', 'utf8').split('\\n').find(line => line.split(' ')[4] === '/sys/fs/cgroup');
+    assert.ok(mount.split(' ')[5].split(',').includes('ro'));
+    assert.equal(existsSync('/run/user'), false);
     assert.equal(process.env.HOME, '/home/stage');
     assert.equal(process.env.XDG_CONFIG_HOME, '/home/stage/.config');
     assert.equal(process.env.XDG_CACHE_HOME, '/home/stage/.cache');
