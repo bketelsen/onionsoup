@@ -59,8 +59,9 @@ export function validateOperatorCheckSourcePaths(command: string[], paths: Set<s
 }
 export const OperatorTaskCheck = z.object({ id: Identifier, command: OperatorCheckCommand });
 export type OperatorTaskCheck = z.infer<typeof OperatorTaskCheck>;
+export const OperatorGoVersion = z.string().regex(/^go[0-9]+\.[0-9]+(?:\.[0-9]+)?(?:(?:rc|beta)[0-9]+)?$/).max(128);
 export const OperatorCheckRuntimeEvidence = z.object({ kind: z.literal('go'),
-  version: z.string().regex(/^go[0-9]+\.[0-9]+(?:\.[0-9]+)?(?:[a-zA-Z0-9.-]*)$/).max(128),
+  version: OperatorGoVersion,
   binarySha256: Hash });
 export type OperatorCheckRuntimeEvidence = z.infer<typeof OperatorCheckRuntimeEvidence>;
 export const OperatorCheckRecord = z.object({

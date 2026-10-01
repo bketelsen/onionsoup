@@ -131,7 +131,9 @@ export async function preflightOperatorCheck(command = ['node', '--test', 'prefl
 function bubblewrapArguments(command: string[], mounts: PinnedOperatorCheckMount[], runtime: OperatorCheckRuntime) {
   const binds = mounts.flatMap((mount, index) => ['--ro-bind-fd', String(index + 3), mount.destination]);
   const environment = Object.entries(runtime.environment).flatMap(([key, value]) => ['--setenv', key, value]);
-  return ['--unshare-all', '--die-with-parent', '--new-session', '--cap-drop', 'ALL',
+  // Waiting for namespace init avoids bwrap's early main-child notification while detached children still exit.
+  // Forced shutdown retains the separate process-group exit proof and uncertainty policy below.
+  return ['--unshare-all', '--as-pid-1', '--die-with-parent', '--new-session', '--cap-drop', 'ALL',
     ...binds, '--proc', '/proc', '--dev', '/dev', '--size', String(OPERATOR_CHECK_RUNNER_LIMITS.temporaryBytes),
     '--tmpfs', '/tmp', '--dir', '/tmp/home', '--remount-ro', '/proc', '--remount-ro', '/dev', '--remount-ro', '/',
     '--clearenv', '--setenv', 'HOME', '/tmp/home', '--setenv', 'TMPDIR', '/tmp',

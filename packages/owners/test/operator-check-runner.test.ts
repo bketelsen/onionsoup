@@ -172,9 +172,11 @@ async function fixtureProcesses(marker: string) {
 test('PID namespace reaps a detached subprocess before a successful check returns', async () => {
   const marker = `operator-check-daemon-${crypto.randomUUID()}`;
   const daemon = file('daemon.test.mjs', `import {spawn} from 'node:child_process';
+for (let index = 0; index < 12; index++) {
 const child = spawn(process.execPath, ['-e', ${JSON.stringify(`setInterval(() => {}, 1000); // ${marker}`)}],
   {detached:true, stdio:'ignore'});
-child.unref();`);
+child.unref();
+}`);
   const checked = await runOperatorCheck(['node', '--test', daemon.path], [daemon]);
   assert.equal(checked.exitCode, 0, checked.output);
   assert.deepEqual(await fixtureProcesses(marker), []);
@@ -251,8 +253,41 @@ test('a missing launch executable has no process and completes with125', async c
   }
 });
 
-test('an isolated test runner killed by signal completes with a nonzero exit after its namespace stops', async () => {
-  const killed = file('killed.test.mjs', `process.kill(process.ppid, 'SIGKILL');`);
-  const checked = await runOperatorCheck(['node', '--test', killed.path], [killed]);
-  assert.equal(checked.exitCode, 137, checked.output);
+async function ownedCheckProcess(parent: number, command: string): Promise<number | undefined> {
+  const children = await readFile(`/proc/${parent}/task/${parent}/children`, 'utf8').catch(() => '');
+  for (const child of children.trim().split(/\s+/).filter(Boolean)) {
+    const arguments_ = await readFile(`/proc/${child}/cmdline`, 'utf8').catch(() => '');
+    if (arguments_ === command) return Number(child);
+    const descendant = await ownedCheckProcess(Number(child), command);
+    if (descendant) return descendant;
+  }
+}
+
+test('an isolated test runner killed by signal completes with a nonzero exit after its namespace stops', async context => {
+  const originalSpawn = childProcess.spawn;
+  const killed = file(`signal-${crypto.randomUUID()}.test.mjs`, 'setTimeout(() => {}, 5000);');
+  let observed: Promise<number | undefined> | undefined;
+  const override = context.mock.method(childProcess, 'spawn', (command: string, args: readonly string[], options: SpawnOptions) => {
+    const child = originalSpawn(command, args, options);
+    observed = (async () => {
+      for (let attempt = 0; attempt < 100 && child.pid; attempt++) {
+        const target = await ownedCheckProcess(child.pid, `/runtime/node\0--test\0${killed.path}\0`);
+        if (target) {
+          process.kill(target, 'SIGKILL');
+          return target;
+        }
+        await new Promise(resolve => setTimeout(resolve, 20));
+      }
+    })();
+    return child;
+  });
+  syncBuiltinESMExports();
+  try {
+    const checked = await runOperatorCheck(['node', '--test', killed.path], [killed]);
+    assert.ok(await observed, 'The observer targeted only the uniquely named runtime beneath its own spawned sandbox.');
+    assert.equal(checked.exitCode, 137, checked.output);
+  } finally {
+    override.mock.restore();
+    syncBuiltinESMExports();
+  }
 });

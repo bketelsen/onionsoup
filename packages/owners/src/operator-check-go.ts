@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import { copyFile, mkdir, open, readFile, readdir, realpath, type FileHandle } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
+import { OperatorGoVersion } from './operator-check-types.ts';
 import type { OperatorCheckRuntime, PinnedOperatorCheckMount } from './operator-check-runner.ts';
 
 export const OPERATOR_GO_LIMITS = { runtimeFiles: 16_384, runtimeBytes: 512 * 1024 * 1024,
@@ -99,7 +100,7 @@ async function goVersion(root: FileHandle) {
     const version = content.subarray(0, bytesRead).toString('utf8').split('\n')[0]!;
     const after = await handle.stat({ bigint: true });
     if (before.size !== after.size || before.mtimeNs !== after.mtimeNs || before.ctimeNs !== after.ctimeNs
-      || !/^go\d+\.\d+(?:\.\d+)?(?:(?:rc|beta)\d+)?$/.test(version)) {
+      || !OperatorGoVersion.safeParse(version).success) {
       throw new Error('operator_check_go_runtime_invalid');
     }
     return version;
