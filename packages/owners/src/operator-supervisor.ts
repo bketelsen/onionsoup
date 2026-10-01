@@ -20,17 +20,27 @@ const CHILD_PROGRESS: Record<OperatorChild['access'], { created: string; dispatc
   write: { created: 'Scoped edit child session created; named-file approval retained.',
     dispatched: 'Scoped edit dispatched asynchronously; exact host diff review remains required.' },
 };
+function checkGuide(child: OperatorChild) {
+  if (!child.checks?.length) return 'No host check command is authorized for this child. ';
+  return `Configured host checks: ${JSON.stringify(child.checks)}. Invoke onionsoup_operator_check with checkID after edits; `
+    + 'only successful host receipts for the final artifact satisfy configured checks. ';
+}
+
 function writeGuide(child: OperatorChild) {
   if (!child.write) return '';
-  const digests = Object.fromEntries(child.write.baseline.files.filter(file => child.files?.includes(file.path))
+  const digests: Record<string, string> = Object.fromEntries(child.write.baseline.files.filter(file => child.files?.includes(file.path))
     .map(file => [file.path, file.sha256]));
+  for (const path of child.createFiles ?? []) digests[path] = 'absent';
   for (const operation of child.write.operations) {
     if (operation.status === 'applied' && operation.receipt) digests[operation.receipt.path] = operation.receipt.afterSha256;
   }
   return `Approved HEAD: ${child.write.baseline.head}. Current host-recorded file SHA256 values: ${JSON.stringify(digests)}. `
     + `Call onionsoup_operator_write_file with path, expectedBeforeSha256 and complete replacement content. `
     + `Use the returned afterSha256 for another edit to that file. `
-    + (child.write.operations.some(operation => operation.status === 'prepared') ? 'A write has an uncertain outcome: do not write or retry it; report the blocker.' : '');
+    + `Only these named missing files may be created: ${JSON.stringify(child.createFiles ?? [])}. `
+    + checkGuide(child)
+    + (child.write.operations.some(operation => operation.status === 'prepared') ? 'A write has an uncertain outcome: do not write or retry it; report the blocker. ' : '')
+    + (child.write.checks?.some(check => check.status === 'prepared') ? 'A check has an uncertain outcome: do not retry it; report the blocker.' : '');
 }
 
 function writeErrorReason(error: unknown) {
@@ -160,6 +170,7 @@ export class OperatorSupervisor {
     let artifact: OperatorWriteArtifact;
     try {
       if (!this.writeHost) throw new Error('operator_write_host_unavailable');
+      if (projected.write?.checks?.some(check => check.status === 'prepared')) throw new Error('operator_write_check_uncertain');
       artifact = OperatorWriteArtifact.parse(await this.writeHost.inspect(fresh, projected, snapshot));
     } catch (error) {
       await this.scheduler.apply(claim, (job, current) => operatorChildBlock(job, current, writeErrorReason(error)));
@@ -205,7 +216,8 @@ export class OperatorSupervisor {
 
   private eligible(job: OperatorJob, child: OperatorChild) {
     return ['running', 'blocked', 'needs-review'].includes(job.status) && child.status === 'queued'
-      && (child.access === 'read-only' || Boolean(child.write?.approval && this.writeHost && !child.write.operations.some(operation => operation.status === 'prepared'))) && !child.operation && !child.uncertainty
+      && (child.access === 'read-only' || Boolean(child.write?.approval && this.writeHost && !child.write.operations.some(operation => operation.status === 'prepared')
+        && !child.write.checks?.some(check => check.status === 'prepared'))) && !child.operation && !child.uncertainty
       && child.dependsOn.every(id => job.children.some(candidate => candidate.id === id && candidate.status === 'completed'));
   }
 
@@ -331,6 +343,7 @@ export class OperatorSupervisor {
     if (!child || child.status !== 'blocked' || !child.sessionID || operatorChildUnsettled(child)
       || child.operation || child.uncertainty?.needsDecision) throw new Error('operator_child_retry_unsafe');
     if (child.write?.operations.some(operation => operation.status === 'prepared')) throw new Error('operator_write_effect_uncertain');
+    if (child.write?.checks?.some(check => check.status === 'prepared')) throw new Error('operator_write_check_uncertain');
     const claim = await this.scheduler.claim(job, child, 'retry');
     if (!claim) throw new Error('operator_child_operation_changed');
     const snapshot = await this.read(claim, { signal: AbortSignal.timeout(this.limits.tickBudgetMs) });

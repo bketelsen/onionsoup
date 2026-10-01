@@ -48,15 +48,18 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
   API, but a prompt injection can still do anything the person's account and the CLI can. Its journal has no view in
   the surface yet: read
   `state/notebooks/operator/journal/*.jsonl`.
-- **Operator writes are limited to approved existing text files.** Durable jobs support read-only investigations and
-  named-file edits in clean Git worktrees, with separate human decisions for the exact scope and completed diff.
-  They do not run arbitrary shell commands or tests, create/delete paths, commit or push. Whole-workspace conflicts
+- **Operator writes and checks require exact approved scope.** Durable jobs support read-only investigations and
+  named-file edits/creation in clean Git worktrees, with separate human decisions for exact paths/check commands and
+  the completed diff. Checks currently support only `node --test` with literal relative paths, without package installs,
+  package scripts or extra dependencies. They do not run arbitrary shell commands, delete paths, commit or push. Whole-workspace conflicts
   are refused; accepted edits remain uncommitted. An uncertain prepared mutation keeps its reservation and has no
   replay or recovery path in this slice, including failures after intent is recorded but before the writer starts.
   Zero-mutation write children can use explicit human recovery only after verified absent or idle owned runtime
   state. An offline runtime cannot establish that proof, even for a never-launched child with a session ID.
   Read-only children retain their existing bounded observation and human abandonment path. Unknown parent wakes
-  are not replayed. Only the fixed file writer is sandboxed; the parent operator remains trusted and unsandboxed.
+  are not replayed. The fixed file writer and approved check runner are sandboxed; the parent operator remains trusted
+  and unsandboxed. The first scope click remains required; only exact retries of the approved job reuse approval.
+  Removing that click needs a structured-intake authority decision, not natural-language interpretation or a blanket grant.
   The surface supplies the fixed writer's trusted Node runtime. Externally launched OpenCode must receive that
   host runtime explicitly or scoped writes fail closed.
 - **Plan approvals in chat do not survive a restart.** A plan approval pending in a chat is lost if the surface restarts (the

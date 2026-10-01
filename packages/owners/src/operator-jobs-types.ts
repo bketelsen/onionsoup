@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { OPERATOR_CHECK_LIMITS, OperatorTaskCheck, OperatorCheckRecord } from './operator-check-types.ts';
 import { OperatorWriteSnapshot, OperatorWriteArtifact, OperatorWriteMutation, OperatorWriteReceipt } from './operator-write-workspace.ts';
 
 export const OPERATOR_INVESTIGATOR = 'onionsoup-operator-investigator';
@@ -18,10 +19,19 @@ export const OperatorJobIntake = z.object({ messageID: Identifier, text: Text })
 export type OperatorJobIntake = z.infer<typeof OperatorJobIntake>;
 export const OperatorTaskInput = z.object({
   id: Identifier, goal: Text, directory: Text, access: z.enum(['read-only', 'write']), dependsOn: z.array(Identifier).default([]),
-  files: z.array(Text).min(1).optional(),
+  files: z.array(Text).optional(), createFiles: z.array(Text).optional(),
+  checks: z.array(OperatorTaskCheck).min(1).max(OPERATOR_CHECK_LIMITS.checksPerTask).optional(),
 }).superRefine((task, context) => {
-  if (task.access === 'write' && !task.files?.length) context.addIssue({ code: 'custom', message: 'operator_write_files_required' });
-  if (task.access === 'read-only' && task.files) context.addIssue({ code: 'custom', message: 'operator_readonly_files_forbidden' });
+  if (task.access === 'write' && !task.files?.length && !task.createFiles?.length) context.addIssue({ code: 'custom', message: 'operator_write_files_required' });
+  if (task.access === 'read-only' && (task.files || task.createFiles || task.checks)) {
+    context.addIssue({ code: 'custom', message: 'operator_readonly_files_forbidden' });
+  }
+  if (task.createFiles?.some(path => task.files?.includes(path))) {
+    context.addIssue({ code: 'custom', message: 'operator_write_create_scope_overlap' });
+  }
+  if (task.checks && new Set(task.checks.map(check => check.id)).size !== task.checks.length) {
+    context.addIssue({ code: 'custom', message: 'operator_check_duplicate_id' });
+  }
 });
 export const OperatorJobInput = z.object({
   key: Identifier, goal: Text, constraints: z.array(Text), tasks: z.array(OperatorTaskInput).min(1).max(OPERATOR_JOB_LIMITS.tasksPerJob),
@@ -46,7 +56,9 @@ export type OperatorWriteOperation = z.infer<typeof OperatorWriteOperation>;
 export const OperatorChildWrite = z.object({
   baseline: OperatorWriteSnapshot,
   approval: z.object({ scopeDigest: Text, proof: OperatorPermissionProof, at: Text }),
-  operations: z.array(OperatorWriteOperation), artifact: OperatorWriteArtifact.optional(),
+  operations: z.array(OperatorWriteOperation),
+  checks: z.array(OperatorCheckRecord).max(OPERATOR_CHECK_LIMITS.checksPerTask * OPERATOR_CHECK_LIMITS.attemptsPerCheck).optional(),
+  artifact: OperatorWriteArtifact.optional(),
   acceptance: z.object({ digest: Text, proof: OperatorPermissionProof, at: Text }).optional(),
 });
 export type OperatorChildWrite = z.infer<typeof OperatorChildWrite>;

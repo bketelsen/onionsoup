@@ -9,7 +9,7 @@ import {
 } from './operator-jobs-types.ts';
 import { OperatorWriteArtifact } from './operator-write-workspace.ts';
 import { assertOperatorWriteApproval, assertOperatorWorkspaceClaims, assertOperatorWriteArtifact,
-  assertOperatorWriteTerminal, operatorWriteReviewDigest } from './operator-write-state.ts';
+  assertOperatorWriteTerminal, assertOperatorWriteChecks, operatorWriteReviewDigest } from './operator-write-state.ts';
 export { operatorWriteScopeDigest, operatorWriteReviewDigest } from './operator-write-state.ts';
 
 export function operatorJobDigest(job: OperatorJob) {
@@ -114,6 +114,7 @@ export class OperatorJobs {
     for (const task of input.tasks) {
       task.directory = await this.canonicalDirectory(task.directory);
       if (task.files) task.files = [...new Set(task.files)].sort();
+      if (task.createFiles) task.createFiles = [...new Set(task.createFiles)].sort();
     }
     return { origin, intake, input };
   }
@@ -170,6 +171,7 @@ export class OperatorJobs {
       if (child.status !== 'needs-review' || child.operation || operatorWriteReviewDigest(job, child) !== digest
         || JSON.stringify(child.write.artifact) !== JSON.stringify(artifact)) throw new Error('operator_write_review_stale');
       assertOperatorWriteArtifact(child, artifact);
+      assertOperatorWriteChecks(child, artifact);
       assertOperatorWriteTerminal(child, snapshot);
       if (permissionUsed(ledger, proof.nonce)) throw new Error('operator_write_permission_reused');
       child.write.acceptance = { digest, proof, at: new Date().toISOString() };
@@ -217,14 +219,15 @@ function makeJob(origin: OperatorJobOrigin, intake: OperatorJobIntake, input: Op
         approval: { scopeDigest: approval.scopeDigest, proof: approval.proof, at }, operations: [] } } : {}) })),
   };
   operatorJobEvent(job, 'created', approval
-    ? 'Scoped edits approved once for the named existing tracked files; workspace reservations held until exact host diff review. No shell, commit, push or owner delegation.'
+    ? 'Scoped edits approved once for the exact named file and check scopes; workspace reservations held until exact host diff review. No shell, commit, push or owner delegation.'
     : 'Read-only investigations queued under the original human intake; no owner delegation or write authority.');
   return job;
 }
 
 function assertSameInput(existing: OperatorJob, intake: OperatorJobIntake, input: OperatorJobInput) {
-  const tasks = existing.children.map(({ id, goal, directory, access, dependsOn, files }) => ({
+  const tasks = existing.children.map(({ id, goal, directory, access, dependsOn, files, createFiles, checks }) => ({
     id, goal, directory, access, dependsOn, ...(files ? { files } : {}),
+    ...(createFiles ? { createFiles } : {}), ...(checks ? { checks } : {}),
   }));
   if (JSON.stringify({ goal: existing.goal, constraints: existing.constraints, tasks })
     !== JSON.stringify({ goal: input.goal, constraints: input.constraints, tasks: input.tasks })

@@ -18,7 +18,9 @@ function recoveryWarning(job: OperatorJob, child: OperatorChild) {
   if (child.access !== 'write') return WARNING;
   return `Release only zero-write child ${job.id}/${child.id}, original goal ${JSON.stringify(job.goal)}, `
     + `child goal ${JSON.stringify(child.goal)}, `
-    + `in ${child.directory}, approved files ${JSON.stringify(child.files)}. Fresh runtime evidence must prove absence `
+    + `in ${child.directory}, approved existing files ${JSON.stringify(child.files ?? [])}, `
+    + `new files ${JSON.stringify(child.createFiles ?? [])}, checks ${JSON.stringify(child.checks ?? [])}. `
+    + 'Fresh runtime evidence must prove absence '
     + 'or idle owned history with all tools terminal. Human approval releases this workspace reservation and revokes '
     + 'future managed writes for this child. It creates no replacement and does not accept the task as completed. '
     + 'Original approval, attempts and history remain preserved; no persistent grant is added.';
@@ -41,7 +43,8 @@ export function operatorRecoveryDigest(job: OperatorJob, child: OperatorChild) {
     job: job.id, origin: job.origin, intake: job.intake, goal: job.goal, constraints: job.constraints, status: job.status,
     child: { id: child.id, goal: child.goal, directory: child.directory, access: child.access, dependsOn: child.dependsOn,
       title: child.title, sessionID: child.sessionID, status: child.status, attempts: child.attempts,
-      files: child.files, write: child.write, evidence: child.evidence, abandonment: child.abandonment, blocker: child.blocker,
+      files: child.files, createFiles: child.createFiles, checks: child.checks,
+      write: child.write, evidence: child.evidence, abandonment: child.abandonment, blocker: child.blocker,
       operation: child.operation ? { token: child.operation.token, kind: child.operation.kind } : undefined,
       uncertainty: child.uncertainty ? { kind: child.uncertainty.kind, reason: child.uncertainty.reason,
         needsDecision: child.uncertainty.needsDecision } : undefined },
