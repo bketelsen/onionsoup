@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, readdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { link, mkdir, readdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { ChatOrigin } from './chat-origin.ts';
 import type { WorkItem } from './ledger.ts';
 import type { Runtime } from './runtime.ts';
+import { withRecordLock } from './record-lock.ts';
 
 /**
  * Owners hear how their work went. Each daemon tick compares every work item with what was last seen; a change the
@@ -194,13 +195,25 @@ export async function pendingNotices(runtime: Runtime): Promise<WorkNotice[]> {
 
 /** Take a notice for delivery. Several opencode servers may run the plugin; the rename lets exactly one win. */
 export async function claimNotice(runtime: Runtime, id: string) {
-  const { pending, delivered } = directories(runtime);
-  await mkdir(delivered, { recursive: true });
-  return rename(join(pending, `${id}.json`), join(delivered, `${id}.json`)).then(() => true, () => false);
+  const { root, pending, delivered } = directories(runtime);
+  return withRecordLock(join(root, 'locks', `${id}.lock`), async () => {
+    await mkdir(delivered, { recursive: true });
+    return rename(join(pending, `${id}.json`), join(delivered, `${id}.json`)).then(() => true, () => false);
+  });
 }
 
-/** Put a notice back when delivery failed, to try again later. */
-export async function releaseNotice(runtime: Runtime, id: string) {
-  const { pending, delivered } = directories(runtime);
-  await rename(join(delivered, `${id}.json`), join(pending, `${id}.json`)).catch(() => undefined);
+/** Caller must have positive local proof that no transport was invoked. Never overwrite newer queued content. */
+export async function restoreUnsentNotice(runtime: Runtime, notice: WorkNotice) {
+  const { root, pending, delivered } = directories(runtime);
+  return withRecordLock(join(root, 'locks', `${notice.id}.lock`), async () => {
+    const claimed = join(delivered, `${notice.id}.json`);
+    const saved = WorkNotice.parse(JSON.parse(await readFile(claimed, 'utf8')));
+    if (JSON.stringify(saved) !== JSON.stringify(WorkNotice.parse(notice))) throw new Error('work_notice_claim_changed');
+    try { await link(claimed, join(pending, `${notice.id}.json`)); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') return;
+      throw error;
+    }
+    await unlink(claimed);
+  });
 }

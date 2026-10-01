@@ -4,7 +4,9 @@ import { isDirectReport, repositoryNames } from './declarations.ts';
 import { itemText } from './desk.ts';
 import type { WorkItem } from './ledger.ts';
 import { NOTICE_PREFIX } from './notices.ts';
-import { syncedChatPlace, type OwnerSessionClient } from './owner-sessions.ts';
+import { syncedChatPlace, createOpeningSession, promptOpeningSession, type OwnerSessionClient } from './owner-sessions.ts';
+import type { MaintenanceContext } from './maintenance-context.ts';
+import { SessionOpeningStore } from './session-opening-store.ts';
 import { isDue, pendingReminders, REMINDER_LIMITS, type Reminder, type ReminderRequest } from './reminders.ts';
 import type { Runtime } from './runtime.ts';
 import { spanMs } from './span.ts';
@@ -105,12 +107,12 @@ function reminderTitle(reminder: Reminder) {
   return `Reminder: ${clipped(reminder.prompt.replace(/\s+/g, ' ').trim(), REMINDER_LIMITS.titleChars)}`;
 }
 
-/** Record the session and mark the reminder fired, unless another opener got there first. */
+/** Record exact identity before prompting; fired is recorded only after successful delivery. */
 async function claimReminder(runtime: Runtime, id: string, session: ChatOrigin) {
   try {
     return await runtime.reminders.update(id, current => {
-      if (current.status !== 'pending') throw new Error('reminder_already_open');
-      return { ...current, status: 'fired', session, firedAt: new Date().toISOString() };
+      if (current.status !== 'pending' || current.session) throw new Error('reminder_already_open');
+      return { ...current, session };
     });
   } catch (error) {
     if (error instanceof Error && error.message === 'reminder_already_open') return undefined;
@@ -118,41 +120,58 @@ async function claimReminder(runtime: Runtime, id: string, session: ChatOrigin) 
   }
 }
 
-async function releaseReminder(runtime: Runtime, id: string) {
-  await runtime.reminders.update(id, current => ({ ...current, status: 'pending', session: undefined, firedAt: undefined }));
-}
-
 async function reminderItem(runtime: Runtime, reminder: Reminder) {
   return reminder.item ? runtime.ledger.get(reminder.item).catch(() => undefined) : undefined;
 }
 
-/** Open a fresh owner session for a due reminder and send its prompt; returns the session, if one was opened. */
-export async function openReminderSession(runtime: Runtime, client: OwnerSessionClient, reminder: Reminder) {
+/** Reserve before creation; ambiguous create or prompt outcomes retain the exact opening and never replay. */
+export async function openReminderSession(runtime: Runtime, client: OwnerSessionClient, reminder: Reminder, context?: MaintenanceContext) {
   const owner = runtime.owner(reminder.owner);
   if (!owner.persona) return undefined;
-  const { directory, note } = await syncedChatPlace(runtime, owner.id, repositoryNames(owner), reminder.id);
-  const session = { sessionID: await client.create(directory, reminderTitle(reminder), []), directory };
-  const claimed = await claimReminder(runtime, reminder.id, session);
-  if (!claimed) {
-    await client.remove(session).catch(() => undefined);
-    return undefined;
-  }
+  context?.check();
+  const store = new SessionOpeningStore(runtime.stateDirectory);
+  const reservation = await store.reserve({ entity: 'reminder', id: reminder.id, owner: reminder.owner, kind: 'reminder' });
+  if (!reservation) return undefined;
   try {
-    await client.prompt(session, owner.persona.name, `${reminderPrompt(claimed, await reminderItem(runtime, claimed))}${note}`);
+    const current = await runtime.reminders.get(reminder.id);
+    context?.check();
+    if (current.status !== 'pending' || current.session || current.owner !== reminder.owner) throw new Error('reminder_already_open');
+    const { directory, note } = await syncedChatPlace(runtime, owner.id, repositoryNames(owner), reminder.id, context);
+    context?.check();
+    const afterPlace = await runtime.reminders.get(reminder.id);
+    context?.check();
+    if (JSON.stringify(afterPlace) !== JSON.stringify(current)) throw new Error('reminder_changed_before_create');
+    const session = await createOpeningSession(store, reservation, client, directory, reminderTitle(current), [], context);
+    const claimed = await claimReminder(runtime, reminder.id, session);
+    context?.check();
+    if (!claimed) throw new Error('reminder_already_open');
+    const item = await reminderItem(runtime, claimed);
+    context?.check();
+    await promptOpeningSession(store, reservation, client, session, owner.persona.name, `${reminderPrompt(claimed, item)}${note}`, context);
+    await runtime.reminders.update(reminder.id, latest => {
+      if (latest.status !== 'pending' || latest.session?.sessionID !== session.sessionID
+        || latest.session.directory !== session.directory) return latest;
+      return { ...latest, status: 'fired', firedAt: new Date().toISOString() };
+    });
+    context?.check();
+    await runtime.notebook(owner.id).journal({
+      kind: 'reminder-fired', note: claimed.prompt, outcome: claimed.id, workItem: claimed.item, session: session.sessionID,
+    });
+    return session;
   } catch (error) {
-    await releaseReminder(runtime, reminder.id);
-    await client.remove(session).catch(() => undefined);
+    await store.failed(reservation);
     throw error;
   }
-  await runtime.notebook(owner.id).journal({
-    kind: 'reminder-fired', note: claimed.prompt, outcome: claimed.id, workItem: claimed.item, session: session.sessionID,
-  });
-  return session;
 }
 
-/** Every due reminder of an owner with a persona, opened one at a time; a failure leaves it for the next pass. */
-export async function openDueReminders(runtime: Runtime, client: OwnerSessionClient, onError: (id: string, error: unknown) => void, now = new Date()) {
+/** Reservations make concurrent and replacement passes inert for already attempted reminders. */
+export async function openDueReminders(runtime: Runtime, client: OwnerSessionClient,
+  onError: (id: string, error: unknown) => void, now = new Date(), context?: MaintenanceContext) {
   const hasPersona = (reminder: Reminder) => Boolean(runtime.declarations.owners.get(reminder.owner)?.persona);
   const due = (await runtime.reminders.list()).filter(reminder => isDue(reminder, now) && hasPersona(reminder));
-  for (const reminder of due) await openReminderSession(runtime, client, reminder).catch(error => onError(reminder.id, error));
+  context?.check();
+  for (const reminder of due) {
+    context?.check();
+    await openReminderSession(runtime, client, reminder, context).catch(error => onError(reminder.id, error));
+  }
 }

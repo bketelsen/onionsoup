@@ -90,6 +90,13 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
   cannot attest the responding build or loaded plugin. The person accepted this risk for
   [guarded deployment](deployment.md); a global status protocol and plugin attestation remain
   follow-ups. `Type=simple` does not itself signal readiness.
+- **Legacy maintenance admissions lack operation proof.** Instance disposal now stops maintenance timers,
+  and new records bind maintenance to instance/operation identity. This cannot identify the unfinished
+  operation behind an older live-PID lease. Age, idle chats and a stopped lock helper do not prove its
+  effect completed. Guarded rollout continues to refuse those leases. Unknown new session openings or
+  notice sends retain their exact claims and receipts without replay; recovery is not implemented.
+  The [separate legacy recovery plan](deployment.md#legacy-maintenance-recovery-plan) describes the
+  remaining proof and operational decision rather than authorizing a restart or clearing records.
 - **snosi builds run only in CI.** mkosi needs root, so Murbella verifies with snosi's static checks and relies on
   GitHub Actions for builds (CI failures wake her). Local builds would need a privileged build VM on minideb,
   requested from Miles Teg like the smoke-test instances.

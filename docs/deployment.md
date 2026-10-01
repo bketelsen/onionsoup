@@ -333,3 +333,35 @@ single old-surface restart and immutable receipt. It does not abandon children, 
 files, edit messages or invoke synthetic plugin callbacks. The global activity checks and
 uncertain-restart protections above still apply. No recovery or deployment follows from
 collecting the fingerprint or opening a draft change.
+
+### Legacy maintenance recovery plan
+
+This is a reviewable plan, **not an implemented recovery command or authorization to restart**.
+Maintenance lifecycle prevention cannot recover an old `plugin:notices` or `plugin:operator-jobs`
+admission that contains only kind, PID and process start time. It supplies no instance, awaited call,
+resource identity, request receipt or terminal outcome. A live PID, quiet chats, old timestamp or zombie
+lock helper cannot fill that gap. Chat/notice/failed-tool recovery commands do not apply to these leases.
+
+1. Preserve the exact leases, process/build identity, configuration, durable ledgers, session evidence
+   and workspace state in a verified backup. Read-only inspection may identify a specific outstanding
+   call and its domain receipt. If it cannot, record the outcome as unknown, not completed.
+2. Prefer a positive exact-operation terminal receipt and proof that no owned callback or worker can
+   still act. Kernel-lock release alone proves neither. Older records normally cannot supply this proof;
+   a new prevention build must not backfill invented identities or silently adopt them.
+3. When proof is unavailable, a person must separately decide whether to interrupt the exact old runtime
+   while preserving unknown effects. A reviewed supported procedure would need to drain new work,
+   recheck all genuine chats, tools, children, host checks and descendants, and invalidate its preview
+   on any new activity, changed PID/start/build or changed evidence. It must positively establish process
+   termination and contain possible outstanding effects before restart. An apparently idle snapshot
+   is insufficient. No current generic guarded-release path implements this exception.
+4. Retain an immutable receipt that distinguishes **operator-authorized interruption** from completed
+   work. Keep old leases and transcripts as history; never rewrite them as successful operations.
+   Reconcile or explicitly quarantine uncertain domain effects before allowing a replacement to send
+   again. Preserve rollback and verify exact build/health after any separately authorized rollout.
+
+Acceptance for any future recovery implementation must include a real disposable-runtime stop with
+matching process identity; foreign/new activity invalidating a prepared digest; pending external effects
+remaining protected; duplicate/uncertain restart refusal; unchanged transcripts and workspace evidence;
+and no notice, opening or child replay. Until that procedure is implemented, independently reviewed and
+explicitly approved, the correct outcome for unproven legacy leases remains **blocked**. The prevention
+change does not clear them or make today's guarded rollout eligible.

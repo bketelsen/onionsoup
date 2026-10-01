@@ -16,6 +16,7 @@ export const AdmissionRecord = z.object({
   kind: z.string().trim().min(1),
   pid: z.number().int().positive(),
   startTime: z.string().regex(/^\d+$/),
+  maintenance: z.object({ instanceID: z.uuid(), operationID: z.uuid(), directory: z.string() }).optional(),
 });
 
 export type Admission = z.infer<typeof AdmissionRecord> & { alive: boolean };
@@ -116,14 +117,15 @@ async function readAdmissions(stateDirectory: string): Promise<Admission[]> {
 }
 
 /** Atomically checks the drain gate and persists a lease before returning to the caller. */
-export async function beginAdmission(stateDirectory: string, kind: string): Promise<AdmissionLease> {
+export async function beginAdmission(stateDirectory: string, kind: string,
+  maintenance?: z.infer<typeof AdmissionRecord>['maintenance']): Promise<AdmissionLease> {
   const admitted = await withAdmissionLock(stateDirectory, async () => {
     const intent = await readIntent(stateDirectory);
     if (intent?.status === 'draining') throw new Error('deployment_draining');
     await readAdmissions(stateDirectory);
     const startTime = await processStartTime(process.pid);
     if (!startTime) throw new Error('deployment_process_state_unknown');
-    const record = AdmissionRecord.parse({ id: randomUUID(), kind, pid: process.pid, startTime });
+    const record = AdmissionRecord.parse({ id: randomUUID(), kind, pid: process.pid, startTime, maintenance });
     await mkdir(join(deployDirectory(stateDirectory), 'leases'), { recursive: true });
     await atomicJson(join(deployDirectory(stateDirectory), 'leases', `${record.id}.json`), record);
     return record;

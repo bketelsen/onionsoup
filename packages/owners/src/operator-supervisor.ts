@@ -78,8 +78,10 @@ export class OperatorSupervisor {
     this.scheduler = new OperatorScheduler(jobs, limits.operationLeaseMs);
   }
 
-  async tick() {
-    const options = { signal: AbortSignal.timeout(this.limits.tickBudgetMs) };
+  async tick(signal?: AbortSignal) {
+    const timeout = AbortSignal.timeout(this.limits.tickBudgetMs);
+    const options = { signal: signal ? AbortSignal.any([signal, timeout]) : timeout };
+    options.signal.throwIfAborted();
     await this.scheduler.expire();
     const candidates = (await this.jobs.snapshot()).flatMap(job => job.children.map(child => ({ job, child })))
       .filter(({ job, child }) => this.canReconcile(job, child)).slice(0, this.limits.observationsPerTick);

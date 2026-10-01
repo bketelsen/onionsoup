@@ -93,13 +93,15 @@ export class OperatorApplications {
         approval: { proof, at: new Date().toISOString() }, status: 'approved', operations: [], workers: [] });
     });
   }
-  async reconcile() {
+  async reconcile(signal?: AbortSignal) {
+    signal?.throwIfAborted();
     let names: string[];
     try { names = await readdir(join(this.handoffs.jobs.home, 'operator-applications')); }
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return; throw error; }
     for (const name of names.filter(name => name.endsWith('.json'))) {
       const id = name.slice(0, -5);
       const record = await this.store.read(id);
+      signal?.throwIfAborted();
       if (record && (['approved', 'applying'].includes(record.status)
         || (record.status === 'applied' && (!record.claimReleasedAt || record.workers.some(worker => !worker.endedAt))))) this.worker.enqueue(id);
     }

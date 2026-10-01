@@ -33,7 +33,9 @@ import {
   steerReportItem, submitInitiative, updateInitiative,
 } from './org-work.ts';
 import type { ChatOrigin } from './chat-origin.ts';
-import { claimNotice, isRuntimeNotice, NOTICE_PREFIX, pendingNotices, releaseNotice } from './notices.ts';
+import { isRuntimeNotice, NOTICE_PREFIX } from './notices.ts';
+import { deliverWorkNotices } from './work-notice-delivery.ts';
+import { PluginMaintenance, type MaintenancePass } from './plugin-maintenance.ts';
 import { hasShipGrant, shipEngine } from './ship.ts';
 import { ownerFiles, prepareOwnerWrite, prepareRetire, retireOwner, stewardGuide, writeOwner } from './stewardship.ts';
 import { readEnvFile, truenasMcpEnvironment } from './truenas.ts';
@@ -417,8 +419,14 @@ const server: Plugin = async (input, options) => {
     type: tool.schema.enum(['busy', 'idle', 'retry']),
   }));
 
-  async function sessionStatuses(directory: string) {
-    const response = await input.client.session.status?.({ query: { directory } }).catch(() => undefined);
+  interface ChatMaintenance {
+    client: typeof input.client;
+    context: import('./maintenance-context.ts').MaintenanceContext;
+  }
+
+  async function sessionStatuses(directory: string, scope?: ChatMaintenance) {
+    scope?.context.check();
+    const response = await (scope?.client ?? input.client).session.status?.({ query: { directory } }).catch(() => undefined);
     if (!response || response.error) return undefined;
     const parsed = SessionStatuses.safeParse(response.data);
     return parsed.success ? parsed.data : undefined;
@@ -540,7 +548,8 @@ const server: Plugin = async (input, options) => {
     }
   }
 
-  async function isIdleWithChildren(sessionID: string, statuses: Record<string, { type: 'busy' | 'idle' | 'retry' }>, directory: string, requireFinalProof = false, visited = new Set<string>()): Promise<boolean> {
+  async function isIdleWithChildren(sessionID: string, statuses: Record<string, { type: 'busy' | 'idle' | 'retry' }>, directory: string, requireFinalProof = false, scope?: ChatMaintenance, visited = new Set<string>()): Promise<boolean> {
+    scope?.context.check();
     if (pendingAncestry.size) return false;
     if (visited.has(sessionID)) return false;
     visited.add(sessionID);
@@ -555,39 +564,41 @@ const server: Plugin = async (input, options) => {
     for (const child of joinedChildren.get(sessionID) ?? []) {
       if (statuses[child] && statuses[child].type !== 'idle') return false;
     }
-    const children = await input.client.session.children({ path: { id: sessionID }, query: { directory } }).catch(() => undefined);
+    const children = await (scope?.client ?? input.client).session.children({ path: { id: sessionID }, query: { directory } }).catch(() => undefined);
     if (!children || children.error || !children.data) return false;
     for (const child of children.data) {
       knownParents.set(child.id, sessionID);
       if (!statuses[child.id] && !await isAbandonedChild(runtime.stateDirectory, { childID: child.id, parentID: sessionID, directory })
-        && !await childHasFinalAnswer(child.id, directory)) return false;
-      if (!await isIdleWithChildren(child.id, statuses, directory, requireFinalProof, visited)) return false;
+        && !await childHasFinalAnswer(child.id, directory, scope)) return false;
+      if (!await isIdleWithChildren(child.id, statuses, directory, requireFinalProof, scope, visited)) return false;
     }
     return true;
   }
 
-  async function finishIdle(sessionID: string, expectedActivity: number | undefined) {
+  async function finishIdle(sessionID: string, expectedActivity: number | undefined, scope?: ChatMaintenance) {
+    scope?.context.check();
     if (chatActivity.get(sessionID) !== expectedActivity) return;
-    const session = await input.client.session.get({ path: { id: sessionID } }).catch(() => undefined);
+    const session = await (scope?.client ?? input.client).session.get({ path: { id: sessionID } }).catch(() => undefined);
     const directory = session?.data?.directory;
     if (!directory || session.error) return;
     // Child work belongs to this turn; its final idle event will retry the parent.
     if (chatLeases.has(sessionID)) {
-      const statuses = await sessionStatuses(directory);
-      if (!statuses || !await isIdleWithChildren(sessionID, statuses, directory, true)) return;
+      const statuses = await sessionStatuses(directory, scope);
+      if (!statuses || !await isIdleWithChildren(sessionID, statuses, directory, true, scope)) return;
     }
     const owner = sessions.ownerOf(sessionID);
     if (owner) {
       try {
-        await watch(sessionID, owner);
+        await watch(sessionID, owner, scope);
       } catch (error) {
         console.warn('owner_decision_watch_failed', sessionID, error);
+        if (scope) throw error;
       }
     }
     const operatorChat = operatorSessions.ownerOf(sessionID);
     if (operatorChat) {
       try {
-        await reflectOnMemory(sessionID, operatorChat);
+        await reflectOnMemory(sessionID, operatorChat, scope);
       } catch (error) {
         console.warn('operator_memory_idle_failed', sessionID, error);
         return;
@@ -597,19 +608,20 @@ const server: Plugin = async (input, options) => {
     await withChatLock(sessionID, async () => {
       if (!chatLeases.has(sessionID)) return;
       if (activeMessages.has(sessionID) || activeTools.get(sessionID)?.size) return;
-      const statuses = await sessionStatuses(directory);
-      if (!statuses || !await isIdleWithChildren(sessionID, statuses, directory, true)) return;
+      const statuses = await sessionStatuses(directory, scope);
+      if (!statuses || !await isIdleWithChildren(sessionID, statuses, directory, true, scope)) return;
       if (chatActivity.get(sessionID) !== activity) return;
-      if (!admittedMessages.get(sessionID) || !await hasChatFinalAnswer(sessionID, directory)) return;
-      if (!await childrenHaveFinalAnswers(sessionID, directory, statuses)) return;
-      const verified = await sessionStatuses(directory);
-      if (!verified || !await isIdleWithChildren(sessionID, verified, directory, true)) return;
-      if (!await hasChatFinalAnswer(sessionID, directory)) return;
-      if (!await childrenHaveFinalAnswers(sessionID, directory, verified)) return;
+      if (!admittedMessages.get(sessionID) || !await hasChatFinalAnswer(sessionID, directory, scope)) return;
+      if (!await childrenHaveFinalAnswers(sessionID, directory, statuses, scope)) return;
+      const verified = await sessionStatuses(directory, scope);
+      if (!verified || !await isIdleWithChildren(sessionID, verified, directory, true, scope)) return;
+      if (!await hasChatFinalAnswer(sessionID, directory, scope)) return;
+      if (!await childrenHaveFinalAnswers(sessionID, directory, verified, scope)) return;
       if (chatActivity.get(sessionID) !== expectedActivity || activeMessages.has(sessionID) || activeTools.get(sessionID)?.size
-        || !await hasChatFinalAnswer(sessionID, directory)) return;
+        || !await hasChatFinalAnswer(sessionID, directory, scope)) return;
       if (chatActivity.get(sessionID) !== expectedActivity || activeMessages.has(sessionID) || activeTools.get(sessionID)?.size
         || pendingAncestry.size) return;
+      scope?.context.check();
       await releaseChat(sessionID);
       for (const childID of joinedChildren.get(sessionID) ?? []) childMessages.delete(childID);
       joinedChildren.delete(sessionID);
@@ -617,9 +629,9 @@ const server: Plugin = async (input, options) => {
     });
   }
 
-  function queueIdle(sessionID: string, expectedActivity: number | undefined) {
+  function queueIdle(sessionID: string, expectedActivity: number | undefined, scope?: ChatMaintenance) {
     const previous = idleTasks.get(sessionID) ?? Promise.resolve();
-    const current = previous.catch(() => undefined).then(() => finishIdle(sessionID, expectedActivity));
+    const current = previous.catch(() => undefined).then(() => finishIdle(sessionID, expectedActivity, scope));
     idleTasks.set(sessionID, current);
     return current.finally(() => {
       if (idleTasks.get(sessionID) === current) idleTasks.delete(sessionID);
@@ -627,8 +639,9 @@ const server: Plugin = async (input, options) => {
   }
 
   /** A missed event is recoverable only when opencode shows the completed answer at the transcript tail. */
-  async function hasFinalAnswer(sessionID: string, directory: string, userID?: string): Promise<boolean> {
-    const reply = await input.client.session.messages({ path: { id: sessionID }, query: { directory } }).catch(() => undefined);
+  async function hasFinalAnswer(sessionID: string, directory: string, userID?: string, scope?: ChatMaintenance): Promise<boolean> {
+    scope?.context.check();
+    const reply = await (scope?.client ?? input.client).session.messages({ path: { id: sessionID }, query: { directory } }).catch(() => undefined);
     if (!reply || reply.error || !Array.isArray(reply.data)) return false;
     const informational = await Promise.all(reply.data.map(message => deliveredExchangeNoticeProof(runtime, { sessionID, directory }, message)));
     const messages = reply.data.filter((_message, index) => !informational[index]);
@@ -645,76 +658,83 @@ const server: Plugin = async (input, options) => {
       && typeof info.time?.completed === 'number' && info.finish === 'stop';
   }
 
-  async function hasChatFinalAnswer(sessionID: string, directory: string) {
+  async function hasChatFinalAnswer(sessionID: string, directory: string, scope?: ChatMaintenance) {
+    scope?.context.check();
     const userID = admittedMessages.get(sessionID);
     if (!userID) return false;
-    if (!awaitingNudge.has(sessionID)) return hasFinalAnswer(sessionID, directory, userID);
+    if (!awaitingNudge.has(sessionID)) return hasFinalAnswer(sessionID, directory, userID, scope);
     const nudgeID = pendingNudges.get(sessionID);
     if (!nudgeID) return false;
-    const reply = await input.client.session.messages({ path: { id: sessionID }, query: { directory } }).catch(() => undefined);
+    const reply = await (scope?.client ?? input.client).session.messages({ path: { id: sessionID }, query: { directory } }).catch(() => undefined);
     if (!reply || reply.error || !Array.isArray(reply.data)) return false;
     const originalIndex = reply.data.findIndex(message => message.info?.id === userID && message.info.role === 'user');
     if (originalIndex < 0) return false;
     const nudge = reply.data.find(message => message.info?.role === 'user' && message.info?.id === nudgeID);
     if (!nudge) return false;
     const nudgeIndex = reply.data.indexOf(nudge);
-    return !!nudge.info?.id && nudgeIndex > originalIndex && await hasFinalAnswer(sessionID, directory, nudge.info.id);
+    return !!nudge.info?.id && nudgeIndex > originalIndex && await hasFinalAnswer(sessionID, directory, nudge.info.id, scope);
   }
 
-  function childHasFinalAnswer(sessionID: string, directory: string) {
+  function childHasFinalAnswer(sessionID: string, directory: string, scope?: ChatMaintenance) {
+    scope?.context.check();
     const messageID = childMessages.get(sessionID);
-    return childMessages.has(sessionID) && !messageID ? Promise.resolve(false) : hasFinalAnswer(sessionID, directory, messageID);
+    return childMessages.has(sessionID) && !messageID ? Promise.resolve(false) : hasFinalAnswer(sessionID, directory, messageID, scope);
   }
 
-  async function reconcileChat(sessionID: string) {
+  async function reconcileChat(sessionID: string, scope?: ChatMaintenance) {
+    scope?.context.check();
     const activity = await withChatLock(sessionID, async () => {
       if (!chatLeases.has(sessionID) || idleTasks.has(sessionID)) return;
       if (activeMessages.has(sessionID) || activeTools.get(sessionID)?.size) return;
       const activity = chatActivity.get(sessionID);
-      const session = await input.client.session.get({ path: { id: sessionID } }).catch(() => undefined);
+      const session = await (scope?.client ?? input.client).session.get({ path: { id: sessionID } }).catch(() => undefined);
       const directory = session?.data?.directory;
       if (!directory || session.error) return;
-      const response = await input.client.session.status({ query: { directory } }).catch(() => undefined);
+      const response = await (scope?.client ?? input.client).session.status({ query: { directory } }).catch(() => undefined);
       const parsed = response && !response.error ? SessionStatuses.safeParse(response.data) : undefined;
       if (!parsed?.success) return;
       if (!admittedMessages.get(sessionID)) return;
-      if (!await isIdleWithChildren(sessionID, parsed.data, directory, true)) return;
-      if (!await hasChatFinalAnswer(sessionID, directory)) return;
-      if (!await childrenHaveFinalAnswers(sessionID, directory, parsed.data)) return;
+      if (!await isIdleWithChildren(sessionID, parsed.data, directory, true, scope)) return;
+      if (!await hasChatFinalAnswer(sessionID, directory, scope)) return;
+      if (!await childrenHaveFinalAnswers(sessionID, directory, parsed.data, scope)) return;
       // Events and callbacks may arrive while API reads are in flight. Recheck immediately before release.
       if (chatActivity.get(sessionID) !== activity || activeMessages.has(sessionID) || activeTools.get(sessionID)?.size
-        || !await hasChatFinalAnswer(sessionID, directory)) return;
-      const latest = await input.client.session.status({ query: { directory } }).catch(() => undefined);
+        || !await hasChatFinalAnswer(sessionID, directory, scope)) return;
+      const latest = await (scope?.client ?? input.client).session.status({ query: { directory } }).catch(() => undefined);
       const current = latest && !latest.error ? SessionStatuses.safeParse(latest.data) : undefined;
-      if (!current?.success || !await isIdleWithChildren(sessionID, current.data, directory, true)) return;
+      if (!current?.success || !await isIdleWithChildren(sessionID, current.data, directory, true, scope)) return;
       if (chatActivity.get(sessionID) !== activity) return;
-      if (!await hasChatFinalAnswer(sessionID, directory) || !await childrenHaveFinalAnswers(sessionID, directory, current.data)) return;
+      if (!await hasChatFinalAnswer(sessionID, directory, scope) || !await childrenHaveFinalAnswers(sessionID, directory, current.data, scope)) return;
       if (chatActivity.get(sessionID) !== activity || activeMessages.has(sessionID) || activeTools.get(sessionID)?.size
-        || !await hasChatFinalAnswer(sessionID, directory)) return;
+        || !await hasChatFinalAnswer(sessionID, directory, scope)) return;
       return activity;
     });
-    if (activity !== undefined) await queueIdle(sessionID, activity);
+    if (activity !== undefined) await queueIdle(sessionID, activity, scope);
   }
 
-  async function childrenHaveFinalAnswers(sessionID: string, directory: string, statuses: Record<string, { type: 'busy' | 'idle' | 'retry' }>): Promise<boolean> {
-    const response = await input.client.session.children({ path: { id: sessionID }, query: { directory } }).catch(() => undefined);
+  async function childrenHaveFinalAnswers(sessionID: string, directory: string, statuses: Record<string, { type: 'busy' | 'idle' | 'retry' }>, scope?: ChatMaintenance): Promise<boolean> {
+    scope?.context.check();
+    const response = await (scope?.client ?? input.client).session.children({ path: { id: sessionID }, query: { directory } }).catch(() => undefined);
     if (!response || response.error || !response.data) return false;
     for (const child of response.data) {
-      const ancestry = await input.client.session.get({ path: { id: child.id }, query: { directory } }).catch(() => undefined);
+      const ancestry = await (scope?.client ?? input.client).session.get({ path: { id: child.id }, query: { directory } }).catch(() => undefined);
       if (!ancestry?.data || ancestry.error || ancestry.data.parentID !== sessionID || ancestry.data.directory !== directory) return false;
       knownParents.set(child.id, sessionID);
       if (statuses[child.id]?.type === 'busy' || statuses[child.id]?.type === 'retry') return false;
       if (await isAbandonedChild(runtime.stateDirectory, { childID: child.id, parentID: sessionID, directory })) continue;
-      if (!await childHasFinalAnswer(child.id, directory)) return false;
-      if (!await childrenHaveFinalAnswers(child.id, directory, statuses)) return false;
+      if (!await childHasFinalAnswer(child.id, directory, scope)) return false;
+      if (!await childrenHaveFinalAnswers(child.id, directory, statuses, scope)) return false;
     }
     return true;
   }
 
-  async function reconcileChats() {
-    await reconcileFailedTools().catch(error => console.warn('plugin_tool_reconciliation_failed', error));
+  async function reconcileChats(pass?: MaintenancePass) {
+    const scope = pass ? { client: pass.client(input.client), context: pass } : undefined;
+    pass?.check();
+    await reconcileFailedTools(undefined, scope).catch(error => console.warn('plugin_tool_reconciliation_failed', error));
     for (const sessionID of chatLeases.keys()) {
-      await reconcileChat(sessionID).catch(error => console.warn('plugin_chat_reconciliation_failed', sessionID, error));
+      pass?.check();
+      await reconcileChat(sessionID, scope).catch(error => console.warn('plugin_chat_reconciliation_failed', sessionID, error));
     }
   }
 
@@ -744,17 +764,19 @@ const server: Plugin = async (input, options) => {
   }
 
   /** OpenCode skips its after hook on thrown errors; events are hints, persisted parts are proof. */
-  async function reconcileFailedTools(sessionID?: string) {
+  async function reconcileFailedTools(sessionID?: string, scope?: ChatMaintenance) {
+    scope?.context.check();
     const candidates = [...trackedTools].filter(([, tracked]) => tracked.ready && tracked.userID
       && (!sessionID || tracked.sessionID === sessionID));
     for (const childID of new Set(candidates.map(([, tracked]) => tracked.sessionID))) {
-      const session = await input.client.session.get({ path: { id: childID } }).catch(() => undefined);
+      const session = await (scope?.client ?? input.client).session.get({ path: { id: childID } }).catch(() => undefined);
       const directory = session?.data?.directory;
       if (!directory || session.error || session.data?.id !== childID) continue;
-      const reply = await input.client.session.messages({ path: { id: childID }, query: { directory } }).catch(() => undefined);
+      const reply = await (scope?.client ?? input.client).session.messages({ path: { id: childID }, query: { directory } }).catch(() => undefined);
       if (!reply || reply.error || !Array.isArray(reply.data)) continue;
       for (const [key, tracked] of candidates) {
         if (tracked.sessionID !== childID || trackedTools.get(key) !== tracked || !tracked.ready) continue;
+        scope?.context.check();
         if (failedToolInTranscript(reply.data, tracked)) await clearTrackedTool(key, tracked);
       }
     }
@@ -857,8 +879,8 @@ const server: Plugin = async (input, options) => {
     operatorActivity.observeMessage(sessionID, text);
   }
 
-  async function sessionDirectory(sessionID: string, fallback: string) {
-    const session = await input.client.session.get({ path: { id: sessionID } }).catch(() => undefined);
+  async function sessionDirectory(sessionID: string, fallback: string, scope?: ChatMaintenance) {
+    const session = await (scope?.client ?? input.client).session.get({ path: { id: sessionID } }).catch(() => undefined);
     return session?.data?.directory ?? fallback;
   }
 
@@ -866,11 +888,14 @@ const server: Plugin = async (input, options) => {
    * When a top-level operator chat goes idle: commit what changed in its memory, then nudge it (once per stretch of
    * work) to write down what a later chat will need.
    */
-  async function reflectOnMemory(sessionID: string, holder: OperatorDeclaration) {
+  async function reflectOnMemory(sessionID: string, holder: OperatorDeclaration, scope?: ChatMaintenance) {
+    scope?.context.check();
     await commitOperatorMemory(operatorNotebook);
+    scope?.context.check();
     const decision = operatorActivity.decide(sessionID, await memorySignature(memoryDirectory));
     if (!decision?.shouldNudge) return;
-    const directory = await sessionDirectory(sessionID, holder.directory);
+    const directory = await sessionDirectory(sessionID, holder.directory, scope);
+    scope?.context.check();
     awaitingNudge.add(sessionID);
     const messageID = `msg_${randomUUID().replaceAll('-', '')}`;
     try {
@@ -878,8 +903,10 @@ const server: Plugin = async (input, options) => {
         if (!chatLeases.has(sessionID) || releasingChats.has(sessionID)) throw new Error('deployment_chat_parent_not_admitted');
         pendingNudges.set(sessionID, messageID);
       });
-      await sessionClient().prompt({ sessionID, directory }, holder.name, MEMORY_NUDGE_TEXT, messageID);
+      scope?.context.check();
+      await ownerSessionClient(scope?.client ?? input.client).prompt({ sessionID, directory }, holder.name, MEMORY_NUDGE_TEXT, messageID);
     } catch (error) {
+      if (scope && error instanceof Error && error.message === 'plugin_maintenance_effect_uncertain') throw error;
       awaitingNudge.delete(sessionID);
       await withChatLock(sessionID, async () => {
         if (pendingNudges.get(sessionID) === messageID) pendingNudges.delete(sessionID);
@@ -942,18 +969,21 @@ const server: Plugin = async (input, options) => {
       .map(entry => entry.quote!.trim());
   }
 
-  async function watch(sessionID: string, owner: OwnerDeclaration) {
+  async function watch(sessionID: string, owner: OwnerDeclaration, scope?: ChatMaintenance) {
+    scope?.context.check();
     // The parent's chat lease already covers this watcher during drain.
     const watcherLease = chatLeases.has(sessionID) ? undefined : await beginAdmission(runtime.stateDirectory, `watcher:${sessionID}`);
+    let completed = false;
     try {
-      await watchAdmitted(sessionID, owner);
+      await watchAdmitted(sessionID, owner, scope);
+      completed = true;
     } finally {
-      await watcherLease?.release();
+      if (!scope || completed) await watcherLease?.release();
     }
   }
 
-  async function watchAdmitted(sessionID: string, owner: OwnerDeclaration) {
-    const messages = ((await input.client.session.messages({ path: { id: sessionID } })).data ?? []) as unknown as SessionMessage[];
+  async function watchAdmitted(sessionID: string, owner: OwnerDeclaration, scope?: ChatMaintenance) {
+    const messages = ((await (scope?.client ?? input.client).session.messages({ path: { id: sessionID } })).data ?? []) as unknown as SessionMessage[];
     const lastUser = messages.findLastIndex(message => message.info.role === 'user');
     if (lastUser < 0) return;
     const userMessage = messages[lastUser]!;
@@ -967,12 +997,15 @@ const server: Plugin = async (input, options) => {
     const ownerFamily = runtime.family(owner.model);
     const { model } = pickModel(runtime.declarations.families, WATCHER_MODELS, [ownerFamily]);
     const [providerID, ...modelParts] = model.split('/');
-    const child = await input.client.session.create({ body: { title: `${ownerChatAgent(owner)}: decision watcher`, parentID: sessionID } });
+    scope?.context.check();
+    const child = await (scope?.client ?? input.client).session.create({ body: { title: `${ownerChatAgent(owner)}: decision watcher`, parentID: sessionID } });
     const childID = child.data?.id;
     if (!childID) return;
     watcherSessions.set(childID, owner.id);
+    let promptCompleted = false;
     try {
-      const reply = await input.client.session.prompt({
+      scope?.context.check();
+      const reply = await (scope?.client ?? input.client).session.prompt({
         path: { id: childID },
         body: {
           agent: WATCHER_AGENT,
@@ -981,6 +1014,8 @@ const server: Plugin = async (input, options) => {
           parts: [{ type: 'text', text: watcherBrief(ownerChatVoice(owner), userText, assistantText) }],
         } as never,
       });
+      promptCompleted = true;
+      scope?.context.check();
       const parsed = WatcherRecords.safeParse((reply.data?.info as { structured?: unknown } | undefined)?.structured);
       if (!parsed.success) return;
       const notebook = runtime.notebook(owner.id);
@@ -989,12 +1024,18 @@ const server: Plugin = async (input, options) => {
       // A quote not really in the person's message is a hallucination; one already noted in this session is a duplicate.
       const fresh = parsed.data.records.filter(candidate => candidate.quote.trim() && userText.includes(candidate.quote.trim()) && !overlaps(candidate.quote.trim()));
       for (const record of fresh) {
+        scope?.context.check();
         await notebook.journal({ kind: 'chat-decision', outcome: record.kind, note: record.statement, quote: record.quote, session: sessionID, model });
       }
+      scope?.context.check();
       await commitQuietly(notebook, 'chat decisions');
     } finally {
       watcherSessions.delete(childID);
-      const deleted = await input.client.session.delete({ path: { id: childID } }).catch(() => undefined);
+      if (scope) {
+        scope.context.check();
+        if (!promptCompleted) throw new Error('plugin_maintenance_effect_uncertain');
+      }
+      const deleted = await (scope?.client ?? input.client).session.delete({ path: { id: childID } }).catch(() => undefined);
       if (deleted && !deleted.error) {
         await withChatLock(sessionID, async () => {
           pendingChildren.get(sessionID)?.delete(childID);
@@ -1042,26 +1083,6 @@ const server: Plugin = async (input, options) => {
     else await recordProviderSuccess(runtime, info.providerID);
   }
 
-  /**
-   * Deliver work notices (notices.ts) into the chat each piece of work was opened from, as a message to the owner,
-   * once that chat is idle. Every opencode server running this plugin tries; claiming makes exactly one deliver.
-   */
-  async function deliverWorkNotices() {
-    for (const notice of await pendingNotices(runtime).catch(() => [])) {
-      const owner = runtime.declarations.owners.get(notice.owner);
-      if (!owner?.persona || !notice.origin) continue;
-      const { sessionID, directory } = notice.origin;
-      const status = await input.client.session.status({ query: { directory } }).catch(() => undefined);
-      const state = (status?.data as Record<string, { type: string }> | undefined)?.[sessionID];
-      if (state && state.type !== 'idle') continue;
-      if (!(await claimNotice(runtime, notice.id))) continue;
-      const sent = await input.client.session.promptAsync({
-        path: { id: sessionID }, query: { directory },
-        body: { agent: owner.persona.name, parts: [{ type: 'text', text: `${NOTICE_PREFIX} ${notice.text}` }] },
-      }).catch((error: unknown) => ({ error }));
-      if ((sent as { error?: unknown }).error) await releaseNotice(runtime, notice.id);
-    }
-  }
   interface InitiativeArgs { id?: string; initiative?: unknown; assignment?: string; escalation?: string; note?: string }
   type InitiativeAction = (managerId: string, args: InitiativeArgs, origin: ChatOrigin) => Promise<string>;
 
@@ -1125,65 +1146,46 @@ const server: Plugin = async (input, options) => {
     system.push(`<your-notebook>\n${notebook.slice(0, PLUGIN_LIMITS.contextChars)}\n</your-notebook>\n\n<your-open-work>\n${work}\n</your-open-work>`);
   }
 
-  // Read when needed: tests and the config hook construct the plugin without an opencode client.
   const sessionClient = () => ownerSessionClient(input.client);
+  const maintenance = new PluginMaintenance(runtime.stateDirectory, () => input.directory ?? '');
+  async function deliverNotices(pass: MaintenancePass) {
+    const client = pass.client(input.client);
+    const sessions = ownerSessionClient(client);
+    await pass.phase('plan-revisions', () => deliverPlanRevisions(runtime, planRevisionClient(client),
+      (id, error) => console.warn('plan_revision_delivery_failed', id, error)));
+    await pass.phase('direct-reviews', () => deliverDirectRequestReviews(runtime, planRevisionClient(client),
+      (id, error) => console.warn('direct_review_wake_failed', id, error)));
+    await pass.phase('work-notices', () => deliverWorkNotices(runtime, client, pass));
+    await pass.phase('exchange-notices', () => deliverExchangeNotices(runtime, exchangeClient(client)));
+    await pass.phase('owner-sessions', () => openNeededSessions(runtime, sessions,
+      (id, error) => console.warn('owner_session_failed', id, error), pass));
+    await pass.phase('reminders', () => openDueReminders(runtime, sessions,
+      (id, error) => console.warn('reminder_session_failed', id, error), new Date(), pass));
+    await pass.phase('worktree-cleanup', () => removeIdlePlanWorktrees(runtime, sessions,
+      (id, error) => console.warn('plan_worktree_cleanup_failed', id, error), new Date(), pass));
+  }
+  maintenance.start('plugin:notices', PLUGIN_LIMITS.noticeMs, deliverNotices,
+    error => console.warn('notice_delivery_failed', error));
 
-  /**
-   * Runtime work only this opencode can do: post notices into owners' chats, open the sessions plans need, and remove
-   * finished plans' worktrees once their sessions have gone idle.
-   */
-  let isDeliveringNotices = false;
-  async function deliverNotices() {
-    if (isDeliveringNotices) return;
-    isDeliveringNotices = true;
-    let lease: AdmissionLease | undefined;
-    try {
-      lease = await beginAdmission(runtime.stateDirectory, 'plugin:notices');
-      await deliverPlanRevisions(runtime, planRevisionClient(input.client), (itemId, error) => console.warn('plan_revision_delivery_failed', itemId, error));
-      await deliverDirectRequestReviews(runtime, planRevisionClient(input.client), (requestId, error) => console.warn('direct_review_wake_failed', requestId, error));
-      await deliverWorkNotices();
-      await deliverExchangeNotices(runtime, exchangeClient(input.client));
-      await openNeededSessions(runtime, sessionClient(), (itemId, error) => console.warn('owner_session_failed', itemId, error));
-      await openDueReminders(runtime, sessionClient(), (reminderId, error) => console.warn('reminder_session_failed', reminderId, error));
-      await removeIdlePlanWorktrees(runtime, sessionClient(), (itemId, error) => console.warn('plan_worktree_cleanup_failed', itemId, error));
-    } finally {
-      await lease?.release();
-      isDeliveringNotices = false;
-    }
+  async function maintainOperatorJobs(pass: MaintenancePass) {
+    if (!operatorJobs) return;
+    const client = pass.client(input.client);
+    const supervisor = new OperatorSupervisor(operatorJobs, operatorSupervisorClient(client), undefined, operatorWrites);
+    await pass.phase('applications', async () => operatorApplications?.reconcile(pass.signal));
+    await pass.phase('supervisor', () => supervisor.tick(pass.signal));
+    await pass.phase('job-wakes', () => deliverOperatorJobWakes(operatorJobs, planRevisionClient(client),
+      (id, error) => console.warn('operator_job_wake_failed', id, error)));
+    await pass.phase('child-history', () => rememberOperatorChildren(runtime, operatorJobs, client));
   }
-  const noticeTimer = setInterval(() => {
-    void deliverNotices().catch(error => console.warn('notice_delivery_failed', error));
-  }, PLUGIN_LIMITS.noticeMs);
-  noticeTimer.unref?.();
-  // Operator metadata latency must not delay domain-owner notices or hold their maintenance lease.
-  let isMaintainingOperatorJobs = false;
-  async function maintainOperatorJobs() {
-    if (!operatorJobs || !operatorSupervisor || isMaintainingOperatorJobs) return;
-    isMaintainingOperatorJobs = true;
-    let lease: AdmissionLease | undefined;
-    try {
-      lease = await beginAdmission(runtime.stateDirectory, 'plugin:operator-jobs');
-      await operatorApplications?.reconcile().catch(error => console.warn('operator_application_reconciliation_failed', error));
-      await operatorSupervisor.tick().catch(error => console.warn('operator_supervisor_failed', error));
-      await Promise.all([
-        deliverOperatorJobWakes(operatorJobs, planRevisionClient(input.client), (jobID, error) => console.warn('operator_job_wake_failed', jobID, error)),
-        rememberOperatorChildren(runtime, operatorJobs, input.client).catch(error => console.warn('operator_child_history_failed', error)),
-      ]);
-    } finally {
-      await lease?.release();
-      isMaintainingOperatorJobs = false;
-    }
-  }
-  const operatorTimer = operator ? setInterval(() => {
-    return maintainOperatorJobs().catch(error => console.warn('operator_maintenance_failed', error));
-  }, PLUGIN_LIMITS.noticeMs) : undefined;
-  operatorTimer?.unref?.();
-  const reconciliationTimer = setInterval(() => {
-    return reconcileChats();
-  }, PLUGIN_LIMITS.noticeMs);
-  reconciliationTimer.unref?.();
+  if (operator) maintenance.start('plugin:operator-jobs', PLUGIN_LIMITS.noticeMs, maintainOperatorJobs,
+    error => console.warn('operator_maintenance_failed', error));
+  // Chat/tool admissions are already held by this instance's maps; do not globally serialize different directories.
+  maintenance.start('plugin:chat-reconciliation', PLUGIN_LIMITS.noticeMs,
+    pass => pass.phase('chat-reconciliation', () => reconcileChats(pass)),
+    error => console.warn('plugin_chat_reconciliation_failed', error), false);
 
   return {
+    dispose: () => maintenance.dispose(),
     async 'tool.execute.before'(input, output) {
       if (operatorJobs) await checkOperatorChildTool(operatorJobs, input.sessionID, input.tool, output.args);
       if (await readChildAbandonment(runtime.stateDirectory, input.sessionID)) throw new Error('child_session_abandoned: preserved history is read-only');
