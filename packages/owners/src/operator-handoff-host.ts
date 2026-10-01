@@ -14,7 +14,7 @@ import { OPERATOR_SUPERVISOR_TRANSPORT_LIMITS } from './operator-supervisor-clie
 
 export const OPERATOR_HANDOFF_HOST_LIMITS = { concurrentChecks: 2 };
 export interface OperatorHandoffReport {
-  kind: 'operator-handoff'; application: 'not-applied';
+  kind: 'operator-handoff'; application: 'not-applied'; observedAt: string;
   status: 'needs-checks' | 'checking' | 'uncertain' | 'failed' | 'ready' | 'unchecked' | 'stale';
   current: boolean; reason?: string; artifact: OperatorHandoffRecord['artifact']; checks: OperatorCheckRecord[];
   paths: { patch: string; report: string };
@@ -122,7 +122,8 @@ export class OperatorHandoffs {
   private async report(record: OperatorHandoffRecord, reason?: string): Promise<OperatorHandoffReport> {
     const directory = join(this.jobs.home, 'operator-handoffs', record.artifact.digest);
     const paths = { patch: join(directory, 'combined.patch'), report: join(directory, 'report.json') };
-    const report: OperatorHandoffReport = { kind: 'operator-handoff', application: 'not-applied', current: !reason,
+    const report: OperatorHandoffReport = { kind: 'operator-handoff', application: 'not-applied',
+      observedAt: new Date().toISOString(), current: !reason,
       status: reason ? 'stale' : this.status(record), ...(reason ? { reason } : {}), artifact: record.artifact,
       checks: record.checks, paths };
     await writeHandoffFile(paths.patch, record.artifact.diff);

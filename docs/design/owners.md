@@ -797,7 +797,7 @@ and one per handoff. They run asynchronously outside mutation locks. A prepared 
 (including setup failure) produce reusable receipts, while unproven process termination retains admission and an
 uncertain record. Restart preserves that uncertainty; there is no automatic retry or claim that a crash undid work.
 `show-handoff { id }` rechecks live child evidence and workspace freshness and provides an exact patch and JSON report
-under `state/operator-handoffs/`. `ready` means all configured combined checks passed for the current artifact;
+under `state/operator-handoffs/`. Reports are timestamped observations; call `show-handoff` after a pending check to refresh the exported JSON. `ready` means all configured combined checks passed for the current artifact;
 `unchecked` means none were configured. Neither means applied, independently reviewed, committed or published.
 The human's existing exact scope/check authorization covers these commands; preparing or checking a combined preview
 does not add another permission click or standing grant. Applying and publishing remain separate user-directed work.
