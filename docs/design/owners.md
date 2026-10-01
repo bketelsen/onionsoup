@@ -757,7 +757,9 @@ Unknown outcomes keep their reservations during bounded observation (three attem
 spacing by default), then stop automatic polling with `needsDecision`. `recheck { id, childID }` performs one fresh
 observation without dispatching work. If the receipt appears, it reconciles the existing session. Otherwise,
 `recovery-preview { id, childID }` shows the exact scope and digest for a read-only child;
-`abandon { id, childID, digest, text }` requests a one-time human decision. Write reservations cannot use this recovery path. It is never an automatic retry or a claim that the original work failed.
+`abandon { id, childID, digest, text }` requests a one-time human decision. Write reservations qualify only with
+zero recorded mutations and the stronger runtime proof described below. It is never an automatic retry or a claim
+that the original work failed.
 
 Abandonment releases only the logical scheduling reservation. The old inference may still finish, so physical
 concurrency may temporarily exceed the two managed slots after this explicit decision. The unknown outcome remains
