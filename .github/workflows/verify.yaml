@@ -26,6 +26,11 @@ jobs:
         run: |
           git config --global user.name 'Onionsoup CI'
           git config --global user.email 'onionsoup-ci@example.invalid'
+          # setup-node's shared tool cache may be group-writable. Keep the writer's host gate strict.
+          node_binary="$(node -p 'process.execPath')"
+          stat --format='%a %n' "$node_binary"
+          sudo chmod go-w "$node_binary"
+          stat --format='%a %n' "$node_binary"
           sudo apt-get update -qq
           sudo apt-get install -y bubblewrap build-essential meson ninja-build pkg-config libcap-dev
           # Ubuntu 22.04's bwrap lacks descriptor binds. Test the same pinned release as the host
