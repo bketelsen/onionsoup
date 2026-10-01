@@ -76,6 +76,8 @@ async function stageArguments(command, args, location, privateFiles, skipHostBus
     ...certificates, ...networkFiles,
     '--ro-bind', privateFiles.passwd, '/etc/passwd',
     '--ro-bind', privateFiles.gitconfig, '/etc/stage-gitconfig',
+    // Read-only cgroup metadata lets nested fixed helpers prove this scope's cap without a host bus.
+    '--dir', '/sys', '--dir', '/sys/fs', '--ro-bind', '/sys/fs/cgroup', '/sys/fs/cgroup',
     '--dev', '/dev', '--proc', '/proc', '--tmpfs', '/tmp',
     '--dir', '/home', '--tmpfs', PRIVATE_HOME,
     ...stageParents(location), '--bind', location, location,
