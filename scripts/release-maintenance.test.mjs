@@ -194,6 +194,49 @@ test('a complete recovery and approved release admits new work while retaining u
   await state.assertHistory();
 });
 
+async function futureReminder(state, dueAt) {
+  const directory = join(state.state, 'reminders');
+  await mkdir(directory, { recursive: true });
+  const path = join(directory, 'reminder_fixture.json');
+  const bytes = JSON.stringify({ id: 'reminder_fixture', owner: 'specialist', prompt: 'Synthetic scheduled task',
+    status: 'pending', dueAt, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+  await writeFile(path, bytes);
+  return { path, bytes };
+}
+
+test('future reminder deadline is bound into release without firing or rewriting it', async context => {
+  const state = await recovered(context);
+  const dueAt = new Date(Date.now() + 3_600_000).toISOString();
+  const reminder = await futureReminder(state, dueAt);
+  const { preview, input } = await preparedRelease(state);
+  assert.equal(preview.eligible, true);
+  assert.equal(preview.proof.inventory.validUntil, dueAt);
+  assert.equal((await releaseMaintenance(input)).state, 'released');
+  assert.equal(await readFile(reminder.path, 'utf8'), reminder.bytes);
+  await state.assertHistory();
+});
+
+test('deadline crossed after pending write keeps quarantine and retry refuses stale release evidence', async context => {
+  const state = await recovered(context);
+  const clock = Date.now();
+  context.mock.timers.enable({ apis: ['Date'], now: clock });
+  const deadline = clock + 60_000;
+  const reminder = await futureReminder(state, new Date(deadline).toISOString());
+  const { preview, input } = await preparedRelease(state);
+  assert.equal(preview.eligible, true);
+  input.probeEffects.afterPendingCommit = async () => context.mock.timers.setTime(deadline);
+  await assert.rejects(releaseMaintenance(input), /maintenance_inventory_expired/);
+  assert.equal((await state.pending()).status, 'completed');
+  await assert.rejects(readFile(maintenanceReleasePaths(state.state).receipt), { code: 'ENOENT' });
+  await assertQuarantined(state);
+  input.probeEffects.afterPendingCommit = undefined;
+  await assert.rejects(releaseMaintenance(input), /maintenance_release_inventory_changed/);
+  assert.equal((await state.pending()).status, 'draining');
+  assert.equal(state.releaseActivity.disposals, 1, 'expired proof cannot repeat disposal');
+  assert.equal(await readFile(reminder.path, 'utf8'), reminder.bytes);
+  await assertQuarantined(state);
+});
+
 for (const stage of ['observation', 'release']) {
   test(`${stage} requires an explicit approver and exact preview digest`, async context => {
     const state = await recovered(context);

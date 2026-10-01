@@ -674,8 +674,11 @@ Attempt records prevent uncertain stop/start replay. Failed activation never res
 that cannot enforce quarantine. The ordinary deploy worker refuses the held checkpoint. A separate
 operator-only release command inventories replay candidates and requires fresh exact-digest approval.
 It starts OpenCode in observation mode, keeping execution, MCP servers, notebook initialization and
-wiki synchronization blocked. Only terminal or existing single-use-protected continuations qualify;
-missing legacy submission identity remains an explicit blocker. After authenticated quiet proof,
+wiki synchronization blocked. Inert terminal request history can retain its operation and checkpoints
+when no runner remains; this does not attest the historical outcome. Existing single-use-protected
+continuations also qualify. Future reminders qualify only before their due time, bound into the proof
+and checked again at release commit. Interrupted operations, tracking requests, finished-worktree cleanup
+candidates and unsubmitted actionable wakes still require separate evidence. After authenticated quiet proof,
 the host disposes restricted instances once and commits release before normal instances can load.
 Original outcomes remain unknown in immutable archives; no lease, transcript or domain status is cleared.
 See [legacy recovery](../deployment.md#legacy-maintenance-recovery-plan).
