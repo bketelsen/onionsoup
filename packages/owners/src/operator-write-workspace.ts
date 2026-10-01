@@ -69,6 +69,17 @@ async function repositoryIdentity(directory: string, limits = OPERATOR_WRITE_LIM
   if (!index.isFile() || index.isSymbolicLink()) error('index_invalid');
   return { gitDirectory, head, tree, indexSha256: operatorWriteSha256(await readFile(join(gitDirectory, 'index'))) };
 }
+/** Canonical repository identity for combining sibling worktrees, never merely matching commits. */
+export async function operatorWriteCommonDirectory(snapshot: OperatorWriteSnapshot) {
+  if (await realpath(snapshot.directory) !== snapshot.directory) error('workspace_changed');
+  const identity = await repositoryIdentity(snapshot.directory, snapshot.limits);
+  for (const key of ['gitDirectory', 'head', 'tree', 'indexSha256'] as const) {
+    if (identity[key] !== snapshot[key]) error('repository_changed');
+  }
+  const path = (await git(snapshot.directory, ['rev-parse', '--path-format=absolute', '--git-common-dir'], snapshot.limits)).trim();
+  return realpath(path);
+}
+
 async function parentsOf(directory: string, paths: string[]) {
   const names = new Set(['']);
   for (const path of paths) {
