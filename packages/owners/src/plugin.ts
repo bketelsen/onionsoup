@@ -59,6 +59,10 @@ import { checkOperatorChildMessage, checkOperatorChildTool } from './operator-ch
 import { rememberOperatorChildren } from './operator-job-history.ts';
 import { deliverOperatorJobWakes } from './operator-job-wake.ts';
 import { OperatorRecoveryPermissions } from './operator-recovery-permission.ts';
+import { OperatorWritePermissions } from './operator-write-permission.ts';
+import { OperatorWrites } from './operator-write-host.ts';
+import { OPERATOR_WRITE_TOOL, OperatorWriteCalls } from './operator-write-call.ts';
+import { operatorFileTool } from './operator-write-tool.ts';
 import {
   commitOperatorMemory, editsUnder, ensureOperatorMemory, isMemoryNudge, MEMORY_NUDGE_TEXT, memoryIndexBlock, memorySignature, OperatorActivityLog,
   operatorMemoryDirectory,
@@ -356,8 +360,12 @@ const server: Plugin = async (input, options) => {
   }
   const operator = runtime.declarations.operator;
   const operatorJobs = operator ? new OperatorJobs(runtime.stateDirectory, operator.directory, operator.name) : undefined;
-  const operatorSupervisor = operatorJobs ? new OperatorSupervisor(operatorJobs, operatorSupervisorClient(input.client)) : undefined;
   const operatorRecoveryPermissions = new OperatorRecoveryPermissions();
+  const operatorWritePermissions = new OperatorWritePermissions();
+  const operatorWriteCalls = new OperatorWriteCalls();
+  const operatorClient = operator ? operatorSupervisorClient(input.client) : undefined;
+  const operatorWrites = operatorJobs && operatorClient ? new OperatorWrites(operatorJobs, operatorClient, operatorWritePermissions) : undefined;
+  const operatorSupervisor = operatorJobs && operatorClient ? new OperatorSupervisor(operatorJobs, operatorClient, undefined, operatorWrites) : undefined;
   // The operator journals what it does, like an owner, to a notebook of its own (never distilled) that also holds its
   // memory: files it keeps itself, committed here when its chat goes idle.
   const operatorNotebook = runtime.notebook(OPERATOR_ID);
@@ -1188,6 +1196,7 @@ const server: Plugin = async (input, options) => {
         const lease = isAdmittedTurn ? undefined : await beginAdmission(runtime.stateDirectory, `tool:${input.tool}`);
         if (lease) toolLeases.set(key, lease);
         await prepareToolArguments(input, output);
+        if (input.tool === OPERATOR_WRITE_TOOL && operatorWrites) operatorWriteCalls.prepare(input, output.args);
         tracked.ready = true;
       } catch (error) {
         await clearTrackedTool(key, tracked);
@@ -1325,6 +1334,7 @@ const server: Plugin = async (input, options) => {
 
     async event({ event }) {
       operatorRecoveryPermissions.event(event);
+      operatorWritePermissions.event(event);
       const typed = event as { type: string; properties: Record<string, any> };
       const isIdle = typed.type === 'session.idle' || (typed.type === 'session.status' && typed.properties.status?.type === 'idle');
       const activityAtEvent = isIdle ? new Map(chatActivity) : undefined;
@@ -1370,7 +1380,8 @@ const server: Plugin = async (input, options) => {
         if (agent === operator!.name) return;
         if (ownerByAgent.has(agent)) requireOwner(agent);
         throw new Error('operator_job_operator_only');
-      }, operatorRecoveryPermissions) } : {}),
+      }, operatorRecoveryPermissions, operatorWrites) } : {}),
+      ...(operatorWrites ? { [OPERATOR_WRITE_TOOL]: operatorFileTool(operatorWrites, operatorWriteCalls) } : {}),
       onionsoup_friction: tool({
         description: 'Report unexpected onionsoup engine behavior with expected/actual and reproducible evidence. Host code adds observed failures and origin; repeats are counted, not re-triaged. Do not include secrets.',
         args: {

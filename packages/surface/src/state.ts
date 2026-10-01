@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import {
-  listChildAbandonments, abandonedChildMessages, OPERATOR_RECOVERY_PERMISSION,
+  listChildAbandonments, abandonedChildMessages, OPERATOR_RECOVERY_PERMISSION, OPERATOR_WRITE_PERMISSION,
   planRevisionStatus, approveCreate, approveDelete, approvePlan, approvePush, chatDirectory, denyRequest, deskState, describeAsk,
   domainSummary, itemText, revisePlan, resumeItem, retryItem, cancelItem, memoryFingerprint, type ResourceRequest, type Runtime,
   promoteFriction, retryFrictionPromotion, frictionPromotionView, frictionPromotionHistory,
@@ -17,6 +17,7 @@ import {
 } from '@onionsoup/owners';
 import type { OpencodeApi, PendingPermission, PendingQuestion } from './opencode.ts';
 import { planApprovalOf, type PlanApprovalRequest } from './plan-approval-request.ts';
+import { operatorWriteApprovalOf, type OperatorWriteApproval } from './operator-write-approval.ts';
 import { readSessionMessages, readSessionsTitled, readArchivedSessionMessages } from './hire-store.ts';
 import { ordered, SettingsStore } from './settings.ts';
 import { publicFrictionDigest, type PublicFrictionRecord } from './friction-public.ts';
@@ -53,7 +54,7 @@ function requestRecoveryDetail(request: ResourceRequest) {
 }
 
 /** These decisions always wait for the person, including in chats configured to auto-accept routine permissions. */
-const PERSON_GATES = new Set([PLAN_APPROVAL_PERMISSION, 'onionsoup_ship', 'onionsoup_owner_change', WIKI_DELETE_PERMISSION, OPERATOR_RECOVERY_PERMISSION]);
+const PERSON_GATES = new Set([PLAN_APPROVAL_PERMISSION, 'onionsoup_ship', 'onionsoup_owner_change', WIKI_DELETE_PERMISSION, OPERATOR_RECOVERY_PERMISSION, OPERATOR_WRITE_PERMISSION]);
 
 /** Delegated plans wait in the inbox; a plan submitted from the person's chat is answered there instead. */
 function waitsInInbox(item: WorkItem) {
@@ -94,13 +95,14 @@ export interface InboxEntry {
   sessionID?: string;
   permission?: PendingPermission;
   planApproval?: PlanApprovalRequest;
+  operatorWriteApproval?: OperatorWriteApproval;
   question?: PendingQuestion;
 }
 
 function permissionEntry(ownerId: string, permission: PendingPermission): InboxEntry {
   const planApproval = planApprovalOf(permission);
   const title = planApproval ? `Approve plan ${planApproval.item}: ${planApproval.title}` : `${permission.permission}: ${permission.patterns.join(', ')}`;
-  return { kind: 'permission', id: permission.id, owner: ownerId, sessionID: permission.sessionID, title, detail: '', permission, planApproval };
+  return { kind: 'permission', id: permission.id, owner: ownerId, sessionID: permission.sessionID, title, detail: '', permission, planApproval, operatorWriteApproval: operatorWriteApprovalOf(permission) };
 }
 
 /** Provider problems belong to the engine, not to one owner. */

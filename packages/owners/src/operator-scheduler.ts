@@ -5,7 +5,7 @@ import { recordOperatorUncertainty } from './operator-uncertainty.ts';
 
 export const OPERATOR_OPERATION_LIMITS = { leaseMs: 45_000, observationsPerTick: 16 };
 export const OPERATOR_TERMINAL_JOBS = new Set<OperatorJob['status']>(['completed', 'cancelled']);
-export const OPERATOR_TERMINAL_CHILDREN = new Set<OperatorChild['status']>(['completed', 'cancelled', 'abandoned']);
+export const OPERATOR_TERMINAL_CHILDREN = new Set<OperatorChild['status']>(['completed', 'cancelled', 'abandoned', 'needs-review']);
 export const OPERATOR_CREATION_BLOCKERS = new Set(['operator_child_creation_uncertain', 'operator_child_creation_ambiguous',
   'operator_child_creation_runtime_unavailable']);
 type OperationKind = NonNullable<OperatorChild['operation']>['kind'];
@@ -28,6 +28,7 @@ export function operatorChildUnsettled(child: OperatorChild) {
 }
 
 export function operatorChildOccupiesSlot(child: OperatorChild) {
+  if (child.access === 'write' && !child.write?.acceptance && operatorChildUnsettled(child)) return true;
   if (OPERATOR_TERMINAL_CHILDREN.has(child.status)) return false;
   return (child.status === 'queued' && child.operation?.kind === 'observe')
     || ['creating', 'dispatching', 'running'].includes(child.status) || operatorChildUnsettled(child)
@@ -48,7 +49,12 @@ export function settleOperatorJob(job: OperatorJob) {
     job.status = 'needs-synthesis';
     return;
   }
-  job.status = job.children.some(child => ['blocked', 'abandoned'].includes(child.status)) ? 'blocked' : 'running';
+  const statuses: Array<{ matches: boolean; status: OperatorJob['status'] }> = [
+    { matches: job.children.some(child => ['blocked', 'abandoned'].includes(child.status)), status: 'blocked' },
+    { matches: job.children.some(child => child.status === 'needs-review'), status: 'needs-review' },
+    { matches: true, status: 'running' },
+  ];
+  job.status = statuses.find(candidate => candidate.matches)!.status;
 }
 
 /** Only short file transactions live here. Runtime calls belong to the caller, after a durable claim returns. */

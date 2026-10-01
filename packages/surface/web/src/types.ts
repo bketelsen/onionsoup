@@ -22,6 +22,7 @@ export interface InboxEntry {
   attentionStatus?: string;
   attentionAssignment?: import('@onionsoup/owners').AttentionAssignmentView;
   assignmentTargets?: ReturnType<typeof import('@onionsoup/owners').attentionAssignmentTargets>;
+  operatorWriteApproval?: import('../../src/operator-write-approval.ts').OperatorWriteApproval;
   permission?: PendingPermission; planApproval?: PlanApprovalRequest; question?: PendingQuestion;
 }
 

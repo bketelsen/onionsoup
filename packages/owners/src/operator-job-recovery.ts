@@ -55,6 +55,10 @@ export async function prepareOperatorRecovery(jobs: OperatorJobs, client: Operat
   origin: OperatorJobOrigin, id: string, childID: string) {
   const job = await jobs.get(origin, id);
   const child = boundChild(job, childID);
+  if (child.access === 'write') {
+    return { jobID: id, childID, digest: operatorRecoveryDigest(job, child), eligible: false,
+      reason: 'write-reservation-requires-verified-review', warning: 'Unknown write effects retain their workspace claim. No read-only abandonment can release it.' };
+  }
   if (child.abandonment) return { jobID: id, childID, eligible: false, reason: 'already-abandoned',
     digest: child.abandonment.digest, warning: WARNING, abandonment: child.abandonment };
   const digest = operatorRecoveryDigest(job, child);
@@ -151,6 +155,7 @@ async function commitAbandonment(jobs: OperatorJobs, origin: OperatorJobOrigin, 
     const job = jobs.bound(ledger, origin, id);
     const child = boundChild(job, childID);
     if (child.abandonment?.digest === digest && child.abandonment.note === note) return job;
+    if (child.access === 'write') throw new Error('operator_write_review_required');
     if (operatorRecoveryDigest(job, child) !== digest || !child.uncertainty?.needsDecision) throw new Error('operator_recovery_stale');
     const attempt = child.attempts.at(-1);
     child.abandonment = { digest, at: new Date().toISOString(), actor: userInfo().username, note, unknownOutcome: true, approval,

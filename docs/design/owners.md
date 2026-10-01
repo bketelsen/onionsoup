@@ -725,14 +725,16 @@ gets the surface opencode's own server credentials blanked (the plugin's `shell.
 
 #### Durable operator investigations
 
-`onionsoup_operator_job` supervises the operator's own children, independently of owners and initiatives. Its first
-stage supports read-only file investigations: no child bash, edits, network tools, further delegation or owner tools.
-No persistent grant is created. The operator's normal interactive permissions are unchanged.
+`onionsoup_operator_job` supervises the operator's own children, independently of owners and initiatives. It supports
+read-only investigations and explicitly approved edits to named existing files. Children have no arbitrary bash, native
+edit, network, delegation or owner tools. No persistent grant is created; the operator's normal interactive permissions
+are unchanged.
 
 The host binds a job to the configured operator and exact top-level chat, and captures the invoking human message
 from the transcript. Original intake, decomposed goal, constraints and task scope are separate fields; a runtime
 notice cannot create a new job as if it were a person. `create` returns a durable handle promptly. Tasks name existing
-directories within the operator's configured workspace, use `access: "read-only"`, and can name `dependsOn` task IDs.
+directories within the operator's configured workspace, use `access: "read-only"` or the gated `"write"` scope below,
+and can name `dependsOn` task IDs.
 The scheduler reserves at most two managed slots across all jobs. These are independent OpenCode sessions with logical
 parentage in `state/operator-jobs/jobs.json`, so the parent can answer another message while both children run.
 Children are also recorded in the operator's existing session history, without inventing native parent relationships.
@@ -754,8 +756,8 @@ pause and synthesis calls can proceed while metadata reads wait.
 Unknown outcomes keep their reservations during bounded observation (three attempts or two minutes, with 15-second
 spacing by default), then stop automatic polling with `needsDecision`. `recheck { id, childID }` performs one fresh
 observation without dispatching work. If the receipt appears, it reconciles the existing session. Otherwise,
-`recovery-preview { id, childID }` shows the exact scope and digest; `abandon { id, childID, digest, text }` requests a
-one-time human decision. It is never an automatic retry or a claim that the original work failed.
+`recovery-preview { id, childID }` shows the exact scope and digest for a read-only child;
+`abandon { id, childID, digest, text }` requests a one-time human decision. Write reservations cannot use this recovery path. It is never an automatic retry or a claim that the original work failed.
 
 Abandonment releases only the logical scheduling reservation. The old inference may still finish, so physical
 concurrency may temporarily exceed the two managed slots after this explicit decision. The unknown outcome remains
@@ -774,7 +776,7 @@ calls preserve the first audit receipt. Native permission prompts do not survive
 the runtime stopped before committing the recovery.
 
 The plugin has a separate admitted operator maintenance pass, so slow operator metadata cannot hold up domain-owner
-notices. It reconciles jobs and sends durable, actionable parent wakes for progress, blockers and readiness.
+notices. It reconciles jobs and sends durable, actionable parent wakes for progress, blockers, write review and readiness.
 Wakes wait for an idle parent, keep a stable message receipt and never blindly resend an uncertain
 prompt. They are runtime observations, not new permissions. The operator must inspect current job state before acting.
 Completed child evidence retains exact session, prompt, final message and tool-call identities. `synthesize` takes the
@@ -783,10 +785,41 @@ binds the summary to observed transcripts; it does not certify the truth of a mo
 
 The acceptance scenario is two parallel investigations, another message answered in the same parent chat, a restart
 of a disposable OpenCode server, recovery of the same child IDs and evidence, and a recorded synthesis. Production
-sessions must not be restarted to test it. Write-enabled children and workspace write-claim scheduling are a later
-stage: this version rejects write scopes rather than allowing unsupervised concurrent edits. Native permissions and
-canonical-path checks constrain reading tools, but these host sessions are not a filesystem sandbox against concurrent
-path replacement by another process.
+sessions must not be restarted to test it. Native permissions and canonical-path checks constrain reading tools, but
+these host sessions are not a filesystem sandbox against concurrent path replacement by another process.
+
+
+#### Scoped operator file edits
+
+A write task uses `access: "write"` and an explicit `files` list. Its directory must already be a clean Git worktree
+root under the configured operator workspace. Only existing tracked UTF-8 files are eligible; new paths, deletions,
+symlinks, hard-linked files and Git metadata are excluded. Default limits allow eight approved files per task, each
+at most 256 KiB. Creation captures the original intake, goal, constraints, task paths and HEAD in an exact scope digest.
+The person must answer the matching native **Allow once** prompt before the job is admitted. Auto-allow, **Always**,
+a runtime notice or an earlier approval cannot substitute for this decision.
+
+Workspace claims cover the whole canonical worktree, including overlapping parent/child directories. A conflicting
+read or write task is refused rather than run concurrently; two independent worktrees can use the two managed slots.
+The operator can keep answering its parent chat while these children work. Claims remain held after child inference
+finishes and until the person accepts the verified diff.
+
+The child calls `onionsoup_operator_write_file` with an approved relative path, its expected current SHA256 and full
+replacement text. Host code records a mutation intent, checks the original Git and file identities, and passes a
+pinned file descriptor to a fixed writer in a network-isolated, memory-capped bwrap sandbox. The helper can write only
+that approved descriptor; pathname replacement cannot redirect it. This isolates the file mutation, not the trusted
+operator or every model session. Children receive no arbitrary shell, test execution, commit, push or merge capability.
+
+A completed child enters `needs-review`. `review-write { id, childID }` verifies current workspace and terminal runtime
+evidence and returns the exact host diff and review digest. The parent presents that diff, the original goal and
+constraints; `accept-write { id, childID, digest }` asks for another native **Allow once**, bound to that exact review.
+Both chat and inbox show the full diff in a scrolling view and label child conclusions as model claims. Fresh checks
+before and after approval reject changed files, HEAD, scope or evidence. Acceptance releases the workspace claim and
+allows normal job synthesis once all children are complete. It does not certify tests, commit the edits or clean the
+worktree; a later write job needs a new clean baseline.
+
+A prepared mutation with an unknown outcome remains blocked with its workspace reservation intact. Restart, cancel,
+read-only abandonment and a fresh tool call cannot replay or clear it. This slice provides no uncertain-write recovery
+or automatic replacement. The original transcript, intent and any receipt remain available for diagnosis.
 
 #### Operator memory
 

@@ -4,6 +4,7 @@ import { PlanApprovalCard } from '../chat/cards.tsx';
 import { QuestionCard } from '../chat/QuestionCard.tsx';
 import { AttentionAssignment } from './AttentionAssignment.tsx';
 import { DecisionActions } from './DecisionActions.tsx';
+import { OperatorWriteApprovalView } from './OperatorWriteApproval.tsx';
 import { api, navigate } from '../api.ts';
 import type { InboxEntry, OwnerSummary } from '../types.ts';
 import { Badge, Button, cx, OwnerIcon, timeAgo } from './ui.tsx';
@@ -68,7 +69,8 @@ export function Decision({ entry, owner, onDone, compact }: { entry: InboxEntry;
           {entry.permission.metadata.approvalScope === 'once' && typeof entry.permission.metadata.warning === 'string' && (
             <p>{entry.permission.metadata.warning}</p>
           )}
-          <pre className="typography-code bg-muted rounded-md p-2 overflow-x-auto max-h-40">{JSON.stringify(entry.permission.metadata, null, 2)}</pre>
+          <>{entry.operatorWriteApproval ? <OperatorWriteApprovalView approval={entry.operatorWriteApproval} />
+            : <pre className="typography-code bg-muted rounded-md p-2 overflow-x-auto max-h-40">{JSON.stringify(entry.permission.metadata, null, 2)}</pre>}</>
         </>
       )}
       {entry.kind === 'question' && entry.question && <QuestionCard key={entry.id} entry={entry} onDone={onDone} />}

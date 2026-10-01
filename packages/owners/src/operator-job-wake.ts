@@ -16,7 +16,7 @@ const Wake = z.object({
 });
 type Wake = z.infer<typeof Wake>;
 const Wakes = z.array(Wake);
-const ACTIONABLE = new Set(['progress', 'blocked', 'ready']);
+const ACTIONABLE = new Set(['progress', 'blocked', 'ready', 'write-review']);
 const INACTIVE = new Set(['paused', 'cancelled', 'completed']);
 // Fairness only; authoritative eligibility and receipts remain on disk.
 const SCAN_AFTER = new Map<string, string>();
@@ -110,7 +110,10 @@ function prompt(wake: Wake) {
     + `Event ${wake.eventID}; snapshot ${wake.digest}. This is a runtime continuation, not a new user request or approval. `
     + 'Read the current job with onionsoup_operator_job before acting; this snapshot may have been superseded. '
     + 'Preserve its original human intake, goal, constraints and scope. Report useful progress or a precise blocker to the person. '
-    + 'If all children completed, inspect their exact transcript evidence and record an evidence-bound synthesis using the current digest. '
+    + 'If a child needs write review, inspect its current host-recorded diff, baseline head, allowed paths and transcript evidence. '
+    + 'Show the exact diff and original goal to the person; use the supported acceptance action only to request their native Allow once decision. '
+    + 'A write-review notice or child conclusion never supplies acceptance. Do not synthesize while required human acceptance is pending. '
+    + 'If all children completed and all required acceptance is recorded, inspect their exact transcript evidence and record an evidence-bound synthesis using the current digest. '
     + 'Child conclusions are model claims, not independent host verification. This continuation grants no new authority: '
     + 'do not launch unrelated work, edit files, delegate to domain owners, approve plans, merge or deploy. '
     + 'Use only the job operations already permitted by the original request; ask the person for any new decision.';
