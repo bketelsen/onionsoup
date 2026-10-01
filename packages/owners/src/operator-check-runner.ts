@@ -10,6 +10,7 @@ import { OPERATOR_CHECK_LIMITS, OperatorCheckCommand, operatorCheckKind,
 import { alreadyMemoryCapped, OPERATOR_WRITER_LIMITS, preflightOperatorFileWriter,
   requireOperatorWriterBwrapFeatures } from './operator-write-writer.ts';
 import { preflightOperatorGoCheck, prepareOperatorGoCheck } from './operator-check-go.ts';
+import { operatorNamespaceWitness } from './operator-check-process.ts';
 
 export const OPERATOR_CHECK_RUNNER_LIMITS = { memoryBytes: OPERATOR_WRITER_LIMITS.memoryBytes,
   tasksMax: SANDBOX_LIMITS.tasksMax, timeoutMs: 60_000, killMs: OPERATOR_WRITER_LIMITS.killMs,
@@ -131,9 +132,9 @@ export async function preflightOperatorCheck(command = ['node', '--test', 'prefl
 function bubblewrapArguments(command: string[], mounts: PinnedOperatorCheckMount[], runtime: OperatorCheckRuntime) {
   const binds = mounts.flatMap((mount, index) => ['--ro-bind-fd', String(index + 3), mount.destination]);
   const environment = Object.entries(runtime.environment).flatMap(([key, value]) => ['--setenv', key, value]);
-  // Waiting for namespace init avoids bwrap's early main-child notification while detached children still exit.
-  // Forced shutdown retains the separate process-group exit proof and uncertainty policy below.
+  // The parent pins namespace init before releasing execution, then proves its death even after forced shutdown.
   return ['--unshare-all', '--as-pid-1', '--die-with-parent', '--new-session', '--cap-drop', 'ALL',
+    '--info-fd', String(mounts.length + 3), '--block-fd', String(mounts.length + 4),
     ...binds, '--proc', '/proc', '--dev', '/dev', '--size', String(OPERATOR_CHECK_RUNNER_LIMITS.temporaryBytes),
     '--tmpfs', '/tmp', '--dir', '/tmp/home', '--remount-ro', '/proc', '--remount-ro', '/dev', '--remount-ro', '/',
     '--clearenv', '--setenv', 'HOME', '/tmp/home', '--setenv', 'TMPDIR', '/tmp',
@@ -183,7 +184,7 @@ async function executeCheck(command: Awaited<ReturnType<typeof isolatedCommand>>
     let child: ReturnType<typeof spawn>;
     try {
       child = spawn(command.executable, command.args, { detached: true,
-        stdio: ['ignore', 'pipe', 'pipe', ...mounts.map(mount => mount.handle.fd)],
+        stdio: ['ignore', 'pipe', 'pipe', ...mounts.map(mount => mount.handle.fd), 'pipe', 'pipe'],
         env: { PATH: '/usr/bin:/bin', XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR,
           DBUS_SESSION_BUS_ADDRESS: process.env.DBUS_SESSION_BUS_ADDRESS } });
     } catch {
@@ -191,6 +192,7 @@ async function executeCheck(command: Awaited<ReturnType<typeof isolatedCommand>>
       return;
     }
     let output = '';
+    const namespace = operatorNamespaceWitness(child, mounts.length + 3, mounts.length + 4);
     let outputTruncated = false;
     let timedOut = false;
     let spawnFailed = false;
@@ -219,14 +221,18 @@ async function executeCheck(command: Awaited<ReturnType<typeof isolatedCommand>>
       clearTimeout(timeout);
       clearTimeout(killTimer);
       clearTimeout(stopTimer);
-      void waitForGroupExit(child.pid).then(() => {
+      let groupExited = false;
+      void waitForGroupExit(child.pid).then(async () => {
+        groupExited = true;
+        const released = await namespace.wait();
         const captured = { output, outputTruncated };
         if (spawnFailed) resolve(failureOutcome(125, 'operator_check_launch_failed', captured));
+        else if (!released) resolve(failureOutcome(125, 'operator_check_setup_failed', captured));
         else if (timedOut) resolve(failureOutcome(124, 'operator_check_timeout', captured));
         else if (signal) resolve(failureOutcome(128 + operatingSystem.signals[signal], 'operator_check_terminated', captured));
         else if (code === null) reject(new Error('operator_check_process_uncertain'));
         else resolve({ exitCode: code, output, outputTruncated });
-      }, reject);
+      }).catch(reject).finally(() => namespace.close(groupExited)).catch(reject);
     });
   });
 }

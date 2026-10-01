@@ -831,8 +831,10 @@ approved check ID; host code records bounded output, exit code and the exact art
 record the selected runtime version and Go executable SHA256 (not a digest of the entire toolchain). These receipts are
 separate from model claims. Editing after a check makes that receipt stale for acceptance; every configured check
 must have a current successful receipt. Failed or incomplete checks remain visible without implying completion.
-Normal completion waits for the sandbox namespace-init process to exit. Forced shutdown retains the existing
-bounded process-group policy; unproved exit remains uncertain. It does not independently attest an empty cgroup.
+Before execution, a startup barrier lets the host pin the sandbox namespace-init process identity. Both normal
+completion and forced shutdown require that pinned identity to disappear, alongside the existing bounded
+process-group exit proof; a zombie leader alone is insufficient while its threads may still be exiting.
+Unproved exit remains uncertain. This does not independently attest an empty cgroup.
 
 A completed child enters `needs-review`. `review-write { id, childID }` verifies current workspace and terminal runtime
 evidence and returns the exact host diff and review digest. The parent presents that diff, the original goal and
