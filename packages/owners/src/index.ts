@@ -65,3 +65,7 @@ export { readChildAbandonment, listChildAbandonments, abandonedChildMessages, Ch
 export { OPERATOR_RECOVERY_PERMISSION, OPERATOR_WRITE_PERMISSION } from './operator-jobs-types.ts';
 
 export { OperatorTaskCheck, OperatorCheckRecord } from './operator-check-types.ts';
+
+export { MaintenanceQuarantine, MaintenanceQuarantineBody, MaintenanceQuarantineAcknowledgment, maintenanceQuarantineDigest,
+  maintenanceQuarantinePath, readMaintenanceQuarantine, maintenanceQuarantineStatus, assertMaintenanceAllowed,
+  maintenanceRuntimeBuildId, maintenanceQuarantineAckPath, acknowledgeMaintenanceQuarantine } from './maintenance-quarantine.ts';

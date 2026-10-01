@@ -23,6 +23,16 @@ const READINESS_REASONS = new Set([
 const fail = code => Object.assign(new Error(code), { code });
 const workerRoot = resolve(fileURLToPath(new URL('..', import.meta.url)));
 
+async function assertNoMaintenanceRecovery(layout) {
+  try {
+    await lstat(join(layout.state, 'deploy/maintenance-quarantine.json'));
+  } catch (error) {
+    if (error.code === 'ENOENT') return;
+    throw error;
+  }
+  throw fail('maintenance_recovery_quarantine_gate_held');
+}
+
 async function coordinator() {
   try {
     return await import(new URL('../packages/owners/src/deployment-admission.ts', import.meta.url));
@@ -211,8 +221,13 @@ async function stage(input, location, buildId) {
     await runSandboxed('npm', ['ci'], location);
     await runSandboxed('npm', ['run', 'verify'], location);
     await mkdir(join(location, 'packages', 'surface'), { recursive: true });
+    const capabilities = await readFile(join(location, 'packages/owners/maintenance-capabilities.json'), 'utf8')
+      .then(bytes => JSON.parse(bytes)).catch(error => {
+        if (error.code === 'ENOENT') return undefined;
+        throw error;
+      });
     await writeFile(join(location, 'packages', 'surface', 'release-manifest.json'),
-      JSON.stringify({ buildId }) + '\n', { flag: 'wx' });
+      JSON.stringify({ buildId, ...(capabilities ? { capabilities } : {}) }) + '\n', { flag: 'wx' });
     await manifestMatches(location, buildId);
   } finally {
     await rm(archive, { force: true });
@@ -235,6 +250,7 @@ async function seal(location) {
 
 export async function arm(input) {
   const layout = paths(input);
+  await assertNoMaintenanceRecovery(layout);
   if (!isAbsolute(input.source ?? '') || !SHA.test(input.commit ?? '')) throw fail('explicit_commit_and_source_required');
   const { armDeployment } = await coordinator();
   const previous = await pending(layout);
@@ -270,6 +286,7 @@ export async function cancel(input) {
   const layout = paths(input);
   const { withRecordLock } = await import(new URL('../packages/owners/src/record-lock.ts', import.meta.url));
   return withRecordLock(join(layout.directory, 'worker.lock'), async () => {
+    await assertNoMaintenanceRecovery(layout);
     const record = await pending(layout);
     if (!record) throw fail('pending_missing');
     if (await bootstrapMarker(layout)) throw fail('bootstrap_old_health_unverified_gate_held');
@@ -380,6 +397,7 @@ export async function worker(input) {
   const layout = paths(input);
   const { withRecordLock } = await import(new URL('../packages/owners/src/record-lock.ts', import.meta.url));
   return withRecordLock(join(layout.directory, 'worker.lock'), async () => {
+    await assertNoMaintenanceRecovery(layout);
     if (await bootstrapMarker(layout)) throw fail('bootstrap_old_health_unverified_gate_held');
     const record = await pending(layout);
     if (!record) return null;

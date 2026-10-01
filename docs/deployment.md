@@ -336,7 +336,12 @@ collecting the fingerprint or opening a draft change.
 
 ### Legacy maintenance recovery plan
 
-This is a reviewable plan, **not an implemented recovery command or authorization to restart**.
+The legacy exception is a separate operator-only command, `scripts/recover-maintenance.mjs`.
+Its implementation is not authorization to interrupt a runtime. It restores **diagnostic-only
+quarantine**, not ordinary chat or execution service. Both units acknowledge the approved target
+build and recovery digest, but OpenCode is intentionally not started. The admission drain, original
+lease files, interruption checkpoint and unknown outcomes remain held. There is no timeout-based
+release, automated replay, or blanket clear operation.
 Maintenance lifecycle prevention cannot recover an old `plugin:notices` or `plugin:operator-jobs`
 admission that contains only kind, PID and process start time. It supplies no instance, awaited call,
 resource identity, request receipt or terminal outcome. A live PID, quiet chats, old timestamp or zombie
@@ -353,15 +358,54 @@ lock helper cannot fill that gap. Chat/notice/failed-tool recovery commands do n
    recheck all genuine chats, tools, children, host checks and descendants, and invalidate its preview
    on any new activity, changed PID/start/build or changed evidence. It must positively establish process
    termination and contain possible outstanding effects before restart. An apparently idle snapshot
-   is insufficient. No current generic guarded-release path implements this exception.
+   is insufficient. The ordinary guarded-release worker refuses this recovery's checkpoint and quarantine.
 4. Retain an immutable receipt that distinguishes **operator-authorized interruption** from completed
    work. Keep old leases and transcripts as history; never rewrite them as successful operations.
    Reconcile or explicitly quarantine uncertain domain effects before allowing a replacement to send
    again. Preserve rollback and verify exact build/health after any separately authorized rollout.
 
-Acceptance for any future recovery implementation must include a real disposable-runtime stop with
+The command's acceptance checks include a disposable-runtime stop with
 matching process identity; foreign/new activity invalidating a prepared digest; pending external effects
 remaining protected; duplicate/uncertain restart refusal; unchanged transcripts and workspace evidence;
 and no notice, opening or child replay. Until that procedure is implemented, independently reviewed and
 explicitly approved, the correct outcome for unproven legacy leases remains **blocked**. The prevention
-change does not clear them or make today's guarded rollout eligible.
+change alone does not clear them or make an ordinary guarded rollout eligible.
+
+Run the command from a stable, reviewed checkout outside the immutable release root. The target must
+already be staged with `capabilities.legacyMaintenanceQuarantine: 1`. Supply the exact legacy lease IDs
+and evidence directories covering the selected runtime's OpenCode database and WAL, in addition to
+the configuration, durable state and workspaces automatically inventoried by the probe:
+
+```sh
+node --conditions=onionsoup-source --import tsx scripts/recover-maintenance.mjs \
+  --root "$release_root" --state "$state" --config "$config" \
+  --surface-url http://127.0.0.1:4747/ \
+  --expected-old "$old_commit" --expected-target "$target_commit" \
+  --lease "$legacy_lease_id" --evidence-root "$opencode_data"
+```
+
+This first invocation is a preview. Repeat the same selection with `--approve-digest` set to that
+exact preview digest and `--approved-by` identifying the approving person only after explicit
+approval. The preview binds manifests, endpoint and service/process identities, exact lease bytes,
+session registry/transcript hashes and configuration/workspace evidence. Changed evidence or genuine
+activity invalidates it. Preview output contains hashes rather than transcript or credential contents;
+paths and session identifiers remain private operational evidence.
+
+Under the worker lock and admission drain, apply repeats the probes and copies evidence to
+`<release_root>/maintenance-recoveries/<digest>/`. Raw copies preserve files and separate online SQLite
+backups preserve consistent databases. A second archive after verified termination retains the state
+actually left by interruption. Each stop, pointer switch and target start gets a durable attempt record
+before execution. Retries inspect those records and observed processes; they never repeat an uncertain
+effect merely because a command timed out. Local termination does not prove a remote request was cancelled.
+
+The result `restored-quarantined` means both services expose diagnostics for the exact new build and
+acknowledge the quarantine; its separate `outcome: unknown` is intentional. It does **not** mean work
+completed, OpenCode is healthy, the deployment gate is released, or the system is ready for new jobs.
+`GET /api/maintenance-quarantine` reports this state. All mutations, maintenance dispatch, model prompts,
+wiki synchronization and OpenCode startup remain disabled. Missing or invalid quarantine identity fails closed.
+
+Rollback cannot restart an older build that does not implement the quarantine. A failed activation keeps
+the checkpoint and drain and leaves the quarantined target or stopped services for diagnosis. The old
+release, original lease files, transcripts and backups remain intact. Resuming ordinary work requires
+separate evidence-based reconciliation of the unknown effects and an explicitly reviewed release path;
+this command provides no generic way to waive that uncertainty.

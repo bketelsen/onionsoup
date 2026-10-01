@@ -1,3 +1,4 @@
+import { isMaintenanceQuarantineError } from './maintenance-quarantine.ts';
 import { continuityPreview } from './continuity-preview.ts';
 import { promoteFriction, retryFrictionPromotion, frictionInvestigationView } from './friction-promotion.ts';
 import { execFile } from 'node:child_process';
@@ -325,7 +326,7 @@ const COMMANDS: Record<string, Command> = {
         try {
           lease = await beginAdmission(runtime.stateDirectory, 'cli-daemon-shutdown');
         } catch (error) {
-          if (!(error instanceof Error && error.message === 'deployment_draining')) throw error;
+          if (!(error instanceof Error && error.message === 'deployment_draining') && !isMaintenanceQuarantineError(error)) throw error;
         }
         try {
           const stranded = lease ? await runtime.ledger.markInterrupted() : 0;

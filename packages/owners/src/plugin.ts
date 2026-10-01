@@ -1,3 +1,4 @@
+import { maintenanceQuarantineStatus, acknowledgeMaintenanceQuarantine, maintenanceRuntimeBuildId, assertMaintenanceAllowed } from './maintenance-quarantine.ts';
 import { failedToolInTranscript, type TrackedToolCall } from './tool-completion.ts';
 import { isAbandonedChild, readChildAbandonment } from './child-recovery.ts';
 import { ownerChatAgent, ownerChatVoice, observationChatPermission, observationChatPrompt } from './owner-chat.ts';
@@ -354,6 +355,19 @@ async function commitQuietly(notebook: Notebook, message: string, paths?: readon
 const server: Plugin = async (input, options) => {
   if (process.env.ONIONSOUP_SANDBOX === '1') return {};
   const runtime = await Runtime.open({ declarations: String(options?.declarations ?? configDirectory()), state: String(options?.state ?? stateDirectory()) });
+  const quarantine = await maintenanceQuarantineStatus(runtime.stateDirectory);
+  if (quarantine.state !== 'absent') {
+    await acknowledgeMaintenanceQuarantine(runtime.stateDirectory, await maintenanceRuntimeBuildId(), 'plugin')
+      .catch(error => console.warn('maintenance_quarantine_ack_failed', error instanceof Error ? error.message : String(error)));
+    return {
+      async 'chat.message'() { throw new Error('maintenance_quarantined'); },
+      async 'tool.execute.before'(event) {
+        if (event.tool !== 'onionsoup_status') throw new Error('maintenance_quarantined');
+      },
+      tool: { onionsoup_status: tool({ description: 'Read maintenance quarantine status; work and chats are paused.', args: {},
+        execute: async () => JSON.stringify(await maintenanceQuarantineStatus(runtime.stateDirectory)) }) },
+    };
+  }
   const owners = [...runtime.declarations.owners.values()];
   const personaOwners = owners.filter(owner => owner.persona);
   const ownerByAgent = new Map(owners.map(owner => [ownerChatAgent(owner), runtime.owner(owner.id)]));
@@ -1187,6 +1201,7 @@ const server: Plugin = async (input, options) => {
   return {
     dispose: () => maintenance.dispose(),
     async 'tool.execute.before'(input, output) {
+      await assertMaintenanceAllowed(runtime.stateDirectory);
       if (operatorJobs) await checkOperatorChildTool(operatorJobs, input.sessionID, input.tool, output.args);
       if (await readChildAbandonment(runtime.stateDirectory, input.sessionID)) throw new Error('child_session_abandoned: preserved history is read-only');
       const key = `${input.sessionID}:${input.callID}`;
@@ -1287,22 +1302,24 @@ const server: Plugin = async (input, options) => {
     },
 
     async 'chat.message'(message, output) {
-      const messageID = message.messageID ?? output.message?.id;
-      if (operatorJobs) await checkOperatorChildMessage(operatorJobs, message.agent, message.sessionID, messageID);
-      if (isExchangeNoticeDeliveryAttempt(runtime.stateDirectory, messageID, output.parts ?? [])) {
-        const session = await input.client.session.get({ path: { id: message.sessionID } }).catch(() => undefined);
-        if (session?.data?.directory && !session.error && !session.data.parentID
-          && output.message?.id === messageID && consumeExchangeNoticeDelivery(runtime.stateDirectory,
-            { sessionID: message.sessionID, directory: session.data.directory },
-            { id: messageID, role: output.message.role, agent: message.agent, parts: output.parts })) return;
-        throw new Error('exchange_notice_delivery_unverified');
-      }
-      if (await readChildAbandonment(runtime.stateDirectory, message.sessionID)) throw new Error('child_session_abandoned: open a new session to continue');
+      // Fence concurrent idle proofs before quarantine or ancestry reads can yield.
       const pending = Symbol(message.sessionID);
       pendingAncestry.add(pending);
       markChatActive(message.sessionID);
       activeMessages.set(message.sessionID, (activeMessages.get(message.sessionID) ?? 0) + 1);
       try {
+        await assertMaintenanceAllowed(runtime.stateDirectory);
+        const messageID = message.messageID ?? output.message?.id;
+        if (operatorJobs) await checkOperatorChildMessage(operatorJobs, message.agent, message.sessionID, messageID);
+        if (isExchangeNoticeDeliveryAttempt(runtime.stateDirectory, messageID, output.parts ?? [])) {
+          const session = await input.client.session.get({ path: { id: message.sessionID } }).catch(() => undefined);
+          if (session?.data?.directory && !session.error && !session.data.parentID
+            && output.message?.id === messageID && consumeExchangeNoticeDelivery(runtime.stateDirectory,
+              { sessionID: message.sessionID, directory: session.data.directory },
+              { id: messageID, role: output.message.role, agent: message.agent, parts: output.parts })) return;
+          throw new Error('exchange_notice_delivery_unverified');
+        }
+        if (await readChildAbandonment(runtime.stateDirectory, message.sessionID)) throw new Error('child_session_abandoned: open a new session to continue');
         const admittedParent = await admittedMessageParent(message.sessionID);
         pendingAncestry.delete(pending);
         const isNudge = !admittedParent && await admitNudge(message.sessionID, message.agent,
@@ -1343,14 +1360,16 @@ const server: Plugin = async (input, options) => {
     },
 
     async event({ event }) {
-      operatorRecoveryPermissions.event(event);
-      operatorWritePermissions.event(event);
       const typed = event as { type: string; properties: Record<string, any> };
       const isIdle = typed.type === 'session.idle' || (typed.type === 'session.status' && typed.properties.status?.type === 'idle');
       const activityAtEvent = isIdle ? new Map(chatActivity) : undefined;
       if (typed.type === 'session.status' && ['busy', 'retry'].includes(typed.properties.status?.type)) {
         markKnownAncestryActive(String(typed.properties.sessionID));
       }
+      // Event-time epochs must precede asynchronous quarantine inspection.
+      if ((await maintenanceQuarantineStatus(runtime.stateDirectory)).state !== 'absent') return;
+      operatorRecoveryPermissions.event(event);
+      operatorWritePermissions.event(event);
       frictionEvents.observe(event);
       await observeProvider(event).catch(error => console.warn('provider_health_failed', error instanceof Error ? error.message : String(error)));
       if (isIdle) {

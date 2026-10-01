@@ -94,9 +94,11 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
   and new records bind maintenance to instance/operation identity. This cannot identify the unfinished
   operation behind an older live-PID lease. Age, idle chats and a stopped lock helper do not prove its
   effect completed. Guarded rollout continues to refuse those leases. Unknown new session openings or
-  notice sends retain their exact claims and receipts without replay; recovery is not implemented.
-  The [separate legacy recovery plan](deployment.md#legacy-maintenance-recovery-plan) describes the
-  remaining proof and operational decision rather than authorizing a restart or clearing records.
+  notice sends retain their exact claims and receipts without replay. Explicit legacy interruption can
+  restore diagnostic-only services under a durable quarantine; it does not resolve unknown effects or
+  resume ordinary chats, dispatch or OpenCode. Evidence-based quarantine release remains unimplemented.
+  The [separate legacy recovery procedure](deployment.md#legacy-maintenance-recovery-plan) describes the
+  required proof and operational decision rather than authorizing a restart or clearing records.
 - **snosi builds run only in CI.** mkosi needs root, so Murbella verifies with snosi's static checks and relies on
   GitHub Actions for builds (CI failures wake her). Local builds would need a privileged build VM on minideb,
   requested from Miles Teg like the smoke-test instances.
