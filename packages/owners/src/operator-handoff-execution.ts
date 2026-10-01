@@ -10,6 +10,8 @@ import { OperatorPermissionProof } from './operator-jobs-types.ts';
 import { withRecordLock } from './record-lock.ts';
 import { writeHandoffFile } from './operator-handoff-file.ts';
 
+export const OPERATOR_HANDOFF_RECOVERY_LIMITS = { noteChars: 2_000 };
+
 const Hash = z.string().regex(/^[a-f0-9]{64}$/);
 const Identifier = z.string().regex(/^[a-zA-Z0-9_-]+$/);
 export const OperatorHandoffExecutionBinding = z.object({ receiptID: Identifier, token: z.uuid(),
@@ -37,7 +39,7 @@ export type OperatorHandoffExecution = z.infer<typeof OperatorHandoffExecution>;
 export const OperatorHandoffResolution = z.object({ receiptID: Identifier, digest: Hash,
   kind: z.enum(['completed', 'stopped-unverified']), prepared: OperatorCheckRecord,
   completed: OperatorCheckRecord.optional(), proof: OperatorPermissionProof.optional(),
-  note: z.string().min(1).max(2_000), executionDigest: Hash,
+  note: z.string().min(1).max(OPERATOR_HANDOFF_RECOVERY_LIMITS.noteChars), executionDigest: Hash,
   inspection: OperatorCheckInspection.optional(), at: z.string().min(1) });
 export type OperatorHandoffResolution = z.infer<typeof OperatorHandoffResolution>;
 

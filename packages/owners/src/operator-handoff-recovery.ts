@@ -6,10 +6,11 @@ import type { OperatorJobOrigin, OperatorPermissionProof } from './operator-jobs
 import { operatorJobDigest } from './operator-jobs.ts';
 import type { OperatorRecoveryPermissions } from './operator-recovery-permission.ts';
 import type { OperatorHandoffs } from './operator-handoff-host.ts';
-import { OperatorHandoffExecutionJournal, operatorHandoffExecutionDigest, originalHandoffPrepared,
+import { OperatorHandoffExecutionJournal, OperatorHandoffOutcome, OPERATOR_HANDOFF_RECOVERY_LIMITS,
+  operatorHandoffExecutionDigest, originalHandoffPrepared,
   type OperatorHandoffExecution, type OperatorHandoffExecutionBinding, type OperatorHandoffResolution } from './operator-handoff-execution.ts';
 
-export const OPERATOR_HANDOFF_RECOVERY_LIMITS = { noteChars: 2_000 };
+export { OPERATOR_HANDOFF_RECOVERY_LIMITS } from './operator-handoff-execution.ts';
 type Context = Pick<ToolContext, 'agent' | 'directory' | 'sessionID' | 'messageID' | 'abort' | 'ask' | 'metadata'>;
 type Inspections = { owner: typeof inspectOperatorCheckOwner; witness: typeof inspectOperatorCheckWitness };
 export interface OperatorHandoffRecoveryPreview {
@@ -49,8 +50,9 @@ export class OperatorHandoffRecovery {
     if (receipt.status === 'completed' && !admitted) return { reason: 'operator_handoff_recovery_already_completed' };
     const execution = await new OperatorHandoffExecutionJournal(this.handoffs.jobs.home, binding).read();
     if (receipt.status === 'completed') {
-      if (execution?.outcome && JSON.stringify({ ...receipt, ...execution.outcome, completedAt: execution.completedAt })
-        !== JSON.stringify({ ...receipt, completedAt: execution.completedAt })) throw new Error('operator_handoff_recovery_outcome_mismatch');
+      if (execution?.outcome && JSON.stringify(execution.outcome) !== JSON.stringify(OperatorHandoffOutcome.parse(receipt))) {
+        throw new Error('operator_handoff_recovery_outcome_mismatch');
+      }
       return { execution, completedReceipt: receipt, reason: 'operator_handoff_recovery_completed_cleanup', action: 'reconcile-completed' as const };
     }
     if (!execution) return { reason: 'operator_handoff_recovery_execution_missing' };
@@ -156,11 +158,19 @@ export class OperatorHandoffRecovery {
 
 function makeResolution(receipt: OperatorCheckRecord, preview: OperatorHandoffRecoveryPreview,
   note: string, proof: OperatorPermissionProof | undefined): OperatorHandoffResolution {
-  const completed = preview.action === 'reconcile-completed' ? preview.completedReceipt ? { ...preview.completedReceipt }
-    : { ...receipt, ...preview.execution!.outcome!, status: 'completed' as const, completedAt: preview.execution!.completedAt! } : undefined;
-  if (completed) completed.digest = operatorCheckRecordDigest(completed);
+  const completed = completedResolutionReceipt(receipt, preview);
   return { receiptID: receipt.id, digest: preview.digest,
     kind: completed ? 'completed' : 'stopped-unverified', prepared: originalHandoffPrepared(receipt), ...(completed ? { completed } : {}),
     ...(proof ? { proof } : {}), note, executionDigest: operatorHandoffExecutionDigest(preview.execution ?? null),
     ...(preview.inspection ? { inspection: preview.inspection } : {}), at: new Date().toISOString() };
+}
+
+function completedResolutionReceipt(receipt: OperatorCheckRecord, preview: OperatorHandoffRecoveryPreview) {
+  if (preview.action !== 'reconcile-completed') return undefined;
+  if (preview.completedReceipt) return { ...preview.completedReceipt };
+  const execution = preview.execution;
+  if (!execution?.outcome || !execution.completedAt) throw new Error('operator_handoff_recovery_completion_missing');
+  const completed: OperatorCheckRecord = { ...receipt, ...execution.outcome, status: 'completed', completedAt: execution.completedAt };
+  completed.digest = operatorCheckRecordDigest(completed);
+  return completed;
 }
