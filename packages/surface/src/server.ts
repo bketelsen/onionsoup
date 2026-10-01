@@ -4,7 +4,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { userInfo } from 'node:os';
 import { extname, join, normalize, resolve } from 'node:path';
 import { Decision, type SurfaceState } from './state.ts';
-import { beginAdmission, memoryStatus, requestDistill, type Wiki } from '@onionsoup/owners';
+import { beginAdmission, memoryStatus, requestDistill, maintenanceQuarantineStatus, type MaintenanceQuarantineAcknowledgment, type Wiki } from '@onionsoup/owners';
 import { readDeploymentView } from './deployment-view.ts';
 import { serveWiki } from './wiki-site.ts';
 
@@ -137,6 +137,7 @@ export function surfaceServer(state: SurfaceState, options: { webRoot: string; b
   };
 
   const routes: Route[] = [
+    route('GET', '/api/maintenance-quarantine', async () => maintenanceQuarantineStatus(state.runtime.stateDirectory)),
     route('GET', '/api/state', async () => {
       const [snapshot, opencode] = await Promise.all([state.inboxSnapshot(), state.opencode.health()]);
       const { inbox, inboxErrors, providerHealth } = snapshot;
@@ -287,6 +288,13 @@ export function surfaceServer(state: SurfaceState, options: { webRoot: string; b
       }
       const url = new URL(request.url ?? '/', 'http://localhost');
       try {
+        const quarantine = await maintenanceQuarantineStatus(state.runtime.stateDirectory);
+        if (quarantine.state !== 'absent') {
+          if (!['GET', 'HEAD'].includes(request.method ?? '')) throw new HttpError(503, 'maintenance_quarantined');
+          if (url.pathname === '/api/maintenance-quarantine') return send(response, 200, quarantine);
+          if (url.pathname === '/api/state') return send(response, 200, await quarantineState(state.runtime.stateDirectory, options.buildId));
+          if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/wiki')) throw new HttpError(503, 'maintenance_quarantined');
+        }
         if (options.wiki && url.pathname === '/wiki') {
           response.writeHead(308, { location: `/wiki/${url.search}` });
           response.end();
@@ -331,6 +339,7 @@ export function surfaceServer(state: SurfaceState, options: { webRoot: string; b
     let lastReload = Date.now();
     const poll = setInterval(() => {
       void (async () => {
+        if ((await maintenanceQuarantineStatus(state.runtime.stateDirectory)).state !== 'absent') return;
         if (Date.now() - lastReload > SURFACE_LIMITS.reloadMs) {
           lastReload = Date.now();
           await state.runtime.reloadDeclarations().catch(() => undefined);
@@ -355,4 +364,41 @@ export function surfaceServer(state: SurfaceState, options: { webRoot: string; b
   };
 
   return { server, pump, broadcast };
+}
+
+
+async function quarantineState(stateDirectory: string, buildId: string | null) {
+  return { owners: [], operator: null, inbox: [], inboxErrors: [], providerHealth: [], frictionCount: 0,
+    opencode: { ok: false, error: 'maintenance_quarantined: OpenCode is intentionally not started' },
+    deployment: await readDeploymentView({ stateDirectory, buildId }),
+    maintenanceQuarantine: await maintenanceQuarantineStatus(stateDirectory), readOnly: true,
+    notice: 'Diagnostic-only maintenance quarantine. Work records are preserved; chats, background work and mutations are paused.' };
+}
+
+/** Recovery starts a diagnostic HTTP service without constructing OpenCode, wiki sync or normal state readers. */
+export function quarantineSurfaceServer(stateDirectory: string, options: {
+  buildId: string | null; acknowledgment?: MaintenanceQuarantineAcknowledgment;
+}) {
+  const server = createServer((request, response) => {
+    void (async () => {
+      try {
+        if (!['GET', 'HEAD'].includes(request.method ?? '')) return send(response, 503, { error: 'maintenance_quarantined' });
+        const path = new URL(request.url ?? '/', 'http://localhost').pathname;
+        const quarantine = await maintenanceQuarantineStatus(stateDirectory);
+        if (path === '/api/state') return send(response, 200, await quarantineState(stateDirectory, options.buildId));
+        if (path === '/api/maintenance-quarantine' || path === '/') {
+          const acknowledgment = options.acknowledgment;
+          const exact = quarantine.state === 'active' && acknowledgment?.digest === quarantine.digest
+            && acknowledgment.buildId === quarantine.targetBuildId;
+          return send(response, 200, { ...quarantine, buildId: options.buildId, component: 'surface',
+            ...(exact ? { pid: acknowledgment.pid, startTime: acknowledgment.startTime } : {}),
+            acknowledged: Boolean(exact), readOnly: true });
+        }
+        return send(response, 503, { error: 'maintenance_quarantined', diagnostic: '/api/maintenance-quarantine' });
+      } catch (error) {
+        return send(response, 503, { error: error instanceof Error ? error.message : 'maintenance_quarantine_unavailable' });
+      }
+    })();
+  });
+  return { server, pump: (_signal: AbortSignal) => undefined };
 }
