@@ -58,7 +58,7 @@ function bytesDigest(bytes) { return createHash('sha256').update(bytes).digest('
 function missing(error) { return ['ENOENT', 'ESRCH'].includes(error.code); }
 
 /** Public probes contain fingerprints, never credentials or transcript/configuration contents. */
-async function request(endpoint, path, directory) {
+export async function request(endpoint, path, directory) {
   const url = new URL(path, endpoint.url);
   if (directory !== undefined) url.searchParams.set('directory', directory);
   const authorization = `Basic ${Buffer.from(`${endpoint.username}:${endpoint.password}`).toString('base64')}`;
@@ -382,7 +382,7 @@ async function defaultStorageRoots(endpoint) {
   }
   return [...roots];
 }
-async function storageEvidence(selection, endpoint, effects) {
+export async function storageEvidence(selection, endpoint, effects) {
   const roots = [...new Set(z.array(absolute).min(1).parse(await (effects.storageRoots ?? defaultStorageRoots)(endpoint)))].sort();
   const declared = await Promise.all(selection.evidenceRoots.map(root => realpath(root)));
   for (const root of roots) {
@@ -421,7 +421,7 @@ async function selectedLeases(selection, endpoint) {
   return { leases: selected, leaseFiles };
 }
 
-async function knownDirectories(runtime) {
+export async function knownDirectories(runtime) {
   const places = new Set();
   for (const owner of runtime.declarations.owners.values()) {
     places.add(chatPath(runtime, owner.id));
@@ -445,7 +445,7 @@ async function knownDirectories(runtime) {
   return [...places].map(path => absolute.parse(path)).sort();
 }
 
-async function registrySnapshot(endpoint, read) {
+export async function registrySnapshot(endpoint, read) {
   const path = `/experimental/session?archived=true&roots=false&limit=${MAINTENANCE_PROBE_LIMITS.sessions + 1}`;
   const sessions = z.array(Session).parse(await read(endpoint, path));
   if (sessions.length > MAINTENANCE_PROBE_LIMITS.sessions || !unique(sessions.map(session => session.id))) {
@@ -453,7 +453,7 @@ async function registrySnapshot(endpoint, read) {
   }
   return sessions.sort((left, right) => left.id.localeCompare(right.id));
 }
-async function sessionEvidence(endpoint, registry, read) {
+export async function sessionEvidence(endpoint, registry, read) {
   const indexed = new Map(registry.map(session => [session.id, session]));
   for (const session of registry) {
     const seen = new Set();
@@ -492,7 +492,7 @@ async function sessionEvidence(endpoint, registry, read) {
   }
   return evidence;
 }
-async function quietDirectories(endpoint, directories, read) {
+export async function quietDirectories(endpoint, directories, read) {
   for (const directory of directories) {
     const status = z.record(z.string(), z.unknown()).parse(await read(endpoint, '/session/status', directory));
     const permissions = z.array(z.unknown()).parse(await read(endpoint, '/permission', directory));

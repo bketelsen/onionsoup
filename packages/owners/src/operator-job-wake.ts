@@ -15,7 +15,7 @@ const Wake = z.object({
   messageID: z.string().optional(), reason: z.string().optional(),
 });
 type Wake = z.infer<typeof Wake>;
-const Wakes = z.array(Wake);
+export const Wakes = z.array(Wake);
 const ACTIONABLE = new Set(['progress', 'blocked', 'ready', 'write-review']);
 const INACTIVE = new Set(['paused', 'cancelled', 'completed']);
 // Fairness only; authoritative eligibility and receipts remain on disk.

@@ -96,7 +96,10 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
   effect completed. Guarded rollout continues to refuse those leases. Unknown new session openings or
   notice sends retain their exact claims and receipts without replay. Explicit legacy interruption can
   restore diagnostic-only services under a durable quarantine; it does not resolve unknown effects or
-  resume ordinary chats, dispatch or OpenCode. Evidence-based quarantine release remains unimplemented.
+  itself resume ordinary chats, dispatch or OpenCode. The separate release command can resume only after
+  fresh replay-safety inventory, authenticated observation and exact operational approval. Unbound legacy
+  openings, pending effects and stale notice cursors still block it; missing evidence is never fabricated.
+  An uncertain observation startup or unconfirmed instance disposal remains held for investigation.
   The [separate legacy recovery procedure](deployment.md#legacy-maintenance-recovery-plan) describes the
   required proof and operational decision rather than authorizing a restart or clearing records.
 - **snosi builds run only in CI.** mkosi needs root, so Murbella verifies with snosi's static checks and relies on

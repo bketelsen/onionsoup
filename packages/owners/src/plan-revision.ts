@@ -13,7 +13,7 @@ import { requestRunnerIsAlive, type ResourceRequest } from './requests.ts';
 import type { Runtime } from './runtime.ts';
 
 export const PLAN_REVISION_LIMITS = { perPass: 20, textChars: 8_000 };
-const Revision = z.object({
+export const Revision = z.object({
   id: z.string(), messageID: z.string().optional(), item: z.string(), owner: z.string(), expected: z.string(), plan: z.string(),
   feedback: z.string(), note: HumanNote, origin: ChatOrigin.optional(),
   directReview: DirectRequestPlanReview.optional(),

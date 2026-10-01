@@ -10,7 +10,7 @@ import { withRecordLock } from './record-lock.ts';
 import type { Runtime } from './runtime.ts';
 
 export const DIRECT_REVIEW_WAKE_LIMITS = { perPass: 20 };
-const Wake = z.object({
+export const Wake = z.object({
   request: z.string(), item: z.string(), reviewer: z.string(), digest: z.string(), origin: ChatOrigin.optional(),
   status: z.enum(['pending', 'sending', 'delivered', 'blocked', 'superseded']),
   reason: z.string().optional(), messageID: z.string().optional(),
