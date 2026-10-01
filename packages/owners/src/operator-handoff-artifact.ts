@@ -57,7 +57,7 @@ function assertDisjoint(children: OperatorChild[]) {
   }
 }
 
-function baselineDigest(snapshot: OperatorWriteSnapshot) {
+export function operatorHandoffBaselineDigest(snapshot: OperatorWriteSnapshot) {
   return digest(snapshot.files.map(file => ({ path: file.path, sha256: file.sha256, mode: file.mode, kind: file.kind }))
     .sort((left, right) => left.path.localeCompare(right.path)));
 }
@@ -127,13 +127,13 @@ export async function buildOperatorHandoff(jobInput: OperatorJob) {
   const checks = combinedChecks(children);
   const first = children[0]!;
   const base = { commonDirectory: await operatorWriteCommonDirectory(first.write!.baseline),
-    head: first.write!.baseline.head, tree: first.write!.baseline.tree, sourceDigest: baselineDigest(first.write!.baseline) };
+    head: first.write!.baseline.head, tree: first.write!.baseline.tree, sourceDigest: operatorHandoffBaselineDigest(first.write!.baseline) };
   const source = new Map<string, OperatorCheckSourceFile>();
   const files: OperatorHandoffArtifact['files'] = [];
   let diff = '';
   for (const child of children) {
     const baseline = child.write!.baseline;
-    if (baseline.head !== base.head || baseline.tree !== base.tree || baselineDigest(baseline) !== base.sourceDigest) fail('base_mismatch');
+    if (baseline.head !== base.head || baseline.tree !== base.tree || operatorHandoffBaselineDigest(baseline) !== base.sourceDigest) fail('base_mismatch');
     const inspected = await inspectChild(child);
     if (inspected.commonDirectory !== base.commonDirectory) fail('repository_mismatch');
     if (!source.size) for (const file of inspected.source) source.set(file.path, { ...file, content: Buffer.from(file.content) });

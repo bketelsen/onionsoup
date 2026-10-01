@@ -800,7 +800,36 @@ uncertain record. Restart preserves that uncertainty; there is no automatic retr
 under `state/operator-handoffs/`. Reports are timestamped observations; call `show-handoff` after a pending check to refresh the exported JSON. `ready` means all configured combined checks passed for the current artifact;
 `unchecked` means none were configured. Neither means applied, independently reviewed, committed or published.
 The human's existing exact scope/check authorization covers these commands; preparing or checking a combined preview
-does not add another permission click or standing grant. Applying and publishing remain separate user-directed work.
+does not add another permission click or standing grant. Applying requires its own exact destination approval; publishing remains separate user-directed work.
+
+`preview-application { id, directory }` binds that ready result to an exact clean sibling integration worktree in
+its canonical Git repository. Its application digest retains the original goal/intake/constraints, accepted child
+identities and evidence, successful combined-check receipts, destination HEAD/index and full filesystem baseline.
+`apply-handoff { id, directory, digest }` uses the existing native write gate with **Allow once** for this destination
+effect. Exact retries reuse that saved approval; a different destination/digest is rejected. No standing grant,
+commit, push, merge or publication is added. `show-application` and the handoff report expose separate application
+progress and durable evidence, without rewriting child acceptance or synthesis.
+
+Applications reserve the whole canonical target in the same jobs transaction used by child workspace claims. Held
+claims survive pause/cancel/restart and conflict with readers and writers in either direction. One dedicated
+cross-process execution lock serializes application workers; metadata reads and file execution never hold a jobs
+or application mutation lock. Parent tool calls return promptly after durable approval, while ordinary maintenance
+reattaches to existing approved/in-progress applications. Blocked attempts need an explicit exact retry.
+
+For every file the host saves preparation intent, creates and fsyncs a bounded private staging file, then saves its
+exact identity before execution. A fixed sandbox publisher waits for an explicit permit after the host durably saves
+its launcher/PID-namespace witness. Existing files are written through pinned descriptors, retaining their inode;
+new files use no-overwrite hardlink publication from staging in the same parent. A completed postimage is durable
+evidence only with the exact original/staging inode and birth time plus positive stopped-process proof. The observed
+result is saved before identity-checked stage cleanup and final receipt. Recovery reuses this history: completed
+writes are never replayed, untouched preimages can retry at most four times, and partial/foreign/unproven outcomes
+remain reserved. Interrupted staging before its identity was saved also remains blocked, without blind cleanup.
+
+After all receipts, the host revalidates unchanged HEAD/index, the entire target source against the approved combined
+source digest, and original live child evidence. It records `applied` before releasing the exact claim and admission.
+Crash recovery completes only remaining identity-bound cleanup. Managed claims do not exclude an unrelated editor;
+identity/content changes are detected and fenced, but this is not a filesystem-wide transaction. A multi-file partial
+application is retained for inspection rather than represented as rolled back or complete.
 
 Combined-check recovery uses `recovery-preview-handoff { id, receiptID }` and
 `recover-handoff { id, receiptID, digest, text }`. Each new attempt persists its exact admission, command/artifact

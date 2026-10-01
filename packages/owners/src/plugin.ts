@@ -55,6 +55,7 @@ import { OperatorSupervisor } from './operator-supervisor.ts';
 import { operatorSupervisorClient } from './operator-supervisor-client.ts';
 import { OPERATOR_INVESTIGATOR } from './operator-jobs-types.ts';
 import { OPERATOR_JOB_TOOL, operatorJobTool } from './operator-job-tools.ts';
+import { OperatorApplications } from './operator-application-host.ts';
 import { OperatorHandoffs } from './operator-handoff-host.ts';
 import { checkOperatorChildMessage, checkOperatorChildTool } from './operator-child-scope.ts';
 import { rememberOperatorChildren } from './operator-job-history.ts';
@@ -370,6 +371,7 @@ const server: Plugin = async (input, options) => {
   const operatorWrites = operatorJobs && operatorClient ? new OperatorWrites(operatorJobs, operatorClient, operatorWritePermissions) : undefined;
   const operatorHandoffs = operatorJobs && operatorClient && operatorWrites
     ? new OperatorHandoffs(operatorJobs, operatorClient, operatorWrites) : undefined;
+  const operatorApplications = operatorHandoffs ? new OperatorApplications(operatorHandoffs, operatorWritePermissions) : undefined;
   const operatorSupervisor = operatorJobs && operatorClient ? new OperatorSupervisor(operatorJobs, operatorClient, undefined, operatorWrites) : undefined;
   // The operator journals what it does, like an owner, to a notebook of its own (never distilled) that also holds its
   // memory: files it keeps itself, committed here when its chat goes idle.
@@ -1161,6 +1163,7 @@ const server: Plugin = async (input, options) => {
     let lease: AdmissionLease | undefined;
     try {
       lease = await beginAdmission(runtime.stateDirectory, 'plugin:operator-jobs');
+      await operatorApplications?.reconcile().catch(error => console.warn('operator_application_reconciliation_failed', error));
       await operatorSupervisor.tick().catch(error => console.warn('operator_supervisor_failed', error));
       await Promise.all([
         deliverOperatorJobWakes(operatorJobs, planRevisionClient(input.client), (jobID, error) => console.warn('operator_job_wake_failed', jobID, error)),
@@ -1385,7 +1388,7 @@ const server: Plugin = async (input, options) => {
         if (agent === operator!.name) return;
         if (ownerByAgent.has(agent)) requireOwner(agent);
         throw new Error('operator_job_operator_only');
-      }, operatorRecoveryPermissions, operatorWrites, operatorHandoffs) } : {}),
+      }, operatorRecoveryPermissions, operatorWrites, operatorHandoffs, operatorApplications) } : {}),
       ...(operatorWrites ? { [OPERATOR_WRITE_TOOL]: operatorFileTool(operatorWrites, operatorWriteCalls),
         [OPERATOR_CHECK_TOOL]: operatorCheckTool(operatorWrites, operatorCheckCalls) } : {}),
       onionsoup_friction: tool({

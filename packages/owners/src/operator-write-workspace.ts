@@ -246,7 +246,7 @@ function matchesIdentity(file: FileIdentity, original: FileIdentity | undefined,
     && file.device === original.device && file.inode === original.inode && file.links === original.links
     && file.birthtimeNs === original.birthtimeNs;
 }
-async function inspectCreatedFiles(snapshot: OperatorWriteSnapshot, expected: ExpectedFiles) {
+async function inspectCreatedFiles(snapshot: OperatorWriteSnapshot, expected: ExpectedFiles, stages: FileIdentity[] = []) {
   await requireNotIgnored(snapshot.directory, snapshot.createFiles ?? [], snapshot.limits);
   for (const path of snapshot.createFiles ?? []) {
     const identity = expected.created.get(path);
@@ -257,9 +257,15 @@ async function inspectCreatedFiles(snapshot: OperatorWriteSnapshot, expected: Ex
     }
   }
   const untracked = (await git(snapshot.directory, ['ls-files', '--others', '--exclude-standard', '-z'], snapshot.limits)).split('\0').filter(Boolean);
-  if (untracked.some(path => !expected.created.has(path))) error('untracked_files');
+  for (const stage of stages) {
+    checkPath(stage.path);
+    if (expected.digests.has(stage.path) || stage.kind !== 'file' || !stage.birthtimeNs || stage.links !== 1) error('stage_invalid');
+    const actual = await fileIdentity(snapshot.directory, stage.path, snapshot.limits.fileBytes, stage);
+    if (!matchesIdentity(actual, stage, stage.sha256)) error('stage_changed');
+  }
+  if (untracked.some(path => !expected.created.has(path) && !stages.some(stage => stage.path === path))) error('untracked_files');
 }
-async function inspectWorkspace(snapshot: OperatorWriteSnapshot, expected: ExpectedFiles) {
+async function inspectWorkspace(snapshot: OperatorWriteSnapshot, expected: ExpectedFiles, stages: FileIdentity[] = []) {
   const { digest: snapshotDigest, ...body } = OperatorWriteSnapshot.parse(snapshot);
   if (digest(body) !== snapshotDigest) error('snapshot_invalid');
   if (await realpath(snapshot.workspace) !== snapshot.workspace || await realpath(snapshot.directory) !== snapshot.directory) error('workspace_changed');
@@ -274,10 +280,15 @@ async function inspectWorkspace(snapshot: OperatorWriteSnapshot, expected: Expec
     const original = snapshot.files.find(candidate => candidate.path === file.path);
     if (!matchesIdentity(file, original, expected.digests.get(file.path))) error('source_changed');
   }
-  await inspectCreatedFiles(snapshot, expected);
+  await inspectCreatedFiles(snapshot, expected, stages);
 }
 export async function validateOperatorWriteWorkspace(snapshot: OperatorWriteSnapshot, receipts: OperatorWriteReceipt[]) {
   await inspectWorkspace(snapshot, expectedFiles(snapshot, receipts));
+}
+
+/** Application-only staging must have a durable exact identity; no ignored prefix or arbitrary untracked exception. */
+export async function validateOperatorApplicationWorkspace(snapshot: OperatorWriteSnapshot, receipts: OperatorWriteReceipt[], stages: FileIdentity[]) {
+  await inspectWorkspace(snapshot, expectedFiles(snapshot, receipts), stages);
 }
 
 export async function prepareOperatorFileMutation(snapshot: OperatorWriteSnapshot, receipts: OperatorWriteReceipt[], input: { id: string; path: string; expectedBeforeSha256: string; content: string }): Promise<OperatorWriteMutation> {
