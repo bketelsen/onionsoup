@@ -49,6 +49,8 @@ test('host write creation normalizes intake and native once proof, and duplicate
   assert.match(job.children[0]!.write!.approval.proof.permissionID, /^permission_host_/);
   assert.deepEqual(f.asks[0]!.always, []);
   assert.equal(f.asks[0]!.metadata.mode, 'create-write');
+  assert.deepEqual(f.asks[0]!.metadata, JSON.parse(JSON.stringify(f.asks[0]!.metadata)),
+    'native OpenCode permission metadata cannot contain undefined optional properties');
   const duplicate = await f.writes.create(f.origin, f.intake, f.input, f.parent());
   assert.deepEqual(duplicate, job);
   assert.equal(f.asks.length, 1);

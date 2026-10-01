@@ -35,7 +35,7 @@ export function assertOperatorWriteApproval(origin: OperatorJobOrigin, intake: O
     const knownPaths = new Set([...baseline.files.filter(file => file.kind === 'file').map(file => file.path), ...(task.createFiles ?? [])]);
     for (const check of task.checks ?? []) {
       try { validateOperatorCheckSourcePaths(check.command, knownPaths); }
-      catch { throw new Error('operator_write_check_path_outside_scope'); }
+      catch (cause) { throw new Error('operator_write_check_path_outside_scope', { cause }); }
     }
   }
 }
