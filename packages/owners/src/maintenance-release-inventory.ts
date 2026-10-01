@@ -32,8 +32,9 @@ export const MAINTENANCE_RELEASE_INVENTORY_LIMITS = { entries: 100_000, bytes: 1
 export interface MaintenanceInventoryEntry { path: string; type: 'absent' | 'directory' | 'file'; digest: string }
 export interface MaintenanceInventoryDecision {
   resource: string;
-  classification: 'terminal' | 'single-use-protected' | 'blocked';
+  classification: 'terminal' | 'human-gated' | 'single-use-protected' | 'time-gated' | 'blocked';
   reason: string;
+  validUntil?: string;
 }
 export interface MaintenanceReleaseInventory {
   version: 1;
@@ -41,6 +42,7 @@ export interface MaintenanceReleaseInventory {
   entries: MaintenanceInventoryEntry[];
   decisions: MaintenanceInventoryDecision[];
   eligible: boolean;
+  validUntil?: string;
 }
 interface Snapshot { entries: MaintenanceInventoryEntry[]; files: Map<string, string>; bytes: number }
 function hash(value: string) { return createHash('sha256').update(value).digest('hex'); }
@@ -121,7 +123,7 @@ function classifyItems(state: string, files: Map<string, string>) {
     return decision(path, safe, safe ? 'no_automatic_work_execution' : 'work_continuation_requires_evidence');
   });
 }
-function classifyReminders(state: string, files: Map<string, string>) {
+function classifyReminders(state: string, files: Map<string, string>, now: number) {
   const store = new SessionOpeningStore(state);
   return jsonFiles(files, 'reminders').map(path => {
     const reminder = Reminder.parse(parsed(files, path));
@@ -132,6 +134,9 @@ function classifyReminders(state: string, files: Map<string, string>) {
     const openingPath = store.path(key).slice(state.length + 1);
     const opening = files.has(openingPath) ? SessionOpening.parse(parsed(files, openingPath)) : undefined;
     if (opening && JSON.stringify(opening.key) !== JSON.stringify(key)) throw new Error('maintenance_inventory_opening_identity');
+    if (!openingProtected(opening) && Date.parse(reminder.dueAt) > now) {
+      return { ...decision(path, true, 'reminder_not_due', 'time-gated'), validUntil: reminder.dueAt };
+    }
     return decision(path, openingProtected(opening), openingProtected(opening)
       ? 'reminder_single_use_claim_retained' : 'legacy_reminder_without_single_use_claim', 'single-use-protected');
   });
@@ -230,14 +235,29 @@ function classifyRouting(files: Map<string, string>) {
   return decisions;
 }
 
-async function classify(state: string, files: Map<string, string>) {
-  const decisions = [...classifyItems(state, files), ...classifyReminders(state, files), ...classifyJobs(files),
+/** These states have no automatic request step. Historical operation receipts are not running work.
+ * Interrupted operations are intentionally excluded: ordinary recovery can resume their saved stage. */
+const INERT_REQUEST_STATUSES = new Set<ResourceRequest['status']>(['declined', 'denied', 'deleted', 'published',
+  'updated', 'failed', 'completed', 'awaiting-create-approval', 'awaiting-delete-approval']);
+
+function classifyRequest(path: string, request: ResourceRequest) {
+  if (request.operation?.runner !== undefined) return decision(path, false, 'request_runner_unresolved');
+  if (['awaiting-create-approval', 'awaiting-delete-approval'].includes(request.status)) {
+    return decision(path, true, 'request_human_gate_retained', 'human-gated');
+  }
+  if (INERT_REQUEST_STATUSES.has(request.status)) {
+    return decision(path, true, request.operation ? 'request_historical_operation_retained' : 'request_no_automatic_step');
+  }
+  return decision(path, request.status === 'interrupted' && !request.operation, 'request_continuation_gate');
+}
+
+async function classify(state: string, files: Map<string, string>, now: number) {
+  const decisions = [...classifyItems(state, files), ...classifyReminders(state, files, now), ...classifyJobs(files),
     ...classifyDeliveries(files), ...classifyNotices(files)];
   for (const path of jsonFiles(files, 'requests')) {
     const request = ResourceRequest.parse(parsed(files, path));
     boundPath(path, `requests/${request.id}.json`);
-    decisions.push(decision(path, !request.operation && ['declined', 'denied', 'deleted', 'published', 'updated', 'failed',
-      'interrupted', 'completed', 'awaiting-create-approval', 'awaiting-delete-approval'].includes(request.status), 'request_continuation_gate'));
+    decisions.push(classifyRequest(path, request));
   }
   for (const path of jsonFiles(files, 'initiatives')) {
     const initiative = Initiative.parse(parsed(files, path));
@@ -287,18 +307,34 @@ async function classify(state: string, files: Map<string, string>) {
 
 /** Read twice: a valid classification over torn or changed input is not release evidence. */
 export async function inspectMaintenanceReleaseInventory(stateDirectory: string,
-  effects: { afterSnapshot?: () => Promise<void> } = {}): Promise<MaintenanceReleaseInventory> {
+  effects: { afterSnapshot?: () => Promise<void>; now?: () => number } = {}): Promise<MaintenanceReleaseInventory> {
   const state = resolve(stateDirectory);
+  const now = effects.now ?? Date.now;
   const first = await snapshot(state);
-  const decisions = await classify(state, first.files);
+  const decisions = await classify(state, first.files, now());
   await effects.afterSnapshot?.();
   const second = await snapshot(state);
   if (JSON.stringify(first.entries) !== JSON.stringify(second.entries)) throw new Error('maintenance_inventory_changed');
-  const digest = hash(JSON.stringify({ version: 1, state, entries: first.entries, decisions }));
-  return { version: 1, digest, entries: first.entries, decisions, eligible: decisions.every(entry => entry.classification !== 'blocked') };
+  const validUntil = decisions.flatMap(entry => entry.validUntil ? [entry.validUntil] : [])
+    .sort((left, right) => Date.parse(left) - Date.parse(right))[0];
+  const digest = hash(JSON.stringify({ version: 1, state, entries: first.entries, decisions, validUntil }));
+  const inventory = { version: 1 as const, digest, entries: first.entries, decisions, validUntil,
+    eligible: decisions.every(entry => entry.classification !== 'blocked') };
+  assertMaintenanceReleaseInventoryFresh(inventory, now());
+  return inventory;
 }
-export async function assertMaintenanceReleaseInventoryUnchanged(stateDirectory: string, expectedDigest: string) {
-  const current = await inspectMaintenanceReleaseInventory(stateDirectory);
+/** File bytes can stay identical while a future reminder becomes runnable. Check again at gate commit. */
+export function assertMaintenanceReleaseInventoryFresh(inventory: Pick<MaintenanceReleaseInventory, 'validUntil'>,
+  now = Date.now()) {
+  if (!Number.isFinite(now)) throw new Error('maintenance_inventory_clock_invalid');
+  if (inventory.validUntil !== undefined
+    && (!Number.isFinite(Date.parse(inventory.validUntil)) || now >= Date.parse(inventory.validUntil))) {
+    throw new Error('maintenance_inventory_expired');
+  }
+}
+export async function assertMaintenanceReleaseInventoryUnchanged(stateDirectory: string, expectedDigest: string,
+  effects: { now?: () => number } = {}) {
+  const current = await inspectMaintenanceReleaseInventory(stateDirectory, effects);
   if (current.digest !== expectedDigest) throw new Error('maintenance_inventory_changed');
   return current;
 }

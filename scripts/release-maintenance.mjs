@@ -8,7 +8,7 @@ import { z } from 'zod';
 import { withRecordLock } from '../packages/owners/src/record-lock.ts';
 import { writeHandoffFile } from '../packages/owners/src/operator-handoff-file.ts';
 import { MaintenanceReleaseObservation, MaintenanceReleaseReceipt, maintenanceReleasePaths } from '../packages/owners/src/maintenance-release-state.ts';
-import { inspectMaintenanceReleaseInventory } from '../packages/owners/src/maintenance-release-inventory.ts';
+import { inspectMaintenanceReleaseInventory, assertMaintenanceReleaseInventoryFresh } from '../packages/owners/src/maintenance-release-inventory.ts';
 import { fingerprintEvidence } from './maintenance-admission-probe.mjs';
 import { recoveryContext, observationProof, reconciliationProof, validateReleaseFence,
   verifyReleaseRuntimeIdentity } from './maintenance-release-probe.mjs';
@@ -256,6 +256,7 @@ async function release(input, effects) {
     // Receipt is the single commit point. A crash before it retains the quarantine even after pending completes.
     await writeHandoffFile(paths.pending, JSON.stringify({ status: 'completed', targetBuildId: intent.targetBuildId }) + '\n');
     await effects.afterPendingCommit?.();
+    assertMaintenanceReleaseInventoryFresh(proof.inventory);
     await durableExclusive(paths.receipt, receipt);
     await effects.afterReleaseCommit?.();
   });

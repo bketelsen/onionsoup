@@ -99,6 +99,9 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
   itself resume ordinary chats, dispatch or OpenCode. The separate release command can resume only after
   fresh replay-safety inventory, authenticated observation and exact operational approval. Unbound legacy
   openings, pending effects and stale notice cursors still block it; missing evidence is never fabricated.
+  Terminal request operations without runners are retained as history. Future reminders have a release
+  deadline, not a fabricated fired receipt. Tracking requests, cleanup candidates (even ones previously
+  kept), and unsubmitted operator wakes still block; this classification does not supply their missing proof.
   An uncertain observation startup or unconfirmed instance disposal remains held for investigation.
   A crash between pending completion and the release receipt also remains quarantined; the exact saved
   release digest is required to resume. The pending badge alone is not proof that admission is open.

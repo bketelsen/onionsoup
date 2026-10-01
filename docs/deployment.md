@@ -452,6 +452,15 @@ unsettled application/child work, stale notice cursors and unknown files are nam
 abandons them nor treats human approval as proof they completed. This is replay-safety reconciliation;
 remote effect outcomes can remain unknown. Actual eligibility is established by the preview, not by
 passing synthetic tests or observing idle services.
+Terminal requests may retain historical operations and checkpoints when no runner remains; this is
+evidence that no automatic request step runs, not a new conclusion about the old effect. Requests that
+are still tracking work or can reconcile an interrupted operation remain blocked. Pending reminders
+whose due time is in the future are classified as `time-gated`; the earliest such time is the inventory's
+`validUntil`. The digest stays stable before that boundary, but expiry or a record change requires new
+evidence. Expiry is checked after inventory reads and again immediately before committing release.
+No reminder is fired, cancelled or rescheduled by the preview. Finished worktrees remain blocked even
+with an old `kept-*` result: current cleanup eligibility needs separate proof. A pending operator wake
+without a message identity is an unsubmitted actionable continuation, not proof of delivery or duplication.
 This inventory addresses replay of the two selected legacy plugin maintenance producers. Ordinary
 daemon duties, friction investigations and memory work resume under their existing gates after release;
 the inventory does not declare those unrelated workflows completed or grant them new authority.
