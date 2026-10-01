@@ -156,7 +156,7 @@ export class OperatorWrites {
     await this.jobs.transaction(async (ledger, save) => {
       context.abort.throwIfAborted();
       const current = writeChild(this.jobs.bound(ledger, origin, id), childID);
-      if (JSON.stringify(current.write) !== before || current.attempts.at(-1)?.endedAt
+      if (JSON.stringify(current.write) !== before || current.abandonment || current.attempts.at(-1)?.endedAt
         || current.attempts.at(-1)?.messageID !== child.attempts.at(-1)?.messageID
         || current.sessionID !== context.sessionID || !['running', 'dispatching'].includes(current.status)
         || current.blocker === 'operator_child_foreign_work') throw new Error('operator_write_scope_stale');
@@ -182,7 +182,7 @@ export class OperatorWrites {
 
   private async assertCall(child: OperatorChild, context: Context, callID: string) {
     const attempt = child.attempts.at(-1);
-    if (!attempt || attempt.endedAt || !child.sessionID || child.directory !== context.directory || child.write?.acceptance
+    if (!attempt || attempt.endedAt || child.abandonment || !child.sessionID || child.directory !== context.directory || child.write?.acceptance
       || !['running', 'dispatching'].includes(child.status) || child.blocker === 'operator_child_foreign_work') {
       throw new Error('operator_write_child_not_running');
     }

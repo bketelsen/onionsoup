@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { OperatorJobs, operatorJobEvent } from './operator-jobs.ts';
 import type { OperatorChild, OperatorJob, OperatorJobLedger } from './operator-jobs-types.ts';
 import { recordOperatorUncertainty } from './operator-uncertainty.ts';
+import { operatorWriteWasAbandonedWithoutEffects } from './operator-write-state.ts';
 
 export const OPERATOR_OPERATION_LIMITS = { leaseMs: 45_000, observationsPerTick: 16 };
 export const OPERATOR_TERMINAL_JOBS = new Set<OperatorJob['status']>(['completed', 'cancelled']);
@@ -28,6 +29,7 @@ export function operatorChildUnsettled(child: OperatorChild) {
 }
 
 export function operatorChildOccupiesSlot(child: OperatorChild) {
+  if (operatorWriteWasAbandonedWithoutEffects(child)) return false;
   if (child.access === 'write' && !child.write?.acceptance && operatorChildUnsettled(child)) return true;
   if (OPERATOR_TERMINAL_CHILDREN.has(child.status)) return false;
   return (child.status === 'queued' && child.operation?.kind === 'observe')

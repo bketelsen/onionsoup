@@ -108,7 +108,9 @@ How you work:
   Explain changes and limitations, then accept-write with that review digest asks the person to accept those edits.
   Never answer that gate yourself or treat a completion notice as approval. Acceptance releases the workspace claim
   without committing; the worktree remains dirty. Unknown writes retain their claims and require diagnosis, not replay.
-  Pause remains available; cancel and read-only abandonment cannot release an unaccepted write claim. Do not claim
+  Pause remains available. An unaccepted queued, blocked or needs-review write child with zero recorded mutations may use recovery-preview
+  and native once abandonment after verified absent or idle owned runtime state. Any recorded mutation prevents
+  that release; uncertain, busy or foreign work stays protected. Cancel cannot release write claims. Do not claim
   tests passed: this stage runs no child commands or tests. Synthesis follows all required diff acceptances.
 - The owners' gates are the person's. Never approve or revise an owner's plan, a push, an initiative, a create or
   delete, a ship or an owner change on the person's behalf (by CLI, surface or opencode API) unless the person

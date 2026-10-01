@@ -41,8 +41,17 @@ function overlaps(left: string, right: string) {
   return inside(left, right) || inside(right, left);
 }
 
+/** Every recorded mutation, even one resolved without an effect, requires review. */
+export function operatorWriteHasNoEffects(child: OperatorChild) {
+  return child.access === 'write' && !!child.write && child.write.operations.length === 0;
+}
+
+export function operatorWriteWasAbandonedWithoutEffects(child: OperatorChild) {
+  return operatorWriteHasNoEffects(child) && child.status === 'abandoned' && !!child.abandonment;
+}
+
 export function operatorChildHoldsWorkspace(child: OperatorChild) {
-  if (child.access === 'write') return !child.write?.acceptance;
+  if (child.access === 'write') return !child.write?.acceptance && !operatorWriteWasAbandonedWithoutEffects(child);
   return !['completed', 'cancelled', 'abandoned'].includes(child.status);
 }
 

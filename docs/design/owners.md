@@ -801,7 +801,9 @@ a runtime notice or an earlier approval cannot substitute for this decision.
 Workspace claims cover the whole canonical worktree, including overlapping parent/child directories. A conflicting
 read or write task is refused rather than run concurrently; two independent worktrees can use the two managed slots.
 The operator can keep answering its parent chat while these children work. Claims remain held after child inference
-finishes and until the person accepts the verified diff.
+finishes and until the person accepts the verified diff. Claims coordinate managed children, not external programs;
+use dedicated worktrees. Host checks cover tracked files and nonignored untracked paths. Ignored untracked files remain outside
+that integrity check, and no child can create or edit them through this tool.
 
 The child calls `onionsoup_operator_write_file` with an approved relative path, its expected current SHA256 and full
 replacement text. Host code records a mutation intent, checks the original Git and file identities, and passes a
@@ -820,6 +822,12 @@ worktree; a later write job needs a new clean baseline.
 A prepared mutation with an unknown outcome remains blocked with its workspace reservation intact. Restart, cancel,
 read-only abandonment and a fresh tool call cannot replay or clear it. This slice provides no uncertain-write recovery
 or automatic replacement. The original transcript, intent and any receipt remain available for diagnosis.
+
+An unaccepted queued, blocked or needs-review write child with **zero recorded mutations** can use the existing `recovery-preview` and
+`abandon` actions after the host verifies absent or idle owned runtime state with no live tools or operation claim.
+A separate native one-time recovery decision releases that reservation and revokes subsequent child tool use; it
+does not accept the task or create a replacement. Unavailable, busy and foreign runtime state stays protected. Any
+mutation record, including a resolved one, prevents this path; a late mutation invalidates the recovery digest.
 
 #### Operator memory
 
