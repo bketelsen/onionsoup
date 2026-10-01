@@ -5,7 +5,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { test } from 'node:test';
 import { listAdmissions } from '../src/deployment-admission.ts';
 import { OperatorHandoffs } from '../src/operator-handoff-host.ts';
-import { OperatorJobs } from '../src/operator-jobs.ts';
+import { OperatorJobs, operatorJobDigest } from '../src/operator-jobs.ts';
 import { OperatorWrites } from '../src/operator-write-host.ts';
 import { operatorCheckRecordDigest } from '../src/operator-check-types.ts';
 import type { OperatorCheckRun } from '../src/operator-check-runner.ts';
@@ -380,4 +380,33 @@ test('a concurrent pause during live metadata validation makes the shown handoff
     assert.equal(report.reason, 'operator_handoff_job_stale');
     assert.equal(report.checks[0]!.exitCode, 0, 'historical passing evidence remains visible');
   } finally { gate.resolve(); }
+});
+
+
+test('synthesis after prepare preserves handoff binding and completed-job history through checking and reuse', async () => {
+  const context = await handoffFixture();
+  let calls = 0;
+  const handoffs = host(context, async () => { calls++; return completed; });
+  const prepared = await handoffs.prepare(context.origin, context.id, context.parent());
+  const job = await context.jobs.get(context.origin, context.id);
+  const originalDigest = operatorJobDigest(job);
+  const synthesized = await context.jobs.synthesize(context.origin, context.id, originalDigest,
+    job.children.map(child => child.evidence!.messageID), 'Both accepted edits retain their individual evidence. Combined checks remain separate.');
+  assert.equal(synthesized.status, 'completed');
+  assert.equal(operatorJobDigest(synthesized), originalDigest, 'status, events and synthesis do not alter the input/evidence digest');
+  const savedJob = await readFile(context.jobs.path, 'utf8');
+  const reprepared = await handoffs.prepare(context.origin, context.id, context.parent());
+  assert.equal(reprepared.artifact.digest, prepared.artifact.digest);
+  assert.equal(reprepared.status, 'needs-checks');
+  const checkID = prepared.artifact.checks[0]!.id;
+  await handoffs.check(context.origin, context.id, prepared.artifact.digest, checkID, context.parent());
+  const ready = await settled(handoffs, context, 'ready');
+  const reopened = host(context, async () => { throw new Error('unexpected_completed_job_replay'); });
+  const reused = await reopened.check(context.origin, context.id, prepared.artifact.digest, checkID, context.parent());
+  assert.equal(reused.current, true);
+  assert.equal(reused.status, 'ready');
+  assert.deepEqual(reused.checks, ready.checks);
+  assert.equal(calls, 1);
+  assert.equal(await readFile(context.jobs.path, 'utf8'), savedJob);
+  await released(context);
 });

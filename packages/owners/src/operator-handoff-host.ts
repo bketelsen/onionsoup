@@ -22,6 +22,12 @@ export interface OperatorHandoffReport {
 type Context = Pick<ToolContext, 'abort' | 'messageID' | 'sessionID' | 'agent' | 'directory'>;
 type Effects = { run: typeof runOperatorCheck; preflight: typeof preflightOperatorCheck };
 
+function logHandoffFailure(reason: string, jobID: string, receiptID: string, error: unknown) {
+  const cause = error instanceof Error && /^operator_[a-z0-9_]+$/.test(error.message)
+    ? error.message : 'cause_unclassified';
+  console.error(reason, { jobID, receiptID, cause });
+}
+
 /** A handoff verifies an isolated union; it never applies changes or rewrites child acceptance. */
 export class OperatorHandoffs {
   readonly store: OperatorHandoffStore;
@@ -202,16 +208,16 @@ export class OperatorHandoffs {
 
   private async execute(id: string, receipt: OperatorCheckRecord, source: OperatorCheckSourceFile[], admission: AdmissionLease) {
     let outcome: OperatorCheckRun;
-    try { outcome = await this.effects.run(receipt.command, source); } catch {
+    try { outcome = await this.effects.run(receipt.command, source); } catch (error) {
       this.running.delete(receipt.id);
-      console.error('operator_handoff_check_stop_unproven');
+      logHandoffFailure('operator_handoff_check_stop_unproven', id, receipt.id, error);
       return;
     }
-    try { await this.complete(id, receipt, outcome); } catch {
-      console.error('operator_handoff_check_completion_not_persisted');
+    try { await this.complete(id, receipt, outcome); } catch (error) {
+      logHandoffFailure('operator_handoff_check_completion_not_persisted', id, receipt.id, error);
     } finally {
       this.running.delete(receipt.id);
-      await admission.release().catch(() => console.error('operator_handoff_admission_release_failed'));
+      await admission.release().catch(error => logHandoffFailure('operator_handoff_admission_release_failed', id, receipt.id, error));
     }
   }
 }
