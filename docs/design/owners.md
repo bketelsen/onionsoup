@@ -906,17 +906,25 @@ creation uses the approved absent path and pinned parent identity; an unexpected
 New files remain untracked and their full contents appear in the review diff; the host does not stage them in Git.
 
 Optional `checks` name exact command arrays such as `{ "id": "title-test", "command": ["node", "--test", "test/title.test.mjs"] }`.
-Supported commands are `node --test` with literal relative test paths and `go test` / `go vet` with local package
-paths (`./...`, `./pkg`, `./pkg/...`). Go checks require a host-selected `ONIONSOUP_HOST_GO_ROOT`; the task cannot
-select a compiler. They support self-contained modules: CGO, workspace discovery, toolchain downloads, module
-downloads and host caches are disabled. Neither adapter installs dependencies, runs package scripts nor invokes
-a host shell. The runner receives a read-only copy of verified source files and approved creations, with a
-private trusted runtime, network isolation and memory,
-process, time and output limits. It mounts neither the live worktree nor the host home or environment. The child requests only an
-approved check ID; host code records bounded output, exit code and the exact artifact digest. Go receipts also
-record the selected runtime version and Go executable SHA256 (not a digest of the entire toolchain). These receipts are
-separate from model claims. Editing after a check makes that receipt stale for acceptance; every configured check
-must have a current successful receipt. Failed or incomplete checks remain visible without implying completion.
+Supported commands are `node --test` with literal relative test paths, `go test` / `go vet` with local package
+paths (`./...`, `./pkg`, `./pkg/...`), and `["project", "make", "check"]` or other exact project argv. Go checks require
+host-selected `ONIONSOUP_HOST_GO_ROOT` and self-contained modules: CGO, workspace discovery, toolchain downloads,
+module downloads and host caches are disabled.
+
+Project validation uses the host-selected `ONIONSOUP_PROJECT_TOOLS_FILE` profile of installed ELF executables.
+It parses their library dependencies without executing them on the host, pins private copies of verified tool/library
+bytes and runs the exact approved argv in a writable disposable copy of the verified source. Repository scripts,
+Make recipes and mise tasks can run there without a command whitelist; downloads and host caches remain unavailable.
+Synthetic Git fixture state and build output are discarded. Real repository Git metadata is never copied. The runtime
+mounts neither the live worktree nor the host home or environment and retains network, memory, process, time and
+output limits. Internal instruction symlinks retain exact target bytes; escapes, cycles, dangling links and metadata
+links are rejected before execution. Approved edits still target regular named files only.
+
+The child requests only an approved check ID; host code records bounded output, exit code and the exact artifact digest.
+Go receipts record runtime version and Go executable SHA256 (not the whole toolchain). Project receipts record the
+profile digest and each mounted runtime file's SHA256. These receipts are separate from model claims. Editing after a
+check makes that receipt stale for acceptance; every configured check must have a current successful receipt. Failed
+or incomplete checks remain visible without implying completion.
 Before execution, a startup barrier lets the host pin the sandbox namespace-init process identity. Both normal
 completion and forced shutdown require that pinned identity to disappear, alongside the existing bounded
 process-group exit proof; a zombie leader alone is insufficient while its threads may still be exiting.

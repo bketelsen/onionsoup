@@ -134,7 +134,8 @@ test('sandbox supports a staged runner and pinned Node under tmp without mountin
   const directory = await mkdtemp(join(tmpdir(), 'operator-check-staged-'));
   const previous = process.env.ONIONSOUP_HOST_NODE;
   try {
-    for (const name of ['operator-check-runner.ts', 'operator-check-go.ts', 'operator-check-process.ts',
+    for (const name of ['operator-check-runner.ts', 'operator-check-go.ts', 'operator-check-project.ts', 'operator-check-source.ts',
+      'operator-project-launcher.mjs', 'operator-check-process.ts',
       'operator-check-execution.ts', 'operator-check-guard.mjs', 'operator-check-types.ts', 'operator-write-writer.ts']) {
       await cp(new URL(`../src/${name}`, import.meta.url), join(directory, name));
     }

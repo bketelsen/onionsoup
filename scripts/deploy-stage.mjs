@@ -75,6 +75,8 @@ async function stageArguments(command, args, location, privateFiles, skipHostBus
     ...(await existingReadOnly('/etc/ssl/certs')),
     ...(await existingReadOnly('/etc/pki/tls/certs')),
   ];
+  // Project runtimes resolve installed shared libraries without executing host tools.
+  const libraryCache = await existingReadOnly('/etc/ld.so.cache');
   const networkFiles = (await Promise.all([
     '/etc/resolv.conf', '/etc/hosts', '/etc/nsswitch.conf', '/etc/gai.conf',
   ].map(path => existingReadOnly(path)))).flat();
@@ -85,7 +87,7 @@ async function stageArguments(command, args, location, privateFiles, skipHostBus
     '--symlink', 'usr/lib64', '/lib64',
     '--dir', '/opt', '--ro-bind', nodeRoot, '/opt/node',
     '--dir', '/etc', '--dir', '/etc/ssl', '--dir', '/etc/pki', '--dir', '/etc/pki/tls',
-    ...certificates, ...networkFiles,
+    ...certificates, ...networkFiles, ...libraryCache,
     '--ro-bind', privateFiles.passwd, '/etc/passwd',
     '--ro-bind', privateFiles.gitconfig, '/etc/stage-gitconfig',
     // Read-only cgroup metadata lets nested fixed helpers prove this scope's cap without a host bus.

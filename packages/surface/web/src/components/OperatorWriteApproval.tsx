@@ -16,12 +16,22 @@ function Creation({ approval }: { approval: Extract<OperatorWriteApproval, { mod
     </pre>) : <p>No check commands approved.</p>}
   </div>)}</div>;
 }
+type RuntimeEvidence = NonNullable<AcceptanceApproval['checks'][number]['runtime']>;
+type RuntimeFormatters = { [Kind in RuntimeEvidence['kind']]: (runtime: Extract<RuntimeEvidence, { kind: Kind }>) => string };
+const runtimeFormatters: RuntimeFormatters = {
+  go: runtime => `Runtime: ${runtime.version}\nGo executable SHA256: ${runtime.binarySha256}`,
+  project: runtime => `Runtime: isolated project tools\nProfile SHA256: ${runtime.profileSha256}\n`
+    + runtime.tools.map(tool => `${tool.name}: ${tool.binarySha256}`).join('\n'),
+};
+function runtimeDescription<Kind extends RuntimeEvidence['kind']>(runtime: Extract<RuntimeEvidence, { kind: Kind }>) {
+  return runtimeFormatters[runtime.kind as Kind](runtime);
+}
 function CheckReceipt({ check }: { check: AcceptanceApproval['checks'][number] }) {
   const output = check.output ?? '';
   const isTruncated = output.length > OPERATOR_CHECK_DISPLAY_LIMITS.outputChars;
   return <div className="space-y-1">
     <pre className={BLOCK}>{`Check: ${check.checkID}\nReceipt: ${check.id}\nReceipt digest: ${check.digest ?? '(Not completed)'}\nCommand: ${JSON.stringify(check.command)}\nStatus: ${check.status}\nExit code: ${check.exitCode ?? '(Not completed)'}\nArtifact digest: ${check.artifactDigest}`}</pre>
-    {check.runtime && <pre className={BLOCK}>{`Runtime: ${check.runtime.version}\nGo executable SHA256: ${check.runtime.binarySha256}`}</pre>}
+    {check.runtime && <pre className={BLOCK}>{runtimeDescription(check.runtime)}</pre>}
     {output && <pre className={BLOCK}>{output.slice(0, OPERATOR_CHECK_DISPLAY_LIMITS.outputChars)}</pre>}
     {check.outputTruncated && <p>Host check output was truncated when recorded.</p>}
     {isTruncated && <p>Check output display truncated; the durable check receipt retains the recorded output.</p>}

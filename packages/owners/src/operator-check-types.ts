@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 
 export const OPERATOR_CHECK_LIMITS = { checksPerTask: 4, pathsPerCheck: 8, attemptsPerCheck: 3,
-  outputChars: 24_000, pathChars: 2_048 };
+  outputChars: 24_000, pathChars: 2_048, projectArguments: 128, projectArgumentChars: 16_384, projectCommandChars: 65_536 };
 const Identifier = z.string().regex(/^[a-zA-Z0-9_-]+$/);
 const Hash = z.string().regex(/^[a-f0-9]{64}$/);
 export const OperatorCheckPath = z.string().min(1).max(OPERATOR_CHECK_LIMITS.pathChars).refine(path =>
@@ -14,24 +14,35 @@ export const OperatorGoPackage = z.string().min(1).max(OPERATOR_CHECK_LIMITS.pat
   const local = path.slice(2).replace(/\/\.\.\.$/, '');
   return OperatorCheckPath.safeParse(local).success && !local.split('/').some(part => part.includes('...'));
 }, 'operator_check_package_invalid');
-export type OperatorCheckKind = 'node-test' | 'go-test' | 'go-vet';
+export type OperatorCheckKind = 'node-test' | 'go-test' | 'go-vet' | 'project';
+function boundedLegacyCommand(command: string[]) {
+  return command.length >= 3 && command.length <= OPERATOR_CHECK_LIMITS.pathsPerCheck + 2;
+}
 const commandValidators: Record<string, (command: string[]) => boolean> = {
-  'node --test': command => command.slice(2).every(path => OperatorCheckPath.safeParse(path).success),
-  'go test': command => command.slice(2).every(path => OperatorGoPackage.safeParse(path).success),
-  'go vet': command => command.slice(2).every(path => OperatorGoPackage.safeParse(path).success),
+  'node --test': command => boundedLegacyCommand(command) && command.slice(2).every(path => OperatorCheckPath.safeParse(path).success),
+  'go test': command => boundedLegacyCommand(command) && command.slice(2).every(path => OperatorGoPackage.safeParse(path).success),
+  'go vet': command => boundedLegacyCommand(command) && command.slice(2).every(path => OperatorGoPackage.safeParse(path).success),
+  project: command => (command[1]?.length ?? 0) > 0 && command.every(argument => !argument.includes('\0')
+    && argument.length <= OPERATOR_CHECK_LIMITS.projectArgumentChars)
+    && command.reduce((length, argument) => length + argument.length, 0) <= OPERATOR_CHECK_LIMITS.projectCommandChars,
 };
 const commandKinds: Record<string, OperatorCheckKind> = {
-  'node --test': 'node-test', 'go test': 'go-test', 'go vet': 'go-vet',
+  'node --test': 'node-test', 'go test': 'go-test', 'go vet': 'go-vet', project: 'project',
 };
+function commandKey(command: string[]) {
+  return Object.hasOwn(commandKinds, command[0]!) ? command[0]! : command.slice(0, 2).join(' ');
+}
 /** Call only after command parsing at the host boundary. */
 export function operatorCheckKind(command: string[]): OperatorCheckKind {
-  const kind = commandKinds[command.slice(0, 2).join(' ')];
+  const key = commandKey(command);
+  const kind = Object.hasOwn(commandKinds, key) ? commandKinds[key] : undefined;
   if (!kind) throw new Error('operator_check_command_invalid');
   return kind;
 }
-export const OperatorCheckCommand = z.array(z.string()).min(3).max(OPERATOR_CHECK_LIMITS.pathsPerCheck + 2)
+export const OperatorCheckCommand = z.array(z.string()).min(2).max(OPERATOR_CHECK_LIMITS.projectArguments + 1)
   .superRefine((command, context) => {
-    if (!commandValidators[command.slice(0, 2).join(' ')]?.(command)) {
+    const key = commandKey(command);
+    if (!Object.hasOwn(commandValidators, key) || !commandValidators[key]!(command)) {
       context.addIssue({ code: 'custom', message: 'operator_check_command_invalid' });
     }
   });
@@ -52,6 +63,7 @@ const sourceValidators: Record<OperatorCheckKind, (command: string[], paths: Set
   },
   'go-test': validateGoSourcePaths,
   'go-vet': validateGoSourcePaths,
+  project: () => { /* The isolated filesystem and host-selected runtime constrain project commands. */ },
 };
 /** Shared scope proof for baseline authorization and the exact source snapshot before execution. */
 export function validateOperatorCheckSourcePaths(command: string[], paths: Set<string>) {
@@ -60,9 +72,12 @@ export function validateOperatorCheckSourcePaths(command: string[], paths: Set<s
 export const OperatorTaskCheck = z.object({ id: Identifier, command: OperatorCheckCommand });
 export type OperatorTaskCheck = z.infer<typeof OperatorTaskCheck>;
 export const OperatorGoVersion = z.string().regex(/^go[0-9]+\.[0-9]+(?:\.[0-9]+)?(?:(?:rc|beta)[0-9]+)?$/).max(128);
-export const OperatorCheckRuntimeEvidence = z.object({ kind: z.literal('go'),
+const OperatorGoRuntimeEvidence = z.object({ kind: z.literal('go'),
   version: OperatorGoVersion,
   binarySha256: Hash });
+export const OperatorProjectRuntimeEvidence = z.object({ kind: z.literal('project'), profileSha256: Hash,
+  tools: z.array(z.object({ name: z.string().min(1), binarySha256: Hash })).min(1) });
+export const OperatorCheckRuntimeEvidence = z.discriminatedUnion('kind', [OperatorGoRuntimeEvidence, OperatorProjectRuntimeEvidence]);
 export type OperatorCheckRuntimeEvidence = z.infer<typeof OperatorCheckRuntimeEvidence>;
 export const OperatorCheckRecord = z.object({
   id: Identifier, checkID: Identifier, command: OperatorCheckCommand,

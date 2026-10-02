@@ -534,6 +534,15 @@ test('write scope cards separate new paths and approved argv from artifact-bound
   const goHtml = renderToStaticMarkup(createElement(OperatorWriteApprovalView, { approval: goApproval }));
   assert.match(goHtml, /Runtime: go1.25.8/);
   assert.match(goHtml, /Go executable SHA256: c{64}/);
+  const projectApproval = operatorWriteApprovalOf({ permission: OPERATOR_WRITE_PERMISSION,
+    metadata: { ...accept, checks: [{ ...check, command: ['project', 'make', 'check'], runtime: {
+      kind: 'project', profileSha256: 'd'.repeat(64), tools: [{ name: '/runtime/bin/make', binarySha256: 'e'.repeat(64) }],
+    } }] } });
+  assert(projectApproval);
+  const projectHtml = renderToStaticMarkup(createElement(OperatorWriteApprovalView, { approval: projectApproval }));
+  assert.match(projectHtml, /Runtime: isolated project tools/);
+  assert.match(projectHtml, /Profile SHA256: d{64}/);
+  assert.match(projectHtml, /\/runtime\/bin\/make: e{64}/);
   assert.equal(operatorWriteApprovalOf({ permission: OPERATOR_WRITE_PERMISSION,
     metadata: { ...accept, checks: [{ ...check, runtime: { ...runtime, version: '<script>unsafe</script>' } }] } }), undefined);
 

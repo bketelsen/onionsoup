@@ -17,7 +17,7 @@ export function operatorFileTool(writes: OperatorWrites, calls: OperatorWriteCal
 
 export function operatorCheckTool(writes: OperatorWrites, calls: OperatorCheckCalls): ReturnType<typeof tool> {
   return tool({
-    description: 'Run a check ID explicitly covered by your write task approval. The host runs its exact Node test or Go test/vet command on a read-only source copy with no network, host credentials, production state or original-workspace writes. Results bind the source digest; changed source needs new checks. Never replay an uncertain check.',
+    description: 'Run a check ID explicitly covered by your write task approval. The host runs its exact approved Node, Go or project command on a private source snapshot. Project commands use host-selected tools in a writable disposable copy with no network, host credentials, production state or original-workspace writes. Results bind the source digest; changed source needs new checks. Never replay an uncertain check.',
     args: { checkID: tool.schema.string() },
     async execute(args, context) {
       const callID = calls.consume(context.sessionID, args as OperatorCheckInput & Record<string, unknown>);
