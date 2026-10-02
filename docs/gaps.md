@@ -6,8 +6,9 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
 
 - **History preserves identity, not an independent transcript backup.** Archived owner conversations remain
   discoverable after plan cleanup; transcripts still depend on OpenCode's store. Unobserved children and deleted
-  transcripts cannot be reconstructed. New chat uses a fresh workspace but does not automatically carry selected
-  historical context. Existing explicit ledger references are readable without a bulk backfill.
+  transcripts cannot be reconstructed. New human chat does not automatically carry selected historical context;
+  addressed owner continuations carry bounded retained context into a fresh declared workspace. Existing explicit
+  ledger references are readable without a bulk backfill.
 
 - **Attention assignment is repository-only.** Seen remains inert; explicit assignment creates one gated request
   without resolving the attention entry. Assignment generations, reassignment and a blocked-routing recovery UI
@@ -22,8 +23,10 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
 
 - **Uncertain revision delivery requires inspection.** New inbox/manager plan revisions have durable delivery
   intent and stable receipt reconciliation; an uncertain send is not automatically retried. There is no delivery
-  repair/resend UI yet. Pre-send prerequisite blockers resume when the prerequisites return; uncertain sends do not. In-flight model submissions cannot be recalled, and old work notices retain their existing
-  delivery mechanism. Revision is distinct from cancellation, not a new goal-management layer.
+  repair/resend UI yet. Pre-send prerequisite blockers resume when the prerequisites return; uncertain sends do not.
+  Addressed work notices reconcile exact saved author/content/message receipts; legacy receipts without saved
+  bodies cannot prove acceptance. In-flight model submissions cannot be recalled.
+  Revision is distinct from cancellation, not a new goal-management layer.
 
 - **Cross-owner progress is recorded state, not omniscience.** Request participants and the receiving owner's
   direct manager can read linked progress without relaying it through the person. Origin-pinned updates are
@@ -32,11 +35,12 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
   External/manual work has no such evidence until a supported host proposal or reconciliation runs; between-tick transitions can be missed.
   Status does not independently check live services or prove deployment.
 
-- **Direct-request plan review needs a reachable origin chat.** A requester who is the receiving owner's manager
+- **Uncertain direct-request review wakes need exact receipts.** A requester who is the receiving owner's manager
   can review under its existing applicable `approve-plans` grant. A separate durable continuation wakes that
-  requester; informational notices remain inert. Missing origin/persona/session blocks delivery and leaves the human
-  inbox available. Pre-send prerequisites retry; an uncertain attempted send is reconciled by its receipt and never
-  blindly repeated. Scope matching is an explicit reviewer assessment, not a host inference from prose. Unresolved
+  requester; informational notices remain inert. A retired requester workspace now routes to a fresh requester-owned
+  continuation, never the report's workspace. Missing persona blocks delivery; the human inbox remains available.
+  Pre-send prerequisites retry; an uncertain attempted send is reconciled by its exact saved body/message receipt
+  and never blindly repeated. Legacy ID-only receipts remain unverified. Scope matching is an explicit reviewer assessment, not a host inference from prose. Unresolved
   scope stays at the human gate. Peer reviewers and blanket coordinator authority remain unsupported.
 
 - **Actionable consultations currently cover repository changes only.** Explicit `onionsoup_ask` follow-up routes one
@@ -88,8 +92,8 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
   surface, with no second listener. A legacy `listen` configuration is ignored for rollback compatibility.
   There is no editing in the browser, and only the
   keeper writes. A move does not rewrite links to the moved page (its backlinks list them). A `wiki_push_conflict` needs someone to rebase the
-  clone by hand. Corrections reach the keeper as `onionsoup_ask` exchange notices, which she sees only when the
-  person next chats with her.
+  clone by hand. Addressed `onionsoup_send` corrections now wake the keeper in her actual context; informational
+  `onionsoup_ask` consultations remain silent.
 - **Shipping and the surface.** `onionsoup_ship` restarts the services in the owner's `deploy` section with a health
   check. The surface's opencode loads the plugin, so plugin changes need `onionsoup-surface` restarted too; listing
   it in `deploy.services` makes ship do it, at the cost of cutting off any reply in progress.
@@ -132,8 +136,8 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
 - **No initiatives between peers.** Only a manager plans across owners, through its direct reports; peers still
   delegate one request at a time, and the receiver may decline.
 - **Waking a manager needs the surface running.** Manager notices are posted by the plugin in the surface's
-  opencode; with the surface down they stay queued. If the initiative's chat was deleted, the notice stays pending:
-  there is no fallback to the manager's latest chat yet. Tool lists are built when the plugin starts, so a
+  opencode; with the surface down they stay queued. Retired initiative chats route to a fresh manager-owned
+  continuation with retained history where available, not a guessed latest human chat. Tool lists are built when the plugin starts, so a
   `reportsTo` change shows new tools only after a surface restart (engine checks apply at once).
 - **Owner sessions need the surface running.** The plugin opens the sessions that plan delegated work and carry out
   approved plans, so a plan approved from the inbox or the CLI waits for a running surface before any work starts.
@@ -145,7 +149,9 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
   the directory they were made in, and the surface lists an owner's desk and the plan worktrees that still exist.
   A finished plan's worktree is removed once its session has been idle for
   `PLAN_WORKTREE_LIMITS.idleBeforeRemovalHours` (24); after that the owner's chat list no longer shows the session
-  (the item still records it, in its old directory), and a prompt sent to it fails because the directory is gone.
+  (the item still records it, in its old directory). Retained history stays readable, and addressed owner messages
+  open/reuse a fresh continuation rather than prompting or recreating the missing directory. Human archived chats
+  remain read-only.
 - **Only the surface's opencode removes finished plans' worktrees.** The cleanup pass needs the session's activity,
   so it runs in the plugin; while the surface is down, finished plans keep their worktrees.
 

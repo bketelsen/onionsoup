@@ -514,6 +514,15 @@ configuration before treating an unknown owner as retired, so an older plugin ca
 person chat is older than the configured session search window, raise `noticeSessions` or speak in that chat.
 Restart the surface after installing plugin changes.
 
+For conversation in an owner's actual context, use `onionsoup_send { to, text, item?, session? }`, not
+`onionsoup_ask`'s separate read-only consultation. Name the recipient's item for an exact work continuation, or
+a host-observed session `{ sessionID, directory }`. `onionsoup_reply { message, text }` answers the delivered
+notice ID at the recorded sender address. These tools are available to persona owners, not subagents or
+observation-only identities. Delivery waits for idle, preserves sender/content and reconciles exact transcript
+receipts on restart. A retired workspace routes to one fresh declared-workspace continuation with retained
+history; it is never recreated. Manager notes and escalation resolutions use this same queue. Conversation
+does not grant new repository, model, credential or destructive authority, and existing effect gates still apply.
+
 ## What needs engine code
 
 New domain kinds (how an owner observes and changes something, like `git-repository`, `incus`, `truenas`, `github-org`), new

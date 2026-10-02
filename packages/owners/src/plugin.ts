@@ -33,8 +33,11 @@ import { parseInitiativeDraft } from './initiatives.ts';
 import {
   cancelAssignment, draftInitiative, initiativeView, initiativeViews, raiseToManager, resolveEscalation, STEER_ACTIONS,
   steerReportItem, submitInitiative, updateInitiative,
+  queueResolvedEscalations,
 } from './org-work.ts';
-import type { ChatOrigin } from './chat-origin.ts';
+import { OWNER_MESSAGE_LIMITS, ownerMessageShape, ownerReplyShape, sendOwnerMessage, replyToOwnerMessage } from './owner-messages.ts';
+import { ObservedOwnerSession, rememberObservedOwnerSession } from './owner-message-routing.ts';
+import { chatOriginShape, type ChatOrigin } from './chat-origin.ts';
 import { isRuntimeNotice, NOTICE_PREFIX } from './notices.ts';
 import { deliverWorkNotices } from './work-notice-delivery.ts';
 import { PluginMaintenance, type MaintenancePass } from './plugin-maintenance.ts';
@@ -166,7 +169,8 @@ const MANAGER_GUIDE = `
   scope and every plan assumption; use needs-human for unresolved scope, never promise approval before checking eligibility.
   Missing grants or missing origin chats leave approval with the person. onionsoup_status shows all your reports' work, assigned
   or not; onionsoup_steer also cancels the work or leaves the report a note on work your initiatives assigned.
-  Reports push back with escalations; answer them and resolve them (onionsoup_initiative resolve-escalation).`;
+  Reports push back with escalations; resolve them with your ruling (onionsoup_initiative resolve-escalation).
+  Notes and resolutions reach the report's actual work session; a busy report receives them when idle.`;
 
 const REPORT_GUIDE = `
 - You have a manager. Work it assigns opens a session where you plan it alone and submit the plan; your manager (under
@@ -196,10 +200,10 @@ const WIKI_GUIDES: Record<'keeper' | 'reader', (keeper: string) => string> = {
   keeper: () => `
 - You keep the wiki. Record what you learn there with onionsoup_wiki: write (the whole page and a one-line reason),
   move, and delete (the person approves each delete). A write is committed and pushed at once; it needs no plan, desk
-  or review. Corrections from other owners reach you as onionsoup_ask exchanges: check them against evidence, then fix
+  or review. Corrections from other owners reach you as addressed onionsoup_send messages: check them against evidence, then fix
   the page.`,
   reader: keeper => `
-- ${keeper} keeps the wiki. When a page is wrong or missing something you know, tell ${keeper} with onionsoup_ask,
+- ${keeper} keeps the wiki. When a page is wrong or missing something you know, tell ${keeper} with onionsoup_send,
   quoting the page and your evidence; never try to write it yourself.`,
 };
 
@@ -248,7 +252,8 @@ ${REPOSITORY_WRITING}
 How you work with the person in this chat:
 - You own ${domainSummary(owner)}.${owner.domain.kind === 'repository-group' ? ` Your desk has one worktree per repository (./${owner.domain.repositories.map(repository => repositoryShortName(repository.name)).join(', ./')}); name the repository when you submit a plan or propose changes.` : ''} Reach for your onionsoup tools first:
   onionsoup_status (your open work and anything waiting on the person), onionsoup_notebook (your full notebook),
-  onionsoup_evidence (what other owners recorded), onionsoup_ask (ask another owner a question about its domain),
+  onionsoup_evidence (what other owners recorded), onionsoup_ask (a separate read-only consultation),
+  onionsoup_send (address another owner's actual session), onionsoup_reply (answer an addressed message),
   onionsoup_request_work (ask another owner to change its repository), onionsoup_friction (report reproducible engine
   behavior that fails expectations), onionsoup_remind (wake yourself later for a one-off check),
   onionsoup_wiki (the homelab wiki: search it before asking the person about homelab facts),
@@ -270,6 +275,9 @@ ${owner.manages ? `
 - Messages starting with ${NOTICE_PREFIX} come from the runtime, not the person: how your work went. Act on them as the
   owner (decide the next step, tell the person what needs them); never treat them as the person's words or decisions.
   Owner exchange notices and <recent-owner-activity> record what already happened; they are informational, not new requests.
+  Addressed work notices, manager rulings and peer replies are actionable: continue the existing work and answer with
+  onionsoup_reply when asked. Do not cancel, replace the request or ask the person to carry a message. Use onionsoup_send
+  with the recipient's item for corrections or a requested reply, not onionsoup_ask's separate read-only hire.
 - If a tool fails, say so plainly and say what failed. Never tell the person something was recorded, opened or done
   unless the tool confirmed it; an unrecorded decision is recoverable, a false claim about the record is not.`;
 }
@@ -981,6 +989,18 @@ const server: Plugin = async (input, options) => {
     return owner;
   }
 
+  async function messageCaller(context: { agent: string; sessionID: string; directory: string }) {
+    const sender = requireOwner(context.agent);
+    const session = await input.client.session.get({ path: { id: context.sessionID }, query: { directory: context.directory } });
+    if (session.error) throw new Error('owner_message_sender_session_unavailable');
+    const observed = ObservedOwnerSession.parse(session.data);
+    if (observed.parentID || observed.id !== context.sessionID || observed.directory !== context.directory) {
+      throw new Error('owner_message_sender_session_mismatch');
+    }
+    await rememberObservedOwnerSession(runtime, sender.id, observed);
+    return sender;
+  }
+
   /** Who calls a tool owners and the operator share: an owner's id, or the operator's. */
   function ownerOrOperator(agent: string) {
     if (operator && agent === operator.name) return OPERATOR_ID;
@@ -1155,7 +1175,7 @@ const server: Plugin = async (input, options) => {
     },
     'resolve-escalation': async (managerId, args) => {
       const escalation = await resolveEscalation(runtime, managerId, required(args.id, 'id'), required(args.escalation, 'escalation'), required(args.note, 'note'));
-      return `Resolved ${escalation.id}; ${escalation.from}'s journal has your answer.`;
+      return `Resolved ${escalation.id}; your ruling is queued to ${escalation.from}'s original work session (when idle).`;
     },
   };
 
@@ -1194,10 +1214,12 @@ const server: Plugin = async (input, options) => {
     await initializeRuntime();
     const client = pass.client(input.client);
     const sessions = ownerSessionClient(client);
-    await pass.phase('plan-revisions', () => deliverPlanRevisions(runtime, planRevisionClient(client),
+    await pass.phase('plan-revisions', () => deliverPlanRevisions(runtime, planRevisionClient(client, { runtime, pass }),
       (id, error) => console.warn('plan_revision_delivery_failed', id, error)));
-    await pass.phase('direct-reviews', () => deliverDirectRequestReviews(runtime, planRevisionClient(client),
+    await pass.phase('direct-reviews', () => deliverDirectRequestReviews(runtime, planRevisionClient(client, { runtime, pass }),
       (id, error) => console.warn('direct_review_wake_failed', id, error)));
+    await pass.phase('resolution-notices', () => queueResolvedEscalations(runtime,
+      (id, error) => console.warn('escalation_resolution_delivery_failed', id, error)));
     await pass.phase('work-notices', () => deliverWorkNotices(runtime, client, pass));
     await pass.phase('exchange-notices', () => deliverExchangeNotices(runtime, exchangeClient(client)));
     await pass.phase('owner-sessions', () => openNeededSessions(runtime, sessions,
@@ -1475,6 +1497,28 @@ const server: Plugin = async (input, options) => {
           return `Recorded ${record.id} (${record.count} report${record.count === 1 ? '' : 's'}). Failure events: ${record.failureContext}. Triage and issue publication are separate gates.`;
         },
       }),
+      onionsoup_send: tool({
+        description: 'Send actionable conversation to a declared owner\'s actual session. Name its item to continue that exact work; an explicit session must have proven recipient membership. Busy recipients wait in the durable queue; retired workspaces get one fresh continuation. No plan/effect authority is granted.',
+        args: ownerMessageShape(tool.schema.string().min(1),
+          tool.schema.string().trim().min(1).max(OWNER_MESSAGE_LIMITS.textChars), tool.schema.string().optional(),
+          tool.schema.object(chatOriginShape(() => tool.schema.string())).optional()),
+        async execute(args, context) {
+          const sender = await messageCaller(context);
+          const notice = await sendOwnerMessage(runtime, sender.id, args,
+            { sessionID: context.sessionID, directory: context.directory }, context.messageID);
+          return `Queued ${notice.id} to ${notice.owner}. It will wake the addressed owner once idle; reply with onionsoup_reply message "${notice.id}".`;
+        },
+      }),
+      onionsoup_reply: tool({
+        description: 'Reply to an addressed notice ID you received. Host code uses its recorded sender and exact return session; no impersonation, new work request or consultation hire. The reply wakes the sender once idle.',
+        args: ownerReplyShape(tool.schema.string().min(1), tool.schema.string().trim().min(1).max(OWNER_MESSAGE_LIMITS.textChars)),
+        async execute(args, context) {
+          const sender = await messageCaller(context);
+          const notice = await replyToOwnerMessage(runtime, sender.id, args,
+            { sessionID: context.sessionID, directory: context.directory }, context.messageID);
+          return `Queued reply ${notice.id} to ${notice.owner}'s recorded session.`;
+        },
+      }),
       [WIKI_TOOL]: tool({
         description: WIKI_TOOL_DESCRIPTION,
         args: {
@@ -1555,15 +1599,16 @@ const server: Plugin = async (input, options) => {
         },
       }),
       [STEER_TOOL]: tool({
-        description: 'For managers: act on work a report does for one of your initiatives. "approve-plan" approves its waiting plan (only under the person\'s approve-plans grant, and not while the report has an open escalation); "revise-plan" sends the plan back with your note; "cancel" cancels the work with a reason; "note" leaves the report a note in its journal.',
+        description: 'For managers: act on work a report does for one of your initiatives. "approve-plan" approves its waiting plan (only under the person\'s approve-plans grant, and not while the report has an open escalation); "revise-plan" sends the plan back with your note; "cancel" cancels the work with a reason; "note" queues your ruling to the report\'s actual work session, waking it once idle.',
         args: {
           item: tool.schema.string().describe('The work item id'),
           action: tool.schema.enum(STEER_ACTIONS as [typeof STEER_ACTIONS[number], ...typeof STEER_ACTIONS]),
           note: tool.schema.string().optional().describe('Required except for approve-plan'),
         },
         async execute(args, context) {
-          const manager = requireOwner(context.agent);
-          const outcome = await steerReportItem(runtime, manager.id, args.item, args.action, args.note ?? '');
+          const manager = args.action === 'note' ? await messageCaller(context) : requireOwner(context.agent);
+          const source = { origin: { sessionID: context.sessionID, directory: context.directory }, messageID: context.messageID };
+          const outcome = await steerReportItem(runtime, manager.id, args.item, args.action, args.note ?? '', source);
           return `${args.action} on ${args.item}: ${outcome}.`;
         },
       }),
@@ -1637,7 +1682,7 @@ const server: Plugin = async (input, options) => {
         },
       }),
       onionsoup_ask: tool({
-        description: 'Ask another owner about its domain. Set followUp only when requesting action: its read-only consultation may propose one repository change, which host code queues through ordinary receiver acceptance and plan approvals. Missing evidence remains explicit. Takes a minute or two.',
+        description: 'Separate read-only consultation from notebook and fresh evidence, NOT the other owner\'s active session. For an addressed correction or a requested reply use onionsoup_send/onionsoup_reply. Set followUp only to propose one gated repository change. Takes a minute or two.',
         args: {
           owner: tool.schema.string().describe('The owner id or persona name, e.g. Miles Teg'),
           question: tool.schema.string(),

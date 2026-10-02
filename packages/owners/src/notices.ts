@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { link, mkdir, readdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
@@ -28,6 +28,8 @@ export const WorkNotice = z.object({
   change: z.string(),
   text: z.string(),
   origin: ChatOrigin.optional(),
+  sender: z.object({ owner: z.string(), origin: ChatOrigin.optional() }).optional(),
+  replyTo: z.string().optional(),
   at: z.string(),
 });
 export type WorkNotice = z.infer<typeof WorkNotice>;
@@ -105,12 +107,37 @@ async function audiencesOf(runtime: Runtime, item: WorkItem, chatDirectory: (own
 
 /** Queue a notice for the plugin to post; written whole, so a reader never sees half a file. */
 export async function queueNotice(runtime: Runtime, notice: WorkNotice) {
-  const { pending } = directories(runtime);
-  await mkdir(pending, { recursive: true });
-  const path = join(pending, `${notice.id}.json`);
-  const temporary = `${path}.${randomUUID()}.tmp`;
-  await writeFile(temporary, JSON.stringify(WorkNotice.parse(notice), null, 2) + '\n');
-  await rename(temporary, path);
+  const parsed = WorkNotice.parse(notice);
+  if (!/^[a-zA-Z0-9_-]+$/.test(parsed.id)) throw new Error('work_notice_identity_invalid');
+  const { root, pending } = directories(runtime);
+  return withRecordLock(join(root, 'locks', `${parsed.id}.lock`), async () => {
+    const previous = await readNotice(runtime, parsed.id);
+    if (previous) {
+      const { at: _previousAt, ...previousContent } = previous;
+      const { at: _nextAt, ...nextContent } = parsed;
+      if (JSON.stringify(previousContent) !== JSON.stringify(nextContent)) throw new Error('work_notice_identity_conflict');
+      return previous;
+    }
+    await mkdir(pending, { recursive: true });
+    const path = join(pending, `${parsed.id}.json`);
+    const temporary = `${path}.${randomUUID()}.tmp`;
+    await writeFile(temporary, JSON.stringify(parsed, null, 2) + '\n', { mode: 0o600 });
+    await rename(temporary, path);
+    return parsed;
+  });
+}
+
+export async function readNotice(runtime: Runtime, id: string) {
+  if (!/^[a-zA-Z0-9_-]+$/.test(id)) throw new Error('work_notice_identity_invalid');
+  const { pending, delivered } = directories(runtime);
+  for (const directory of [pending, delivered]) {
+    const contents = await readFile(join(directory, `${id}.json`), 'utf8').catch(error => {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      return undefined;
+    });
+    if (contents) return WorkNotice.parse(JSON.parse(contents));
+  }
+  return undefined;
 }
 
 async function raiseNotice(runtime: Runtime, item: WorkItem, previous: string | undefined, audience: Audience) {
@@ -118,7 +145,8 @@ async function raiseNotice(runtime: Runtime, item: WorkItem, previous: string | 
   const described = describe(item, previous);
   if (!described) return undefined;
   const notice: WorkNotice = {
-    id: `${item.id}-${described.change}${suffix}`, owner: audience.owner, workItem: item.id, change: described.change,
+    id: `${item.id}-${described.change}${suffix}-${createHash('sha256').update(item.updatedAt).digest('hex').slice(0, 12)}`,
+    owner: audience.owner, workItem: item.id, change: described.change,
     text: described.text, origin: await audience.origin(), at: new Date().toISOString(),
   };
   const notebook = runtime.notebook(audience.owner);

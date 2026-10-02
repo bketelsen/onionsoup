@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import type { ChatOrigin } from './chat-origin.ts';
 import type { AttentionProvenance } from './journal-record.ts';
 import { canChange, directReports, isDirectReport, planGrantFor } from './declarations.ts';
 import { requestWork } from './delegation.ts';
@@ -9,11 +8,14 @@ import {
   type InitiativeStatus, type PlanReview,
 } from './initiatives.ts';
 import type { WorkItem, WorkStatus } from './ledger.ts';
-import { queueNotice } from './notices.ts';
+import { queueNotice, readNotice } from './notices.ts';
 import type { RequestStatus, ResourceRequest } from './requests.ts';
 import type { Runtime } from './runtime.ts';
 import { approvePlan, cancelItem, revisePlan } from './work-recovery.ts';
 import { SUPERVISION_LIMITS } from './plan-review-limits.ts';
+import { latestOwnerMessageTarget, ownerMessageId } from './owner-messages.ts';
+import { z } from 'zod';
+import { ChatOrigin } from './chat-origin.ts';
 export { SUPERVISION_LIMITS } from './plan-review-limits.ts';
 
 /**
@@ -357,7 +359,8 @@ export function planUnderReview(item: WorkItem) {
 async function assignedItem(runtime: Runtime, managerId: string, itemId: string) {
   const item = await runtime.ledger.get(itemId).catch(() => undefined);
   const initiative = item?.assignment ? await runtime.initiatives.get(item.assignment.initiative).catch(() => undefined) : undefined;
-  if (!item?.assignment || !initiative || initiative.owner !== managerId) return undefined;
+  if (!item?.assignment || !initiative || initiative.owner !== managerId
+    || !isDirectReport(runtime.declarations, managerId, item.owner)) return undefined;
   return { item, initiative, assignmentId: item.assignment.assignment };
 }
 
@@ -444,26 +447,32 @@ async function askManager(runtime: Runtime, view: InitiativeView, item: WorkItem
     + `Read it with onionsoup_status item ${item.id}, then approve it with onionsoup_steer approve-plan (the person granted you this) or send it back with revise-plan and a note. The person can also decide in their inbox.`);
 }
 
-type Steer = (runtime: Runtime, managerId: string, item: WorkItem, note: string) => Promise<string>;
+export const SteerInvocation = z.object({ origin: ChatOrigin, messageID: z.string().min(1) });
+export type SteerInvocation = z.infer<typeof SteerInvocation>;
+type Steer = (runtime: Runtime, managerId: string, item: WorkItem, note: string, invocation?: SteerInvocation) => Promise<string>;
 
 /** What a manager may do to her reports' assigned work from chat. Approving needs the grant; sending back does not. */
 const STEERS: Record<'approve-plan' | 'revise-plan' | 'cancel' | 'note', Steer> = {
   'approve-plan': async (runtime, managerId, item, note) => (await reviewReportPlan(runtime, managerId, item.id, { decision: 'approve', note })).status,
   'revise-plan': async (runtime, managerId, item, note) => (await reviewReportPlan(runtime, managerId, item.id, { decision: 'revise', note })).status,
   cancel: async (runtime, managerId, item, note) => (await cancelItem(runtime, item.id, `owner:${managerId}`, note)).status,
-  note: async (runtime, managerId, item, note) => {
-    await journal(runtime, [item.owner], 'manager-note', `${item.id}: from ${managerId}: ${note}`);
-    return 'noted in its journal';
+  note: async (runtime, managerId, item, note, invocation) => {
+    const initiative = await runtime.initiatives.get(item.assignment!.initiative);
+    await queueReportRuling(runtime, managerId, item.owner, item,
+      ownerMessageId(['manager-note', managerId, item.id, note, invocation]), note, invocation?.origin ?? initiative.origin);
+    return 'queued to its work session';
   },
 };
 export type SteerAction = keyof typeof STEERS;
 export const STEER_ACTIONS = Object.keys(STEERS) as SteerAction[];
 
-export async function steerReportItem(runtime: Runtime, managerId: string, itemId: string, action: SteerAction, note: string) {
+export async function steerReportItem(runtime: Runtime, managerId: string, itemId: string, action: SteerAction,
+  note: string, source?: SteerInvocation) {
   const context = await assignedItem(runtime, managerId, itemId);
   if (!context) throw new Error(`not_your_report_item: ${itemId} is not work in one of ${managerId}'s initiatives; direct request plans use onionsoup_review_request_plan with the exact request and plan binding`);
   if (action !== 'approve-plan' && !note.trim()) throw new Error(`steer_note_required: ${action} needs a note`);
-  const outcome = await STEERS[action](runtime, managerId, context.item, note);
+  const invocation = source ? SteerInvocation.parse(source) : undefined;
+  const outcome = await STEERS[action](runtime, managerId, context.item, note, invocation);
   await journal(runtime, [managerId, context.item.owner], 'steered', `${itemId}: ${action} by ${managerId}${note ? `: ${note}` : ''}`);
   return outcome;
 }
@@ -506,10 +515,65 @@ export async function resolveEscalation(runtime: Runtime, managerId: string, ini
   const updated = await runtime.initiatives.update(initiativeId, current => {
     const escalation = current.escalations.find(candidate => candidate.id === escalationId);
     if (!escalation) throw new Error(`unknown_escalation: ${escalationId}`);
-    if (escalation.resolution) throw new Error(`escalation_already_resolved: ${escalationId}`);
+    if (escalation.resolution) {
+      if (escalation.resolution.by !== resolution.by || escalation.resolution.note !== note) {
+        throw new Error(`escalation_resolution_conflict: ${escalationId}`);
+      }
+      return current;
+    }
     return { ...current, escalations: current.escalations.map(candidate => (candidate.id === escalationId ? { ...candidate, resolution } : candidate)) };
   });
   const escalation = updated.escalations.find(candidate => candidate.id === escalationId)!;
-  await journal(runtime, [managerId, escalation.from], 'escalation-resolved', `${escalationId} on ${initiativeId}/${escalation.assignment}: ${note}`);
+  await deliverEscalationResolution(runtime, updated, escalation);
   return escalation;
+}
+
+async function queueReportRuling(runtime: Runtime, managerId: string, recipient: string,
+  item: WorkItem | undefined, id: string, text: string, source?: ChatOrigin) {
+  const previous = await readNotice(runtime, id);
+  const origin = item?.session ?? item?.origin ?? await latestOwnerMessageTarget(runtime, recipient);
+  const workItem = previous ? previous.workItem : item?.id;
+  const notice = await queueNotice(runtime, {
+    id, owner: recipient, workItem, change: 'manager-ruling', text,
+    origin: previous ? previous.origin : origin,
+    sender: { owner: managerId, origin: source }, at: new Date().toISOString(),
+  });
+  await runtime.notebook(recipient).journalOnce({
+    kind: 'manager-note', workItem, source: id, note: `from ${managerId}: ${text}`,
+  }, notice.at);
+}
+
+async function deliverEscalationResolution(runtime: Runtime, initiative: Initiative, escalation: Escalation) {
+  const resolution = escalation.resolution;
+  if (!resolution) return;
+  const assignment = initiative.assignments.find(candidate => candidate.id === escalation.assignment);
+  const request = assignment?.request ? await runtime.requests.get(assignment.request) : undefined;
+  const itemId = escalation.item ?? request?.workItem;
+  const item = itemId ? await runtime.ledger.get(itemId) : undefined;
+  if (!assignment || assignment.to !== escalation.from
+    || !isDirectReport(runtime.declarations, initiative.owner, escalation.from)
+    || (item && (item.owner !== escalation.from || item.assignment?.initiative !== initiative.id
+      || item.assignment.assignment !== escalation.assignment))) throw new Error('escalation_resolution_work_mismatch');
+  await queueReportRuling(runtime, initiative.owner, escalation.from, item,
+    ownerMessageId(['escalation-resolution', initiative.id, escalation.id]),
+    `Resolution of ${escalation.id} (${escalation.kind}) on ${initiative.id}/${escalation.assignment}: ${resolution.note}`, initiative.origin);
+  for (const owner of [initiative.owner, escalation.from]) {
+    await runtime.notebook(owner).journalOnce({ kind: 'escalation-resolved',
+      source: `escalation-resolution:${initiative.id}:${escalation.id}`,
+      note: `${escalation.id} on ${initiative.id}/${escalation.assignment}: ${resolution.note}` }, resolution.at);
+  }
+}
+
+/** Repair a resolution committed just before a crash, only for still-live original work. */
+export async function queueResolvedEscalations(runtime: Runtime, onError: (id: string, error: unknown) => void) {
+  const items = new Map((await runtime.ledger.list()).map(item => [item.id, item]));
+  const requests = new Map((await runtime.requests.list()).map(request => [request.id, request]));
+  for (const initiative of await runtime.initiatives.list()) {
+    for (const escalation of initiative.escalations.filter(candidate => candidate.resolution)) {
+      const assignment = initiative.assignments.find(candidate => candidate.id === escalation.assignment);
+      const itemId = escalation.item ?? (assignment?.request ? requests.get(assignment.request)?.workItem : undefined);
+      if (!itemId || !['planning', 'awaiting-plan-approval', 'working'].includes(items.get(itemId)?.status ?? '')) continue;
+      await deliverEscalationResolution(runtime, initiative, escalation).catch(error => onError(escalation.id, error));
+    }
+  }
 }

@@ -59,6 +59,7 @@ async function resubmit(runtime: Runtime, ownerId: string, submission: PlanSubmi
       ...current, status: 'awaiting-plan-approval', reason: undefined, planDocument: planDocument(submission.plan),
       proposal: { ...current.proposal, title: submission.title, goal: submission.goal, repository },
       origin: current.origin ?? origin,
+      originOwner: current.origin ? current.originOwner : ownerId,
     };
   });
 }
@@ -70,7 +71,7 @@ export async function submitPlan(runtime: Runtime, ownerId: string, submission: 
   const item = submission.item
     ? await resubmit(runtime, ownerId, submission, origin)
     : await runtime.ledger.create(ownerId, OWNER_CHANGE_WORKFLOW, proposalOf(submission, repository), {
-      status: 'awaiting-plan-approval', planDocument: planDocument(submission.plan), origin,
+      status: 'awaiting-plan-approval', planDocument: planDocument(submission.plan), origin, originOwner: ownerId,
     });
   const notebook = runtime.notebook(ownerId);
   await notebook.journal({ kind: 'plan-submitted', workItem: item.id, note: submission.title, session: origin.sessionID });

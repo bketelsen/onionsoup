@@ -539,7 +539,7 @@ test('a manager hears how assigned work went in the chat its initiative was draf
   assert.deepEqual(raised.map(notice => notice.owner).sort(), ['clippy', 'odrade']);
   const pending = await pendingNotices(runtime);
   assert.equal(pending.length, 1, 'the report has no chat for this work; only the manager is woken');
-  assert.equal(pending[0]?.id, `${item.id}-failed-manager`);
+  assert.ok(pending[0]?.id.startsWith(`${item.id}-failed-manager-`));
   assert.deepEqual(pending[0]?.origin, origin);
   assert.ok(pending[0]!.text.includes(`clippy's work ${item.id} "Repair domain" (assignment a1 of initiative ${initiative.id}) failed: verification_failed`));
   assert.ok((await journalOf(runtime, 'odrade')).some(entry => entry.kind === 'work-status' && entry.workItem === item.id && entry.outcome === 'failed'));

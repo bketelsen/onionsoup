@@ -8,12 +8,14 @@ import { NOTICE_PREFIX } from './notices.ts';
 import { nextMessageId, type PlanRevisionClient } from './plan-revision.ts';
 import { withRecordLock } from './record-lock.ts';
 import type { Runtime } from './runtime.ts';
+import { MessageDeliveryBody } from './message-receipt.ts';
 
 export const DIRECT_REVIEW_WAKE_LIMITS = { perPass: 20 };
 export const Wake = z.object({
   request: z.string(), item: z.string(), reviewer: z.string(), digest: z.string(), origin: ChatOrigin.optional(),
   status: z.enum(['pending', 'sending', 'delivered', 'blocked', 'superseded']),
   reason: z.string().optional(), messageID: z.string().optional(),
+  context: z.string().optional(), delivery: MessageDeliveryBody.optional(),
 });
 type Wake = z.infer<typeof Wake>;
 type Review = Awaited<ReturnType<typeof getDirectRequestReview>>;
@@ -74,22 +76,30 @@ async function claim(runtime: Runtime, wake: Wake, observed: readonly string[]) 
   return withRecordLock(`${wakePath(runtime, wake.request, wake.digest)}.lock`, async () => {
     const current = await read(runtime, wake.request, wake.digest);
     if (!current || current.messageID || ['delivered', 'superseded'].includes(current.status)) return;
+    if (JSON.stringify(current.origin) !== JSON.stringify(wake.origin)) return;
     await currentReview(runtime, current);
-    const claimed = { ...current, status: 'sending' as const, reason: undefined, messageID: nextMessageId(observed) };
+    const agent = runtime.owner(current.reviewer).persona!.name;
+    const text = reviewPrompt(current) + (current.context ? `\n\n${current.context}` : '');
+    const claimed = { ...current, status: 'sending' as const, reason: undefined, messageID: nextMessageId(observed), delivery: { agent, text } };
     await save(runtime, claimed);
     return claimed;
   });
 }
-async function deliver(runtime: Runtime, wake: Wake, client: PlanRevisionClient) {
-  if (['delivered', 'superseded'].includes(wake.status)) return;
-  const owner = runtime.declarations.owners.get(wake.reviewer);
-  if (!wake.origin || !owner?.persona) return change(runtime, wake, 'blocked', 'direct_review_wake_origin_or_persona_missing');
-  if (!await client.exists(wake.origin)) return change(runtime, wake, 'blocked', 'direct_review_wake_origin_unavailable');
-  const observed = await client.messages(wake.origin);
-  if (wake.messageID && observed.includes(wake.messageID)) return change(runtime, wake, 'delivered');
-  // A missing transcript receipt after an attempted send cannot prove that retrying is safe.
-  if (wake.messageID) return change(runtime, wake, 'blocked', 'direct_review_wake_delivery_uncertain');
-  if (!await client.idle(wake.origin)) return;
+async function routeWake(runtime: Runtime, wake: Wake, client: PlanRevisionClient) {
+  if (wake.messageID || !client.route) return wake;
+  const routed = await client.route({ owner: wake.reviewer, origin: wake.origin, item: wake.item,
+    id: `direct-review:${wake.request}:${wake.digest}` });
+  return withRecordLock(`${wakePath(runtime, wake.request, wake.digest)}.lock`, async () => {
+    const current = await read(runtime, wake.request, wake.digest);
+    if (!current) throw new Error('direct_review_wake_identity_missing');
+    if (current.messageID) return current;
+    const updated = { ...current, origin: routed.origin, context: current.context || routed.context };
+    await save(runtime, updated);
+    return updated;
+  });
+}
+
+async function sendWake(runtime: Runtime, wake: Wake, client: PlanRevisionClient, observed: readonly string[]) {
   const claimed = await claim(runtime, wake, observed);
   if (!claimed) return;
   try {
@@ -98,12 +108,32 @@ async function deliver(runtime: Runtime, wake: Wake, client: PlanRevisionClient)
     return change(runtime, claimed, 'superseded', 'direct_review_wake_no_longer_eligible');
   }
   try {
-    await client.prompt(wake.origin, owner.persona.name, reviewPrompt(claimed), claimed.messageID);
-    if ((await client.messages(wake.origin)).includes(claimed.messageID)) await change(runtime, claimed, 'delivered');
+    await client.prompt(claimed.origin!, claimed.delivery.agent, claimed.delivery.text, claimed.messageID);
+    const accepted = client.accepted ? await client.accepted(claimed.origin!, claimed.messageID, claimed.delivery)
+      : (await client.messages(claimed.origin!)).includes(claimed.messageID);
+    if (accepted) await change(runtime, claimed, 'delivered');
     else await change(runtime, claimed, 'blocked', 'direct_review_wake_delivery_uncertain');
   } catch {
     await change(runtime, claimed, 'blocked', 'direct_review_wake_delivery_uncertain');
   }
+}
+
+async function deliver(runtime: Runtime, pending: Wake, client: PlanRevisionClient) {
+  if (['delivered', 'superseded'].includes(pending.status)) return;
+  const owner = runtime.declarations.owners.get(pending.reviewer);
+  if (!owner?.persona) return change(runtime, pending, 'blocked', 'direct_review_wake_origin_or_persona_missing');
+  const wake = await routeWake(runtime, pending, client);
+  if (!wake.origin) return change(runtime, wake, 'blocked', 'direct_review_wake_origin_or_persona_missing');
+  if (!await client.exists(wake.origin)) return change(runtime, wake, 'blocked', 'direct_review_wake_origin_unavailable');
+  const observed = await client.messages(wake.origin);
+  if (wake.messageID && observed.includes(wake.messageID)
+    && (!client.accepted || (wake.delivery && await client.accepted(wake.origin, wake.messageID, wake.delivery)))) {
+    return change(runtime, wake, 'delivered');
+  }
+  // A missing transcript receipt after an attempted send cannot prove that retrying is safe.
+  if (wake.messageID) return change(runtime, wake, 'blocked', 'direct_review_wake_delivery_uncertain');
+  if (!await client.idle(wake.origin)) return;
+  await sendWake(runtime, wake, client, observed);
 }
 
 /** One continuation per exact request/plan generation; no informational notice becomes a model turn. */

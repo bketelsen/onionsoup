@@ -1,5 +1,8 @@
 import { z } from 'zod';
 
 /** A chat that work or an initiative was opened from, so the runtime can tell its owner there how it went. */
-export const ChatOrigin = z.object({ sessionID: z.string(), directory: z.string() });
+export function chatOriginShape<StringSchema>(string: () => StringSchema) {
+  return { sessionID: string(), directory: string() };
+}
+export const ChatOrigin = z.object(chatOriginShape(() => z.string()));
 export type ChatOrigin = z.infer<typeof ChatOrigin>;
