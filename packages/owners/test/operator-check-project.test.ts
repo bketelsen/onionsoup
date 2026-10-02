@@ -144,3 +144,36 @@ test('prepared project runtimes execute immutable bytes despite later replacemen
     } finally { for (const mount of mounts.reverse()) await mount.handle.close(); }
   });
 });
+
+
+test('project checks use the supplied trusted Node when the plugin parent is a non-Node executable', async () => {
+  await withProfile(async () => {
+    const node = process.execPath;
+    const descriptor = Object.getOwnPropertyDescriptor(process, 'execPath')!;
+    const bun = Object.getOwnPropertyDescriptor(process.versions, 'bun');
+    const previous = process.env.ONIONSOUP_HOST_NODE;
+    try {
+      Object.defineProperty(process, 'execPath', { ...descriptor, value: '/usr/bin/true' });
+      Object.defineProperty(process.versions, 'bun', { value: 'fixture', configurable: true });
+      delete process.env.ONIONSOUP_HOST_NODE;
+      await assert.rejects(preflightOperatorProjectCheck(), /operator_check_project_runtime_invalid/);
+      process.env.ONIONSOUP_HOST_NODE = node;
+      const checked = await runOperatorCheck(['project', 'node', '-e',
+        'if (!process.versions.node || process.versions.bun) process.exit(1); console.log("trusted Node used");'],
+      [file('README.md', 'non-Node parent fixture')]);
+      assert.equal(checked.exitCode, 0, checked.output);
+      assert.match(checked.output, /trusted Node used/);
+      assert.equal(checked.runtime?.kind, 'project');
+      if (checked.runtime?.kind === 'project') {
+        assert.equal(checked.runtime.tools.find(tool => tool.name === '/runtime/node')?.binarySha256,
+          createHash('sha256').update(await readFile(node)).digest('hex'));
+      }
+    } finally {
+      Object.defineProperty(process, 'execPath', descriptor);
+      if (bun) Object.defineProperty(process.versions, 'bun', bun);
+      else Reflect.deleteProperty(process.versions, 'bun');
+      if (previous === undefined) delete process.env.ONIONSOUP_HOST_NODE;
+      else process.env.ONIONSOUP_HOST_NODE = previous;
+    }
+  });
+});

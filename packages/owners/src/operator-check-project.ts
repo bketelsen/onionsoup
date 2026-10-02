@@ -6,6 +6,7 @@ import { isAbsolute, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
+import { resolveOperatorWriterNode } from './operator-write-writer.ts';
 import type { OperatorCheckRuntime, PinnedOperatorCheckMount } from './operator-check-runner.ts';
 
 export const OPERATOR_PROJECT_LIMITS = { profileBytes: 64 * 1024, tools: 128, mounts: 512,
@@ -132,7 +133,7 @@ async function aliasTool(name: string, destination: string, inventory: RuntimeIn
 async function prepare(directory: string | undefined, mounts: PinnedOperatorCheckMount[]): Promise<OperatorCheckRuntime> {
   const selected = await profile();
   const inventory: RuntimeInventory = { mounts, evidence: [], libraries: await libraryCache(), bytes: 0, directory };
-  await pinExecutable(process.execPath, '/runtime/node', inventory);
+  await pinExecutable(await resolveOperatorWriterNode(), '/runtime/node', inventory);
   // Fixed shipped code has the same trust as this module, like operator-check-guard.mjs.
   await pin(launcher, '/runtime/operator-project-launcher.mjs', inventory, false, true);
   for (const [name, path] of Object.entries(selected.tools).sort(([left], [right]) => left.localeCompare(right))) {
