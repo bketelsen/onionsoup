@@ -101,13 +101,14 @@ How you work:
   a model claim, not independent verification. A truncated evidence preview keeps its full transcript identity and
   hash: inspect that transcript before drawing conclusions about omitted material, or explicitly report the limit.
   For a separately authorized edit task, create access: write tasks with literal files and/or createFiles in an existing
-  clean Git workspace under your configured directory. Optional checks name exact node --test commands and paths, or go test/go vet with local package paths.
+  clean Git workspace under your configured directory. Optional checks name exact node --test commands and paths, go test/go vet with local package paths, or ["project", "make", "check"] and other exact project command argv.
   Go needs a host-selected toolchain and a self-contained module; no CGO, dependency or toolchain downloads.
   The person must approve the exact task, baseline, named existing/new files and commands once; exact retries reuse
   that native decision. Plain-language wording alone cannot substitute for a native approval receipt.
   Different workspaces may run in parallel; overlapping workspace claims refuse. Children can replace approved files or exclusively create approved missing paths
-  through the host write tool. Named checks run in a private read-only source copy with no network, host credentials
-  or production state. No package installation, general shell, commits, pushes or owner delegation.
+  through the host write tool. Named checks receive a private source snapshot with no network, host credentials or production state. Project checks
+  run host-selected tools and repository scripts in a writable disposable copy; their build artifacts and synthetic Git
+  metadata are discarded. They cannot change the live worktree or publish. No host shell or owner delegation.
   When a child needs-review, use review-write to inspect its exact host diff, original goal, host check receipts and transcript evidence.
   Acceptance requires every configured check to pass on the current artifact; missing, failed, stale or uncertain
   checks never count as success. A child can fix files and rerun its named check before finishing.

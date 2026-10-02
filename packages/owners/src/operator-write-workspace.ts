@@ -5,6 +5,7 @@ import { lstat, open, readFile, readlink, realpath, type FileHandle } from 'node
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { z } from 'zod';
+import { validateOperatorCheckSourceFiles } from './operator-check-source.ts';
 import { preflightOperatorFileWriter, runOperatorFileWriter } from './operator-write-writer.ts';
 
 export const OPERATOR_WRITE_LIMITS = { approvedFiles: 8, trackedFiles: 4096, fileBytes: 256 * 1024, treeBytes: 128 * 1024 * 1024, gitTimeoutMs: 10_000 };
@@ -377,7 +378,7 @@ export async function operatorWriteArtifact(snapshot: OperatorWriteSnapshot, rec
   return { ...artifact, digest: digest(artifact) };
 }
 
-/** Exact bounded bytes for an isolated check copy; no symlinks, Git metadata or unrelated untracked files. */
+/** Exact bounded tracked bytes and internal link targets; never dereference links or copy Git metadata. */
 export async function readOperatorWriteSourceFiles(snapshot: OperatorWriteSnapshot, receipts: OperatorWriteReceipt[]) {
   const expected = expectedFiles(snapshot, receipts);
   await inspectWorkspace(snapshot, expected);
@@ -385,7 +386,14 @@ export async function readOperatorWriteSourceFiles(snapshot: OperatorWriteSnapsh
   const source = [];
   let total = 0;
   for (const identity of identities) {
-    if (identity.kind !== 'file') error('source_symlink_unsupported');
+    if (identity.kind === 'symlink') {
+      const content = await withPinnedParent(snapshot.directory, identity.path, async target => Buffer.from(await readlink(target)));
+      if (operatorWriteSha256(content) !== expected.digests.get(identity.path)) error('source_changed');
+      total += content.length;
+      if (total > snapshot.limits.treeBytes) error('tree_too_large');
+      source.push({ path: identity.path, content, mode: 0o120000 });
+      continue;
+    }
     const opened = await withPinnedParent(snapshot.directory, identity.path, target => pinnedBytes(target, snapshot.limits.treeBytes, identity));
     const current = { ...identity, sha256: operatorWriteSha256(opened.content), device: opened.stat.dev, inode: opened.stat.ino,
       mode: opened.stat.mode, links: opened.stat.nlink };
@@ -394,6 +402,7 @@ export async function readOperatorWriteSourceFiles(snapshot: OperatorWriteSnapsh
     if (total > snapshot.limits.treeBytes) error('tree_too_large');
     source.push({ path: identity.path, content: opened.content, mode: opened.stat.mode });
   }
+  validateOperatorCheckSourceFiles(source, { sourceFiles: snapshot.limits.trackedFiles + snapshot.limits.approvedFiles, sourceBytes: snapshot.limits.treeBytes });
   await inspectWorkspace(snapshot, expected);
   return source;
 }

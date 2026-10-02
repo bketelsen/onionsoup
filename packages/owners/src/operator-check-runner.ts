@@ -1,8 +1,8 @@
 import { execFile, spawn } from 'node:child_process';
 import { constants } from 'node:fs';
-import { mkdir, mkdtemp, open, realpath, rm, writeFile, type FileHandle } from 'node:fs/promises';
+import { mkdir, mkdtemp, open, realpath, rm, type FileHandle } from 'node:fs/promises';
 import { constants as operatingSystem, tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { SANDBOX_LIMITS } from './sandbox.ts';
@@ -11,6 +11,8 @@ import { OPERATOR_CHECK_LIMITS, OperatorCheckCommand, operatorCheckKind,
 import { alreadyMemoryCapped, OPERATOR_WRITER_LIMITS, preflightOperatorFileWriter,
   requireOperatorWriterBwrapFeatures } from './operator-write-writer.ts';
 import { preflightOperatorGoCheck, prepareOperatorGoCheck } from './operator-check-go.ts';
+import { preflightOperatorProjectCheck, prepareOperatorProjectCheck } from './operator-check-project.ts';
+import { validateOperatorCheckSourceFiles, copyOperatorCheckSourceFiles, type OperatorCheckSourceFile } from './operator-check-source.ts';
 import { operatorNamespaceWitness } from './operator-check-process.ts';
 import type { OperatorCheckWitness } from './operator-check-execution.ts';
 
@@ -18,70 +20,35 @@ export const OPERATOR_CHECK_RUNNER_LIMITS = { memoryBytes: OPERATOR_WRITER_LIMIT
   tasksMax: SANDBOX_LIMITS.tasksMax, timeoutMs: 60_000, killMs: OPERATOR_WRITER_LIMITS.killMs,
   stopWaitMs: 5_000, exitPollMs: 20,
   sourceFiles: 4_104, sourceBytes: 128 * 1024 * 1024, libraries: 64, temporaryBytes: 256 * 1024 * 1024 };
-export interface OperatorCheckSourceFile { path: string; content: Buffer; mode: number }
+export type { OperatorCheckSourceFile } from './operator-check-source.ts';
 export interface OperatorCheckRun { exitCode: number; output: string; outputTruncated: boolean; runtime?: OperatorCheckRuntimeEvidence }
 export interface OperatorCheckExecutionOptions { onWitness(witness: OperatorCheckWitness): Promise<void> }
 export interface PinnedOperatorCheckMount { handle: FileHandle; destination: string }
-export interface OperatorCheckRuntime { executable: string; environment: Record<string, string>; evidence?: OperatorCheckRuntimeEvidence }
+export interface OperatorCheckRuntime { executable: string; invocationPrefix?: string[];
+  environment: Record<string, string>; evidence?: OperatorCheckRuntimeEvidence }
 interface CheckAdapter {
+  needsGuardNode?: boolean;
   preflight(): Promise<void>;
   prepare(directory: string, mounts: PinnedOperatorCheckMount[]): Promise<OperatorCheckRuntime>;
 }
 const execute = promisify(execFile);
 const guard = fileURLToPath(new URL('./operator-check-guard.mjs', import.meta.url));
 
-const goAdapter: CheckAdapter = { preflight: preflightOperatorGoCheck, prepare: prepareOperatorGoCheck };
+const goAdapter: CheckAdapter = { needsGuardNode: true, preflight: preflightOperatorGoCheck, prepare: prepareOperatorGoCheck };
 const adapters: Record<ReturnType<typeof operatorCheckKind>, CheckAdapter> = {
   'node-test': { preflight: preflightNodeCheck, prepare: prepareNodeCheck },
   'go-test': goAdapter,
   'go-vet': goAdapter,
+  project: { preflight: preflightOperatorProjectCheck, prepare: prepareOperatorProjectCheck },
 };
-
-function safeSourcePath(path: string) {
-  return typeof path === 'string' && path.length > 0 && path.length <= OPERATOR_CHECK_LIMITS.pathChars
-    && !path.startsWith('/') && !/[\\\0]/.test(path)
-    && path.split('/').every(part => part !== '' && !['.', '..', '.git'].includes(part));
-}
-
-function safeSourceMode(mode: number) {
-  return Number.isSafeInteger(mode) && mode >= 0 && mode <= 0o100777
-    && (mode & ~(constants.S_IFREG | 0o777)) === 0;
-}
 
 /** Validate before recording intent; literal source names need not be executable test arguments. */
 export function validateOperatorCheckInput(command: string[], sourceFiles: OperatorCheckSourceFile[]) {
   const approved = OperatorCheckCommand.safeParse(command);
   if (!approved.success) throw new Error('operator_check_command_invalid');
-  if (!sourceFiles.length || sourceFiles.length > OPERATOR_CHECK_RUNNER_LIMITS.sourceFiles) {
-    throw new Error('operator_check_source_limit');
-  }
-  const paths = new Set<string>();
-  let bytes = 0;
-  for (const file of sourceFiles) {
-    if (!safeSourcePath(file.path) || paths.has(file.path)
-      || !Buffer.isBuffer(file.content) || !safeSourceMode(file.mode)) {
-      throw new Error('operator_check_source_invalid');
-    }
-    paths.add(file.path);
-    bytes += file.content.length;
-  }
-  for (const path of paths) {
-    const components = path.split('/');
-    if (components.slice(1).some((_part, index) => paths.has(components.slice(0, index + 1).join('/')))) {
-      throw new Error('operator_check_source_invalid');
-    }
-  }
-  if (bytes > OPERATOR_CHECK_RUNNER_LIMITS.sourceBytes) throw new Error('operator_check_source_limit');
+  const paths = validateOperatorCheckSourceFiles(sourceFiles, { ...OPERATOR_CHECK_RUNNER_LIMITS, pathChars: OPERATOR_CHECK_LIMITS.pathChars });
   validateOperatorCheckSourcePaths(approved.data, paths);
   return approved.data;
-}
-
-async function copySource(directory: string, sourceFiles: OperatorCheckSourceFile[]) {
-  for (const file of sourceFiles) {
-    const destination = join(directory, file.path);
-    await mkdir(dirname(destination), { recursive: true, mode: 0o700 });
-    await writeFile(destination, file.content, { flag: 'wx', mode: file.mode & 0o777 });
-  }
 }
 
 async function pinFile(path: string, destination: string, mounts: PinnedOperatorCheckMount[]) {
@@ -143,7 +110,7 @@ export async function preflightOperatorCheck(command = ['node', '--test', 'prefl
 function bubblewrapArguments(command: string[], mounts: PinnedOperatorCheckMount[], runtime: OperatorCheckRuntime, guarded: boolean) {
   const binds = mounts.flatMap((mount, index) => ['--ro-bind-fd', String(index + 3), mount.destination]);
   const environment = Object.entries(runtime.environment).flatMap(([key, value]) => ['--setenv', key, value]);
-  const invocation = [runtime.executable, ...command.slice(1)];
+  const invocation = [runtime.executable, ...(runtime.invocationPrefix ?? []), ...command.slice(1)];
   if (guarded) invocation.unshift('/runtime/node', '/runtime/operator-check-guard.mjs');
   // The parent pins namespace init before releasing execution, then proves its death even after forced shutdown.
   return ['--unshare-all', '--as-pid-1', '--die-with-parent', '--new-session', '--cap-drop', 'ALL',
@@ -273,12 +240,13 @@ export async function runOperatorCheck(command: string[], sourceFiles: OperatorC
     directory = await mkdtemp(join(tmpdir(), 'operator-check-'));
     const workspace = join(directory, 'workspace');
     await mkdir(workspace, { mode: 0o700 });
-    await copySource(workspace, sourceFiles);
+    await copyOperatorCheckSourceFiles(workspace, sourceFiles);
     const handle = await open(workspace, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
     mounts.push({ handle, destination: '/workspace' });
-    const runtime = await adapters[operatorCheckKind(approved)].prepare(directory, mounts);
+    const adapter = adapters[operatorCheckKind(approved)];
+    const runtime = await adapter.prepare(directory, mounts);
     if (options) {
-      if (operatorCheckKind(approved) !== 'node-test') await prepareNodeCheck(directory, mounts);
+      if (adapter.needsGuardNode) await prepareNodeCheck(directory, mounts);
       await pinGuard(mounts);
     }
     const launch = await isolatedCommand(approved, mounts, runtime, !!options);

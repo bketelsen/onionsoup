@@ -62,9 +62,11 @@ do not commit.” The `test` directory must already exist. The operator can call
    card, then choose **Allow once**. Existing files must be tracked UTF-8 text; new files must be explicitly named, absent
    and nonignored, with existing parent directories. A second independent worktree may run concurrently; an
    overlapping workspace claim is refused even when it names different files.
-2. The child edits through the host’s bounded file tool and requests approved checks by ID. Checks accept `node --test` plus literal relative paths, or `go test` / `go vet`
-   plus local package paths such as `./...` or `./pkg`: no shell, package scripts, dependency installation, commits
-   or pushes. Go checks require a host-selected toolchain and a self-contained module. You can keep talking to the operator while it runs.
+2. The child edits through the host’s bounded file tool and requests approved checks by ID. Checks accept `node --test`
+   plus literal relative paths, `go test` / `go vet` plus local package paths such as `./...`, or project argv such as
+   `["project", "make", "check"]` or `["project", "sh", "scripts/validate.sh"]`. Project commands run with host-selected
+   tools in a writable disposable source copy, without network, credentials or live worktree access. Go checks require
+   a host-selected toolchain and a self-contained module. You can keep talking to the operator while checks run.
 3. When the job reports `needs-review`, the operator calls `onionsoup_operator_job` with
    `{ "action": "review-write", "id": "<job>", "childID": "title" }` and presents the host diff and check receipts.
    Every approved check must pass against the current artifact before acceptance; later edits require fresh checks.
@@ -74,6 +76,26 @@ do not commit.” The `test` directory must already exist. The operator can call
    claim. It neither commits the change nor certifies tests beyond the shown host-run checks or independent review.
 5. After every child is complete and required edits are accepted, `show` supplies the current job digest and evidence
    message IDs for `synthesize`. The edits remain in your worktree for your normal verification and Git workflow.
+
+Project validation requires the service operator to set `ONIONSOUP_PROJECT_TOOLS_FILE` to an absolute JSON file:
+
+```json
+{ "tools": { "make": "/usr/bin/make", "sh": "/usr/bin/bash", "git": "/usr/bin/git" } }
+```
+
+Select installed ELF executables, including the shell and utilities the project's recipes need; do not put credentials
+or project-controlled host paths in this configuration. The runner requires the host's `readelf` and `ldconfig` to
+inspect shared libraries. It pins verified private copies of tools and libraries and records their SHA256 hashes in
+check receipts. Adding a tool changes the runtime profile, not a persistent model grant. Approved project commands
+may invoke repository scripts or arbitrary argv inside this sandbox; there is no command-name whitelist. They may
+write build output or initialize synthetic Git fixtures there, but those changes are discarded. The snapshot excludes
+`.git`, host configuration and dependency caches. Tool downloads are unavailable; mise tasks can use installed PATH
+tools. A mise version declaration does not select host bytes or prove the PATH executable has that version; validate
+the actual tool version when it matters. Missing tools must be supplied by the host; no installer runs automatically.
+
+Repository-internal file and directory symlinks retain their exact target text in snapshots, checks and combined
+application. Escaping, absolute, dangling, cyclic or `.git`-targeting links fail closed. Symlinks are read-only inputs;
+write scopes still name regular files. A canonical `AGENTS.md` can be edited while its instruction aliases stay intact.
 
 For accepted changes in sibling worktrees of one repository at one base, ask for a combined handoff:
 
