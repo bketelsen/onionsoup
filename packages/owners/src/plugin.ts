@@ -7,7 +7,8 @@ import { recentActivityContext } from './chat-context.ts';
 import { deliveredExchangeNoticeProof, deliverExchangeNotices } from './exchange-notices.ts';
 import { consumeExchangeNoticeDelivery, isExchangeNoticeDeliveryAttempt } from './exchange-notice-delivery.ts';
 import { exchangeClient } from './exchange-client.ts';
-import { listAttention, changeAttention } from './attention.ts';
+import { listAttention, changeAttention, ownerAttentionActor } from './attention.ts';
+import { frictionBacklog, ownerFrictionDetail } from './friction-work.ts';
 import { requestProgressDetail, requestProgressSummary } from './request-status.ts';
 import { deliverPlanRevisions, planRevisionStatus } from './plan-revision.ts';
 import { DirectRequestPlanReviewInput, reviewDirectRequestPlan } from './direct-request-plan-review.ts';
@@ -225,12 +226,15 @@ const WORK_GUIDES: Record<'changes' | 'observes', string> = {
   skill tool as it says. Small, clear changes: edit your desk, run the verification commands, and end with
   onionsoup_propose_changes. Anything bigger: brainstorm it with the person, write the plan, and submit it with
   onionsoup_submit_plan. The person approves it here, and the approved plan runs in its own session and its own git
-  worktree (never your desk, so parallel plans never share files), where you dispatch your implementer and reviewer
-  subagents task by task and end with onionsoup_propose_changes for its item. A PR whose
+  worktree (never your desk, so parallel plans never share files). You may implement and review tasks yourself,
+  or optionally delegate implementation or review when useful; end with onionsoup_propose_changes for its item. A PR whose
   CI fails: onionsoup_checkout_pr, fix and verify, then propose with that item. When your desk is behind its base
   branch, onionsoup_sync_desk brings it up to date and keeps your uncommitted work; never pull, stash or reset yourself.
 - Never commit, push or merge with git yourself: onionsoup_propose_changes does that behind host verification and a
-  required review from another model family. Only blocker findings send the change back to you.`,
+  required review from another model family. Optional task reviews do not replace that one final publication review.
+  Only blocker findings send the change back to you. Replies, retries and maintenance reuse the unchanged approved
+  goal and existing applicable standing grants; do not create a replacement plan or approval ceremony for the same scope.
+  New scope, credentials and world effects still follow their declared authority and host gates.`,
   observes: `
 - You do not change your domain yourself: raise what needs the person, and ask the owner of a repository to change it
   (onionsoup_request_work).`,
@@ -272,8 +276,9 @@ How you work with the person in this chat:
   state missing or superseded evidence plainly. Do not open duplicate work to obtain a status update. Status-only scope
   applies to that interaction; a separately accepted handoff continues under its own goal and approval gates.
 - Record facts you observe, and rulings you make while working, with onionsoup_record_fact: they come back to you word
-  for word each turn, and you pass the ones a subagent needs into its task. Anything outside your safe commands asks
-  the person first.
+  for word each turn, and you pass the ones a subagent needs into its task. Ordinary edits and local development in
+  an authorized repository workspace need no repeated approval unless explicitly denied in configuration.
+  Commands outside your allowed rules still ask; chat bash is not a sandbox and grants no world-effect authority.
 - Record a decision only when the person states one or explicitly agrees to your proposal, and quote their words. A
   watcher also notes decisions after each exchange; you do not need to record everything.
 - Your notebook, current work and recent journal activity are appended to your context each turn. Never put secrets into notes or files.${verify.length ? `
@@ -294,7 +299,9 @@ ${owner.manages ? `
 function conversationPermission(owner: OwnerDeclaration, verify: readonly string[]) {
   const mode = owner.conversation ?? { bash: { '*': 'ask' }, edit: 'ask', webfetch: 'ask' };
   return {
-    edit: mode.edit, bash: chatBash(mode.bash, verify), webfetch: mode.webfetch, external_directory: CHAT_EXTERNAL_DIRECTORIES,
+    edit: canChange(owner) && mode.edit !== 'deny' ? 'allow' : mode.edit,
+    bash: chatBash(mode.bash, verify, canChange(owner)),
+    webfetch: mode.webfetch, external_directory: CHAT_EXTERNAL_DIRECTORIES,
     doom_loop: 'ask', task: taskPermission(owner.id),
     // opencode denies its question tool unless an agent allows it; answering is always the person's, so it grants nothing.
     question: 'allow', [PLAN_APPROVAL_PERMISSION]: 'ask', [WIKI_DELETE_PERMISSION]: 'ask', ...NO_OPERATOR_SKILLS,
@@ -904,6 +911,20 @@ const server: Plugin = async (input, options) => {
     return undefined;
   }
 
+  /** A shared task agent must not bypass the initiating owner's explicit conversation denies. */
+  async function requireOwnerToolNotDenied(sessionID: string, name: string, args: Record<string, unknown>) {
+    if (name !== 'bash' && !MUTATING_TOOLS.has(name)) return;
+    const owner = sessions.ownerOf(sessionID) ?? await sessions.ownerOfChild(sessionID);
+    if (!owner?.conversation) return;
+    if (MUTATING_TOOLS.has(name) && owner.conversation.edit === 'deny') {
+      throw new Error(`owner_edit_denied: ${owner.id}`);
+    }
+    if (name === 'bash' && typeof args.command === 'string'
+      && bashAction(owner.conversation.bash, args.command) === 'deny') {
+      throw new Error(`owner_bash_denied: ${owner.id}`);
+    }
+  }
+
   /**
    * A completed call that changed something (or ran a command the chat's rules do not allow) enters the journal.
    * Whether it did.
@@ -1318,6 +1339,7 @@ const server: Plugin = async (input, options) => {
         const lease = isAdmittedTurn ? undefined : await beginAdmission(runtime.stateDirectory, `tool:${input.tool}`);
         if (lease) toolLeases.set(key, lease);
         await prepareToolArguments(input, output);
+        await requireOwnerToolNotDenied(input.sessionID, input.tool, output.args);
         if (operatorWrites) operatorCalls.get(input.tool)?.prepare(input, output.args);
         tracked.ready = true;
       } catch (error) {
@@ -1671,7 +1693,7 @@ const server: Plugin = async (input, options) => {
         },
       }),
       onionsoup_attention: tool({
-        description: 'List your attention items, or acknowledge, resolve, or reopen one with a reason. Resolution records an outcome; it does not authorize effects.',
+        description: 'List your attention history, or acknowledge, resolve, or reopen typed owner-housekeeping with a reason. Human decisions and unclassified legacy entries are person-only. Housekeeping needs no approval and never authorizes effects.',
         args: {
           id: tool.schema.string().optional(),
           action: tool.schema.enum(['list', 'acknowledge', 'resolve', 'reopen']).default('list'),
@@ -1683,7 +1705,7 @@ const server: Plugin = async (input, options) => {
           if (args.action === 'list') return JSON.stringify(entries);
           if (!entries.some(entry => entry.id === args.id)) throw new Error('attention_not_yours');
           const statuses = { acknowledge: 'acknowledged', resolve: 'resolved', reopen: 'open' } as const;
-          return JSON.stringify(await changeAttention(runtime, args.id!, statuses[args.action], owner.id, args.reason ?? ''));
+          return JSON.stringify(await changeAttention(runtime, args.id!, statuses[args.action], ownerAttentionActor(runtime, owner.id), args.reason ?? ''));
         },
       }),
       onionsoup_status: tool({
@@ -1691,12 +1713,14 @@ const server: Plugin = async (input, options) => {
         args: {
           item: tool.schema.string().optional().describe('A work item id, e.g. w-20260923-31a48a'),
           request: tool.schema.string().optional().describe('A visible request ID for complete linked progress and blocker details'),
+          friction: tool.schema.string().optional().describe('Your report or configured triage incident ID for bounded host-collected evidence'),
           offset: tool.schema.number().int().nonnegative().optional().describe('Next cross-owner progress page offset shown by status'),
         },
         async execute(args, context) {
           const owner = requireObservationOwner(context.agent);
+          if (args.friction) return JSON.stringify(await ownerFrictionDetail(runtime, owner.id, args.friction));
           if (args.request) return requestProgressDetail(runtime, owner.id, args.request);
-          if (!args.item) return workSummary(owner.id, args.offset);
+          if (!args.item) return `${await workSummary(owner.id, args.offset)}\n\nOwner friction backlog:\n${JSON.stringify(await frictionBacklog(runtime, owner.id))}`;
           const item = await runtime.ledger.get(args.item).catch(() => undefined);
           const isVisible = item && (item.owner === owner.id || isDirectReport(runtime.declarations, owner.id, item.owner));
           if (!item || !isVisible) return `No work item ${args.item} of yours or your reports'. Your status:\n\n${await workSummary(owner.id)}`;

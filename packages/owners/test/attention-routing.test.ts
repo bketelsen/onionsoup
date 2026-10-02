@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { changeAttention, listAttention } from '../src/attention.ts';
+import { changeAttention, listAttention, humanAttentionActor } from '../src/attention.ts';
 import { needsHumanDecision } from '../src/attention-routing.ts';
 import { deskState } from '../src/desk.ts';
 import { raiseToManager, resolveEscalation } from '../src/org-work.ts';
@@ -69,7 +69,7 @@ test('legacy index migration preserves Seen and unpublished commits, resolves on
   await runtime.notebook('clippy').journal({ kind: 'attention', note });
   await runtime.notebook('clippy').journal({ kind: 'attention', note });
   const entries = await listAttention(runtime);
-  await changeAttention(runtime, entries[0].id, 'acknowledged', 'person', 'Keep for inspection');
+  await changeAttention(runtime, entries[0].id, 'acknowledged', humanAttentionActor(), 'Keep for inspection');
   const indexPath = join(runtime.stateDirectory, 'attention', 'index.json');
   const index = JSON.parse(await readFile(indexPath, 'utf8'));
   delete index.routingVersion;

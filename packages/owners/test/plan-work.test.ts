@@ -106,12 +106,17 @@ test('a submitted plan asks the person in chat; a denial keeps it waiting with t
   assert.match(String(approval), /approved plan .* runs in its own session/);
   assert.equal(opencode.created.length, 1);
   assert.equal(opencode.created[0]!.title, `Plan ${item!.id}: Rotate logs`);
-  assert.deepEqual(opencode.created[0]!.permission, [{ permission: 'edit', pattern: '*', action: 'allow' }]);
+  assert.deepEqual(opencode.created[0]!.permission, [], 'execution inherits the owner rules without overriding declared denies');
   assert.deepEqual(working.session, { sessionID: 'ses_opened_1', directory: opencode.created[0]!.directory });
   assert.equal(opencode.created[0]!.directory, working.planWorktree, 'the plan works in its own worktree, not the desk');
   const [prompt] = opencode.prompts;
   assert.equal(prompt?.agent, 'Miles Teg');
   assert.match(prompt!.text, /subagent-driven-development/);
+  assert.match(prompt!.text, /executing-plans/);
+  assert.match(prompt!.text, /implement and review tasks yourself/);
+  assert.match(prompt!.text, /optional/);
+  assert.match(prompt!.text, /unchanged approved goal/);
+  assert.doesNotMatch(prompt!.text, /implementer subagent\s+for each|reviewer subagent after each/);
   assert.ok(prompt!.text.includes(`onionsoup_propose_changes with item "${item!.id}"`));
   assert.ok(prompt!.text.includes('Add weekly logrotate config'));
   const journal = await readFile(join(runtime.notebook('homelab').directory, 'journal', `${new Date().toISOString().slice(0, 10)}.jsonl`), 'utf8');

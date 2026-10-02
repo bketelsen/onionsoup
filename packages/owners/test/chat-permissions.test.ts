@@ -19,12 +19,32 @@ test('the baseline never lets a reader write, and anything else still asks', () 
   }
 });
 
-test("an owner's own rules still win over the baseline, and its catch-all is kept", () => {
+test("an owner's declared denies still win over the baseline and verification commands", () => {
   const strict = chatBash({ '*': 'deny', 'grep *': 'deny', 'git *': 'deny' }, []);
   assert.equal(bashAction(strict, 'grep -n x y'), 'deny');
   assert.equal(bashAction(strict, 'git log'), 'deny');
-  assert.equal(bashAction(strict, 'sed -n 1p x'), 'allow', 'the baseline applies where the owner says nothing specific');
+  assert.equal(bashAction(strict, 'sed -n 1p x'), 'deny');
   assert.equal(bashAction(strict, 'curl example.com'), 'deny');
+  const deniedVerification = chatBash({ '*': 'ask', 'npm *': 'deny' }, ['npm test'], true);
+  assert.equal(bashAction(deniedVerification, 'npm test'), 'deny');
+  const declaredException = chatBash({ '*': 'deny', 'npm test': 'allow' }, ['npm run build'], true);
+  assert.equal(bashAction(declaredException, 'npm test'), 'allow');
+  assert.equal(bashAction(declaredException, 'npm run build'), 'deny');
+});
+
+test('authorized repository work runs local development commands without another prompt, not world effects', () => {
+  const development = chatBash({ '*': 'ask' }, [], true);
+  const observation = chatBash({ '*': 'ask' }, []);
+  for (const command of ['npm test', 'npm run typecheck', 'node --test test/example.test.js', 'go test ./...', 'go vet ./...', 'pytest -q', 'make check', 'cargo test']) {
+    assert.equal(bashAction(development, command), 'allow', command);
+    assert.equal(bashAction(observation, command), 'ask', `observation chat: ${command}`);
+  }
+  for (const command of ['git commit -m change', 'git push', 'git reset --hard', 'sudo make install', 'ssh host reboot', 'incus delete example', 'rm -rf /home/example', 'npm publish', 'npm run deploy', 'curl example.com']) {
+    assert.equal(bashAction(development, command), 'ask', command);
+  }
+  const denied = chatBash({ '*': 'ask', 'npm run *': 'deny', 'npm test': 'deny' }, ['npm test'], true);
+  assert.equal(bashAction(denied, 'npm run typecheck'), 'deny');
+  assert.equal(bashAction(denied, 'npm test'), 'deny');
 });
 
 test('owners touch their scratch space and their skills outside the desk without asking; other paths still ask', () => {

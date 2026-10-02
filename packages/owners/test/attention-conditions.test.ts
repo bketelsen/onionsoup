@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { Runtime } from '../src/runtime.ts';
-import { changeAttention, listAttention } from '../src/attention.ts';
+import { changeAttention, listAttention, humanAttentionActor } from '../src/attention.ts';
 
 async function fixture() {
   const runtime = await Runtime.open({ declarations: 'packages/owners/test/fixtures/owners', state: await mkdtemp(join(tmpdir(), 'attention-conditions-')) });
@@ -18,7 +18,7 @@ test('host condition deduplicates observations, preserves Seen, and resolves onl
   const condition = { key: 'cleanup:item-1', state: 'open' as const };
   await notebook.journal({ kind: 'attention-condition', condition, note: 'Dirty checkout' });
   const [entry] = await listAttention(runtime);
-  await changeAttention(runtime, entry.id, 'acknowledged', 'Brian', 'Seen');
+  await changeAttention(runtime, entry.id, 'acknowledged', humanAttentionActor(), 'Seen');
   await notebook.journal({ kind: 'attention-condition', condition, note: 'Still dirty' });
   let entries = await listAttention(runtime);
   assert.equal(entries.length, 1);

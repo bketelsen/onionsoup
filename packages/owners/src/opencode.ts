@@ -427,7 +427,8 @@ export async function runHire<T>(client: HireSessionClient, request: HireRequest
       const second = await prompt(`${resendInstruction(parsed.error)}${spec.instruction(schema)}`);
       cost += second.info.cost ?? 0;
       parsed = parseDeliverable(request.schema, second.deliverable);
-      if (!parsed.success) throw new HireError(`deliverable_invalid: ${parsed.error.message.slice(0, 500)}`, sessionID, second.deliverable ?? first.deliverable);
+      if (!parsed.success) throw new HireError(`deliverable_invalid: ${parsed.error.message.slice(0, 500)}`,
+        sessionID, second.deliverable ?? first.deliverable, undefined, 'returned-terminal');
     }
     return { value: parsed.data, sessionID, cost, startedAt, finishedAt: new Date().toISOString() };
   } finally {
@@ -438,7 +439,8 @@ export async function runHire<T>(client: HireSessionClient, request: HireRequest
 }
 
 export class HireError extends Error {
-  constructor(message: string, readonly sessionID: string, readonly deliverable?: unknown, readonly providerError?: ProviderError) {
+  constructor(message: string, readonly sessionID: string, readonly deliverable?: unknown,
+    readonly providerError?: ProviderError, readonly outcome: 'returned-terminal' | 'unknown' = 'unknown') {
     super(message);
   }
 }
@@ -447,7 +449,8 @@ export class HireError extends Error {
 function assistantFailure(error: AssistantError, sessionID: string) {
   const providerError = providerErrorOf(error);
   const message = maskKeyLike(`${error.name ?? 'error'}: ${providerError.message}`.trim());
-  return new HireError(message, sessionID, undefined, { ...providerError, message: maskKeyLike(providerError.message) });
+  return new HireError(message, sessionID, undefined,
+    { ...providerError, message: maskKeyLike(providerError.message) }, 'returned-terminal');
 }
 
 /**

@@ -21,7 +21,7 @@ export { configDirectory, stateDirectory } from './paths.ts';
 export { describeAsk, type ResourceRequest } from './requests.ts';
 export { domainSummary } from './roster.ts';
 
-export { listAttention, changeAttention, type Attention } from './attention.ts';
+export { listAttention, changeAttention, humanAttentionActor, ownerAttentionActor, type Attention, type AttentionActor } from './attention.ts';
 export { needsHumanDecision } from './attention-routing.ts';
 export { AttentionProvenance } from './journal-record.ts';
 export { requestWork } from './delegation.ts';
@@ -53,7 +53,8 @@ export {
   beginAdmission, listAdmissions, armDeployment, markDeploymentWaiting, beginDrain, releaseDrain,
   type AdmissionLease,
 } from './deployment-admission.ts';
-export { readFrictionTriage, sourceSnapshot, type FrictionTriage } from './friction-work.ts';
+export { readFrictionTriage, sourceSnapshot, refreshFriction, frictionBacklog, type FrictionTriage } from './friction-work.ts';
+export { collectIncidentBundle, IncidentBundle, FRICTION_EVIDENCE_LIMITS } from './friction-evidence.ts';
 export { revalidateFriction, frictionFreshness, effectiveTriage, readRevisions, writeRevision,
   Revision, RevalidationClaim, type FrictionFreshness } from './friction-revalidation.ts';
 export { AttentionAssignmentInput, assignAttention, retryAttentionAssignment, attentionAssignmentView, attentionAssignmentTargets,

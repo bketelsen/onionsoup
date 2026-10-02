@@ -203,6 +203,14 @@ export function OwnerView({ owner, inbox, sessionId, refresh }: { owner: OwnerSu
             ))}
           </Section>}
           {desk && <OwnerBacklog entries={desk.backlog} />}
+          {!!desk?.friction?.length && <Section title="Owner incident follow-up">
+            {desk.friction.map(incident => <button key={incident.id}
+              onClick={() => navigate('friction', incident.id)}
+              className="rounded-md border border-border p-2 text-left hover:bg-interactive-hover">
+              <span className="typography-meta">{incident.summary}</span>
+              <span className="block typography-micro text-muted-foreground">{incident.disposition ?? incident.state} · {incident.owner}</span>
+            </button>)}
+          </Section>}
           {owner.hasDesk && <Section title="Activity" action={<Button variant="ghost" onClick={() => setNotebookOpen(true)}><RiBookOpenLine className="size-3.5" />Notebook</Button>}>
             {desk && !desk.notes.length && <Empty>Nothing yet.</Empty>}
             <ol className="flex flex-col gap-2">

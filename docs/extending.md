@@ -278,14 +278,43 @@ mcp:
       delete_repository: deny      # hidden from the owner entirely
 ```
 
-Everything else follows the owner's `conversation:` rules: `allow`, `ask` (approve in the chat) or `deny`. Every owner also gets a read-only baseline (`READ_ONLY_CHAT_BASH` in `chat-permissions.ts`: `grep`, `rg`, `sed -n`, `cat`, `head`, `tail`, `ls`, `find`, `jq`, git and `gh` queries) between its catch-all and its own rules, so it reads without asking; an owner's own specific rule still wins. Its opencode scratch space and the skills directory need no approval either.
+Everything else follows the owner's `conversation:` rules: `allow`, `ask` (approve in the chat) or `deny`.
+Owners get a read-only baseline (`READ_ONLY_CHAT_BASH` in `chat-permissions.ts`) and repository-changing owners
+get local edit/development conveniences. Explicit declared denies override these, including execution sessions
+and descendants; scratch/skills conveniences are not new authority. Chat bash is still unsandboxed.
+Implementer and task-review models are optional; local execution/review retains host verification and the one
+final independent-family publication review.
 
 `onionsoup_friction({ summary, expected, actual, evidence? })` captures unexpected engine behavior from an
 owner chat. The host adds the originating session, running engine checkout commit, observed model and bounded
 failed-tool context; it never stores raw tool arguments. Repeated safe error shapes share one report, while a
-missing failure event is marked provisional. Reports appear in the surface's Friction view; triage and issue
-publication are not yet available. `FRICTION_LIMITS` in `packages/owners/src/friction.ts` bounds prose, errors,
+missing failure event is marked provisional. Reports appear in the surface's Friction view; opt-in host-evidence triage and configured owner-workflow routing
+are available, while issue publication retains its separate person gate. `FRICTION_LIMITS` in `packages/owners/src/friction.ts` bounds prose, errors,
 session history, records and listings.
+
+An optional `friction-triage.json` in the person's configuration declares version 1, the triage owner/repository,
+`enabledSince` activation cutoff and `intervalMs` cadence. `routeProposals` defaults to true; false retains manual promotion.
+Before inference the host reads only declared paths, fixed read-only Git argv and typed persisted records;
+`FRICTION_EVIDENCE_LIMITS` bounds record/field/fact/byte/history collection and includes explicit missing/error
+reasons. Credential references are safe facts, credential values are never collected. The installed collector
+build/configured release target are not running-service attestations. Source and cached remote refs are not fetched.
+Routine proposals become typed owner follow-ups through normal acceptance/plan/publication gates; no person
+or manager approval is invented. Unknown operational conditions stay in owner status/desk follow-up, not Attention.
+
+`owners friction-refresh <id>` adds a same-source evidence generation to a completed diagnosis, including
+authorized legacy backfill. `owners friction-revalidate <id>` retains explicit source-stale revalidation.
+The daemon refreshes materially changed incident evidence under existing cadence limits; duty/journal/session
+timestamp churn does not wake a model. Unknown/in-flight outcomes hold recovery, while host-returned terminal
+analysis failures permit new incident generations without a human reset. No paid generation is blindly replayed.
+Post-closure recurrence returns to owner backlog. Original captures/revisions stay append-only.
+Closure requires positive applicable host condition
+keys and fixing-commit containment, not a citation, model statement or merged PR alone. Exact host-linked
+duplicate incidents source-link without dismissing an unresolved condition.
+
+`scripts/test.mjs` defaults to `DEFAULT_TEST_CONCURRENCY=4` in child Node argv.
+`ONIONSOUP_TEST_CONCURRENCY` or CLI `--test-concurrency=N` supplies a positive safe-integer override;
+the CLI wins. Node rejects this flag in `NODE_OPTIONS`. Sandbox memory/task caps and the staging verifier's
+existing seven host-bus exclusions are unchanged.
 
 ## Give an owner authority
 
@@ -299,7 +328,9 @@ Authority comes only from your configuration:
   changes and retires owners whose domain (repository or org name) matches, with your approval for each write. It
   can never write `grants`, `deploy`, `incus`, `mcp` or `manages`, nor change itself.
 - `deploy: { checkout, services }` says where a repository owner's code runs; with it the owner can ship
-  (fast-forward, verify, restart with a health check and rollback).
+  through the legacy generic checkout ship capability. For onionsoup itself use the
+  [immutable guarded deployment worker](deployment.md), not a live checkout fast-forward:
+  exact verified release, atomic pointer switch, **both** units restarted and verified rollback.
 - Destructive actions, plan approval and creates/deletes always stop for you unless a grant says otherwise.
 
 ## Managers and initiatives

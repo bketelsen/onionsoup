@@ -9,7 +9,7 @@ description: Use when you have an agreed design or clear requirements for a mult
 
 Write a plan that an implementer with zero context for this repository, and questionable taste, can follow. Say which files each task touches, the code, the tests, the docs to check, and how to verify it. Break it into bite-sized tasks. DRY. YAGNI. TDD.
 
-Assume the implementer is skilled but knows almost nothing about this toolset or problem domain, and not much about good test design. Remember that the `onionsoup-implementer` subagents who will run it cannot see your notebook: put every fact and decision they need into the plan.
+Assume the implementer is skilled but knows almost nothing about this toolset or problem domain, and not much about good test design. The owner may implement locally or optionally dispatch `onionsoup-implementer`; a dispatched subagent cannot see your notebook, so put every fact and decision it needs into the plan.
 
 **Announce at start:** "I'm using the writing-plans skill to create the implementation plan."
 
@@ -18,6 +18,7 @@ Assume the implementer is skilled but knows almost nothing about this toolset or
 ## When You Do Not Need a Plan
 
 Small, clear, direct changes skip the plan: a typo, a one-line fix, a bounded change the person already agreed in chat. Edit the desk, verify, and call `onionsoup_propose_changes`. The person may also say a plan is unnecessary. Anything with several tasks, design choices or risk gets a plan.
+Before opening new work, check for an existing approved goal and its conditions. Replies, retries, fixes and maintenance within that unchanged scope reuse its item, approval and applicable configured standing grants; they do not need a replacement plan. New scope still follows the existing approval and effect gates.
 
 ## Scope Check
 
@@ -34,7 +35,7 @@ Before defining tasks, map which files will be created or modified and what each
 
 ## Task Right-Sizing
 
-A task is the smallest unit that carries its own test cycle and is worth a fresh reviewer's gate. Fold setup, configuration, scaffolding and documentation into the task whose deliverable needs them. Split only where a reviewer could reject one task while approving its neighbor. Each task ends with an independently testable deliverable.
+A task is the smallest unit that carries its own test cycle and can be assessed independently, locally or by an optional task reviewer. Fold setup, configuration, scaffolding and documentation into the task whose deliverable needs them. Split only where one task can be corrected independently of its neighbor. Each task ends with an independently testable deliverable.
 
 ## Bite-Sized Steps
 
@@ -54,7 +55,7 @@ Every plan starts with this header:
 ```markdown
 # [Feature Name] Implementation Plan
 
-> **For the execution session:** Use the subagent-driven-development skill to run this plan task by task, then end with onionsoup_propose_changes for this item. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For the execution session:** Use executing-plans locally or subagent-driven-development when delegation helps. Implementation and task-review dispatch are optional per task. Run this approved plan task by task, then end with onionsoup_propose_changes for this item; host verification and the one final independent-family publication review remain required. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** [One sentence describing what this builds]
 

@@ -4,9 +4,9 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import { AskWorkProposal } from './ask-handoffs.ts';
 import { canChange } from './declarations.ts';
-import { openOperatorWorkRequest, operatorWorkRequestId } from './delegation.ts';
-import { FrictionRecord } from './friction.ts';
-import { readFrictionTriage, type FrictionTriage } from './friction-work.ts';
+import { openFrictionWorkRequest, openOperatorWorkRequest, operatorWorkRequestId } from './delegation.ts';
+import { FrictionRecord, listFriction } from './friction.ts';
+import { frictionTriagePolicy, readFrictionTriage, type FrictionTriage } from './friction-work.ts';
 import { effectiveTriage, frictionFreshness, withFrictionReportLock, writeOnceLinked } from './friction-revalidation.ts';
 import { withRecordLock } from './record-lock.ts';
 import type { Runtime } from './runtime.ts';
@@ -16,6 +16,7 @@ export const FrictionProposalDigest = z.string().regex(/^[a-f0-9]{64}$/);
 const actor = z.string().trim().min(1).max(FRICTION_PROMOTION_LIMITS.actorChars);
 export const Promotion = z.object({ version: z.literal(1), id: FrictionRecord.shape.id, digest: FrictionProposalDigest,
   by: actor, at: z.string().datetime(), owner: z.string().min(1), proposal: AskWorkProposal,
+  authority: z.enum(['human-routing', 'configured-owner-workflow']).optional(),
   requestID: z.string().regex(/^r-handoff-[a-f0-9]{64}$/),
   retry: z.object({ by: actor, at: z.string().datetime() }).optional(),
   state: z.enum(['pending', 'routed', 'blocked']), attempts: z.number().int().nonnegative(), reason: z.string().optional(),
@@ -52,7 +53,7 @@ async function save(runtime: Runtime, promotion: Promotion) {
 
 /** Binds a human decision to exactly the displayed investigation and its configured recipient. */
 export function frictionProposalDigest(triage: FrictionTriage, revision = 0) {
-  if (triage.state !== 'investigated' || triage.investigation?.disposition !== 'propose-fix'
+  if (triage.duplicateOf || triage.state !== 'investigated' || triage.investigation?.disposition !== 'propose-fix'
     || !triage.investigation.proposedWork) return undefined;
   const content = { id: triage.id, ...(revision ? { revision } : {}), owner: triage.policy.owner,
     repository: triage.policy.repository, sourceCommit: triage.sourceCommit, investigation: triage.investigation };
@@ -151,7 +152,9 @@ async function routeApproved(runtime: Runtime, promotion: Promotion, existing: b
   }
   try {
     if (!existing && freshness?.reason === 'source_unavailable') throw new Error('friction_source_unavailable');
-    const request = await openOperatorWorkRequest(runtime, { kind: 'friction', id }, promotion.by, promotion.owner, promotion.proposal);
+    const request = promotion.authority === 'configured-owner-workflow'
+      ? await openFrictionWorkRequest(runtime, id, promotion.digest, promotion.owner, promotion.proposal)
+      : await openOperatorWorkRequest(runtime, { kind: 'friction', id }, promotion.by, promotion.owner, promotion.proposal);
     await save(runtime, { ...promotion, state: 'routed', reason: undefined });
     return request;
   } catch (error) { return failRouting(runtime, promotion, error); }
@@ -170,6 +173,11 @@ async function route(runtime: Runtime, id: string) {
 
 /** Only an explicit human action calls this. Reading or investigating friction never promotes it. */
 export async function promoteFriction(runtime: Runtime, id: string, expectedDigest: string, by: string) {
+  return createPromotion(runtime, id, expectedDigest, by, 'human-routing');
+}
+
+async function createPromotion(runtime: Runtime, id: string, expectedDigest: string, by: string,
+  authority: NonNullable<Promotion['authority']>) {
   const digest = FrictionProposalDigest.parse(expectedDigest);
   const person = actor.parse(by);
   await withRecordLock(`${path(runtime, id)}.lock`, async () => {
@@ -189,10 +197,32 @@ export async function promoteFriction(runtime: Runtime, id: string, expectedDige
     if (!canChange(runtime.owner(triage.policy.owner))) throw new Error('owner_cannot_change');
     runtime.repositoryOwner(triage.policy.owner, proposal.repository);
     if (previous) await archive(runtime, previous);
-    await save(runtime, { version: 1, id, digest, by: person, at: new Date().toISOString(), owner: triage.policy.owner,
+    await save(runtime, { version: 1, id, digest, by: person, authority, at: new Date().toISOString(), owner: triage.policy.owner,
       proposal, requestID: operatorWorkRequestId({ kind: 'friction', id }), state: 'pending', attempts: 0 });
   });
   return route(runtime, id);
+}
+
+/** Policy selects only declared owner/repository; diagnosis supplies no approval or authority. */
+export async function routeConfiguredFrictionProposals(runtime: Runtime, onError: (id: string, error: unknown) => void) {
+  const policy = await frictionTriagePolicy(runtime);
+  if (!policy || policy.routeProposals === false) return;
+  let count = 0;
+  for (const report of await listFriction(runtime)) {
+    if (Date.parse(report.firstSeen) < Date.parse(policy.enabledSince)) continue;
+    if (count >= FRICTION_PROMOTION_LIMITS.perTick) break;
+    try {
+      const effective = await effectiveTriage(runtime, report.id);
+      if (!effective?.triage.bundle || effective.triage.duplicateOf
+        || effective.triage.policy.owner !== policy.owner || effective.triage.policy.repository !== policy.repository
+        || effective.triage.investigation?.disposition !== 'propose-fix'
+        || await read(runtime, report.id)) continue;
+      const digest = await effectiveProposalDigest(runtime, report.id);
+      if (!digest) continue;
+      count++;
+      await createPromotion(runtime, report.id, digest, `owner:${policy.owner}`, 'configured-owner-workflow');
+    } catch (error) { onError(report.id, error); }
+  }
 }
 
 /** Explicit human retry replenishes only routing attempts, never the request or its execution state. */

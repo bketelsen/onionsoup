@@ -6,7 +6,7 @@ import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { changeAttention, listAttention } from '../src/attention.ts';
+import { changeAttention, listAttention, humanAttentionActor } from '../src/attention.ts';
 import { Runtime, advance, approvePlan, cancelItem, resumeItem, retryItem, humanWorkActor, pauseItem } from '@onionsoup/owners';
 import { git, refreshCheckout, ensureDesk, createWorktree } from '../src/workspace.ts';
 import { REBASE_WORKFLOW, advanceRebase, maintainPullRequests, refreshPublications } from '../src/rebase.ts';
@@ -132,6 +132,48 @@ async function behindPublication(runtime: Runtime, seed: string) {
     },
   });
 }
+
+test('host owner-abandoned maintenance suppresses only the exact original PR head, not new heads or ordinary failures', async context => {
+  for (const reason of ['owner_abandoned: original approved intent declined', 'verification_failed', 'owner_abandoned_other']) {
+    const { runtime, root, remote, seed } = await fixture();
+    context.after(async () => {
+      runtime.close();
+      await rm(root, { recursive: true, force: true });
+    });
+    const source = await behindPublication(runtime, seed);
+    const rejected = await runtime.ledger.create('clippy', REBASE_WORKFLOW, proposal, {
+      status: 'rejected', reason,
+      rebaseOf: { itemId: source.id, branch: 'original', prUrl: source.publication!.url,
+        previousHead: source.landedCommit! },
+    });
+    runtime.hire = async () => { throw new Error('maintenance_selector_must_not_hire_models'); };
+    await fakeGithub(root, remote, async () => {
+      await writeFile(join(root, 'github.json'), JSON.stringify({ created: 0, state: 'OPEN',
+        mergeable: 'CONFLICTING', mergeStateStatus: 'DIRTY', failing: false }));
+      const maintained = await maintainPullRequests(runtime, 'clippy');
+      if (reason.startsWith('owner_abandoned:')) {
+        assert.deepEqual(maintained.opened, []);
+        assert.deepEqual((await maintainPullRequests(runtime, 'clippy')).opened, []);
+        assert.equal((await runtime.ledger.list()).length, 2);
+        assert.equal((await githubState(root)).state, 'OPEN');
+        await git(seed, ['checkout', '-q', 'original']);
+        await writeFile(join(seed, 'feature'), 'approved feature with a new remote head\n');
+        await git(seed, ['add', 'feature']);
+        await git(seed, ['commit', '-qm', 'New PR head']);
+        await git(seed, ['push', '-q', 'origin', 'original']);
+        const [update] = (await maintainPullRequests(runtime, 'clippy')).opened;
+        assert.ok(update);
+        assert.equal(update.rebaseOf?.itemId, source.id);
+        assert.notEqual(update.rebaseOf?.previousHead, rejected.rebaseOf?.previousHead);
+      } else {
+        assert.equal(maintained.opened.length, 1);
+        assert.equal(maintained.opened[0].rebaseOf?.previousHead, rejected.rebaseOf?.previousHead);
+      }
+      assert.equal((await runtime.ledger.get(rejected.id)).status, 'rejected');
+      assert.equal((await runtime.ledger.get(source.id)).publication?.state, 'open');
+    });
+  }
+});
 
 test('the periodic maintenance selector updates a BEHIND PR with verified ancestry-preserving publication', async () => {
   const { runtime, root, remote, seed } = await fixture();
@@ -1241,7 +1283,7 @@ test('a cancelled plan\'s worktree waits for its idle session, and is never remo
   assert.equal(kinds.filter(kind => kind === 'attention-condition').length, 2, 'one kept condition and one clean completion');
   const attention = (await listAttention(runtime)).find(entry => entry.condition?.key.startsWith(`plan-worktree:${dirty!.id}:`))!;
   assert.equal(attention.status, 'open');
-  await changeAttention(runtime, attention.id, 'acknowledged', 'person', 'Will clean later');
+  await changeAttention(runtime, attention.id, 'acknowledged', humanAttentionActor(), 'Will clean later');
   await rm(join(dirty!.planWorktree!, 'dirty.txt'));
   await cleanUp(runtime, sessions.client, pastIdleLimit());
   const cleared = (await listAttention(runtime)).find(entry => entry.id === attention.id)!;

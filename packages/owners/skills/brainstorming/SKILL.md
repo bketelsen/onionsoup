@@ -1,11 +1,17 @@
 ---
 name: brainstorming
-description: Use before any creative work in your repository - new features, new behavior, changed interfaces - to agree the design with the person in chat (or, for delegated work, to settle it alone and record your assumptions) before any plan or edit.
+description: Use for a new goal or a scope-changing design in your repository - agree the design with the person, or settle delegated design with recorded assumptions; unchanged approved execution, replies, retries and maintenance do not restart this process.
 ---
 
 # Brainstorming Ideas Into Designs
 
 Turn an idea into a design the person recognizes as theirs, through plain dialogue in the chat. Classify how much process the request needs, understand the context, refine the idea, present a design, and get the person's approval. Architectural work then goes to writing-plans; the plan you submit with `onionsoup_submit_plan` is the record.
+
+## Existing Work First
+
+Check the recorded goal, approval and conditions before treating a reply, retry or maintenance step as a new request. Continue unchanged approved work, or maintenance already authorized by an applicable configured standing grant, without repeating the design or plan approval. Implementation and task-review agents are optional; work locally or delegate when useful.
+
+This does not expand authority. A genuinely new goal, changed scope or world effect still follows its existing host gates, and explicit declared denies remain binding. A message or model judgment cannot invent a standing grant.
 
 ## Establish Shared Understanding
 
@@ -42,7 +48,7 @@ Before your first question, classify the request and say so, so the person can o
 - **Bounded**: a well-scoped change to code that already exists here: a new flag, a small endpoint, a one-file fix. Bounded means the flow you are changing is already in the repository to read. Ask the questions that matter, present a short design in chat, and STOP until the person says yes. Then edit the desk (test-driven-development applies), verify, and end with `onionsoup_propose_changes`. No plan is needed.
 - **Architectural**: new subsystems, changes that restructure how components fit together, interfaces others depend on, or anything spanning several repositories. Questions, approaches, sectioned design, then writing-plans.
 
-When in doubt, take the heavier path. The ratchet is one-way: hidden complexity found mid-task upgrades the path. Stop, say so, and step up.
+For a new request, when in doubt take the heavier path. Hidden complexity that changes the agreed scope upgrades the path: stop, say so, and step up. Ordinary implementation difficulty within unchanged approved scope calls for a recorded ruling, not another approval ceremony.
 
 ## Red Flags
 

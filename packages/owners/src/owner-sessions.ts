@@ -40,7 +40,7 @@ interface SessionKind {
   place: (runtime: Runtime, item: WorkItem, context?: MaintenanceContext) => Promise<SessionPlace>;
   /** Exact session identity retained on the item, including uncertain prompt delivery. */
   recorded: (origin: ChatOrigin, owner: string) => Partial<WorkItem>;
-  /** Session-level rules on top of the owner's agent: the execution session edits its worktree without asking. */
+  /** Additional session rules, never overrides of the owner's declared denies. */
   permission: readonly PermissionRule[];
 }
 
@@ -106,7 +106,7 @@ export const OWNER_SESSIONS = {
     prompt: executionPrompt,
     place: executionPlace,
     recorded: origin => ({ session: origin }),
-    permission: [{ permission: 'edit', pattern: '*', action: 'allow' }],
+    permission: [],
   },
 } satisfies Record<string, SessionKind>;
 

@@ -12,6 +12,7 @@ import { pendingReminders, REMINDER_JOURNAL_KINDS, REMINDER_LIMITS, reminderSumm
 import { WIKI_JOURNAL_KINDS } from './wiki.ts';
 import type { Runtime } from './runtime.ts';
 import { clipped } from './chat-context.ts';
+import { frictionBacklog } from './friction-work.ts';
 
 export const DESK_LIMITS = { notes: 40, registerChars: 20_000, requests: 15 };
 
@@ -102,6 +103,7 @@ export async function deskState(runtime: Runtime, query: DeskQuery) {
     registers,
     attention,
     backlog: attention.filter(entry => !needsHumanDecision(entry)),
+    friction: await frictionBacklog(runtime, owner.id),
     reminders: (await pendingReminders(runtime, owner.id)).map(reminderSummary),
   };
 }

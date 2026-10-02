@@ -11,7 +11,7 @@ import type { WorkItem } from './ledger.ts';
 import { wake } from './owner.ts';
 import { requestDistill } from './memory.ts';
 import { Runtime } from './runtime.ts';
-import { investigateFriction } from './friction-work.ts';
+import { investigateFriction, refreshFriction } from './friction-work.ts';
 import { revalidateFriction, retryFrictionRevalidation } from './friction-revalidation.ts';
 import { askOwner, formatAnswer } from './ask.ts';
 import { approveCreate, approveDelete, denyRequest, processRequests, requestPublish } from './brokering.ts';
@@ -136,6 +136,9 @@ const WIKI_COMMANDS: Record<string, Command> = {
 const COMMANDS: Record<string, Command> = {
   async 'friction-triage'(runtime, [id]) {
     console.log(JSON.stringify(await investigateFriction(runtime, required(id, 'friction id')), null, 2));
+  },
+  async 'friction-refresh'(runtime, [id]) {
+    console.log(JSON.stringify(await refreshFriction(runtime, required(id, 'friction id')), null, 2));
   },
   async 'friction-revalidate'(runtime, [id]) {
     console.log(JSON.stringify(await revalidateFriction(runtime, required(id, 'friction id')), null, 2));

@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, open, readFile, readdir, rename, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { userInfo } from 'node:os';
 import { z } from 'zod';
 import { AttentionCondition, AttentionProvenance, parseJournalRecord, type JournalRecord } from './journal-record.ts';
 import { reconcileAttention } from './attention-routing.ts';
@@ -29,6 +30,36 @@ export const AttentionIndex = z.object({
 });
 type AttentionIndex = z.infer<typeof AttentionIndex>;
 const CACHE = new Map<string, { stamp: string; index: AttentionIndex }>();
+const ACTORS = new WeakMap<object, { owner?: string; runtime?: Runtime }>();
+export interface AttentionActor {
+  readonly by: string;
+}
+
+/** Trusted surface/CLI entrypoints only; never exposed as a model tool argument. */
+export function humanAttentionActor(): AttentionActor {
+  const actor = Object.freeze({ by: userInfo().username });
+  ACTORS.set(actor, {});
+  return actor;
+}
+
+/** The plugin supplies its authenticated owner, not a tool-selected role or label. */
+export function ownerAttentionActor(runtime: Runtime, owner: string): AttentionActor {
+  runtime.owner(owner);
+  const actor = Object.freeze({ by: `owner:${owner}` });
+  ACTORS.set(actor, { owner, runtime });
+  return actor;
+}
+
+function requireAttentionActor(runtime: Runtime, actor: AttentionActor, entry: Attention) {
+  const binding = typeof actor === 'object' && actor !== null ? ACTORS.get(actor) : undefined;
+  if (!binding) throw new Error('attention_actor_required');
+  if (!binding.owner) return;
+  if (binding.runtime !== runtime || binding.owner !== entry.owner) throw new Error('attention_not_yours');
+  runtime.owner(binding.owner);
+  if (!entry.provenance || entry.provenance.kind === 'human-decision') {
+    throw new Error('attention_human_decision_required');
+  }
+}
 
 function indexPath(runtime: Runtime) {
   return join(runtime.stateDirectory, 'attention', 'index.json');
@@ -188,20 +219,21 @@ export async function listAttention(runtime: Runtime): Promise<Attention[]> {
   });
 }
 
-export async function changeAttention(runtime: Runtime, id: string, status: Attention['status'], by: string, reason: string) {
+export async function changeAttention(runtime: Runtime, id: string, status: Attention['status'], actor: AttentionActor, reason: string) {
   if (!reason.trim()) throw new Error('attention_reason_required');
   await listAttention(runtime);
   const updated = await withRecordLock(`${indexPath(runtime)}.lock`, async () => {
     const index = await readIndex(runtime);
     const entry = index.entries[id];
     if (!entry) throw new Error(`attention_not_found: ${id}`);
-    const changed: Attention = { ...entry, status, decision: { by, reason, at: new Date().toISOString() } };
+    requireAttentionActor(runtime, actor, entry);
+    const changed: Attention = { ...entry, status, decision: { by: actor.by, reason, at: new Date().toISOString() } };
     index.entries[id] = changed;
     await writeIndex(runtime, index);
     return changed;
   });
   const notebook = runtime.notebook(updated.owner);
-  await notebook.journal({ kind: 'attention-decision', note: `${id}: ${status} by ${by}: ${reason}` });
+  await notebook.journal({ kind: 'attention-decision', note: `${id}: ${status} by ${actor.by}: ${reason}` });
   await notebook.commit(`attention ${status}`);
   return updated;
 }

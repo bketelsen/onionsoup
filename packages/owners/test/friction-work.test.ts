@@ -102,7 +102,7 @@ test('failed inference is durable, bounded and does not expose transport secrets
   } finally { await fixtureState.cleanup(); }
 });
 
-test('initial triage rejects already-fixed without saving an investigation', async () => {
+test('initial triage retains unsupported closure as pending operational evidence', async () => {
   const state = await fixture();
   try {
     await state.enable();
@@ -110,9 +110,9 @@ test('initial triage rejects already-fixed without saving an investigation', asy
       observed: ['source.ts:1 contains fix'], inferred: [], unknown: [], disposition: 'already-fixed', fixedBy: 'a'.repeat(40),
     } as never, sessionID: 'fixture', cost: 0, startedAt: state.report.firstSeen, finishedAt: state.report.firstSeen });
     const outcome = await investigateFriction(state.runtime, state.report.id);
-    assert.equal(outcome.state, 'blocked');
-    assert.equal(outcome.reason, 'friction_triage_investigation_failed');
-    assert.equal(outcome.investigation, undefined);
+    assert.equal(outcome.state, 'investigated');
+    assert.equal(outcome.investigation?.disposition, 'needs-evidence');
+    assert.deepEqual(outcome.investigation?.unknown, ['friction_operational_condition_unverified']);
   } finally { await state.cleanup(); }
 });
 

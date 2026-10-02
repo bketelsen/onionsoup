@@ -20,5 +20,5 @@ export type PublicFrictionRecord = Omit<FrictionRecord, 'origin'> & { sessionID:
   effectiveRevision?: number;
   triageError?: 'friction_triage_unreadable';
   unreadable?: ('friction_revisions_unreadable' | 'friction_promotion_history_unreadable')[];
-  triage?: Pick<FrictionTriage, 'state' | 'updatedAt' | 'reason' | 'investigation'>;
+  triage?: Pick<FrictionTriage, 'state' | 'updatedAt' | 'reason' | 'investigation' | 'bundle' | 'duplicateOf'>;
 };

@@ -8,7 +8,7 @@ import { processRequest, processRequests } from '../src/brokering.ts';
 import { recoverRequests, reconcileRequest, recoverRequest } from '../src/request-recovery.ts';
 import { requestParticipants, requestWork } from '../src/delegation.ts';
 import { noticeWorkChanges, pendingNotices } from '../src/notices.ts';
-import { changeAttention, listAttention } from '../src/attention.ts';
+import { changeAttention, listAttention, humanAttentionActor } from '../src/attention.ts';
 import { tick, drain, type TickLog } from '../src/daemon.ts';
 import type { ResourceRequest } from '../src/requests.ts';
 
@@ -178,11 +178,11 @@ test('declined work and failed delegated work escalate to durable actionable att
   const entries = await listAttention(runtime);
   assert.deepEqual(entries.map(entry => entry.owner).sort(), ['clippy', 'homelab']);
   const entry = entries[0]!;
-  await changeAttention(runtime, entry.id, 'acknowledged', 'person', 'Discussing priority');
+  await changeAttention(runtime, entry.id, 'acknowledged', humanAttentionActor(), 'Discussing priority');
   assert.equal((await listAttention(runtime)).find(candidate => candidate.id === entry.id)?.status, 'acknowledged');
-  await changeAttention(runtime, entry.id, 'resolved', 'person', 'Deferred until next month');
+  await changeAttention(runtime, entry.id, 'resolved', humanAttentionActor(), 'Deferred until next month');
   assert.equal((await listAttention(runtime)).find(candidate => candidate.id === entry.id)?.decision?.reason, 'Deferred until next month');
-  await changeAttention(runtime, entry.id, 'open', 'person', 'Priority changed');
+  await changeAttention(runtime, entry.id, 'open', humanAttentionActor(), 'Priority changed');
   assert.equal((await listAttention(runtime)).find(candidate => candidate.id === entry.id)?.status, 'open');
   await assert.rejects(requestWork(runtime, 'homelab', 'moneo', proposal), /owner_cannot_change: moneo/);
 });
@@ -418,7 +418,7 @@ test('attention ingests appended records incrementally, skips malformed lines, a
   assert.equal(entries.length, 2);
   const cursorIndex = JSON.parse(await readFile(indexPath, 'utf8')) as { cursors: Record<string, { offset: number }> };
   assert.equal(cursorIndex.cursors[`clippy/${new Date().toISOString().slice(0, 10)}.jsonl`]?.offset, (await stat(journal)).size);
-  await changeAttention(runtime, entries[0]!.id, 'resolved', 'person', 'Handled');
+  await changeAttention(runtime, entries[0]!.id, 'resolved', humanAttentionActor(), 'Handled');
   const reopenedRuntime = await Runtime.open({ declarations: 'packages/owners/test/fixtures/owners', state: runtime.stateDirectory });
   assert.equal((await listAttention(reopenedRuntime)).find(entry => entry.id === entries[0]!.id)?.status, 'resolved');
 });

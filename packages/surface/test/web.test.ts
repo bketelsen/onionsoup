@@ -169,7 +169,7 @@ test('a blocked revision at the current commit shows its reason instead of askin
   assert.doesNotMatch(html, /Needs revalidation: owners friction-revalidate/);
 });
 
-test('an already-fixed revision shows the fixing commit and source citations without offering a request', () => {
+test('closure details distinguish fixing source from host condition evidence without offering a request', () => {
   const fixed = { disposition: 'already-fixed' as const, fixedBy: NEW_COMMIT,
     observed: ['src/fix.ts:42 shows the changed path'], inferred: [], unknown: [] };
   const html = frictionHtml({ ...FRICTION_RECORD, triage: { ...FRICTION_RECORD.triage!, investigation: fixed },
@@ -177,7 +177,7 @@ test('an already-fixed revision shows the fixing commit and source citations wit
     effectiveRevision: 1, revisions: [{ version: 1, id: FRICTION_ID, revision: 1, previousCommit: OLD_COMMIT,
       sourceCommit: NEW_COMMIT, reason: 'source_stale', state: 'revised', at: '2026-09-25T00:00:00.000Z', investigation: fixed }],
   });
-  assert.match(html, new RegExp(`Already fixed by ${NEW_COMMIT}`));
+  assert.match(html, new RegExp(`Fixing source ${NEW_COMMIT}; host condition evidence: unverified`));
   assert.match(html, /src\/fix.ts:42 shows the changed path/);
   assert.match(html, /Original investigation/);
   assert.match(html, /Original fix/);

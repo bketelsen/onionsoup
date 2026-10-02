@@ -121,11 +121,14 @@ export function executionPrompt(item: WorkItem) {
   return [
     `${NOTICE_PREFIX} ${item.planApproval?.by ?? 'The person'} approved your plan ${item.id} "${item.proposal.title}". This session carries it out.`,
     worktreeLine(item),
-    `Run it with the subagent-driven-development skill: one small task at a time, an implementer subagent
-for each and your reviewer subagent after each. Make the rulings the plan leaves open yourself and record them with
+    `Run it one small task at a time with executing-plans, or use subagent-driven-development when delegation helps.
+You may implement and review tasks yourself; implementer and reviewer dispatch are optional, independently per task.
+Make the rulings the plan leaves open yourself and record them with
 onionsoup_record_fact or onionsoup_record_decision; stop for the person only for what only they can decide. When every
 task is done and verified, end with onionsoup_propose_changes with item "${item.id}"${repositoryLine(item)}: host code
-verifies, has another model family review the whole diff, and opens the PR.`,
+verifies, runs the one final required independent-family review of the whole diff, and opens the PR.
+Continue replies, retries and maintenance under the unchanged approved goal and existing applicable standing grants.
+Do not request another plan approval for the same scope; new scope and world effects retain their existing gates.`,
     `For operational work with no repository changes, finish instead with onionsoup_complete_work item "${item.id}".
 Host code verifies configured checks and exact gated resource postconditions, then asks one independent-family reviewer
 to assess the ORIGINAL goal and evidence. Never manufacture a PR or create resources just to close a record.

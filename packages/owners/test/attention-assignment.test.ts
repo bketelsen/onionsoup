@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { Runtime } from '../src/runtime.ts';
-import { listAttention, changeAttention } from '../src/attention.ts';
+import { listAttention, changeAttention, humanAttentionActor } from '../src/attention.ts';
 import { assignAttention, attentionAssignmentView, recoverAttentionAssignments, retryAttentionAssignment } from '../src/attention-assignment.ts';
 
 const input = { owner: 'clippy', repository: 'example/clippy', title: 'Repair check', goal: 'Make check work', acceptance: ['Regression check passes'] };
@@ -19,7 +19,7 @@ function fail(_id: string, error: unknown): never { throw error; }
 
 test('Seen remains inert and explicit double assignment creates one gated request with human evidence', async () => {
   const { runtime, attention } = await setup();
-  await changeAttention(runtime, attention.id, 'acknowledged', 'person', 'fix this');
+  await changeAttention(runtime, attention.id, 'acknowledged', humanAttentionActor(), 'fix this');
   await recoverAttentionAssignments(runtime, fail);
   assert.equal((await runtime.requests.list()).length, 0);
   const requests = await Promise.all([assignAttention(runtime, attention.id, input, 'Brian'), assignAttention(runtime, attention.id, input, 'Brian')]);
@@ -44,7 +44,7 @@ test('source, actor, criteria and declared repository are validated before durab
   await assert.rejects(assignAttention(runtime, attention.id, { ...input, repository: 'foreign/repo' }, 'Brian'), /not_your_repository/);
   await assert.rejects(assignAttention(runtime, attention.id, { ...input, owner: 'moneo' }, 'Brian'), /owner_cannot_change/);
   assert.equal(await attentionAssignmentView(runtime, attention.id), undefined);
-  await changeAttention(runtime, attention.id, 'resolved', 'Brian', 'Not needed');
+  await changeAttention(runtime, attention.id, 'resolved', humanAttentionActor(), 'Not needed');
   await assert.rejects(assignAttention(runtime, attention.id, input, 'Brian'), /attention_already_resolved/);
   assert.equal((await runtime.requests.list()).length, 0);
 });
