@@ -115,11 +115,16 @@ installer and `arm` does not silently replace a running release. `status` reads 
 intent; `cancel` is for a deliberately cancelled pending deployment, not an override for a
 failed or unverified rollback.
 
-Staged `npm run verify` excludes the nested sandbox test
-`a sandboxed npm ci succeeds in a minimal fixture, with private XDG roots and the worktree writable`:
-it needs a host user bus to start a nested sandbox, and the isolated release stage has no host bus.
-Six desk-review, external-publication and delegated-evidence integration tests that execute configured
-host checks also require that bus; the exact names are listed in `scripts/deploy-stage.mjs`.
+The isolated stage has no host user bus. Core nested checks reuse its kernel-enforced 6 GiB memory,
+512-task and zero-swap budget, without changing their bubblewrap mounts, masks or private environment.
+Each required limit must be proved through actual cgroup v2 membership and ancestors; missing or invalid
+proof retains the original systemd scope rather than trusting an environment marker.
+Sandbox preparation creates missing fixed mask mountpoints before binding the read-only root,
+so an empty synthetic stage home can mount the same host-config/state masks without writable-root access.
+
+Staged `npm run verify` retains its existing seven exact-name exclusions: the nested npm sandbox test
+and six desk-review, external-publication and delegated-evidence integration tests listed in
+`scripts/deploy-stage.mjs`. This compatibility change does not add or remove exclusions.
 All seven still run in ordinary Linux verification and CI; only the isolated stage excludes their
 exact names. The filter is quoted so spaces cannot silently exclude other tests.
 The stage prints these exceptions when verifying. It does not depend on `ONIONSOUP_DEPLOY_E2E`

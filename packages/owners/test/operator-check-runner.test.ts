@@ -136,7 +136,8 @@ test('sandbox supports a staged runner and pinned Node under tmp without mountin
   try {
     for (const name of ['operator-check-runner.ts', 'operator-check-go.ts', 'operator-check-project.ts', 'operator-check-source.ts',
       'operator-project-launcher.mjs', 'operator-check-process.ts',
-      'operator-check-execution.ts', 'operator-check-guard.mjs', 'operator-check-types.ts', 'operator-write-writer.ts']) {
+      'operator-check-execution.ts', 'operator-check-guard.mjs', 'operator-check-types.ts', 'operator-write-writer.ts',
+      'cgroup-budget.ts']) {
       await cp(new URL(`../src/${name}`, import.meta.url), join(directory, name));
     }
     await symlink(fileURLToPath(new URL('../src/sandbox.ts', import.meta.url)), join(directory, 'sandbox.ts'));

@@ -3,6 +3,7 @@ import { mkdirSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { homedir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
+import { inheritedCgroupBudget } from './cgroup-budget.ts';
 import { homeDirectory } from './paths.ts';
 
 /**
@@ -11,7 +12,8 @@ import { homeDirectory } from './paths.ts';
  * matches `cat *`. A read-only owner that wrote probe tests and ran them used ~47 GB and got the
  * whole terminal OOM-killed; this is the fix.
  */
-export const SANDBOX_LIMITS = { memoryMax: '6G', tasksMax: 512, verifyTimeoutMs: 10 * 60_000, outputChars: 6_000 };
+const SANDBOX_MEMORY_GIB = 6;
+export const SANDBOX_LIMITS = { memoryMax: `${SANDBOX_MEMORY_GIB}G`, tasksMax: 512, verifyTimeoutMs: 10 * 60_000, outputChars: 6_000 };
 
 const HOME = homedir();
 
@@ -79,12 +81,6 @@ export interface SandboxOptions {
 
 /** Exported for tests: the exact bwrap/systemd-run arguments, so bind order and masking can be inspected without spawning. */
 export function sandboxCommand(command: string, args: readonly string[], options: SandboxOptions) {
-  assertNotMasking(options.writable);
-  const { config, state } = privateXdgRoots();
-  mkdirSync(config, { recursive: true });
-  mkdirSync(state, { recursive: true });
-  const binds = [...alwaysWritable(), ...options.writable].flatMap(path => ['--bind-try', path, path]);
-  const masks = MASKED_HOST_PATHS.flatMap(path => ['--tmpfs', path]);
   return [
     '--user', '--scope', '--quiet',
     '-p', `MemoryMax=${SANDBOX_LIMITS.memoryMax}`,
@@ -92,6 +88,20 @@ export function sandboxCommand(command: string, args: readonly string[], options
     '-p', `TasksMax=${SANDBOX_LIMITS.tasksMax}`,
     '--',
     'bwrap',
+    ...bubblewrapCommand(command, args, options),
+  ];
+}
+
+function bubblewrapCommand(command: string, args: readonly string[], options: SandboxOptions) {
+  assertNotMasking(options.writable);
+  const { config, state } = privateXdgRoots();
+  mkdirSync(config, { recursive: true });
+  mkdirSync(state, { recursive: true });
+  // A synthetic stage HOME may lack these mountpoints; bwrap cannot create them in its read-only root.
+  for (const masked of MASKED_HOST_PATHS) mkdirSync(masked, { recursive: true });
+  const binds = [...alwaysWritable(), ...options.writable].flatMap(path => ['--bind-try', path, path]);
+  const masks = MASKED_HOST_PATHS.flatMap(path => ['--tmpfs', path]);
+  return [
     '--ro-bind', '/', '/',
     '--dev', '/dev',
     '--proc', '/proc',
@@ -146,7 +156,16 @@ export function sandboxEnvironment(extra: NodeJS.ProcessEnv = {}): NodeJS.Proces
 }
 
 export function spawnSandboxed(command: string, args: readonly string[], options: SandboxOptions): ChildProcess {
-  return spawn('systemd-run', sandboxCommand(command, args, options), {
+  const hasInheritedBudget = inheritedCgroupBudget({
+    memoryBytes: SANDBOX_MEMORY_GIB * 1024 ** 3,
+    tasksMax: SANDBOX_LIMITS.tasksMax,
+    swapBytes: 0,
+  });
+  const executable = hasInheritedBudget ? 'bwrap' : 'systemd-run';
+  const sandboxArgs = hasInheritedBudget
+    ? bubblewrapCommand(command, args, options)
+    : sandboxCommand(command, args, options);
+  return spawn(executable, sandboxArgs, {
     env: sandboxEnvironment(options.env),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
