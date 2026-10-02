@@ -7,8 +7,8 @@ import { nextMessageId } from './plan-revision.ts';
 import { withRecordLock } from './record-lock.ts';
 import { writeHandoffFile } from './operator-handoff-file.ts';
 
-export const SessionOpeningKey = z.object({ entity: z.enum(['owner-item', 'reminder']), id: z.string().min(1),
-  owner: z.string().min(1), kind: z.enum(['planning', 'execution', 'reminder']) });
+export const SessionOpeningKey = z.object({ entity: z.enum(['owner-item', 'reminder', 'owner-continuation']), id: z.string().min(1),
+  owner: z.string().min(1), kind: z.enum(['planning', 'execution', 'reminder', 'continuation']) });
 export type SessionOpeningKey = z.infer<typeof SessionOpeningKey>;
 const Phase = z.enum(['reserved', 'creating', 'created', 'prompting', 'opened', 'blocked', 'uncertain']);
 export const SessionOpening = z.object({ version: z.literal(1), key: SessionOpeningKey, token: z.uuid(),

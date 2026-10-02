@@ -37,7 +37,7 @@ interface SessionKind {
   /** Ready the directory the session runs in, before it opens. */
   place: (runtime: Runtime, item: WorkItem, context?: MaintenanceContext) => Promise<SessionPlace>;
   /** Exact session identity retained on the item, including uncertain prompt delivery. */
-  recorded: (origin: ChatOrigin | undefined) => Partial<WorkItem>;
+  recorded: (origin: ChatOrigin, owner: string) => Partial<WorkItem>;
   /** Session-level rules on top of the owner's agent: the execution session edits its worktree without asking. */
   permission: readonly PermissionRule[];
 }
@@ -95,7 +95,7 @@ export const OWNER_SESSIONS = {
     title: item => `Request ${item.request ?? item.id}: ${item.proposal.title}`,
     prompt: planningPrompt,
     place: planningPlace,
-    recorded: origin => ({ origin }),
+    recorded: (origin, owner) => ({ origin, originOwner: owner }),
     permission: [],
   },
   execution: {
@@ -125,7 +125,7 @@ async function claim(runtime: Runtime, item: WorkItem, kind: SessionKind, origin
   try {
     return await runtime.ledger.update(item.id, current => {
       if (!kind.isNeeded(current) || JSON.stringify(current) !== JSON.stringify(item)) throw new Error('owner_session_already_open');
-      return { ...current, ...kind.recorded(origin) };
+      return { ...current, ...kind.recorded(origin, current.owner) };
     });
   } catch (error) {
     if (error instanceof Error && error.message === 'owner_session_already_open') return undefined;
@@ -218,7 +218,7 @@ export function ownerSessionClient(client: Parameters<Plugin>[0]['client']): Own
   return {
     async create(directory, title, permission) {
       const created = await client.session.create({ body: { title, permission } as never, query: { directory } });
-      if (!created.data?.id) throw new Error('owner_session_create_failed');
+      if (created.error || !created.data?.id) throw new Error('owner_session_create_failed');
       return created.data.id;
     },
     async prompt(target, agent, text, messageID) {

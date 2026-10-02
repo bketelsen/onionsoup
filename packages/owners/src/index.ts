@@ -57,6 +57,7 @@ export { AttentionAssignmentInput, assignAttention, retryAttentionAssignment, at
 export { promoteFriction, retryFrictionPromotion, frictionProposalDigest, effectiveProposalDigest, frictionPromotionHistory,
   frictionPromotionView, FrictionProposalDigest, type FrictionPromotionView } from './friction-promotion.ts';
 export { planRevisionStatus } from './plan-revision.ts';
+export { OwnerMessageInput, OwnerReplyInput, sendOwnerMessage, replyToOwnerMessage } from './owner-messages.ts';
 
 export { ownerChatAgent } from './owner-chat.ts';
 

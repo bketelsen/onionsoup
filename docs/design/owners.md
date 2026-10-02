@@ -449,6 +449,28 @@ real turns can ignore exact delivered notices at their tail; old stranded admiss
 [operator recovery procedure](../deployment.md#recovering-admissions-stranded-by-informational-notices).
 Owners also open requests to each other.
 
+**Addressed conversation is not consultation.** `onionsoup_send { to, text, item?, session? }` queues actionable
+conversation for a declared owner's actual context; `onionsoup_reply { message, text }` returns to the recorded
+sender's exact session. The host binds the sender to tool context and proven session membership. Item addresses
+prefer the item's execution session, then a proven recipient-owned planning origin; a requester-owned origin is
+never assigned to the item owner. Without an address, host-observed owner session history selects the recipient's
+most recently recorded general chat in its declared workspace, never an unrelated item's work session.
+Without one it uses a fenced desk continuation. No consultation hire, work request, approval layer or effect grant is created.
+Busy recipients wait in the existing work-notice queue. Status snapshots and consultation exchanges remain `noReply`.
+
+Queue IDs are immutable, including delivered tombstones. Work-notice receipts retain the native message ID,
+destination, agent and exact rendered body before transport. Returned SDK errors are failures; only an exact
+transcript entry establishes acceptance. Restart reconciles an accepted-but-unacknowledged message without another
+send. Unknown sends stay pending with an uncertain receipt and concrete reason, scoped to that message, never
+fabricated as success or retried with a new ID. Positive pre-transport stopping proof permits the same ID to retry.
+
+A removed or archived workspace remains history, not a usable address. Delivery preserves the old identity and
+retained transcript, and opens/reuses one durable continuation in the recipient's current declared workspace
+(or its still-existing approved worktree). It never recreates the deleted path. The continuation receives bounded
+historical context and the original work/request identity; ordinary plan/effect gates remain unchanged. The
+session-opening store reserves identity before creation; uncertain creation without a saved session cannot blindly
+create again. Other messages and work continue. Transcripts still depend on OpenCode's retained store.
+
 An explicit `onionsoup_ask` with `followUp: true` lets the read-only answer propose **one** change in the answering
 owner's declared repository. Host code validates that owner can change that repository, then creates a regular
 `work` request; receiver acceptance, plan approval, verification, review and publication gates remain unchanged.
@@ -618,8 +640,10 @@ person decides the next plan.
 The plugin's ordinary notice pass prepares a durable actionable continuation for each eligible direct-request
 plan generation in the request's original chat. Informational progress notices remain `noReply`. The new wake
 uses a stable native message receipt, waits for an idle origin and reconciles accepted delivery after restart.
-Pre-send prerequisites retry; an uncertain attempted send without a transcript receipt is blocked rather than
-blindly replayed. Changed plans invalidate prior bindings, and a recorded review suppresses repeat wakes.
+Pre-send prerequisites retry; removed requester workspaces use the same owned continuation routing as addressed
+messages. New wakes save their exact body and reconcile matching transcript receipts. An uncertain attempted send
+without that receipt is blocked rather than blindly replayed; legacy ID-only evidence is not exact-body proof.
+Changed plans invalidate prior bindings, and a recorded review suppresses repeat wakes.
 Models execute outside record locks; a concurrent human decision wins the gate and stale model verdicts fail.
 Scope matching is an explicit reviewer assessment with a note, not deterministic semantic analysis of prose.
 
@@ -629,6 +653,12 @@ assigned (approve a plan under the grant, send it back, cancel the work, or leav
 a note); reading is oversight, steering is authority. A report pushes back with `onionsoup_raise` (objection, question or blocked): the
 escalation is stored on the initiative, journaled to both, recorded as the manager's owner follow-up, and wakes her. While it
 is open she cannot approve that assignment's plans; she resolves it with `onionsoup_initiative resolve-escalation`.
+Manager notes and resolutions queue the manager's ruling to the report's exact owned work session, rather than
+only journaling it. Notes deduplicate by host originating session/message identity, so a deliberate later repeat
+of the same words still reaches the report. A resolution retry repairs missing delivery under its original
+escalation identity. The plugin also repairs resolved escalations on still-live original work after a crash.
+Conflicting attempts to change a saved resolution fail explicitly. The report continues the original request,
+without cancellation, replacement, another approval layer or asking the person to carry the answer.
 
 The surface shows the tree under **Org**, each initiative's assignments by dependency step with their state, work,
 PRs, escalations and plan reviews, and initiatives awaiting approval in the inbox.

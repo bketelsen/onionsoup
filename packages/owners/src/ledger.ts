@@ -158,6 +158,8 @@ export const WorkItem = z.object({
   requestAcceptance: RequestAcceptance.optional(),
   /** The chat the work was opened from, so the owner hears there how it went. */
   origin: ChatOrigin.optional(),
+  /** Host-observed owner of the planning origin; a requester origin is not the item's owner. */
+  originOwner: z.string().optional(),
   /** The owner session that carries out an approved plan; later notices about the work go there. */
   session: ChatOrigin.optional(),
   /** The request another owner opened for this work, when it was delegated. */

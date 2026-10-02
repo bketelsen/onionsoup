@@ -704,7 +704,7 @@ test('a merged PR is recorded on the next tick, and its request and notice follo
   });
   assert.equal((await runtime.ledger.get(item.id)).publication?.state, 'merged');
   assert.equal((await runtime.requests.get(request.id)).status, 'completed');
-  const merged = (await pendingNotices(runtime)).find(notice => notice.id === `${item.id}-pr-merged`);
+  const merged = (await pendingNotices(runtime)).find(notice => notice.workItem === item.id && notice.change === 'pr-merged');
   assert.deepEqual(merged?.origin, session, 'the session carrying out the plan hears it');
   assert.deepEqual(errors, []);
 });

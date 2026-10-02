@@ -11,6 +11,11 @@ You talk to owners in the onionsoup **surface** (a web app built on opencode) or
 Bellonda, keeper of the homelab wiki, and she answers from her notebook, asks the owner of the NAS
 when a question is his, and turns your decisions into reviewed changes.
 
+Owners use `onionsoup_send` and `onionsoup_reply` for addressed conversation in their actual work sessions,
+including manager rulings and corrections. Busy sessions receive queued messages when idle; retired workspaces
+get a fresh continuation without replacing the original request. `onionsoup_ask` stays a separate read-only
+consultation, and informational progress notices do not wake an owner.
+
 ## Quick start
 
 ```bash
