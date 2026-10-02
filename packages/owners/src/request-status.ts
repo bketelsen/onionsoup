@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import { isDirectReport } from './declarations.ts';
 import { ExchangeNotice, queueExchangeNotice } from './exchange-notices.ts';
-import { ExternalPrObservation, type WorkItem, type WorkStatus } from './ledger.ts';
+import { ExternalPrObservation, isPaused, type WorkItem, type WorkStatus } from './ledger.ts';
 import { withRecordLock } from './record-lock.ts';
 import { describeAsk, type ResourceRequest, type RequestStatus } from './requests.ts';
 import type { Runtime } from './runtime.ts';
@@ -44,12 +44,15 @@ const REQUEST_NEXT: Record<RequestStatus, string> = {
   failed: 'Requester must inspect the blocker before proposing a different approach.',
   interrupted: 'Reconcile uncertain effects before any retry.',
   'work-running': 'Receiving owner carries the linked work; inspect its recorded stage.',
+  'work-paused': 'Intentionally paused; only an explicit human or configured-authority resume may continue the original work.',
   completed: 'Request completion is recorded; deployment is not implied by repository merge.',
 };
 const WORK_NEXT: Record<WorkStatus, string> = {
   proposed: 'Receiving owner must plan this proposal.', planning: 'Receiving owner is preparing the plan.',
   'awaiting-plan-approval': 'Wait for the person or configured manager’s plan approval.',
   working: 'Receiving owner is carrying out the approved plan.', implementing: 'Implementation is in progress.',
+  pausing: 'Intentional stop is pending confirmation; active claims and uncertain receipts remain held.',
+  paused: 'Intentionally paused; explicitly resume the same approved goal and plan when ready.',
   reviewing: 'Required review is in progress.', landing: 'Verified changes are being published.',
   'awaiting-push-approval': 'Wait for push approval.',
   landed: 'Inspect the PR state; landed or merged code does not establish deployment.',
@@ -67,13 +70,15 @@ export function requestVisibleTo(runtime: Runtime, owner: string, request: Resou
 export function requestProgress(request: ResourceRequest, item: WorkItem | undefined, now = new Date()): RequestProgress {
   const matches = item?.owner === request.to && item.request === request.id && item.id === request.workItem;
   const linked = matches ? item : undefined;
+  const status = linked && isPaused(linked) && ['work-running', 'work-paused'].includes(request.status)
+    ? 'work-paused' : request.status;
   const lastRecordedAt = linked && linked.updatedAt > request.updatedAt ? linked.updatedAt : request.updatedAt;
   const evidence = request.workItem && !linked ? (item ? 'linked_work_mismatch' : 'linked_work_missing') : 'recorded';
   const next = evidence !== 'recorded' ? 'Linked work is unavailable or inconsistent; inspect before claiming progress.'
     : linked?.requestAcceptance ? 'Original goal explicitly accepted against recorded follow-up evidence; deployment is not implied.'
-      : request.status === 'work-running' && linked ? WORK_NEXT[linked.status] : REQUEST_NEXT[request.status];
+      : ['work-running', 'work-paused'].includes(status) && linked ? WORK_NEXT[linked.status] : REQUEST_NEXT[status];
   return RequestProgress.parse({
-    id: request.id, from: request.from, to: request.to, purpose: request.ask.purpose, title: describeAsk(request.ask), status: request.status,
+    id: request.id, from: request.from, to: request.to, purpose: request.ask.purpose, title: describeAsk(request.ask), status,
     decision: request.publishDecision?.reply ?? request.decision?.reply, reason: request.reason,
     workItem: request.workItem, workStatus: linked?.status, workReason: linked?.reason,
     publication: linked?.publication ? { url: linked.publication.url, state: linked.publication.state } : undefined,
@@ -90,6 +95,18 @@ function hostEvidenceText(progress: RequestProgress, compact = false) {
   if (!evidence) return 'Host tests/review: unavailable; no readable, matching request-scoped host evidence. Model claims do not establish verification.';
   const checks = evidence.verification;
   const review = evidence.review;
+  if (evidence.operational) {
+    const completion = evidence.operational;
+    return [
+      `Operational goal evidence: ${progress.hostEvidenceState}; recorded ${completion.completedAt}. No PR required.`,
+      `Exact original work ${completion.item}, request ${completion.request}, execution session ${completion.execution.sessionID}.`,
+      `Configured host checks: ${completion.verification.checks.map(check => `${check.command} exit=${check.exitCode}`).join(', ')}.`,
+      `Independent goal review by ${review?.reviewer ?? 'unavailable'}: ${review?.verdict.decision ?? 'unavailable'}.`,
+      ...completion.effects.map(effect => `Request ${effect.request}: ${effect.remote}:${effect.name}; ${effect.postcondition} observed ${effect.observedAt}; create/delete approvals recorded.`),
+      evidence.abbreviated ? 'Evidence abbreviated; inspect the original request checkpoint for complete host records.' : '',
+      'Evidence is bound to the recorded original scope. Completion requires the request projection; arbitrary current deployment claims remain unverified.',
+    ].join('\n');
+  }
   return [
     `Host attempt: ${evidence.stage}; ${progress.hostEvidenceState}; recorded ${evidence.observedAt}.`,
     checks ? `Host checks (${checks.verifier}) at ${checks.observedAt}, tree ${checks.tree}: ${checks.checks.length
@@ -179,6 +196,9 @@ async function recordedProgress(runtime: Runtime, request: ResourceRequest, item
   progress.hostEvidence = evidence;
   progress.hostEvidenceState = evidence.planDigest !== item.planDocument?.digest ? 'superseded'
     : now.getTime() - Date.parse(evidence.observedAt) > REQUEST_STATUS_LIMITS.staleMs ? 'stale' : 'recorded';
+  if (evidence.operational && request.status === 'completed') {
+    progress.next = 'Original operational goal verified by host checks, postconditions and independent review; no PR required.';
+  }
   if (evidence.observedAt > progress.lastRecordedAt) {
     progress.lastRecordedAt = evidence.observedAt;
     progress.stale = now.getTime() - Date.parse(evidence.observedAt) > REQUEST_STATUS_LIMITS.staleMs;

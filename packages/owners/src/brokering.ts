@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { decideWork, journalRequest, trackDelegatedWork } from './delegation.ts';
+import type { ChatOrigin } from './chat-origin.ts';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -14,9 +15,9 @@ import type { Runtime } from './runtime.ts';
 import { runSandboxed } from './sandbox.ts';
 
 /** An owner asks another owner for an instance. The request waits for the receiving owner's decision. */
-export async function requestInstance(runtime: Runtime, from: string, to: string, ask: ResourceAsk, followUp: string) {
+export async function requestInstance(runtime: Runtime, from: string, to: string, ask: ResourceAsk, followUp: string, origin?: ChatOrigin) {
   if (ask.kind === 'instance') runtime.incusOwner(to);
-  const request = await runtime.requests.open(from, to, ask, followUp);
+  const request = await runtime.requests.open(from, to, ask, followUp, origin);
   await journalRequest(runtime, request, 'request-opened', `${describeAsk(ask)} for ${ask.purpose}`);
   return request;
 }
@@ -204,7 +205,8 @@ async function executeUpdate(runtime: Runtime, request: ResourceRequest) {
     return runtime.requests.save({ ...request, status: 'updated', reason: settled });
   } catch (error) {
     const reason = `update failed: ${error instanceof Error ? error.message.split('\n')[0] : error}`;
-    await journalRequest(runtime, request, 'attention', `${describeAsk(request.ask)}: ${reason}; a person should look`);
+    await journalRequest(runtime, request, 'attention', `${describeAsk(request.ask)}: ${reason}; a person should look`,
+      { kind: 'request-operation', request: request.id, operation: 'update-app', phase: 'execution' });
     return runtime.requests.save({ ...request, status: 'interrupted', reason });
   }
 }
@@ -248,7 +250,8 @@ async function runFollowUp(runtime: Runtime, request: ResourceRequest) {
 async function executeDelete(runtime: Runtime, request: ResourceRequest) {
   const owner = runtime.incusOwner(request.to);
   try {
-    await deleteInstance(runtime.incus, owner, runtime.managed, request.instance!.remote, request.instance!.name);
+    await deleteInstance(runtime.incus, owner, runtime.managed, request.instance!.remote, request.instance!.name,
+      { id: request.id, from: request.from });
     await journalRequest(runtime, request, 'instance-deleted', `${request.instance!.remote}:${request.instance!.name}`);
     return runtime.requests.save({ ...request, status: 'deleted' });
   } catch (error) {
@@ -263,6 +266,8 @@ type Step = (runtime: Runtime, request: ResourceRequest) => Promise<ResourceRequ
 /** What the runtime does for each request state it owns. States waiting for a person are absent. */
 export const REQUEST_STEPS: Partial<Record<ResourceRequest['status'], Step>> = {
   'work-running': trackDelegatedWork,
+  completed: trackDelegatedWork,
+  'work-paused': trackDelegatedWork,
   'pending-owner': (runtime, request) => decide(runtime, request.id),
   'create-approved': executeCreate,
   provisioned: async (runtime, request) => (request.followUpResult || request.followUp === 'none' ? request : runFollowUp(runtime, request)),
@@ -272,11 +277,13 @@ export const REQUEST_STEPS: Partial<Record<ResourceRequest['status'], Step>> = {
 export function requestCanRun(request: ResourceRequest) {
   if (request.retry && Date.parse(request.retry.nextAt) > Date.now()) return false;
   if (request.operation?.runner !== undefined && requestRunnerIsAlive(request.operation.runner)) return false;
+  if (request.status === 'completed') return Boolean(request.operation?.checkpoint?.operational
+    && !request.operation.checkpoint.operationalNoticeQueued);
   if (request.status === 'provisioned') return !request.followUpResult && request.followUp !== 'none';
   return Boolean(REQUEST_STEPS[request.status]);
 }
 
-const EFFECT_FREE = new Set<ResourceRequest['status']>(['pending-owner', 'work-running']);
+const EFFECT_FREE = new Set<ResourceRequest['status']>(['pending-owner', 'work-running', 'work-paused']);
 
 function requestFailure(request: ResourceRequest, error: unknown): ResourceRequest {
   const operation = { ...request.operation!, runner: undefined };
@@ -296,7 +303,10 @@ export async function processRequest(runtime: Runtime, id: string, onProgress: (
     const step = REQUEST_STEPS[request.status];
     if (!step || !requestCanRun(request)) return;
     const operation = { id: randomUUID(), stage: request.status, startedAt: new Date().toISOString(), runner: process.pid,
-      checkpoint: request.operation?.stage === request.status ? request.operation.checkpoint : undefined };
+      checkpoint: request.operation?.stage === request.status || request.operation?.checkpoint?.operational
+        ? request.operation?.checkpoint : request.ask.kind === 'instance' ? {
+          instance: request.operation?.checkpoint?.instance,
+        } : undefined };
     const active = await runtime.requests.update(id, current => {
       if (current.status !== request.status || current.operation?.runner !== undefined) return current;
       return { ...current, operation };

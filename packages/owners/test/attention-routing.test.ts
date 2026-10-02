@@ -171,6 +171,30 @@ test('legacy request ID mentions and non-failure envelopes never classify or cle
   assert.ok(entries.every(entry => !entry.provenance && needsHumanDecision(entry)));
 });
 
+test('legacy app-update failure provenance is corrected from the exact host envelope, not arbitrary success statuses', async () => {
+  const runtime = await fixture();
+  await runtime.notebook('moneo').ensure('# Fixture NAS');
+  const request = await runtime.requests.open('homelab', 'moneo', {
+    kind: 'update-app', app: 'radarr', fromVersion: '1', toVersion: '2', purpose: 'Update', notesRead: [],
+  }, 'none');
+  for (const owner of ['homelab', 'moneo']) await runtime.notebook(owner).journal({
+    kind: 'attention',
+    note: `${request.id} (homelab → moneo): update radarr 1 → 2: update failed: job failed; a person should look`,
+    provenance: { kind: 'delegation', request: request.id },
+  });
+  await runtime.notebook('homelab').journal({
+    kind: 'attention', note: `${request.id} (homelab → moneo): Choose production authority`,
+    provenance: { kind: 'human-decision', code: 'authority_discrepancy' },
+  });
+  assert.equal((await listAttention(runtime)).filter(entry => entry.provenance?.kind === 'request-operation').length, 2);
+  await runtime.requests.save({ ...request, status: 'published' });
+  assert.equal((await listAttention(runtime)).filter(entry => entry.status === 'resolved').length, 0);
+  await runtime.requests.save({ ...request, status: 'updated' });
+  const entries = await listAttention(runtime);
+  assert.equal(entries.filter(entry => entry.resolution?.code === 'app_update_completed').length, 2);
+  assert.equal(entries.filter(needsHumanDecision).length, 1);
+});
+
 test('missing original provenance and unreadable evidence never mean resolved or no human choice', async () => {
   const runtime = await fixture();
   const notebook = runtime.notebook('clippy');

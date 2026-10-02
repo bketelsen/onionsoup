@@ -1,8 +1,10 @@
 import { execFile } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { promisify } from 'node:util';
 import { z } from 'zod';
-import type { Verification, WorkItem } from './ledger.ts';
+import { isPaused, requireRunnerClaim, type Verification, type WorkItem } from './ledger.ts';
+import { settleItemPause, stoppedRunnerPause } from './work-pause.ts';
 import { OWNER_CHANGE_WORKFLOW } from './plan-work.ts';
 import { effectiveDecision, Verdict } from './artifacts.ts';
 import { requestPublish } from './brokering.ts';
@@ -145,6 +147,7 @@ async function repairHead(deskPath: string, item: WorkItem) {
 async function ownItem(runtime: Runtime, ownerId: string, itemId: string) {
   const item = await runtime.ledger.get(itemId);
   if (item.owner !== ownerId) throw new Error(`item_not_yours: ${item.id} belongs to ${item.owner}`);
+  if (isPaused(item)) throw new Error('work_item_paused');
   return item;
 }
 
@@ -217,9 +220,10 @@ type PublicationItem = (runtime: Runtime, desk: ReviewedDesk, proposal: DeskProp
 /** The ledger item that publishes reviewed desk changes, by where they go. */
 const PUBLICATION_ITEMS: Record<DeskTarget['kind'], PublicationItem> = {
   new: newPublication,
-  plan: (runtime, _desk, proposal, fields) => runtime.ledger.update(proposal.item!, current => ({
-    ...current, ...fields, proposal: { ...current.proposal, title: proposal.title },
-  })),
+  plan: (runtime, _desk, proposal, fields) => runtime.ledger.update(proposal.item!, current => {
+    requireWorking(current);
+    return { ...current, ...fields, proposal: { ...current.proposal, title: proposal.title } };
+  }),
   repair: (runtime, desk, proposal, fields, target) => {
     const { item, head } = target as Extract<DeskTarget, { kind: 'repair' }>;
     const repairOf = { itemId: item.id, branch: item.publication!.branch, prUrl: item.publication!.url, previousHead: head };
@@ -358,6 +362,7 @@ async function continueDeskPublication(runtime: Runtime, itemId: string) {
 const PERMANENT_FAILURES = new Set(['desk_changed_since_review', 'desk_head_changed', 'desk_pr_closed']);
 
 function deskResult(item: WorkItem): DeskChangeResult {
+  if (isPaused(item)) return { outcome: 'in-progress', summary: `Publication ${item.id} is ${item.status}; explicit resume is required.` };
   if (item.activeRunner) return { outcome: 'in-progress', summary: `Publication ${item.id} is running at ${item.deskPublication!.stage}.` };
   if (item.status === 'failed') return deskFailure(item);
   const outcome = item.publication?.state === 'merged' ? 'merged' : 'opened';
@@ -516,22 +521,34 @@ const DESK_STEPS: Partial<Record<DeskStage, DeskStep>> = {
 export async function advanceDeskPublication(runtime: Runtime, itemId: string) {
   let item = await runtime.ledger.update(itemId, current => {
     if (current.activeRunner) throw new Error('work_item_active');
+    if (isPaused(current)) throw new Error('work_item_paused');
     if (current.status === 'cancelled') throw new Error('work_item_cancelled');
-    return { ...current, status: 'landing', resumeStatus: 'landing', activeRunner: process.pid, reason: undefined };
+    return { ...current, status: 'landing', resumeStatus: 'landing',
+      activeRunner: process.pid, runnerClaim: randomUUID(), reason: undefined };
   });
+  const claimed = item;
   try {
     let step = DESK_STEPS[item.deskPublication!.stage];
     while (step) {
       const changes = await step(runtime, item);
-      item = await runtime.ledger.update(item.id, current => ({ ...current, ...changes }));
+      item = await runtime.ledger.update(item.id, current => {
+        requireRunnerClaim(current, claimed);
+        return { ...current, ...changes };
+      });
+      if (isPaused(item)) {
+        item = await runtime.ledger.update(item.id, current => stoppedRunnerPause(current, { ...current, status: 'landing' }, claimed));
+        return settleItemPause(runtime, item.id);
+      }
       step = DESK_STEPS[item.deskPublication!.stage];
     }
-    item = await runtime.ledger.update(item.id, current => ({ ...current, status: 'landed', activeRunner: undefined }));
+    item = await runtime.ledger.update(item.id, current =>
+      stoppedRunnerPause(current, { ...current, status: 'landed' }, claimed));
   } catch (error) {
-    item = await runtime.ledger.update(item.id, current => ({
-      ...current, status: 'failed', activeRunner: undefined, reason: error instanceof Error ? error.message : String(error),
-    }));
+    item = await runtime.ledger.update(item.id, current => stoppedRunnerPause(current, {
+      ...current, status: 'failed', reason: error instanceof Error ? error.message : String(error),
+    }, claimed));
   }
+  if (isPaused(item)) return settleItemPause(runtime, item.id);
   if (item.status === 'landed') item = await recordDeskPublication(runtime, item);
   return item;
 }

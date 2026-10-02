@@ -6,10 +6,11 @@ import { Verdict } from './artifacts.ts';
 import { clipped } from './chat-context.ts';
 import { safeProse } from './friction.ts';
 import { ReviewEvidence } from './desk-reviews.ts';
+import { OperationalEvidence } from './operational-work-types.ts';
 import type { WorkItem } from './ledger.ts';
 import type { Runtime } from './runtime.ts';
 
-export const REQUEST_EVIDENCE_LIMITS = { fieldChars: 240, findings: 8, checks: 24 };
+export const REQUEST_EVIDENCE_LIMITS = { fieldChars: 240, findings: 8, checks: 24, effects: 24 };
 
 function evidenceProse(value: string) {
   try { return clipped(safeProse(value), REQUEST_EVIDENCE_LIMITS.fieldChars); }
@@ -24,6 +25,7 @@ export const RequestWorkEvidence = z.object({
   verification: ReviewEvidence.optional(),
   review: z.object({ reviewer: z.string(), verdict: Verdict }).optional(),
   blocker: z.string().optional(),
+  operational: OperationalEvidence.optional(),
   abbreviated: z.boolean().default(false),
 });
 export type RequestWorkEvidence = z.infer<typeof RequestWorkEvidence>;
@@ -33,18 +35,26 @@ function evidencePath(runtime: Runtime, item: WorkItem) {
   return join(runtime.stateDirectory, 'request-work-evidence', `${key}.json`);
 }
 
-type AttemptEvidence = Pick<RequestWorkEvidence, 'stage' | 'verification' | 'review' | 'blocker'>;
+type AttemptEvidence = Pick<RequestWorkEvidence, 'stage' | 'verification' | 'review' | 'blocker' | 'operational'>;
+export function operationalEvidenceView(operational: NonNullable<RequestWorkEvidence['operational']>) {
+  return { ...operational,
+    verification: { ...operational.verification, checks: operational.verification.checks.slice(0, REQUEST_EVIDENCE_LIMITS.checks) },
+    effects: operational.effects.slice(0, REQUEST_EVIDENCE_LIMITS.effects) };
+}
+
 async function writeRequestWorkEvidence(runtime: Runtime, item: WorkItem, attempt: AttemptEvidence) {
   const verdict = attempt.review?.verdict;
   const limits = REQUEST_EVIDENCE_LIMITS;
   const abbreviated = Boolean(verdict && (verdict.findings.length > limits.findings || verdict.summary.length > limits.fieldChars
     || verdict.findings.some(finding => [finding.file, finding.issue, finding.suggestion].some(value => value.length > limits.fieldChars)))
-    || attempt.verification && attempt.verification.checks.length > limits.checks);
+    || attempt.verification && attempt.verification.checks.length > limits.checks
+    || attempt.operational && attempt.operational.effects.length > limits.effects);
   const verification = attempt.verification ? { ...attempt.verification, checks: attempt.verification.checks.slice(0, limits.checks) } : undefined;
   const review = attempt.review && verdict ? { reviewer: attempt.review.reviewer, verdict: { ...verdict, summary: evidenceProse(verdict.summary),
     findings: [...verdict.findings].sort((left, right) => Number(right.severity === 'blocker') - Number(left.severity === 'blocker')).slice(0, limits.findings).map(finding => ({ ...finding, file: evidenceProse(finding.file),
       issue: evidenceProse(finding.issue), suggestion: evidenceProse(finding.suggestion) })) } } : undefined;
-  const record = RequestWorkEvidence.parse({ ...attempt, verification, review, abbreviated, request: item.request, item: item.id,
+  const operational = attempt.operational ? operationalEvidenceView(attempt.operational) : undefined;
+  const record = RequestWorkEvidence.parse({ ...attempt, verification, review, operational, abbreviated, request: item.request, item: item.id,
     owner: item.owner, planDigest: item.planDocument?.digest, observedAt: new Date().toISOString() });
   const path = evidencePath(runtime, item);
   await mkdir(join(runtime.stateDirectory, 'request-work-evidence'), { recursive: true });

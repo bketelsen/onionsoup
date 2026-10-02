@@ -2,12 +2,12 @@ import type { ReactNode } from 'react';
 import { RiChat3Line } from '@remixicon/react';
 import { navigate } from '../api.ts';
 import { Markdown } from '../chat/Markdown.tsx';
-import type { WorkItem } from '../types.ts';
+import type { ItemRequestContext, WorkItem } from '../types.ts';
 import { ReviewFindings } from './ReviewFindings.tsx';
 import { Badge, Button, Section, timeAgo } from './ui.tsx';
 
 /** One part of a work item's page. Every section takes the whole item and shows nothing when it does not apply. */
-type ItemSection = (props: { item: WorkItem }) => ReactNode;
+type ItemSection = (props: { item: WorkItem } & ItemRequestContext) => ReactNode;
 
 const PUBLICATION_STAGES: Record<string, string> = {
   commit: 'committing', push: 'pushing', open: 'opening the PR', merge: 'merging under grant', finish: 'finishing', complete: 'published',
@@ -53,6 +53,17 @@ function Notes({ item }: { item: WorkItem }) {
       {item.humanNotes.map((note, index) => <div key={index} className="typography-meta"><Badge>{note.kind}</Badge> {note.by}: {note.note}</div>)}
     </Section>
   );
+}
+
+function Pauses({ item }: { item: WorkItem }) {
+  if (!item.pauses.length) return null;
+  return <Section title="Intentional pauses">
+    {item.pauses.map(receipt => <div key={receipt.id} className="typography-meta">
+      <p>{receipt.by} {timeAgo(receipt.at)}: {receipt.reason}. Continue from {receipt.resumeStatus}.</p>
+      <p>{receipt.stoppedAt ? 'Stop confirmed.' : 'Stop not confirmed; runner and delivery claims remain held.'}</p>
+      {receipt.resumedAt && <p>Explicitly resumed by {receipt.resumedBy} {timeAgo(receipt.resumedAt)} ({receipt.resumedAuthority}).</p>}
+    </div>)}
+  </Section>;
 }
 
 function Publication({ item }: { item: WorkItem }) {
@@ -147,4 +158,11 @@ function RequestAcceptance({ item }: { item: WorkItem }) {
 }
 
 /** A work item's page, in order: where the work runs, what was asked, the plan, then how it was published. */
-export const ITEM_SECTIONS: ItemSection[] = [WorkSession, Proposal, Plan, Notes, RequestAcceptance, Publication, Verification, Reviews, Hires];
+function RequestProgress({ requestText }: Parameters<ItemSection>[0]) {
+  if (!requestText) return null;
+  return <Section title="Request and host evidence"><div className="typography-meta whitespace-pre-wrap [overflow-wrap:anywhere]">{requestText}</div></Section>;
+}
+
+export const ITEM_SECTIONS: ItemSection[] = [
+  WorkSession, Proposal, Plan, Notes, Pauses, RequestProgress, RequestAcceptance, Publication, Verification, Reviews, Hires,
+];

@@ -1,8 +1,10 @@
 import type { Plugin } from '@opencode-ai/plugin';
+import { z } from 'zod';
 import type { ChatOrigin } from './chat-origin.ts';
 import { chatDirectory } from './chats.ts';
 import { deskSyncText, syncOwnerDesk, type DeskSyncReport } from './desk-sync.ts';
 import type { WorkItem } from './ledger.ts';
+import { isPaused } from './ledger.ts';
 import { executionPrompt, OWNER_CHANGE_WORKFLOW, planningPrompt } from './plan-work.ts';
 import { ensurePlanWorktree, syncPlanWorktree } from './plan-worktrees.ts';
 import { rememberSession, itemSessionHistory } from './session-history.ts';
@@ -124,7 +126,13 @@ function openingItemBinding(item: WorkItem) {
 async function claim(runtime: Runtime, item: WorkItem, kind: SessionKind, origin: ChatOrigin) {
   try {
     return await runtime.ledger.update(item.id, current => {
-      if (!kind.isNeeded(current) || JSON.stringify(current) !== JSON.stringify(item)) throw new Error('owner_session_already_open');
+      const comparable = isPaused(current) && current.pauses.at(-1)?.resumeStatus === item.status
+        ? { ...current, status: item.status, reason: item.reason, humanNotes: item.humanNotes,
+          pauses: item.pauses, updatedAt: item.updatedAt }
+        : current;
+      if (!kind.isNeeded(comparable) || JSON.stringify(comparable) !== JSON.stringify(item)) {
+        throw new Error('owner_session_already_open');
+      }
       return { ...current, ...kind.recorded(origin, current.owner) };
     });
   } catch (error) {
@@ -143,11 +151,18 @@ export async function sessionOpeningPhase<T>(context: MaintenanceContext | undef
 
 /** Save identity even when a delayed create response arrives after maintenance has stopped. */
 export async function createOpeningSession(store: SessionOpeningStore, reservation: SessionOpening,
-  client: OwnerSessionClient, directory: string, title: string, permission: readonly PermissionRule[], context?: MaintenanceContext) {
+  client: OwnerSessionClient, directory: string, title: string, permission: readonly PermissionRule[],
+  context?: MaintenanceContext, beforeCreate?: () => Promise<void>) {
   context?.check();
   await store.advance(reservation, 'creating', { directory });
   return sessionOpeningPhase(context, 'session-create', async () => {
     context?.check();
+    try {
+      await beforeCreate?.();
+    } catch (error) {
+      await store.stoppedBeforeCreate(reservation);
+      throw error;
+    }
     const origin = { sessionID: await client.create(directory, title, permission), directory };
     await store.advance(reservation, 'created', { origin });
     return origin;
@@ -155,11 +170,18 @@ export async function createOpeningSession(store: SessionOpeningStore, reservati
 }
 
 export async function promptOpeningSession(store: SessionOpeningStore, reservation: SessionOpening,
-  client: OwnerSessionClient, origin: ChatOrigin, agent: string, text: string, context?: MaintenanceContext) {
+  client: OwnerSessionClient, origin: ChatOrigin, agent: string, text: string,
+  context?: MaintenanceContext, beforePrompt?: () => Promise<void>) {
   context?.check();
   await store.advance(reservation, 'prompting');
   await sessionOpeningPhase(context, 'session-prompt', async () => {
     context?.check();
+    try {
+      await beforePrompt?.();
+    } catch (error) {
+      await store.stoppedBeforePrompt(reservation);
+      throw error;
+    }
     await client.prompt(origin, agent, text, reservation.messageID);
     await store.advance(reservation, 'opened');
   });
@@ -175,6 +197,7 @@ export async function openOwnerSession(runtime: Runtime, client: OwnerSessionCli
   const store = new SessionOpeningStore(runtime.stateDirectory);
   const reservation = await store.reserve({ entity: 'owner-item', id: item.id, owner: item.owner, kind: kindName });
   if (!reservation) return undefined;
+  let createdOrigin: ChatOrigin | undefined;
   try {
     const kind: SessionKind = OWNER_SESSIONS[kindName];
     const current = await runtime.ledger.get(itemId);
@@ -185,21 +208,36 @@ export async function openOwnerSession(runtime: Runtime, client: OwnerSessionCli
     const afterPlace = await runtime.ledger.get(itemId);
     context?.check();
     if (openingItemBinding(afterPlace) !== openingItemBinding(current)) throw new Error('owner_session_item_changed');
-    const origin = await createOpeningSession(store, reservation, client, directory, kind.title(current), kind.permission, context);
+    const origin = await createOpeningSession(store, reservation, client, directory, kind.title(current), kind.permission,
+      context, () => requireOpeningItem(runtime, afterPlace));
+    createdOrigin = origin;
     const claimed = await claim(runtime, afterPlace, kind, origin);
     context?.check();
     if (!claimed) throw new Error('owner_session_item_changed');
     for (const session of itemSessionHistory(claimed)) {
       await rememberSession(runtime, session).catch(() => console.warn('owner_session_history_not_recorded', item.id, session.id));
     }
-    await promptOpeningSession(store, reservation, client, origin, persona.name, `${kind.prompt(claimed)}${note}`, context);
+    if (isPaused(await runtime.ledger.get(itemId))) throw new Error('work_item_paused');
+    await promptOpeningSession(store, reservation, client, origin, persona.name, `${kind.prompt(claimed)}${note}`,
+      context, async () => {
+        if (isPaused(await runtime.ledger.get(itemId))) throw new Error('work_item_paused');
+      });
     context?.check();
     await runtime.notebook(item.owner).journal({ kind: 'owner-session-opened', workItem: item.id, outcome: kindName, session: origin.sessionID });
     return origin;
   } catch (error) {
+    if (createdOrigin && (await store.read(reservation.key))?.phase === 'created') {
+      await store.stoppedBeforePrompt(reservation);
+    }
     await store.failed(reservation);
     throw error;
   }
+}
+
+async function requireOpeningItem(runtime: Runtime, expected: WorkItem) {
+  const current = await runtime.ledger.get(expected.id);
+  if (isPaused(current)) throw new Error('work_item_paused');
+  if (JSON.stringify(current) !== JSON.stringify(expected)) throw new Error('owner_session_item_changed');
 }
 
 /** Every eligible item is considered once per pass; uncertain reservations remain inspectable and fenced. */
@@ -238,11 +276,17 @@ export function ownerSessionClient(client: Parameters<Plugin>[0]['client']): Own
       if (statuses.error) throw new Error('owner_session_status_failed');
       const isGone = session.response?.status === 404;
       if (session.error && !isGone) throw new Error('owner_session_read_failed');
-      const state = statuses.data?.[target.sessionID]?.type ?? 'idle';
-      return { isBusy: IS_WORKING[state], updatedAt: session.data?.time.updated };
+      return { isBusy: directoryHasBusySession(statuses.data), updatedAt: session.data?.time.updated };
     },
   };
 }
 
 /** opencode lists only sessions that are not idle; a retrying session is still working. */
 const IS_WORKING: Record<'idle' | 'busy' | 'retry', boolean> = { idle: false, busy: true, retry: true };
+const DirectoryStatus = z.record(z.string(), z.object({ type: z.enum(['idle', 'busy', 'retry']) }));
+
+function directoryHasBusySession(statuses: unknown) {
+  const parsed = DirectoryStatus.safeParse(statuses);
+  if (!parsed.success) throw new Error('owner_session_status_invalid');
+  return Object.values(parsed.data).some(status => IS_WORKING[status.type]);
+}

@@ -31,6 +31,7 @@ import { ensureDesk } from './workspace.ts';
 import { openWiki } from './wiki.ts';
 import { migrateNav } from './wiki-migrate.ts';
 import { advance, approvePlan, resumeItem, retryItem, cancelItem, revisePlan } from './work-recovery.ts';
+import { humanWorkActor, pauseItem } from './work-pause.ts';
 import { beginAdmission } from './deployment-admission.ts';
 
 const run = promisify(execFile);
@@ -67,6 +68,10 @@ function detail(item: WorkItem) {
   if (item.humanNotes.length) out.push('', 'Notes from people:', ...item.humanNotes.map(note => `  ${note.kind} by ${note.by}: ${note.note}`));
   if (item.planDocument) out.push('', `Plan (${item.planDocument.digest}):`, item.planDocument.markdown);
   if (item.planApproval) out.push(`Plan approved by ${item.planApproval.by} at ${item.planApproval.at}`);
+  for (const pause of item.pauses) {
+    out.push(`Paused by ${pause.by} at ${pause.at}: ${pause.reason}; continue from ${pause.resumeStatus}`);
+    if (pause.resumedAt) out.push(`Resumed by ${pause.resumedBy} at ${pause.resumedAt}`);
+  }
   if (item.session) out.push(`Working in session ${item.session.sessionID}`);
   if (item.planWorktree) out.push(`Plan worktree: ${item.planWorktree}`);
   item.implementations.forEach((implementation, index) => {
@@ -198,9 +203,12 @@ const COMMANDS: Record<string, Command> = {
     console.log(`${notebook.directory}\n${stdout}`);
   },
   async resume(runtime, [itemId]) {
-    const item = await resumeItem(runtime, required(itemId, 'work item'), userInfo().username, options.note);
+    const item = await resumeItem(runtime, required(itemId, 'work item'), humanWorkActor(), options.note);
     console.log(line(item));
     await continueIfFree(runtime, item);
+  },
+  async pause(runtime, [itemId]) {
+    console.log(line(await pauseItem(runtime, required(itemId, 'work item'), humanWorkActor(), required(options.reason, '--reason'))));
   },
   async retry(runtime, [itemId]) {
     const item = await retryItem(runtime, required(itemId, 'work item'), userInfo().username, options.note);
@@ -367,7 +375,7 @@ if (!command && !['init', 'continuity-preview'].includes(commandName ?? '')) {
 /** Commands that only read, or only record a person's decision, never take the runtime lock. */
 const LOCK_FREE = [
   'distill', 'items', 'show', 'notebook', 'requests', 'approve', 'revise-plan',
-  'resume', 'retry', 'cancel', 'desk', 'desk-state', 'retract', 'ask', 'request-publish', 'propose',
+  'pause', 'resume', 'retry', 'cancel', 'desk', 'desk-state', 'retract', 'ask', 'request-publish', 'propose',
   'ship', 'approve-push', 'approve-create', 'approve-delete', 'deny-request',
   'desk-review-reset', 'initiatives', 'initiative', 'approve-initiative', 'revise-initiative', 'cancel-initiative',
   'wiki', 'friction-investigation', 'friction-promote', 'friction-promotion-retry',

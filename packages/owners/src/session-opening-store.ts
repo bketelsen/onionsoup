@@ -11,9 +11,13 @@ export const SessionOpeningKey = z.object({ entity: z.enum(['owner-item', 'remin
   owner: z.string().min(1), kind: z.enum(['planning', 'execution', 'reminder', 'continuation']) });
 export type SessionOpeningKey = z.infer<typeof SessionOpeningKey>;
 const Phase = z.enum(['reserved', 'creating', 'created', 'prompting', 'opened', 'blocked', 'uncertain']);
+const Disposition = z.enum(['not-created', 'not-prompted']);
 export const SessionOpening = z.object({ version: z.literal(1), key: SessionOpeningKey, token: z.uuid(),
   messageID: z.string().min(1), phase: Phase, directory: z.string().optional(), origin: ChatOrigin.optional(),
-  reason: z.string().optional(), history: z.array(z.object({ phase: Phase, at: z.iso.datetime(), token: z.uuid() })) });
+  disposition: Disposition.optional(),
+  reason: z.string().optional(), history: z.array(z.object({
+    phase: Phase, at: z.iso.datetime(), token: z.uuid(), disposition: Disposition.optional(),
+  })) });
 export type SessionOpening = z.infer<typeof SessionOpening>;
 
 /** One durable opening per work-item phase or reminder. Unknown effects never become permission to retry. */
@@ -52,7 +56,9 @@ export class SessionOpeningStore {
     return withRecordLock(`${this.path(key)}.lock`, async () => {
       const previous = await this.read(key);
       if (previous && (previous.phase !== 'blocked'
-        || previous.history.some(entry => ['creating', 'created', 'prompting', 'opened', 'uncertain'].includes(entry.phase)))) return undefined;
+        || (previous.disposition !== 'not-created'
+          && previous.history.some(entry => entry.token === previous.token
+            && ['creating', 'created', 'prompting', 'opened', 'uncertain'].includes(entry.phase))))) return undefined;
       const token = randomUUID();
       const record: SessionOpening = { version: 1, key, token, messageID: nextMessageId([]), phase: 'reserved',
         history: [...(previous?.history ?? []), { phase: 'reserved', at: new Date().toISOString(), token }] };
@@ -68,15 +74,39 @@ export class SessionOpeningStore {
       // A late receipt is retained without reviving a cancelled caller's uncertain opening.
       if (['uncertain', 'blocked'].includes(current.phase) && phase !== 'opened') return;
       current.phase = phase;
+      current.disposition = undefined;
       current.history.push({ phase, at: new Date().toISOString(), token: current.token });
+    });
+  }
+  /** Host-local proof only: the admission fence refused before invoking the create transport. */
+  async stoppedBeforeCreate(reservation: SessionOpening) {
+    return this.mutate(reservation, current => {
+      if (current.phase !== 'creating' || current.origin) throw new Error('session_opening_create_already_admitted');
+      current.phase = 'blocked';
+      current.disposition = 'not-created';
+      current.reason = 'session_opening_stopped_before_create';
+      current.history.push({ phase: 'blocked', at: new Date().toISOString(), token: current.token, disposition: current.disposition });
+    });
+  }
+  /** Retain the positively created identity without claiming that an attempted prompt was rejected. */
+  async stoppedBeforePrompt(reservation: SessionOpening) {
+    return this.mutate(reservation, current => {
+      if (!current.origin || !['created', 'prompting'].includes(current.phase)) {
+        throw new Error('session_opening_prompt_disposition_unknown');
+      }
+      current.phase = 'blocked';
+      current.disposition = 'not-prompted';
+      current.reason = 'session_opening_stopped_before_prompt';
+      current.history.push({ phase: 'blocked', at: new Date().toISOString(), token: current.token, disposition: current.disposition });
     });
   }
   async failed(reservation: SessionOpening) {
     return this.mutate(reservation, current => {
-      if (current.phase === 'opened') return;
+      if (['opened', 'blocked'].includes(current.phase)) return;
       current.phase = ['creating', 'created', 'prompting', 'uncertain'].includes(current.phase) ? 'uncertain' : 'blocked';
+      current.disposition = current.phase === 'blocked' ? 'not-created' : undefined;
       current.reason = current.phase === 'uncertain' ? 'session_opening_effect_uncertain' : 'session_opening_stopped_before_create';
-      current.history.push({ phase: current.phase, at: new Date().toISOString(), token: current.token });
+      current.history.push({ phase: current.phase, at: new Date().toISOString(), token: current.token, disposition: current.disposition });
     });
   }
   private async mutate(reservation: SessionOpening, action: (record: SessionOpening) => void) {

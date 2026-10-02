@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { pendingNotices, queueNotice, readNotice } from '../src/notices.ts';
 import { Runtime } from '../src/runtime.ts';
 import { messageFixture } from './owner-message-fixture.ts';
+import { humanWorkActor, pauseItem, resumeItem, settleItemPause } from '@onionsoup/owners';
 
 async function fixture() {
   const context = await messageFixture();
@@ -100,4 +101,47 @@ test('an uncertain notice does not block unrelated actionable work', async () =>
   await context.deliver();
   assert.equal(context.sends.length, 2);
   assert.equal((await context.receipts()).filter(receipt => receipt.status === 'sent').length, 1);
+});
+
+test('addressed notices cannot wake paused work and resume releases the same queued notice without replacing the plan', async () => {
+  const context = await fixture();
+  const origin = await context.addSession('homelab', 'paused-work');
+  const item = await context.runtime.ledger.create('homelab', 'owner-change', {
+    title: 'Original', goal: 'Original goal', rationale: 'r', acceptance: ['a'], size: 'small',
+  }, { status: 'working', session: origin });
+  await queueNotice(context.runtime, {
+    id: 'paused-ruling', owner: 'homelab', workItem: item.id, change: 'owner-message',
+    text: 'Here is more context, not authority to resume.', origin, at: new Date().toISOString(),
+  });
+  await pauseItem(context.runtime, item.id, humanWorkActor(), 'Human stop');
+  await settleItemPause(context.runtime, item.id, { stop: async () => true });
+  await assert.rejects(context.deliver(), /work_item_paused/);
+  assert.equal((await context.runtime.ledger.get(item.id)).status, 'paused');
+  assert.equal(context.sends.some(send => send.path.id === origin.sessionID), false);
+  assert.ok((await pendingNotices(context.runtime)).some(notice => notice.id === 'paused-ruling'));
+  await resumeItem(context.runtime, item.id, humanWorkActor());
+  await context.deliver();
+  assert.equal((await context.runtime.ledger.get(item.id)).status, 'working');
+  assert.equal(context.sends.filter(send => send.path.id === origin.sessionID).length, 2);
+  assert.equal(context.creates(), 0);
+});
+
+test('pause does not rewrite an already uncertain work notice receipt or replay the attempted send', async () => {
+  const context = await fixture();
+  context.setMode('unconfirmed');
+  await context.deliver();
+  const before = (await context.receipts())[0];
+  const notice = await readNotice(context.runtime, 'fixture-notice');
+  const item = await context.runtime.ledger.create('homelab', 'owner-change', {
+    title: 'Original', goal: 'Original goal', rationale: 'r', acceptance: ['a'], size: 'small',
+  }, { status: 'working', session: notice!.origin });
+  await pauseItem(context.runtime, item.id, humanWorkActor(), 'Stop after uncertain message');
+  await settleItemPause(context.runtime, item.id, { stop: async () => true });
+  await context.deliver();
+  const after = (await context.receipts())[0];
+  assert.equal(after.status, 'uncertain');
+  assert.equal(after.messageID, before.messageID);
+  assert.equal(after.text, before.text);
+  assert.equal(after.agent, before.agent);
+  assert.equal(context.sends.length, 1);
 });

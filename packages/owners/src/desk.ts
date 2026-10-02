@@ -140,6 +140,11 @@ export function itemText(item: WorkItem) {
   if (item.plan) lines.push(`Plan: ${item.plan.summary}`, ...item.plan.steps.map((step, index) => `  ${index + 1}. ${step.description}`));
   if (item.planDocument) lines.push(`Plan (${item.planDocument.digest}):`, item.planDocument.markdown);
   if (item.planApproval) lines.push(`Plan approved by ${item.planApproval.by} at ${item.planApproval.at}`);
+  for (const pause of item.pauses) {
+    lines.push(`Intentional pause by ${pause.by} at ${pause.at}: ${pause.reason}; continue from ${pause.resumeStatus}`,
+      pause.stoppedAt ? `Stop confirmed at ${pause.stoppedAt}` : 'Stop not yet confirmed; claims remain held');
+    if (pause.resumedAt) lines.push(`Resumed by ${pause.resumedBy} at ${pause.resumedAt} (${pause.resumedAuthority})`);
+  }
   if (item.session) lines.push(`Working in session ${item.session.sessionID}`);
   if (item.requestAcceptance) {
     const receipt = item.requestAcceptance;
@@ -159,6 +164,7 @@ const ASSIGNMENT_WORDS: Partial<Record<AssignmentState, string>> = {
   'awaiting-merge': 'PR open; waiting on the person to merge it',
   'awaiting-person': 'waiting on the person',
   blocked: 'interrupted; waiting on the person',
+  paused: 'intentionally paused; explicit resume required',
 };
 
 function assignmentLine(assignment: AssignmentView) {

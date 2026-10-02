@@ -540,9 +540,25 @@ What host code still advances is a lookup table in `packages/owners/src/work-rec
 (`owner-change`, `desk-publication`, `rebase`) names its `advance` step and when it is runnable, and `FIRST_STEP` says
 where stopped work continues. A new kind of host-run work adds an entry there; the dispatcher does not change. It
 should record `resumeStatus` before claiming an active stage and clear `activeRunner` when it finishes. Person
-decisions use `approvePlan`, `revisePlan`, `resumeItem`, `retryItem` and `cancelItem`; cancellation of active work is
+decisions use `approvePlan`, `revisePlan`, `pauseItem`, `resumeItem`, `retryItem` and `cancelItem`; cancellation of active work is
 refused. Desk publication (also used by approved plans and CI repairs) keeps its persisted stage to reconcile
 retries against the local commit and existing GitHub PR before repeating effects.
+
+Use `owners pause <item> --reason "Intentional stop"` for a deliberate stop, not crash recovery.
+The surface's Pause control and Stop in a linked work conversation use the same host action. The receipt
+first records `pausing`; the upgraded plugin confirms the execution tree stopped before `paused`.
+Only exact host-recorded work sessions are stopped; a shared submitting desk conversation stays usable.
+With no execution session, the item pauses without aborting that conversation.
+Do not erase an active runner or uncertain SDK admission to force that transition. Read the item and its
+latest pause receipt before treating it as settled. `owners resume <item> --note "Continue unchanged work"`
+or the surface's Resume control restores the exact saved stage and approved goal. This is an explicit human
+action, not an automatic restart or a new plan approval. A direct manager's `onionsoup_steer` resume needs
+its existing applicable `approve-plans` grant and assigned scope.
+
+Persona owners with a declared `maintain-prs` duty can call `onionsoup_update_prs` without repository or head
+arguments. The same periodic selector covers `BEHIND` and conflicting PRs. Clean base updates retain the old
+published head as an ancestor, run configured host checks and use an exact-head protected push.
+Conflicts still use owner resolution, independent review and the existing destructive rewrite gate.
 
 ## Delegation, attention and recovery
 
@@ -576,6 +592,21 @@ review requirements. For a historical merged-PR fact without accepted completion
 `owners observe-merged-pr <owner> <item> <url>`. It preserves current review findings as
 follow-up and leaves the request open; it does not run another review or dispatch work.
 None of these operations establishes deployment.
+
+For an approved delegated infrastructure/E2E task with no repository publication, use
+`onionsoup_complete_work { item: "<original-item>", action: "complete" }` from its execution session or
+host-proven original-work continuation. The tool selects only the original work, not arbitrary resource IDs.
+It runs configured sandbox checks, observes supported resource postconditions and hires one final independent-family
+reviewer against the original goal. A durable checkpoint repairs completion and requester notification after a
+crash without another review or a fake PR. Ordinary create/delete approval remains mandatory.
+
+If legacy evidence is missing, use `action: "reverify"` to queue the owner in that same work context.
+Actual resource records need the original host origin, creation checkpoint, accepted decision, exact managed
+request identity, effect approvals, required successful host follow-up and positively observed deletion.
+Owner reports do not replace them, and re-verification never blindly creates a new VM. The normal
+`onionsoup_request_instance` and `onionsoup_release_instance` tools retain their create/delete gates.
+Intentional pause must be explicitly resumed before completion or re-verification; unchanged approved work
+does not need the repository closure-candidate/human-acceptance ritual below.
 
 For a historically merged request whose outstanding findings were fixed by later merged PRs,
 the person can prepare and explicitly accept closure:

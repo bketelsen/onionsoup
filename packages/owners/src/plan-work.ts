@@ -126,6 +126,10 @@ for each and your reviewer subagent after each. Make the rulings the plan leaves
 onionsoup_record_fact or onionsoup_record_decision; stop for the person only for what only they can decide. When every
 task is done and verified, end with onionsoup_propose_changes with item "${item.id}"${repositoryLine(item)}: host code
 verifies, has another model family review the whole diff, and opens the PR.`,
+    `For operational work with no repository changes, finish instead with onionsoup_complete_work item "${item.id}".
+Host code verifies configured checks and exact gated resource postconditions, then asks one independent-family reviewer
+to assess the ORIGINAL goal and evidence. Never manufacture a PR or create resources just to close a record.
+Use onionsoup_request_instance and onionsoup_release_instance for resource effects; existing create/delete gates remain.`,
     conditions && `<conditions-of-approval>\n${conditions}\n</conditions-of-approval>`,
     `<approved-plan>\n${item.planDocument?.markdown ?? item.proposal.goal}\n</approved-plan>`,
   ].filter(Boolean).join('\n\n');

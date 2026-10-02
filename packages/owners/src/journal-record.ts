@@ -6,6 +6,10 @@ export const AttentionProvenance = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('suggestion'), duty: z.string(), proposal: ProposedWork.optional() }),
   z.object({ kind: z.literal('plan-worktree'), workItem: z.string(), path: z.string(), generation: z.string().optional() }),
   z.object({ kind: z.literal('delegation'), request: z.string(), workItem: z.string().optional() }),
+  z.object({
+    kind: z.literal('request-operation'), request: z.string(),
+    operation: z.literal('update-app'), phase: z.literal('execution'),
+  }),
   z.object({ kind: z.literal('escalation'), initiative: z.string(), escalation: z.string() }),
   z.object({ kind: z.literal('maintenance'), code: z.string().min(1), workItem: z.string().optional() }),
   z.object({ kind: z.literal('human-decision'), code: z.string().min(1), workItem: z.string().optional() }),

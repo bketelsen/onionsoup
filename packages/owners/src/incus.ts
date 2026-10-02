@@ -130,7 +130,10 @@ export class ManagedInstances {
   constructor(readonly directory: string) {}
 
   async list(ownerId: string) {
-    const text = await readFile(this.path(ownerId), 'utf8').catch(() => '[]');
+    const text = await readFile(this.path(ownerId), 'utf8').catch(error => {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return '[]';
+      throw error;
+    });
     return z.array(ManagedInstance).parse(JSON.parse(text));
   }
 
@@ -185,10 +188,18 @@ export async function createInstance(client: IncusClient, owner: IncusOwner, man
 }
 
 /** Host code only, after a person approved it; refuses anything onionsoup did not create. */
-export async function deleteInstance(client: IncusClient, owner: IncusOwner, managed: ManagedInstances, remote: string, name: string) {
+export async function deleteInstance(client: IncusClient, owner: IncusOwner, managed: ManagedInstances, remote: string, name: string,
+  request?: { id: string; from: string }) {
   requirePermission(owner, remote, 'delete');
-  const isManaged = (await managed.list(owner.id)).some(entry => entry.remote === remote && entry.name === name);
+  const entry = (await managed.list(owner.id)).find(candidate => candidate.remote === remote && candidate.name === name);
+  const isManaged = Boolean(entry);
   if (!isManaged || !name.startsWith(owner.domain.namePrefix)) throw new Error(`not_managed_by_onionsoup: ${remote}:${name}`);
+  if (request) {
+    if (entry?.requestId !== request.id || entry.requestedBy !== request.from) throw new Error('instance_request_identity_mismatch');
+    const instances = z.array(RawInstance).parse(JSON.parse(await client.run(['list', `${remote}:`, '--format', 'json'])));
+    const observed = instances.find(instance => instance.name === name);
+    if (!observed || observed.config?.['user.onionsoup.request'] !== request.id) throw new Error('instance_request_identity_unverified');
+  }
   await client.run(['delete', '--force', `${remote}:${name}`], INCUS_LIMITS.launchTimeoutMs);
   await managed.remove(owner.id, remote, name);
 }
@@ -205,8 +216,13 @@ export async function reconcileInstance(client: IncusClient, owner: IncusOwner, 
 }
 
 export async function reconcileDeletion(client: IncusClient, owner: IncusOwner, managed: ManagedInstances,
-  instance: { remote: string; name: string }) {
-  const instances = z.array(RawInstance).parse(JSON.parse(await client.run(['list', `${instance.remote}:`, '--format', 'json'])));
+  instance: { remote: string; name: string }, request?: { id: string; from: string }) {
+  requirePermission(owner, instance.remote, 'observe');
+  const known = (await managed.list(owner.id)).find(entry => entry.remote === instance.remote && entry.name === instance.name);
+  if (request && known && (known.requestId !== request.id || known.requestedBy !== request.from)) {
+    throw new Error('instance_request_identity_mismatch');
+  }
+  const instances = z.array(RawInstance).parse(JSON.parse(await client.run(['list', `${instance.remote}:`, '--all-projects', '--format', 'json'])));
   if (instances.some(candidate => candidate.name === instance.name)) return false;
   await managed.remove(owner.id, instance.remote, instance.name);
   return true;

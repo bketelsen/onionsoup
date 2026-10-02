@@ -1,9 +1,10 @@
 import { execFile } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { promisify } from 'node:util';
 import { z } from 'zod';
 import { canChange } from './declarations.ts';
 import { reviewExternalPublication } from './desk-changes.ts';
-import { ExternalPrObservation, type WorkItem } from './ledger.ts';
+import { ExternalPrObservation, requireRunnerClaim, type WorkItem } from './ledger.ts';
 import { OWNER_CHANGE_WORKFLOW } from './plan-work.ts';
 import type { Runtime } from './runtime.ts';
 import { readRequestWorkEvidence } from './request-work-evidence.ts';
@@ -111,11 +112,12 @@ async function recordPublication(runtime: Runtime, item: WorkItem, remote: Exter
   await requireRequest(runtime, item);
   const observedAt = new Date().toISOString();
   return runtime.ledger.update(item.id, current => {
-    if (current.activeRunner !== process.pid || current.status !== 'working'
+    requireRunnerClaim(current, item);
+    if (current.status !== 'working'
       || JSON.stringify(current.planApproval) !== JSON.stringify(item.planApproval)
       || JSON.stringify(current.proposal) !== JSON.stringify(item.proposal)
       || JSON.stringify(current.planDocument) !== JSON.stringify(item.planDocument)) throw new Error('external_pr_item_changed');
-    return { ...current, status: 'landed', activeRunner: undefined, reason: undefined,
+    return { ...current, status: 'landed', activeRunner: undefined, runnerClaim: undefined, reason: undefined,
       branch: remote.head.ref, landedCommit: remote.head.sha,
       publication: { url: remote.html_url, branch: remote.head.ref, by, at: observedAt, state: remote.merged ? 'merged' : 'open' },
       externalPublication: {
@@ -154,12 +156,14 @@ export async function reconcileExternalPublication(runtime: Runtime, ownerId: st
   await requireConfiguredBase(runtime, initial, initial.planWorktree!, remote);
   const claimed = await runtime.ledger.update(itemId, current => {
     requireApprovedWork(current, ownerId);
-    return { ...current, activeRunner: process.pid };
+    return { ...current, activeRunner: process.pid, runnerClaim: randomUUID() };
   });
   try {
     return await recordPublication(runtime, claimed, remote, by);
   } finally {
-    await runtime.ledger.update(itemId, current => current.activeRunner === process.pid ? { ...current, activeRunner: undefined } : current);
+    await runtime.ledger.update(itemId, current =>
+      current.activeRunner === claimed.activeRunner && current.runnerClaim === claimed.runnerClaim
+        ? { ...current, activeRunner: undefined, runnerClaim: undefined } : current);
   }
 }
 

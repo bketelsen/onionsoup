@@ -9,6 +9,8 @@ export { wake } from './owner.ts';
 export { distill, requestDistill, memoryStatus, memoryFingerprint } from './memory.ts';
 export { MemoryPolicy, MemoryState, type MemoryStatus } from './memory-config.ts';
 export { advance, approvePlan, revisePlan, resumeItem, retryItem, cancelItem, retirePipelineItems } from './work-recovery.ts';
+export { pauseItem, settleItemPause, humanWorkActor, pausedSessionItem, type WorkPauseClient } from './work-pause.ts';
+export { workPauseClient, type WorkPauseTransport } from './work-pause-client.ts';
 export { isDelegated, OWNER_CHANGE_WORKFLOW, PLAN_APPROVAL_PERMISSION } from './plan-work.ts';
 export { approvePush } from './rebase.ts';
 export { approveCreate, approveDelete, denyRequest } from './brokering.ts';
@@ -23,6 +25,8 @@ export { listAttention, changeAttention, type Attention } from './attention.ts';
 export { needsHumanDecision } from './attention-routing.ts';
 export { AttentionProvenance } from './journal-record.ts';
 export { requestWork } from './delegation.ts';
+export { completeOperationalWork, reverifyOperationalWork, reconcileOperationalWork, releaseOperationalInstance } from './operational-work.ts';
+export { requestProgressDetail } from './request-status.ts';
 export { AssignmentRef, AssignmentState, Assignment, Initiative, InitiativeDraft, InitiativeStatus, INITIATIVE_LIMITS } from './initiatives.ts';
 export {
   draftInitiative, submitInitiative, approveInitiative, reviseInitiative, cancelInitiative, initiativeView, initiativeViews,
@@ -62,6 +66,8 @@ export { OwnerMessageInput, OwnerReplyInput, sendOwnerMessage, replyToOwnerMessa
 export { ownerChatAgent } from './owner-chat.ts';
 
 export { SessionHistory, rememberSession, rememberedSession, sessionHistory, itemSessionHistory } from './session-history.ts';
+export { isRetiredSession, workSessionDirectories } from './session-directories.ts';
+export { PlanWorktreeArchive } from './plan-worktree-archive.ts';
 
 export { readChildAbandonment, listChildAbandonments, abandonedChildMessages, ChildAbandonment } from './child-recovery.ts';
 

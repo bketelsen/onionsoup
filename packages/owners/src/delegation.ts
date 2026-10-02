@@ -1,19 +1,25 @@
 import { createHash } from 'node:crypto';
 import type { ChatOrigin } from './chat-origin.ts';
+import type { AttentionProvenance } from './journal-record.ts';
 import { ProposedWork } from './artifacts.ts';
 import { canChange, isDirectReport } from './declarations.ts';
 import { completeAcceptedRequest } from './request-closure-completion.ts';
+import { queueOperationalReverification, reconcileOperationalWork } from './operational-work.ts';
 import { OWNER_CHANGE_WORKFLOW } from './plan-work.ts';
 import type { AssignmentRef } from './initiatives.ts';
 import { PublishDecision, requireStatus, type ResourceRequest, type WorkAsk, type OperatorAssignmentSource } from './requests.ts';
 import type { Runtime } from './runtime.ts';
+import { isPaused } from './ledger.ts';
 
-export async function journalRequest(runtime: Runtime, request: ResourceRequest, kind: string, note: string) {
+export async function journalRequest(
+  runtime: Runtime, request: ResourceRequest, kind: string, note: string, provenance?: AttentionProvenance,
+) {
+  if (kind === 'attention' && !provenance) throw new Error('request_attention_provenance_required');
   for (const ownerId of new Set([request.from, request.to])) {
     const notebook = runtime.notebook(ownerId);
     await notebook.journal({
       kind, note: `${request.id} (${request.from} → ${request.to}): ${note}`,
-      provenance: kind === 'attention' ? { kind: 'delegation', request: request.id, workItem: request.workItem } : undefined,
+      provenance,
     });
     await notebook.commit(`journal ${request.id}`);
   }
@@ -78,14 +84,16 @@ export async function decideWork(runtime: Runtime, request: ResourceRequest) {
   if (request.ask.kind !== 'work') throw new Error('not_a_work_request');
   const workItem = `w-request-${request.id}`;
   const existing = (await runtime.ledger.list()).find(item => item.id === workItem);
-  if (existing) return runtime.requests.save({ ...request, status: 'work-running', workItem });
+  if (existing) return runtime.requests.save({ ...request, status: isPaused(existing) ? 'work-paused' : 'work-running', workItem });
   const owner = runtime.owner(request.to);
   await runtime.notebook(owner.id).ensure(await runtime.text(`charters/${owner.id}.md`));
   const relation = isDirectReport(runtime.declarations, request.from, request.to) ? 'manager' : 'peer';
   const decision = await ACCEPTANCE[relation](runtime, request, request.ask);
   if (decision.decision === 'decline') {
     const declined = await runtime.requests.save({ ...request, status: 'declined', publishDecision: decision, reason: decision.reply });
-    await journalRequest(runtime, declined, 'attention', `delegation declined: ${decision.reply}; the person can resolve or redirect it`);
+    await journalRequest(runtime, declined, 'attention',
+      `delegation declined: ${decision.reply}; the person can resolve or redirect it`,
+      { kind: 'delegation', request: declined.id, workItem: declined.workItem });
     return declined;
   }
   if (!canChange(owner)) throw new Error(`owner_cannot_change: ${owner.id} does not change its repository itself`);
@@ -103,6 +111,23 @@ export async function decideWork(runtime: Runtime, request: ResourceRequest) {
 export async function trackDelegatedWork(runtime: Runtime, request: ResourceRequest) {
   if (!request.workItem) throw new Error('delegation_work_item_missing');
   const item = await runtime.ledger.get(request.workItem);
+  if (isPaused(item)) {
+    return request.status === 'work-paused' ? request
+      : runtime.requests.update(request.id, current =>
+        current.workItem !== item.id || !['work-running', 'work-paused'].includes(current.status) ? current
+          : { ...current, status: 'work-paused', reason: item.reason });
+  }
+  if (request.status === 'work-paused') {
+    request = await runtime.requests.update(request.id, current => current.status !== 'work-paused' ? current
+      : { ...current, status: 'work-running', reason: undefined });
+  }
+  const operational = await reconcileOperationalWork(runtime, request, item);
+  if (operational) return operational;
+  if (item.status === 'landed' && !item.publication && !item.rebaseOf
+    && !item.requestAcceptance && !item.externalPrObservations?.length && !item.deskPublication) {
+    await queueOperationalReverification(runtime, request, item, 'legacy_operational_host_evidence_missing');
+    return request;
+  }
   if (item.requestAcceptance) return completeAcceptedRequest(runtime, item.id);
   const failed = new Set(['failed', 'rejected', 'cancelled']).has(item.status) || item.publication?.state === 'closed';
   const completed = item.publication?.state === 'merged' || (item.status === 'landed' && Boolean(item.rebaseOf));
@@ -110,6 +135,7 @@ export async function trackDelegatedWork(runtime: Runtime, request: ResourceRequ
   const status = failed ? 'failed' : 'completed';
   const reason = `${request.workItem}: ${item.publication?.state ?? item.status}${item.reason ? `: ${item.reason}` : ''}`;
   const updated = await runtime.requests.save({ ...request, status, reason });
-  await journalRequest(runtime, updated, failed ? 'attention' : 'request-completed', reason);
+  await journalRequest(runtime, updated, failed ? 'attention' : 'request-completed', reason,
+    failed ? { kind: 'delegation', request: updated.id, workItem: updated.workItem } : undefined);
   return updated;
 }

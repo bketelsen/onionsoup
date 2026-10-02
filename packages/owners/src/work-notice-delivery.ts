@@ -15,6 +15,8 @@ import { ownerTranscriptTarget, routeOwnerNotice } from './owner-message-routing
 import { ownerChatAgent } from './owner-chat.ts';
 import { withRecordLock } from './record-lock.ts';
 import { MessageDeliveryBody, matchesMessageReceipt } from './message-receipt.ts';
+import { isPaused } from './ledger.ts';
+import { pausedSessionItem } from './work-pause.ts';
 
 export const WorkNoticeDelivery = z.object({
   noticeID: z.string(), messageID: z.string(), origin: ChatOrigin, operationID: z.uuid(),
@@ -24,7 +26,7 @@ export const WorkNoticeDelivery = z.object({
 });
 export type WorkNoticeDelivery = z.infer<typeof WorkNoticeDelivery>;
 
-async function receipts(runtime: Runtime) {
+export async function workNoticeDeliveries(runtime: Runtime) {
   const directory = join(runtime.stateDirectory, 'notices', 'delivery');
   const names = await readdir(directory).catch(error => {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
@@ -97,6 +99,11 @@ async function send(runtime: Runtime, client: Parameters<Plugin>[0]['client'], p
   let attempted = false;
   try {
     pass.check();
+    if (await pausedSessionItem(runtime, receipt.origin.sessionID)) throw new Error('work_item_paused');
+    if (receipt.notice?.workItem) {
+      const item = await runtime.ledger.get(receipt.notice.workItem);
+      if (item.owner === receipt.notice.owner && isPaused(item)) throw new Error('work_item_paused');
+    }
     await save(runtime, { ...receipt, status: 'prepared', reason: undefined });
     pass.check();
     attempted = true;
@@ -115,7 +122,7 @@ async function deliverNotice(runtime: Runtime, client: Parameters<Plugin>[0]['cl
   // Queue identity and transport identity are independent locks; queue repair can run during a send.
   await withRecordLock(join(runtime.stateDirectory, 'notices', 'delivery-locks', `${notice.id}.lock`), async () => {
     pass.check();
-    const previous = (await receipts(runtime)).find(receipt => receipt.noticeID === notice.id);
+    const previous = (await workNoticeDeliveries(runtime)).find(receipt => receipt.noticeID === notice.id);
     if (previous?.notice) {
       const { at: _previousAt, ...savedContent } = previous.notice;
       const { at: _nextAt, ...currentContent } = notice;
@@ -131,7 +138,7 @@ async function deliverNotice(runtime: Runtime, client: Parameters<Plugin>[0]['cl
 export async function deliverWorkNotices(runtime: Runtime, client: Parameters<Plugin>[0]['client'], pass: MaintenancePass,
   onError: (id: string, error: unknown) => void = (id, error) => { console.warn('work_notice_delivery_failed', id, error); }) {
   const waiting = new Map((await pendingNotices(runtime)).map(notice => [notice.id, notice]));
-  for (const receipt of await receipts(runtime)) {
+  for (const receipt of await workNoticeDeliveries(runtime)) {
     if (receipt.status === 'sent' || waiting.has(receipt.noticeID)) continue;
     const notice = await readNotice(runtime, receipt.noticeID);
     if (notice) waiting.set(notice.id, notice);

@@ -202,6 +202,23 @@ CLI (`owners approve`) or by a manager stays `working` without a session, and th
 (every `PLUGIN_LIMITS.noticeMs`). The plugin holds the opencode client, so sessions open only while the surface runs;
 `openNeededSessions` in `owner-sessions.ts` retries a failed open on the next pass.
 
+**Intentional pause, not crash interruption.** A human Stop in a linked work conversation or a work item's
+Pause control first records `pausing` and an actor-bound receipt, fencing new dispatch. Host runners keep
+their claims until the admitted effect reaches its real checkpoint. The plugin stops the recorded execution
+tree and positively observes it idle before recording `paused`; unknown openings, children or stopping
+receipts remain `pausing`, never falsely settled. Delegated requests project `work-paused`, and paused work
+does not reserve an otherwise idle owner or reopen through daemon recovery, notices, reminders or peer messages.
+Only an exact host-recorded work session is stopped or fenced, never a shared desk/chat origin. Work without
+an execution session pauses without stopping its submitting conversation. A positively created but
+never-prompted opening retains its identity so a racing pause can settle. Explicit resume delivers its original
+stage workflow prompt through a durable notice; an uncertain introduction is reused, never blindly replayed.
+
+Explicit Resume restores the saved stage and unchanged goal, plan, approval and checkpoints without another
+plan approval. The host records who resumed and why; model prose or an actor name cannot supply authority.
+A configured direct manager may resume assigned work only under its existing applicable `approve-plans` grant.
+Messages remain queued while paused. Work execution sessions and observed children remain read-only until resume, so a
+continuation or a publication tool cannot accidentally restart deliberately stopped work.
+
 **The required review at the end.** `onionsoup_propose_changes` with an approved plan's item (status `working`)
 carries that item through the same host path as any desk change: verification in the sandbox, then a required
 review hired from the `review` freelancer outside the owner's family, then commit (on `owners/<item>`), push, PR,
@@ -211,17 +228,44 @@ round's findings for the person who merges, then folds in the approved plan. Wit
 `desk-publication` item as before. With an item that has a plan worktree, that worktree is what is verified, reviewed
 (against its merge base, with its own review rounds) and committed; the desk and other plans are untouched, and an
 unfinished publication blocks only proposals from the same worktree. Plans approved before plan worktrees existed
-still propose from the desk. The item moves through `landing` to `landed`; completion of delegated work still means
-its PR merged. The worktree outlives the merge: the plan's session often keeps working there after its PR merges
+still propose from the desk. The item moves through `landing` to `landed`; completion of delegated repository work means
+its PR merged (or an exact accepted repository-closure receipt). Operational work uses its own host-observed
+checks and effect postconditions, never a fabricated PR. The worktree outlives the merge: the plan's session often keeps working there after its PR merges
 (a rollout run from the worktree), so neither the finish step, the publication refresh nor a cancellation removes it,
 and the item's session keeps its real directory. A plan is finished once it is `landed` with its PR merged or closed,
 or `cancelled`. The plugin's cleanup pass (`removeIdlePlanWorktrees` in `plan-worktrees.ts`, on the same
 `PLUGIN_LIMITS.noticeMs` pass that opens sessions) looks only at finished items that still have a `planWorktree`,
 asks opencode for the session's status and last update, and removes the worktree and its branch once the session is
 not busy (or retrying) and has not changed for `PLAN_WORKTREE_LIMITS.idleBeforeRemovalHours` (24); an item without
-a session, or whose session is gone, counts from the item's own last update. A worktree with uncommitted changes, or
-commits no remote holds, is never removed: it stays, the item records why (`planWorktreeKept`), and owner
-maintenance is recorded once per reason, not every pass. Each removal is journaled (`plan-worktree-removed`).
+a session, or whose session is gone, counts from the item's own last update. Busy children also retain the
+workspace. Dirty/untracked, ignored content or unreadable work stays with a concrete `planWorktreeKept` owner-maintenance reason,
+never an implicit human decision. Clean terminal work uses the same merge-tree/squash containment check as desk
+sync against the configured base, not remote commit reachability or the item's "landed" label. Unique commits,
+including a distinct plan-branch tip, get durable local `refs/onionsoup/archive/plans/...` refs and
+`planWorktreeArchives` history before routine retirement; no intent is discarded. Archives are not automatically
+pushed or pruned. Session metadata is retired only after successful cleanup; a retained workspace remains usable.
+Each removal is journaled (`plan-worktree-removed`), and transcript identities remain history.
+
+**Operational completion without a PR.** `onionsoup_complete_work { item, action: "complete" }` completes an
+approved delegated operational goal from its host-proven execution session or original-work continuation.
+It requires unchanged original request, goal, plan and approval; a clean published source; configured sandbox
+checks; and one final review from a configured different model family against the actual original goal and
+host evidence. Existing resource requests are discovered from exact observed execution lineage, never a
+model-supplied list of resource IDs. Supported Incus effects require retained creation checkpoints, request-tagged
+managed identity, create/delete approvals, any required successful host follow-up and positively observed deletion
+across projects. Completing work does not create resources or bypass effect gates.
+
+The original `ResourceRequest.operation.checkpoint` stores the verified completion receipt before the ledger
+and request projections. Retries repair only those exact projections and queue one requester notification,
+using the fresh correctly owned continuation when its original workspace retired. The work lands without a
+publication and the request completes without the PR-specific human closure ritual. Repository changes,
+dirty/unpublished commits and existing publication evidence still require their normal publication lifecycle.
+Model reports alone, foreign identities, failed checks or unavailable postconditions never establish completion.
+
+`onionsoup_complete_work { item, action: "reverify" }` instead queues concrete owner re-verification in the original
+work context, retaining its goal and authority. Insufficient legacy records remain missing evidence; the owner
+must obtain real original-session resource/check receipts and supported postconditions. No transcript claim,
+fake merged PR, new human attention card or automatic replacement VM supplies that proof.
 
 **Draft publication and external PR recovery.** `onionsoup_propose_changes` accepts `draft: true`
 (`owners propose <owner> --draft --item <item> --note <title>` in the CLI). The saved publication
@@ -287,7 +331,17 @@ owner with a notice in the session or chat the PR came from. `onionsoup_checkout
 the PR's head, and `onionsoup_propose_changes` with that item reviews the fix against the PR head and pushes it with
 `--force-with-lease` onto the same PR, refusing if the head moved; no new PR is opened.
 
-**Rebase maintenance.** A conflicting PR gets a `rebase` work item. A clean replay that passes verification needs no
+**PR update maintenance.** The actual `maintain-prs` selector reads both GitHub mergeability and
+`mergeStateStatus`: `BEHIND` is stale, not merely "mergeable". A behind PR gets a `rebase` work item in
+`update-base` mode. Host code merges the existing published head with the current configured base, runs
+configured verification, and binds the resulting tree. Before publication it rechecks the tree, clean source,
+published-head ancestry and exact remote-head lease. This preserves the published commits and original goal;
+it needs no model hire or new destructive-action approval. A changed head or source refuses publication, and
+a real merge conflict falls back to the existing owner conflict-resolution path.
+An owner can invoke `onionsoup_update_prs` to run its declared `maintain-prs` duty and advance the resulting
+updates now. The tool selects no arbitrary repository or head and grants no new maintenance authority.
+
+A conflicting PR gets a `rebase` work item. A clean replay that passes verification needs no
 model. A conflict hires the owner (sandboxed, with its notebook) to decide whether and how it is resolved; it
 briefs the implementer hired next (the `implementation` freelancer), a reviewer from another family checks the
 resolution, and the force-push waits for the person (`approve-push`). Rebase maintenance preserves the whole PR, including earlier repairs, and skips
@@ -1311,9 +1365,11 @@ available. This does not recover transcripts deleted from OpenCode or never-obse
 fallback depends on the same versioned table layout as the existing hire reader.
 
 Archived conversations cannot receive prompts, renames, aborts or auto-accept changes. Recreating the same path
-does not reactivate a record marked archived by cleanup. Older ledger-only references have no durable archive
-marker: their missing directories are read-only, but path reuse cannot be distinguished from the original workspace. The UI shows the conversation as read-only; **New chat** creates a fresh
-session in the valid owner workspace. Automatic context-linked continuation remains a later improvement.
+does not reactivate a record marked archived by cleanup. Exact ledger-only terminal execution references also
+remain history after their workspace retires; an active runner or retained execution context is not ignored
+merely because its directory is absent. The UI shows archived conversations as read-only; **New chat** creates a fresh
+session in the valid owner workspace. Addressed owner messages already use a host-proven fresh continuation;
+new human chats do not automatically inherit selected historical context.
 Ownership is checked before transcript access; an unknown session ID never falls back to an owner's desk.
 
 Corrupt individual index records are skipped with metadata-only warnings; malformed or conflicting session
@@ -1353,6 +1409,12 @@ resolve. Existing worktrees and unpublished commits remain intact. A stored esca
 A linked request completion, recorded cancellation or cancelled linked work item clears delegation failure cards;
 a similarly worded replacement's success alone proves nothing. Human acknowledgments and original observation
 times are preserved. Cleared entries remain history across restarts; old cards are not deleted or replayed as work.
+
+App-update failures instead carry typed request-operation provenance (`update-app`, execution phase).
+Both participant alerts retire only when that exact update request records host-confirmed `updated` success.
+The exact older host failure envelope can correct formerly misclassified delegation provenance without
+guessing from model prose. Interrupted-effect recovery remains a separate genuine gate; alert retirement
+neither approves a retry nor erases its history.
 
 Assignment completion does not prove unrelated underlying conditions cleared. The explicit fact/decision tools
 construct fixed journal shapes and cannot accept host routing or condition metadata. The index trusts the

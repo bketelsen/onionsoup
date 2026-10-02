@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { RiArrowLeftLine, RiExternalLinkLine, RiPulseLine } from '@remixicon/react';
 import { api, navigate, useEvents } from '../api.ts';
-import type { InboxEntry, WorkItem } from '../types.ts';
+import type { InboxEntry, ItemRequestContext, WorkItem } from '../types.ts';
 import { Decision } from './Decision.tsx';
 import { Drawer, MobileBar } from './Drawer.tsx';
 import { WorkRecovery } from './WorkRecovery.tsx';
@@ -13,11 +13,13 @@ import { Badge, Empty, statusTone, timeAgo } from './ui.tsx';
 export function ItemView({ itemId }: { itemId: string }) {
   const [item, setItem] = useState<WorkItem>();
   const [waiting, setWaiting] = useState<InboxEntry>();
+  const [requestText, setRequestText] = useState<string>();
   const [error, setError] = useState('');
   const [isActivityOpen, setActivityOpen] = useState(false);
-  const load = () => api<{ item: WorkItem; waiting?: InboxEntry }>(`/api/items/${itemId}`).then(result => {
+  const load = () => api<{ item: WorkItem; waiting?: InboxEntry } & ItemRequestContext>(`/api/items/${itemId}`).then(result => {
     setItem(result.item);
     setWaiting(result.waiting);
+    setRequestText(result.requestText);
   }, failure => setError(String(failure.message ?? failure)));
   useEffect(() => { void load(); }, [itemId]); // eslint-disable-line react-hooks/exhaustive-deps
   useEvents(event => { if (event.type === 'onionsoup') void load(); }, [itemId]);
@@ -61,7 +63,7 @@ export function ItemView({ itemId }: { itemId: string }) {
           </div>
         )}
         <WorkRecovery item={item} onDone={() => void load()} />
-        {ITEM_SECTIONS.map((ItemSection, index) => <ItemSection key={index} item={item} />)}
+        {ITEM_SECTIONS.map((ItemSection, index) => <ItemSection key={index} item={item} requestText={requestText} />)}
       </div>
     </div>
     <Drawer side="right" isOpen={isActivityOpen} onClose={() => setActivityOpen(false)} label="Activity"

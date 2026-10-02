@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { promisify } from 'node:util';
 import { z } from 'zod';
 import { readFile, writeFile } from 'node:fs/promises';
@@ -7,7 +8,8 @@ import { ImplementationReport, Verdict } from './artifacts.ts';
 import { canChange, requireFreelancer } from './declarations.ts';
 import { tellOwner } from './plan-work.ts';
 import { pickModel } from './families.ts';
-import { isFinished, type WorkItem, type WorkStatus } from './ledger.ts';
+import { isFinished, isPaused, type WorkItem, type WorkStatus } from './ledger.ts';
+import { settleItemPause, stoppedRunnerPause } from './work-pause.ts';
 import type { Runtime } from './runtime.ts';
 import { REPOSITORY_REVIEW, REPOSITORY_WRITING } from './repository-writing.ts';
 import { createWorktree, diffAgainstBase, git, gitWithLiteralPathspecs, matchHead, verificationPassed, verify } from './workspace.ts';
@@ -24,19 +26,22 @@ const run = promisify(execFile);
  */
 export const REBASE_WORKFLOW = 'rebase';
 
-const PullRequest = z.object({ state: z.string(), mergeable: z.string(), headRefOid: z.string() });
+const PullRequest = z.object({
+  state: z.string(), mergeable: z.string(), mergeStateStatus: z.string().default('UNKNOWN'), headRefOid: z.string(),
+});
+export const PULL_REQUEST_MAINTENANCE_LIMITS = { settleAttempts: 5, settleDelayMs: 3_000 };
 
 async function pullRequest(url: string) {
-  const { stdout } = await run('gh', ['pr', 'view', url, '--json', 'state,mergeable,headRefOid']);
+  const { stdout } = await run('gh', ['pr', 'view', url, '--json', 'state,mergeable,mergeStateStatus,headRefOid']);
   return PullRequest.parse(JSON.parse(stdout));
 }
 
 /** mergeable is computed lazily by GitHub; ask again briefly while it says UNKNOWN. */
 async function settledPullRequest(url: string) {
-  for (let attempt = 0; attempt < 5; attempt += 1) {
+  for (let attempt = 0; attempt < PULL_REQUEST_MAINTENANCE_LIMITS.settleAttempts; attempt += 1) {
     const current = await pullRequest(url);
     if (current.mergeable !== 'UNKNOWN' || current.state !== 'OPEN') return current;
-    await new Promise(resolve => setTimeout(resolve, 3_000));
+    await new Promise(resolve => setTimeout(resolve, PULL_REQUEST_MAINTENANCE_LIMITS.settleDelayMs));
   }
   return pullRequest(url);
 }
@@ -151,7 +156,55 @@ async function triageFailingCi(runtime: Runtime, item: WorkItem, headSha: string
   return decision.decision;
 }
 
-/** The maintain-prs duty: record merges and closes, triage failing CI, and open a rebase work item for each conflicting PR. */
+const PR_MAINTENANCE: Record<string, { mode?: 'update-base'; description: string }> = {
+  CONFLICTING: { description: 'conflicting' },
+  BEHIND: { mode: 'update-base', description: 'behind its base' },
+};
+
+async function neededMaintenance(runtime: Runtime, item: WorkItem, notes: string[], cancelled: Set<string>) {
+  const pr = await settledPullRequest(item.publication!.url);
+  if (PR_STATES[pr.state] !== 'open') return undefined;
+  const triage = await triageFailingCi(runtime, item, pr.headRefOid).catch(error => {
+    notes.push(`${item.publication!.url} CI triage failed: ${error instanceof Error ? error.message : error}`);
+    return 'unavailable';
+  });
+  if (triage) {
+    notes.push(`${item.publication!.url} CI failing: ${triage}`);
+    return undefined;
+  }
+  const maintenance = PR_MAINTENANCE[pr.mergeable] ?? PR_MAINTENANCE[pr.mergeStateStatus];
+  if (!maintenance || cancelled.has(`${item.id}:${pr.headRefOid}`)) {
+    notes.push(`${item.publication!.url} ${maintenance ? 'update previously cancelled' : pr.mergeStateStatus.toLowerCase()}`);
+    return undefined;
+  }
+  return { ...maintenance, head: pr.headRefOid };
+}
+
+async function openPrUpdate(runtime: Runtime, item: WorkItem, notes: string[], cancelled: Set<string>) {
+  const maintenance = await neededMaintenance(runtime, item, notes, cancelled);
+  if (!maintenance) return undefined;
+  if (!canChange(runtime.owner(item.owner))) {
+    notes.push(`${item.publication!.url} owner_cannot_change: update retained for owner maintenance`);
+    return undefined;
+  }
+  const update = await runtime.ledger.create(item.owner, REBASE_WORKFLOW, {
+    title: `Update "${item.proposal.title}" onto the current base`,
+    goal: `Bring ${item.publication!.url} up to date with the base branch without changing what it does.`,
+    rationale: `GitHub reports the PR as ${maintenance.description}.`,
+    acceptance: ['The PR applies cleanly to the current base', 'Host verification passes', 'The change is the same change the plan approved'],
+    size: 'small', repository: item.proposal.repository,
+  }, {
+    status: 'implementing',
+    rebaseOf: {
+      itemId: item.id, branch: item.publication!.branch, prUrl: item.publication!.url,
+      previousHead: maintenance.head, mode: maintenance.mode,
+    },
+  });
+  notes.push(`${item.publication!.url} ${maintenance.description} → ${update.id}`);
+  return update;
+}
+
+/** The maintain-prs duty: record lifecycle, triage CI, and update stale or conflicting published branches. */
 export async function maintainPullRequests(runtime: Runtime, ownerId: string) {
   const refreshed = await refreshPublications(runtime, ownerId);
   const items = (await runtime.ledger.list()).filter(item => item.owner === ownerId);
@@ -160,39 +213,20 @@ export async function maintainPullRequests(runtime: Runtime, ownerId: string) {
     .map(item => `${item.rebaseOf!.itemId}:${item.rebaseOf!.previousHead}`));
   const notes = [...refreshed.changed, ...refreshed.unreadable.map(url => `${url} state unreadable`)];
   const opened: WorkItem[] = [];
-  for (const item of items.filter(candidate => candidate.publication?.state === 'open' && !candidate.repairOf)) {
-    const pr = await settledPullRequest(item.publication!.url);
-    // Merged or closed since the refresh: the next refresh records it.
-    if (PR_STATES[pr.state] !== 'open') continue;
+  for (const item of items.filter(candidate => candidate.publication?.state === 'open'
+    && !candidate.repairOf && !isPaused(candidate))) {
     const hasRepair = items.some(candidate => candidate.repairOf?.itemId === item.id
       && !['failed', 'rejected', 'cancelled'].includes(candidate.status)
       && !candidate.publication);
     if (hasRepair) continue;
     if (openRebases.has(item.id)) continue;
-    const triage = await triageFailingCi(runtime, item, pr.headRefOid).catch(error => {
-      notes.push(`${item.publication!.url} CI triage failed: ${error instanceof Error ? error.message : error}`);
-      return undefined;
-    });
-    if (triage) {
-      notes.push(`${item.publication!.url} CI failing: ${triage}`);
-      continue;
-    }
-    if (pr.mergeable !== 'CONFLICTING' || cancelledRebases.has(`${item.id}:${pr.headRefOid}`)) continue;
-    const rebase = await runtime.ledger.create(ownerId, REBASE_WORKFLOW, {
-      title: `Rebase "${item.proposal.title}" onto the current base`,
-      goal: `Bring ${item.publication!.url} up to date with the base branch without changing what it does.`,
-      rationale: 'GitHub reports the PR as conflicting with the base branch.',
-      acceptance: ['The PR applies cleanly to the current base', 'Host verification passes', 'The change is the same change the plan approved'],
-      size: 'small',
-      repository: item.proposal.repository,
-    }, { status: 'implementing', rebaseOf: { itemId: item.id, branch: item.publication!.branch, prUrl: item.publication!.url, previousHead: pr.headRefOid } });
-    opened.push(rebase);
-    notes.push(`${item.publication!.url} conflicting → ${rebase.id}`);
+    const update = await openPrUpdate(runtime, item, notes, cancelledRebases);
+    if (update) opened.push(update);
   }
   const notebook = runtime.notebook(ownerId);
-  await notebook.journal({ kind: 'maintain-prs', note: notes.join('; ') || 'all published PRs are mergeable' });
+  await notebook.journal({ kind: 'maintain-prs', note: notes.join('; ') || 'no published PRs need updating' });
   await notebook.commit('journal maintain-prs');
-  return { summary: notes.join('; ') || 'all published PRs are mergeable', opened };
+  return { summary: notes.join('; ') || 'no published PRs need updating', opened };
 }
 
 function transition(item: WorkItem, status: WorkStatus, reason?: string): WorkItem {
@@ -329,6 +363,68 @@ async function replay(runtime: Runtime, item: WorkItem): Promise<WorkItem> {
   return transition(replayed, replayedCommits.resolved ? 'reviewing' : 'awaiting-push-approval');
 }
 
+/** A clean base merge preserves the published head as an ancestor: it needs no destructive push approval. */
+async function updateBase(runtime: Runtime, item: WorkItem): Promise<WorkItem> {
+  const owner = runtime.repositoryFor(item);
+  await git(owner.workspace, ['fetch', '-q', 'origin']);
+  const { path, branch } = await createWorktree(owner, runtime.worktreesRoot, item.id);
+  await requireKnownUpdateWorktree(item, path, `origin/${owner.domain.baseBranch}`);
+  const merged = await mergePublishedHead(path, `origin/${owner.domain.baseBranch}`)
+    && await mergePublishedHead(path, item.rebaseOf!.previousHead);
+  if (!merged) {
+    await git(path, ['merge', '--abort']);
+    await runtime.notebook(item.owner).journal({
+      kind: 'maintain-prs', workItem: item.id,
+      note: 'base_update_conflicted: clean update requires the existing owner conflict-resolution path',
+    });
+    return replay(runtime, { ...item, rebaseOf: { ...item.rebaseOf!, mode: undefined } });
+  }
+  await matchHead(path);
+  const tree = (await git(path, ['rev-parse', 'HEAD^{tree}'])).trim();
+  const diff = await diffAgainstBase(owner, path);
+  const verification = await verify(owner, path, runtime.toolsDirectory);
+  await requireVerifiedBaseUpdate(path, tree);
+  const updated = {
+    ...item, worktree: path, branch,
+    implementations: [...item.implementations, {
+      report: { summary: 'Merged the current base without changing the approved PR goal.', filesChanged: [], deviationsFromPlan: [] },
+      diffStat: diff.stat, verification, tree,
+    }],
+  };
+  return transition(updated, verificationPassed(verification) ? 'landing' : 'failed',
+    verificationPassed(verification) ? undefined : 'verification_failed_after_base_update');
+}
+
+async function requireKnownUpdateWorktree(item: WorkItem, path: string, base: string) {
+  if ((await git(path, ['status', '--porcelain'])).trim()) throw new Error('base_update_worktree_not_clean');
+  const head = (await git(path, ['rev-parse', 'HEAD'])).trim();
+  const baseHead = (await git(path, ['rev-parse', base])).trim();
+  const tree = (await git(path, ['rev-parse', 'HEAD^{tree}'])).trim();
+  if (head !== baseHead && tree !== item.implementations.at(-1)?.tree) {
+    throw new Error('base_update_workspace_needs_reverification');
+  }
+}
+
+async function mergePublishedHead(path: string, head: string) {
+  try {
+    await git(path, ['merge', '--no-edit', head]);
+    return true;
+  } catch (error) {
+    if ((await conflictedFiles(path)).length) return false;
+    throw new Error(`base_update_merge_failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+async function requireVerifiedBaseUpdate(path: string, tree: string | undefined) {
+  if (!tree) throw new Error('base_update_verification_missing');
+  const current = (await git(path, ['rev-parse', 'HEAD^{tree}'])).trim();
+  if (current !== tree || (await git(path, ['status', '--porcelain'])).trim()) {
+    throw new Error('base_update_source_changed_after_verification');
+  }
+}
+
+const PR_UPDATE_STEPS: Record<string, Step> = { 'update-base': updateBase };
+
 async function replayCommits(runtime: Runtime, item: WorkItem, source: WorkItem, path: string) {
   const base = runtime.repositoryFor(item).domain.baseBranch;
   const commits = (await git(path, [
@@ -377,13 +473,33 @@ async function reviewResolution(runtime: Runtime, item: WorkItem): Promise<WorkI
   return verdict.decision === 'approve' ? transition(reviewed, 'awaiting-push-approval') : transition(reviewed, 'failed', `resolution_not_approved: ${verdict.summary}`);
 }
 
-/** Only after a person approved: overwrite the PR branch, refusing if it moved since we looked. */
+type PublishedPush = (item: WorkItem, head: string, remoteHead: string | undefined) => Promise<void>;
+
+const PUBLICATION_CHECKS: Record<string, (item: WorkItem) => Promise<void>> = {
+  'update-base': item => requireVerifiedBaseUpdate(item.worktree!, item.implementations.at(-1)?.tree),
+};
+
+const PUBLISHED_PUSH: Record<string, PublishedPush> = {
+  'update-base': async (item, head, remoteHead) => {
+    const { branch, previousHead } = item.rebaseOf!;
+    if (remoteHead !== previousHead) throw new Error('published_head_changed_before_base_update');
+    await git(item.worktree!, ['merge-base', '--is-ancestor', previousHead, head]);
+    await git(item.worktree!, ['push', '-q', `--force-with-lease=${branch}:${previousHead}`, 'origin', `${head}:${branch}`]);
+  },
+  rebase: async (item, head) => {
+    const { branch, previousHead } = item.rebaseOf!;
+    await git(item.worktree!, ['push', '-q', `--force-with-lease=${branch}:${previousHead}`, 'origin', `${head}:${branch}`]);
+  },
+};
+
+/** An ancestry-preserving update, or a human-approved rewrite, with exact published-head protection. */
 async function push(runtime: Runtime, item: WorkItem): Promise<WorkItem> {
-  const { branch, previousHead, itemId } = item.rebaseOf!;
+  const { branch, itemId } = item.rebaseOf!;
   const head = (await git(item.worktree!, ['rev-parse', 'HEAD'])).trim();
+  await PUBLICATION_CHECKS[item.rebaseOf?.mode ?? '']?.(item);
   const remoteHead = (await git(item.worktree!, ['ls-remote', 'origin', `refs/heads/${branch}`])).split(/\s/)[0];
   if (remoteHead !== head) {
-    await git(item.worktree!, ['push', '-q', `--force-with-lease=${branch}:${previousHead}`, 'origin', `HEAD:${branch}`]);
+    await PUBLISHED_PUSH[item.rebaseOf?.mode ?? 'rebase']!(item, head, remoteHead);
   }
   await runtime.ledger.update(itemId, source => ({ ...source, landedCommit: head }));
   await runtime.notebook(item.owner).journal({ kind: 'rebase-pushed', workItem: item.id, outcome: head.slice(0, 8), note: item.rebaseOf!.prUrl });
@@ -393,7 +509,7 @@ async function push(runtime: Runtime, item: WorkItem): Promise<WorkItem> {
 type Step = (runtime: Runtime, item: WorkItem) => Promise<WorkItem>;
 
 const REBASE_STEPS: Partial<Record<WorkStatus, Step>> = {
-  implementing: replay,
+  implementing: (runtime, item) => (PR_UPDATE_STEPS[item.rebaseOf?.mode ?? ''] ?? replay)(runtime, item),
   reviewing: reviewResolution,
   landing: push,
 };
@@ -405,7 +521,7 @@ export async function advanceRebase(runtime: Runtime, itemId: string, onProgress
     const expectedStatus = item.status;
     const current = await runtime.ledger.update(item.id, latest => {
       if (latest.status !== expectedStatus || latest.activeRunner) throw new Error('work_item_changed');
-      return { ...latest, resumeStatus: latest.status, activeRunner: process.pid };
+      return { ...latest, resumeStatus: latest.status, activeRunner: process.pid, runnerClaim: randomUUID() };
     });
     try {
       item = await step(runtime, current);
@@ -413,7 +529,10 @@ export async function advanceRebase(runtime: Runtime, itemId: string, onProgress
       const status = error instanceof Abandoned ? 'rejected' : 'failed';
       item = transition(current, status, error instanceof Error ? error.message.split('\n')[0] : String(error));
     }
-    item = await runtime.ledger.save({ ...item, activeRunner: undefined });
+    const completed = item;
+    item = await runtime.ledger.update(item.id, latest =>
+      stoppedRunnerPause(latest, completed, current));
+    if (isPaused(item)) item = await settleItemPause(runtime, item.id);
     onProgress(item);
     step = REBASE_STEPS[item.status];
   }

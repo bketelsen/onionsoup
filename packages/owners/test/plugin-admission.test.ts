@@ -9,6 +9,8 @@ import type { Plugin } from '@opencode-ai/plugin';
 import { armDeployment, beginDrain, listAdmissions } from '../src/deployment-admission.ts';
 import { MEMORY_NUDGE_TEXT } from '../src/operator-memory.ts';
 import { withActiveHooks } from './active-hooks.ts';
+import { Runtime, humanWorkActor, pauseItem, settleItemPause } from '@onionsoup/owners';
+import { submitPlan } from '../src/plan-work.ts';
 
 type TimerCallback = () => Promise<unknown>;
 
@@ -205,6 +207,48 @@ test('chat admission blocks drain until idle and refuses new messages once drain
   await assert.rejects(say('other'), /deployment_draining/);
   await idle('chat');
   assert.equal((await listAdmissions(state)).filter(lease => lease.alive).length, 0);
+});
+
+test('paused work and its SDK-observed descendants cannot admit messages or effect tools', async () => {
+  const fixture = await setup();
+  const runtime = await Runtime.open({ declarations: fixture.declarations, state: fixture.state });
+  const item = await runtime.ledger.create('homelab', 'owner-change', {
+    title: 'Original', goal: 'Original goal', rationale: 'r', acceptance: ['a'], size: 'small',
+  }, { status: 'working', session: { sessionID: 'parent', directory: '/chats' } });
+  await pauseItem(runtime, item.id, humanWorkActor(), 'Human stop');
+  await settleItemPause(runtime, item.id, { stop: async () => true });
+  fixture.children.parent = ['child'];
+  await assert.rejects(fixture.say('parent'), /work_item_paused/);
+  await assert.rejects(fixture.say('child', 'onionsoup-implementer'), /work_item_paused/);
+  await assert.rejects(fixture.hooks['tool.execute.before']!({
+    sessionID: 'child', callID: 'paused-effect', tool: 'bash',
+  }, { args: { command: 'echo must-not-run' } }), /work_item_paused/);
+  assert.equal((await runtime.ledger.get(item.id)).status, 'paused');
+  assert.equal((await listAdmissions(fixture.state)).length, 0);
+});
+
+test('pausing a shared-desk submitted plan or publication leaves unrelated desk messages and tools admitted', async () => {
+  const fixture = await setup();
+  const runtime = await Runtime.open({ declarations: fixture.declarations, state: fixture.state });
+  const origin = { sessionID: 'parent', directory: '/chats' };
+  const plan = await submitPlan(runtime, 'homelab', {
+    title: 'Wait for approval', goal: 'Only this plan pauses', plan: 'The original proposed plan',
+  }, origin);
+  const publication = await runtime.ledger.create('homelab', 'desk-publication', plan.proposal, {
+    status: 'landing', origin,
+  });
+  for (const item of [plan, publication]) {
+    assert.equal((await pauseItem(runtime, item.id, humanWorkActor(), 'Defer this item only')).status, 'paused');
+  }
+  fixture.children.parent = ['child'];
+  await fixture.say('parent');
+  await fixture.say('child', 'onionsoup-implementer');
+  await fixture.hooks['tool.execute.before']!({
+    sessionID: 'child', callID: 'unrelated-desk-effect', tool: 'bash',
+  }, { args: { command: 'echo unrelated-work' } });
+  assert.ok((await listAdmissions(fixture.state)).length > 0);
+  assert.equal((await runtime.ledger.get(plan.id)).status, 'paused');
+  assert.equal((await runtime.ledger.get(publication.id)).status, 'paused');
 });
 
 test('busy child sessions keep their parent lease past parent idle', async () => {

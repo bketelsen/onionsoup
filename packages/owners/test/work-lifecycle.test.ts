@@ -1,19 +1,20 @@
 import { observeExternalMerge, reconcileExternalPublication } from '../src/external-publication.ts';
 import { sessionHistory } from '../src/session-history.ts';
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { changeAttention, listAttention } from '../src/attention.ts';
-import { Runtime, advance, approvePlan, cancelItem, resumeItem, retryItem } from '@onionsoup/owners';
+import { Runtime, advance, approvePlan, cancelItem, resumeItem, retryItem, humanWorkActor, pauseItem } from '@onionsoup/owners';
 import { git, refreshCheckout, ensureDesk, createWorktree } from '../src/workspace.ts';
-import { REBASE_WORKFLOW, maintainPullRequests, refreshPublications } from '../src/rebase.ts';
+import { REBASE_WORKFLOW, advanceRebase, maintainPullRequests, refreshPublications } from '../src/rebase.ts';
+import { execFileSync } from 'node:child_process';
 import { deskSyncText } from '../src/desk-sync.ts';
 import { openOwnerSession, type OwnerSessionClient, type SessionActivity } from '../src/owner-sessions.ts';
 import { PLAN_WORKTREE_LIMITS, ensurePlanWorktree, removeIdlePlanWorktrees, syncPlanWorktree } from '../src/plan-worktrees.ts';
-import { checkoutPullRequest, DESK_CHANGE_LIMITS, proposeDeskChanges, resetDeskReviews } from '../src/desk-changes.ts';
+import { advanceDeskPublication, checkoutPullRequest, DESK_CHANGE_LIMITS, proposeDeskChanges, resetDeskReviews } from '../src/desk-changes.ts';
 import { deskReviewRounds } from '../src/desk-reviews.ts';
 import type { HireRequest } from '../src/opencode.ts';
 
@@ -78,10 +79,14 @@ const handlers = {
   view() {
     if (args[args.indexOf('--json') + 1] === 'isDraft,autoMergeRequest') { console.log(JSON.stringify({ isDraft: !!state.draft, autoMergeRequest: state.autoMergeRequest || null })); return; }
     if (args[args.indexOf('--json') + 1] === 'state') { state.stateViews = (state.stateViews || 0) + 1; console.log(JSON.stringify({ state: state.state })); return; }
-    const branch = state.branch || 'original'; const headRefOid = cp.execFileSync('git', ['-C', remote, 'rev-parse', branch]).toString().trim(); console.log(JSON.stringify({ url, state: state.state, mergeable: state.mergeable || 'MERGEABLE', headRefOid })); },
+    const branch = state.branch || 'original'; const headRefOid = cp.execFileSync('git', ['-C', remote, 'rev-parse', branch]).toString().trim(); console.log(JSON.stringify({ url, state: state.state, mergeable: state.mergeable || 'MERGEABLE', mergeStateStatus: state.mergeStateStatus || 'CLEAN', headRefOid })); },
   checks() { console.log(JSON.stringify(state.failing === false ? [] : [{ name: 'test', bucket: 'fail', link: '' }])); },
   list() { console.log(JSON.stringify(state.created ? [{ url, state: state.state }] : [])); },
   create() {
+    if (state.holdCreate) {
+      fs.writeFileSync(path + '.started', 'started');
+      while (!fs.existsSync(path + '.continue')) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+    }
     if (state.failCreate) {
       state.failCreate = false;
       fs.writeFileSync(path, JSON.stringify(state));
@@ -106,6 +111,133 @@ fs.writeFileSync(path, JSON.stringify(state));
     process.env.PATH = previous;
   }
 }
+
+async function behindPublication(runtime: Runtime, seed: string) {
+  await git(seed, ['checkout', '-qb', 'original']);
+  await writeFile(join(seed, 'feature'), 'approved feature\n');
+  await git(seed, ['add', 'feature']);
+  await git(seed, ['commit', '-qm', 'Approved feature']);
+  await git(seed, ['push', '-q', 'origin', 'original']);
+  const head = (await git(seed, ['rev-parse', 'HEAD'])).trim();
+  await git(seed, ['checkout', '-q', 'main']);
+  await writeFile(join(seed, 'base-update'), 'new base\n');
+  await git(seed, ['add', 'base-update']);
+  await git(seed, ['commit', '-qm', 'Base advanced']);
+  await git(seed, ['push', '-q', 'origin', 'main']);
+  return runtime.ledger.create('clippy', 'desk-publication', proposal, {
+    status: 'landed', branch: 'original', landedCommit: head,
+    publication: {
+      url: 'https://github.com/example/clippy/pull/1', branch: 'original',
+      by: 'person', at: new Date().toISOString(), state: 'open',
+    },
+  });
+}
+
+test('the periodic maintenance selector updates a BEHIND PR with verified ancestry-preserving publication', async () => {
+  const { runtime, root, remote, seed } = await fixture();
+  const source = await behindPublication(runtime, seed);
+  runtime.hire = async () => { throw new Error('clean_update_must_not_hire_models'); };
+  await fakeGithub(root, remote, async () => {
+    await writeFile(join(root, 'github.json'), JSON.stringify({
+      ...await githubState(root), failing: false, mergeStateStatus: 'BEHIND',
+    }));
+    const maintenance = await maintainPullRequests(runtime, 'clippy');
+    assert.equal(maintenance.opened.length, 1);
+    assert.match(maintenance.summary, /behind its base/);
+    const update = maintenance.opened[0]!;
+    assert.equal(update.rebaseOf?.mode, 'update-base');
+    assert.deepEqual((await maintainPullRequests(runtime, 'clippy')).opened, []);
+    const finished = await advance(runtime, update.id);
+    assert.equal(finished.status, 'landed', finished.reason);
+    assert.ok(finished.implementations[0]!.verification.every(check => check.exitCode === 0));
+    const updatedHead = (await git(remote, ['rev-parse', 'original'])).trim();
+    await git(remote, ['merge-base', '--is-ancestor', source.landedCommit!, updatedHead]);
+    await git(remote, ['merge-base', '--is-ancestor', 'main', updatedHead]);
+    assert.equal((await git(remote, ['show', 'original:feature'])).trim(), 'approved feature');
+    assert.equal((await git(remote, ['show', 'original:base-update'])).trim(), 'new base');
+    assert.equal((await runtime.ledger.get(source.id)).landedCommit, updatedHead);
+    assert.equal(finished.humanNotes.length, 0, 'unchanged authorized work needs no new approval');
+  });
+});
+
+test('a moved published head prevents a behind update from overwriting the competing repair', async () => {
+  const { runtime, root, remote, seed } = await fixture();
+  await behindPublication(runtime, seed);
+  await git(seed, ['checkout', '-qb', 'competing', 'original']);
+  await writeFile(join(seed, 'unique-repair'), 'preserve competing repair\n');
+  await git(seed, ['add', 'unique-repair']);
+  await git(seed, ['commit', '-qm', 'Competing repair']);
+  await git(seed, ['push', '-q', 'origin', 'competing']);
+  const competing = (await git(seed, ['rev-parse', 'HEAD'])).trim();
+  await fakeGithub(root, remote, async () => {
+    await writeFile(join(root, 'github.json'), JSON.stringify({
+      ...await githubState(root), failing: false, mergeStateStatus: 'BEHIND',
+    }));
+    const [update] = (await maintainPullRequests(runtime, 'clippy')).opened;
+    const finished = await advanceRebase(runtime, update!.id, item => {
+      if (item.status === 'landing') execFileSync('git', ['-C', remote, 'update-ref', 'refs/heads/original', competing]);
+    });
+    assert.equal(finished.status, 'failed');
+    assert.match(finished.reason!, /published_head_changed_before_base_update/);
+    assert.equal((await git(remote, ['rev-parse', 'original'])).trim(), competing);
+  });
+});
+
+test('a behind update refuses a source edit made after host verification', async () => {
+  const { runtime, root, remote, seed } = await fixture();
+  const source = await behindPublication(runtime, seed);
+  await fakeGithub(root, remote, async () => {
+    await writeFile(join(root, 'github.json'), JSON.stringify({
+      ...await githubState(root), failing: false, mergeStateStatus: 'BEHIND',
+    }));
+    const [update] = (await maintainPullRequests(runtime, 'clippy')).opened;
+    const finished = await advanceRebase(runtime, update!.id, item => {
+      if (item.status === 'landing') writeFileSync(join(item.worktree!, 'feature'), 'unverified alteration\n');
+    });
+    assert.equal(finished.status, 'failed');
+    assert.match(finished.reason!, /base_update_source_changed_after_verification/);
+    assert.equal((await git(remote, ['rev-parse', 'original'])).trim(), source.landedCommit);
+  });
+});
+
+test('an actual conflict in a reportedly BEHIND PR preserves the existing independent review and rewrite gate', async () => {
+  const { runtime, root, remote, seed } = await fixture();
+  await git(seed, ['checkout', '-qb', 'original']);
+  await writeFile(join(seed, 'base'), 'approved branch intent\n');
+  await git(seed, ['commit', '-qam', 'Approved intent']);
+  await git(seed, ['push', '-q', 'origin', 'original']);
+  const head = (await git(seed, ['rev-parse', 'HEAD'])).trim();
+  await git(seed, ['checkout', '-q', 'main']);
+  await writeFile(join(seed, 'base'), 'independent base change\n');
+  await git(seed, ['commit', '-qam', 'New base intent']);
+  await git(seed, ['push', '-q', 'origin', 'main']);
+  await runtime.ledger.create('clippy', 'desk-publication', proposal, {
+    status: 'landed', branch: 'original', landedCommit: head,
+    publication: {
+      url: 'https://github.com/example/clippy/pull/1', branch: 'original',
+      by: 'person', at: new Date().toISOString(), state: 'open',
+    },
+  });
+  scriptHires(runtime, async request => {
+    if (request.role === 'owner') return { decision: 'resolve', guidance: 'Preserve both intents', reason: 'Both remain useful' };
+    if (request.role === 'implementer') {
+      await writeFile(join(request.directory, 'base'), 'independent base change\napproved branch intent\n');
+      return { ...report, filesChanged: ['base'] };
+    }
+    return verdict;
+  });
+  await fakeGithub(root, remote, async () => {
+    await writeFile(join(root, 'github.json'), JSON.stringify({
+      ...await githubState(root), failing: false, mergeStateStatus: 'BEHIND',
+    }));
+    const [update] = (await maintainPullRequests(runtime, 'clippy')).opened;
+    const reviewed = await advance(runtime, update!.id);
+    assert.equal(reviewed.status, 'awaiting-push-approval', reviewed.reason);
+    assert.equal(reviewed.rebaseOf?.mode, undefined);
+    assert.equal(reviewed.verdicts.at(-1)?.decision, 'approve');
+    assert.equal((await git(remote, ['rev-parse', 'original'])).trim(), head, 'a conflict cannot use the clean-update push path');
+  });
+});
 
 test('a clean desk retries publication after commit and enrolls its PR in the ledger', async () => {
   const { runtime, root, remote } = await fixture();
@@ -136,6 +268,50 @@ test('a clean desk retries publication after commit and enrolls its PR in the le
     }));
     assert.equal((await proposeDeskChanges(runtime, 'clippy', { title: 'Retry', summary: 'Retry' })).outcome, 'opened');
     assert.equal(JSON.parse(await readFile(join(root, 'github.json'), 'utf8')).created, 1);
+  });
+});
+
+test('pause during a real publication holds the runner until the admitted effect checkpoints and prevents the next effect', async () => {
+  const { runtime, root, remote, seed } = await fixture();
+  const owner = runtime.declarations.owners.get('clippy')!;
+  runtime.declarations.owners.set('clippy', {
+    ...owner, grants: [...owner.grants, { action: 'merge', to: owner.id, target: 'example/clippy' }],
+  });
+  const head = (await git(seed, ['rev-parse', 'HEAD'])).trim();
+  const item = await runtime.ledger.create('clippy', 'desk-publication', proposal, {
+    status: 'landing', worktree: seed, branch: 'main', landedCommit: head,
+    deskPublication: { stage: 'open', reviewer: 'independent', reviewedHead: head, reviewedTree: 'tree' },
+  });
+  await fakeGithub(root, remote, async () => {
+    await writeFile(join(root, 'github.json'), JSON.stringify({ created: 0, state: 'OPEN', holdCreate: true }));
+    const publishing = advanceDeskPublication(runtime, item.id);
+    try {
+      for (let attempt = 0; !existsSync(join(root, 'github.json.started')); attempt++) {
+        assert.ok(attempt < 500, 'publication must reach the scripted host create');
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+      const admitted = await runtime.ledger.get(item.id);
+      assert.ok(admitted.runnerClaim);
+      const requested = await pauseItem(runtime, item.id, humanWorkActor(), 'Stop before merging');
+      assert.equal(requested.status, 'pausing');
+      assert.equal(requested.activeRunner, process.pid, 'an in-flight admitted create retains its live runner');
+      assert.equal(requested.runnerClaim, admitted.runnerClaim);
+    } finally {
+      await writeFile(join(root, 'github.json.continue'), 'continue');
+    }
+    const stopped = await publishing;
+    assert.equal(stopped.status, 'paused');
+    assert.equal(stopped.activeRunner, undefined);
+    assert.equal(stopped.runnerClaim, undefined);
+    assert.equal(stopped.deskPublication?.stage, 'merge');
+    assert.equal(stopped.publication?.state, 'open');
+    assert.equal((await githubState(root)).state, 'OPEN', 'the next merge effect must not start');
+    assert.equal(stopped.pauses[0]?.resumeStatus, 'landing');
+    await resumeItem(runtime, item.id, humanWorkActor());
+    const completed = await advanceDeskPublication(runtime, item.id);
+    assert.equal(completed.status, 'landed');
+    assert.equal(completed.publication?.state, 'merged');
+    assert.equal((await githubState(root)).created, 1, 'resume adopts the completed create checkpoint');
   });
 });
 
@@ -828,7 +1004,7 @@ test('a desk checked out on a PR is not synced off it; the refusal names the reb
     const { head } = await checkoutPullRequest(runtime, 'clippy', source!.id);
     await assert.rejects(syncOwnerDesk(runtime, 'clippy'), /desk_on_pull_request: .*maintain-prs rebase/);
 
-    await writeFile(join(root, 'github.json'), JSON.stringify({ ...await githubState(root), mergeable: 'CONFLICTING' }));
+    await writeFile(join(root, 'github.json'), JSON.stringify({ ...await githubState(root), failing: false, mergeable: 'CONFLICTING' }));
     const [rebase] = (await maintainPullRequests(runtime, 'clippy')).opened;
     await assert.rejects(syncOwnerDesk(runtime, 'clippy'), new RegExp(`desk_on_pull_request: .*${rebase!.id} is already rebasing it`));
     assert.equal((await git(desk.path, ['rev-parse', 'HEAD'])).trim(), head, 'the desk stays on the PR head');

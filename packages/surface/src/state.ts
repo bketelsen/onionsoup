@@ -14,6 +14,9 @@ import {
   type AssignmentView, type Initiative, type InitiativeView, type WorkItem,
   isDelegated, isFinished, OWNER_CHANGE_WORKFLOW, PLAN_APPROVAL_PERMISSION, OPERATOR_ID, operatorChatDirectory, WIKI_DELETE_PERMISSION,
   providerHealthViews, type ProviderHealthView, type OwnerDeclaration,
+  workSessionDirectories,
+  pauseItem, settleItemPause, humanWorkActor, pausedSessionItem, workPauseClient,
+  requestProgressDetail,
 } from '@onionsoup/owners';
 import type { OpencodeApi, PendingPermission, PendingQuestion } from './opencode.ts';
 import { planApprovalOf, type PlanApprovalRequest } from './plan-approval-request.ts';
@@ -28,6 +31,7 @@ import type { ItemSession } from './item-session-public.ts';
 import { hasBusySession, ownerActivity, type OwnerActivity } from './activity.ts';
 import { authorizedSession, recordedSessions, rememberObservedSessions, historyView } from './session-history.ts';
 import type { RuntimeWork } from './runtime-work-public.ts';
+import { ItemRequestContext } from './item-request-public.ts';
 
 interface OpencodeSession { id: string; title: string; directory: string; parentID?: string; time: { created: number; updated: number } }
 
@@ -338,8 +342,10 @@ export class SurfaceState {
    * carrying out, where that plan's session runs (its prompts, questions and events come from there).
    */
   async ownerDirectories(ownerId: string) {
-    const plans = (await this.runtime.ledger.list()).filter(item => item.owner === ownerId && item.planWorktree);
-    return [...new Set([await this.directory(ownerId), ...plans.map(item => item.planWorktree!)])];
+    const items = (await this.runtime.ledger.list()).filter(item => item.owner === ownerId);
+    const history = await recordedSessions(this.runtime, ownerId);
+    const places = workSessionDirectories(items, history).filter(place => !place.retired && this.workspaceExists(place.directory));
+    return [...new Set([await this.directory(ownerId), ...places.map(place => place.directory)])];
   }
 
   /** Resolve exact owner membership before any read or write; never fall back for an unknown ID. */
@@ -518,7 +524,8 @@ export class SurfaceState {
       [waitsInInbox, candidate => this.planEntry(candidate, initiatives)], [awaitsPush, pushEntry],
     ];
     const waiting = decisions.find(([applies]) => applies(item))?.[1](item);
-    return { item, waiting, text: itemText(item), done: DONE.has(item.status) };
+    const requestText = item.request ? await requestProgressDetail(this.runtime, item.owner, item.request) : undefined;
+    return { item, waiting, ...ItemRequestContext.parse({ requestText }), text: itemText(item), done: DONE.has(item.status) };
   }
 
   /** Public view excludes the saved directory, which is only for host-side notice delivery. */
@@ -572,7 +579,8 @@ export class SurfaceState {
     const roots = [item.origin, item.session].filter(origin => origin !== undefined);
     const remembered = await recordedSessions(this.runtime, item.owner);
     for (const origin of roots) {
-      if (remembered.some(session => session.id === origin.sessionID && session.archived) || !this.workspaceExists(origin.directory)) continue;
+      const identity = remembered.find(session => session.id === origin.sessionID && session.directory === origin.directory);
+      if (!identity || identity.archived || !this.workspaceExists(origin.directory)) continue;
       const sessions = await this.opencode.listSessions(origin.directory).catch(() => []) as OpencodeSession[];
       const related = sessions.filter(session => session.id === origin.sessionID || session.parentID === origin.sessionID);
       await rememberObservedSessions(this.runtime, item.owner, origin.directory, related);
@@ -615,7 +623,8 @@ export class SurfaceState {
       'approve-create': async () => (await approveCreate(this.runtime, decision.id, by, decision.withDelete ?? true)).status,
       'approve-delete': async () => (await approveDelete(this.runtime, decision.id, by)).status,
       'deny-request': async () => (await denyRequest(this.runtime, decision.id, by, reason || 'denied from the surface')).status,
-      'resume-item': async () => (await resumeItem(this.runtime, decision.id, by, reason)).status,
+      'pause-item': async () => (await this.pauseWork(decision.id, required(reason, 'reason'))).status,
+      'resume-item': async () => (await resumeItem(this.runtime, decision.id, humanWorkActor(), reason)).status,
       'retry-item': async () => (await retryItem(this.runtime, decision.id, by, reason)).status,
       'cancel-item': async () => (await cancelItem(this.runtime, decision.id, by, required(reason, 'reason'))).status,
       'reconcile-request': async () => (await reconcileRequest(this.runtime, decision.id)).status,
@@ -645,6 +654,37 @@ export class SurfaceState {
     const action = actions[decision.action];
     if (!action) throw new Error(`unknown_decision: ${decision.action}`);
     return action();
+  }
+
+  private async pauseWork(itemId: string, reason: string) {
+    const item = await pauseItem(this.runtime, itemId, humanWorkActor(), reason);
+    const client = workPauseClient({
+      sessions: directory => this.opencode.listSessions(directory),
+      statuses: directory => this.opencode.status(directory),
+      abort: (directory, sessionID) => this.opencode.abort(directory, sessionID),
+    });
+    return settleItemPause(this.runtime, itemId, { stop: async origin => {
+      const directory = await this.sessionDirectory(item.owner, origin.sessionID);
+      if (directory !== origin.directory) throw new Error('work_pause_session_unavailable');
+      return client.stop(origin);
+    } });
+  }
+
+  async assertSessionNotPaused(sessionID: string) {
+    if (await pausedSessionItem(this.runtime, sessionID)) throw new Error('work_item_paused');
+  }
+
+  /** Stop on the work session is an intentional lifecycle decision, not merely an SDK abort. */
+  async stopSession(ownerId: string, directory: string, sessionID: string) {
+    const linked = (await this.runtime.ledger.list()).filter(item => item.owner === ownerId
+      && !isFinished(item) && item.session?.sessionID === sessionID && item.session.directory === directory);
+    if (!linked.length) {
+      await this.opencode.abort(directory, sessionID);
+      return 'aborted';
+    }
+    const stopped = await Promise.all(linked.map(item =>
+      this.pauseWork(item.id, 'Stopped intentionally by the person in the work conversation')));
+    return stopped.some(item => item.status === 'pausing') ? 'pausing' : 'paused';
   }
 
   async retract(ownerId: string, note: string) {

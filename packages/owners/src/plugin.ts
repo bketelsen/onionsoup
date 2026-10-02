@@ -24,9 +24,11 @@ import {
   type Persona,
 } from './declarations.ts';
 import { askOwner, formatAnswer } from './ask.ts';
-import { requestPublish } from './brokering.ts';
+import { requestInstance, requestPublish, FOLLOW_UPS } from './brokering.ts';
+import { completeOperationalWork, releaseOperationalInstance, reverifyOperationalWork } from './operational-work.ts';
 import { checkoutPullRequest, proposeDeskChanges } from './desk-changes.ts';
 import { deskSyncText, syncOwnerDesk } from './desk-sync.ts';
+import { configuredPrMaintenanceDuty, updateOwnerPullRequests } from './owner-pr-maintenance.ts';
 import { removeIdlePlanWorktrees, syncPlanWorktree } from './plan-worktrees.ts';
 import { initiativeSection, initiativesText, initiativeText, itemText, reminderSection, reportsWorkText, statusText } from './desk.ts';
 import { parseInitiativeDraft } from './initiatives.ts';
@@ -80,6 +82,8 @@ import { bashAction } from './bash-rules.ts';
 import { SessionOwners } from './session-owners.ts';
 import { beginAdmission, type AdmissionLease } from './deployment-admission.ts';
 import { openNeededSessions, ownerSessionClient } from './owner-sessions.ts';
+import { pausedSessionItem, settleItemPause } from './work-pause.ts';
+import { workPauseClient } from './work-pause-client.ts';
 import { cancelReminder, openDueReminders, setReminder } from './reminder-work.ts';
 import { parseReminderRequest } from './reminders.ts';
 import { PLAN_APPROVAL_PERMISSION, PlanSubmission, submitPlan } from './plan-work.ts';
@@ -256,9 +260,14 @@ How you work with the person in this chat:
   onionsoup_send (address another owner's actual session), onionsoup_reply (answer an addressed message),
   onionsoup_request_work (ask another owner to change its repository), onionsoup_friction (report reproducible engine
   behavior that fails expectations), onionsoup_remind (wake yourself later for a one-off check),
+  onionsoup_request_instance (ask for an instance behind the existing create gate),
+  onionsoup_release_instance (release that request behind the delete gate),
+  onionsoup_complete_work (complete approved operational work with host checks and final independent review, no fake PR),
   onionsoup_wiki (the homelab wiki: search it before asking the person about homelab facts),
   onionsoup_record_fact, onionsoup_record_decision and onionsoup_retract. When
-  something belongs to another owner's domain, ask them instead of guessing or probing it yourself.${WORK_GUIDES[canChange(owner) ? 'changes' : 'observes']}
+  something belongs to another owner's domain, ask them instead of guessing or probing it yourself.${WORK_GUIDES[canChange(owner) ? 'changes' : 'observes']}${configuredPrMaintenanceDuty(owner) ? `
+- For your existing published PRs, onionsoup_update_prs runs your configured maintain-prs duty now. Clean updates
+  preserve PR history and run host verification; conflicts retain the existing review and push-approval gate.` : ''}
 - For a progress question, read onionsoup_status request=<id> for the existing request and its host test/review evidence;
   state missing or superseded evidence plainly. Do not open duplicate work to obtain a status update. Status-only scope
   applies to that interaction; a separately accepted handoff continues under its own goal and approval gates.
@@ -305,6 +314,8 @@ const RESTRICTED_TOOLS: Record<string, (runtime: Runtime, owner: OwnerDeclaratio
   [STEER_TOOL]: isManagerOwner,
   [REQUEST_REVIEW_TOOL]: isManagerOwner,
   [RAISE_TOOL]: hasManagerOwner,
+  onionsoup_complete_work: (_runtime, owner) => canChange(owner),
+  onionsoup_update_prs: (_runtime, owner) => Boolean(configuredPrMaintenanceDuty(owner)),
 };
 
 function restrictedToolPermission(runtime: Runtime, owner: OwnerDeclaration) {
@@ -1214,6 +1225,27 @@ const server: Plugin = async (input, options) => {
     await initializeRuntime();
     const client = pass.client(input.client);
     const sessions = ownerSessionClient(client);
+    const pauseClient = workPauseClient({
+      sessions: async directory => {
+        const reply = await client.session.list({ query: { directory } });
+        if (reply.error || !reply.data) throw new Error('work_pause_sessions_unavailable');
+        return reply.data;
+      },
+      statuses: async directory => {
+        const reply = await client.session.status({ query: { directory } });
+        if (reply.error || !reply.data) throw new Error('work_pause_status_unavailable');
+        return reply.data;
+      },
+      abort: async (directory, id) => {
+        const reply = await client.session.abort({ path: { id }, query: { directory } });
+        if (reply.error) throw new Error('work_pause_abort_uncertain');
+      },
+    });
+    for (const item of await runtime.ledger.list()) {
+      if (item.status !== 'pausing') continue;
+      await pass.phase('work-pause', () => settleItemPause(runtime, item.id, pauseClient))
+        .catch(error => console.warn('work_pause_stop_unconfirmed', item.id, error));
+    }
     await pass.phase('plan-revisions', () => deliverPlanRevisions(runtime, planRevisionClient(client, { runtime, pass }),
       (id, error) => console.warn('plan_revision_delivery_failed', id, error)));
     await pass.phase('direct-reviews', () => deliverDirectRequestReviews(runtime, planRevisionClient(client, { runtime, pass }),
@@ -1250,6 +1282,15 @@ const server: Plugin = async (input, options) => {
     pass => pass.phase('chat-reconciliation', () => reconcileChats(pass)),
     error => console.warn('plugin_chat_reconciliation_failed', error), false);
 
+  async function assertWorkSessionRunning(sessionID: string) {
+    const paused = await pausedSessionItem(runtime, sessionID, async id => {
+      const reply = await input.client.session.get({ path: { id } });
+      if (reply.error || !reply.data || reply.data.id !== id) throw new Error('work_pause_session_identity_unavailable');
+      return reply.data.parentID;
+    });
+    if (paused) throw new Error('work_item_paused');
+  }
+
   return {
     dispose: () => {
       disposed = true;
@@ -1259,6 +1300,7 @@ const server: Plugin = async (input, options) => {
       await initializeRuntime();
       if (operatorJobs) await checkOperatorChildTool(operatorJobs, input.sessionID, input.tool, output.args);
       if (await readChildAbandonment(runtime.stateDirectory, input.sessionID)) throw new Error('child_session_abandoned: preserved history is read-only');
+      await assertWorkSessionRunning(input.sessionID);
       const key = `${input.sessionID}:${input.callID}`;
       if (trackedTools.has(key)) throw new Error('tool_call_already_active');
       if (retiredTools.has(key)) throw new Error('tool_call_already_finished');
@@ -1370,6 +1412,7 @@ const server: Plugin = async (input, options) => {
       activeMessages.set(message.sessionID, (activeMessages.get(message.sessionID) ?? 0) + 1);
       try {
         await initializeRuntime();
+        await assertWorkSessionRunning(message.sessionID);
         const messageID = message.messageID ?? output.message?.id;
         if (operatorJobs) await checkOperatorChildMessage(operatorJobs, message.agent, message.sessionID, messageID);
         if (isExchangeNoticeDeliveryAttempt(runtime.stateDirectory, messageID, output.parts ?? [])) {
@@ -1599,7 +1642,7 @@ const server: Plugin = async (input, options) => {
         },
       }),
       [STEER_TOOL]: tool({
-        description: 'For managers: act on work a report does for one of your initiatives. "approve-plan" approves its waiting plan (only under the person\'s approve-plans grant, and not while the report has an open escalation); "revise-plan" sends the plan back with your note; "cancel" cancels the work with a reason; "note" queues your ruling to the report\'s actual work session, waking it once idle.',
+        description: 'For managers: act on assigned report work. "approve-plan" needs the configured approve-plans grant and no open escalation; "revise-plan" requests revision; "cancel" cancels; "note" queues a ruling without resuming paused work. "resume" explicitly resumes the ORIGINAL intentionally paused work (initiative or your direct request), preserving its goal, plan and approvals, only under the configured approve-plans grant.',
         args: {
           item: tool.schema.string().describe('The work item id'),
           action: tool.schema.enum(STEER_ACTIONS as [typeof STEER_ACTIONS[number], ...typeof STEER_ACTIONS]),
@@ -1698,6 +1741,45 @@ const server: Plugin = async (input, options) => {
           return formatAnswer(answerer, answer) + status;
         },
       }),
+      onionsoup_request_instance: tool({
+        description: 'Request an instance from a declared Incus owner. Host code binds this request to this actual owner session. Creation waits for owner decision and person approval; never create VMs with shell commands to bypass the gate.',
+        args: {
+          owner: tool.schema.string(), image: tool.schema.string(), purpose: tool.schema.string(),
+          expectedMinutes: tool.schema.number().int().positive(),
+          followUp: tool.schema.string().optional().describe('A configured host follow-up name, or none'),
+        },
+        async execute(args, context) {
+          const sender = await messageCaller(context);
+          const followUp = args.followUp ?? 'none';
+          if (followUp !== 'none' && !FOLLOW_UPS[followUp]) throw new Error('unknown_follow_up');
+          return JSON.stringify(await requestInstance(runtime, sender.id, resolveOwner(args.owner).id,
+            { kind: 'instance', image: args.image, purpose: args.purpose, expectedMinutes: args.expectedMinutes },
+            followUp, { sessionID: context.sessionID, directory: context.directory }));
+        },
+      }),
+      onionsoup_release_instance: tool({
+        description: 'Release an existing instance request from this exact work session. Deletion still waits for the person unless the original lease approved it. This records intent; host code performs deletion.',
+        args: { request: tool.schema.string() },
+        async execute(args, context) {
+          const owner = await messageCaller(context);
+          return JSON.stringify(await releaseOperationalInstance(runtime, owner.id, args.request,
+            { sessionID: context.sessionID, directory: context.directory }));
+        },
+      }),
+      onionsoup_complete_work: tool({
+        description: 'Complete an approved original operational request without a PR. Call only from its execution session or proven host continuation. Host code runs configured checks, observes exact gated resource cleanup and gets one independent-family goal/evidence review. Dirty or unpublished repository changes still require onionsoup_propose_changes. Reports and arbitrary resource IDs cannot complete work.',
+        args: { item: tool.schema.string(),
+          action: tool.schema.enum(['complete', 'reverify']).optional().describe('Complete from execution, or queue a concrete original-work reverify continuation from any owner chat') },
+        async execute(args, context) {
+          const owner = await messageCaller(context);
+          const actions = {
+            complete: () => completeOperationalWork(runtime, owner.id, args.item,
+              { sessionID: context.sessionID, directory: context.directory }),
+            reverify: () => reverifyOperationalWork(runtime, owner.id, args.item),
+          };
+          return JSON.stringify(await actions[args.action ?? 'complete']());
+        },
+      }),
       onionsoup_propose_changes: tool({
         description: 'Turn the changes on your desk, or in an approved plan\'s own worktree (with its item), into a reviewed change: host code verifies them, a reviewer from another model family checks the diff, and only then they are committed, pushed and opened as a PR (merged, and published if you host a site, when the person granted you merge authority). Takes a few minutes.',
         args: {
@@ -1722,6 +1804,15 @@ const server: Plugin = async (input, options) => {
           const owner = requireOwner(context.agent);
           const desk = await checkoutPullRequest(runtime, owner.id, args.item);
           return `Your desk ${desk.path} is on ${desk.pullRequest} at ${desk.head.slice(0, 12)}. Fix it there, then propose with item "${args.item}".`;
+        },
+      }),
+      onionsoup_update_prs: tool({
+        description: 'Run your declared maintain-prs duty now for your existing published PRs. Host code selects their configured repositories and recorded heads, verifies clean base updates and pushes without rewriting PR history. Conflicts retain the existing independent review and push-approval gate. No repository, branch or head arguments can grant authority.',
+        args: {},
+        async execute(_args, context) {
+          const owner = await messageCaller(context);
+          context.metadata({ title: 'updating declared pull requests' });
+          return JSON.stringify(await updateOwnerPullRequests(runtime, owner.id));
         },
       }),
       onionsoup_sync_desk: tool({
