@@ -238,7 +238,8 @@ test('Bun without an explicit host Node path fails closed instead of invoking it
 test('a staged helper and trusted Node under temporary paths survive the writer tmpfs without exposing that directory', async () => {
   const fixtureState = await fixture();
   const source = await mkdtemp(join(tmpdir(), 'operator-write-staged-'));
-  for (const name of ['operator-write-workspace.ts', 'operator-write-writer.ts', 'operator-write-file.mjs', 'operator-check-source.ts']) {
+  for (const name of ['operator-write-workspace.ts', 'operator-write-writer.ts', 'operator-write-file.mjs',
+    'operator-check-source.ts', 'cgroup-budget.ts']) {
     await cp(new URL(`../src/${name}`, import.meta.url), join(source, name));
   }
   await symlink(fileURLToPath(new URL('../../../node_modules', import.meta.url)), join(source, 'node_modules'));

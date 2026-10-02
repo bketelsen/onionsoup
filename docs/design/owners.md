@@ -1238,6 +1238,10 @@ was deleted, and the result was committed as the keeper and pushed.
 Every hire (owner decisions, surveys, answers, distillation, CI triage, reviews, conflict resolution) and every
 verification runs in a memory-capped systemd scope (6 GB, no swap) inside bubblewrap with a read-only root; only a
 conflict-resolving implementer writes, and only its worktree.
+Nested core sandboxes reuse an inherited cgroup only when kernel cgroup v2 ancestry proves effective limits
+of at most 6 GiB memory, 512 tasks and zero swap. They still run the identical bubblewrap command and private
+environment; absent, unreadable or invalid proof starts the original systemd scope. Environment markers
+are never budget evidence. The operator's fixed helpers share this probe with their existing budgets.
 
 Owner chats and execution sessions are **not** sandboxed yet. They run in the surface's opencode on the host, and so
 do the implementer and reviewer subagents they start: their bash runs as the person, limited only by the owner's

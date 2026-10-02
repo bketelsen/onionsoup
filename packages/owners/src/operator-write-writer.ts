@@ -1,9 +1,10 @@
 import { execFile, spawn } from 'node:child_process';
 import { constants } from 'node:fs';
-import { open, readFile, realpath, stat, type FileHandle } from 'node:fs/promises';
-import { basename, dirname, isAbsolute, join } from 'node:path';
+import { open, realpath, stat, type FileHandle } from 'node:fs/promises';
+import { basename, isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import { inheritedCgroupBudget } from './cgroup-budget.ts';
 import type { OperatorWriteMutation, OperatorWriteSnapshot } from './operator-write-workspace.ts';
 
 export const OPERATOR_WRITER_LIMITS = { memoryBytes: 6 * 1024 ** 3, outerMemoryBytes: 12 * 1024 ** 3, timeoutMs: 15_000, killMs: 1_000, outputBytes: 4096, capabilityOutputBytes: 16 * 1024 };
@@ -45,26 +46,7 @@ export async function preflightOperatorFileWriter() {
 
 /** A nested staging sandbox may reuse an already enforced memory cgroup, never a caller's environment flag. */
 export async function alreadyMemoryCapped(maxBytes = OPERATOR_WRITER_LIMITS.outerMemoryBytes, tasksMax?: number) {
-  let memoryCapped = false;
-  let tasksCapped = tasksMax === undefined;
-  try {
-    const membership = (await readFile('/proc/self/cgroup', 'utf8')).split('\n').find(line => line.startsWith('0::'))?.slice(3);
-    if (!membership || membership.split('/').includes('..')) return false;
-    let directory = join('/sys/fs/cgroup', membership);
-    while (directory.startsWith('/sys/fs/cgroup')) {
-      const value = await readFile(join(directory, 'memory.max'), 'utf8').catch(() => 'max');
-      const limit = Number(value.trim());
-      if (Number.isSafeInteger(limit) && limit > 0 && limit <= maxBytes) memoryCapped = true;
-      if (tasksMax !== undefined) {
-        const tasks = Number((await readFile(join(directory, 'pids.max'), 'utf8').catch(() => 'max')).trim());
-        if (Number.isSafeInteger(tasks) && tasks > 0 && tasks <= tasksMax) tasksCapped = true;
-      }
-      if (memoryCapped && tasksCapped) return true;
-      if (directory === '/sys/fs/cgroup') return false;
-      directory = dirname(directory);
-    }
-  } catch { /* Unavailable proof requires a new scope. */ }
-  return false;
+  return inheritedCgroupBudget({ memoryBytes: maxBytes, tasksMax });
 }
 
 export async function operatorWriterCommand(create = false) {
