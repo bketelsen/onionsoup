@@ -87,7 +87,10 @@ async function recordNeedsWork(runtime: Runtime, owner: RepositoryOwner, scope: 
   await notebook.journal({ kind: 'desk-change-reviewed', outcome: round.decision, note: `${title}: ${round.summary}` });
   const rounds = await recordDeskReview(runtime, owner.id, scope.subject, round);
   if (rounds.length !== DESK_CHANGE_LIMITS.reviewRoundsBeforePerson) return;
-  await notebook.journal({ kind: 'attention', note: `desk change "${title}" in ${owner.domain.name}: ${rounds.length} review rounds asked for changes; the person reads the diff and decides` });
+  await notebook.journal({
+    kind: 'attention', provenance: { kind: 'human-decision', code: 'desk_review_exhausted' },
+    note: `desk change "${title}" in ${owner.domain.name}: ${rounds.length} review rounds asked for changes; the person reads the diff and decides`,
+  });
 }
 
 async function needsWork(runtime: Runtime, owner: RepositoryOwner, scope: ReviewScope, title: string, review: DeskReview): Promise<DeskChangeResult> {

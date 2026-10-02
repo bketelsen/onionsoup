@@ -11,7 +11,10 @@ import type { Runtime } from './runtime.ts';
 export async function journalRequest(runtime: Runtime, request: ResourceRequest, kind: string, note: string) {
   for (const ownerId of new Set([request.from, request.to])) {
     const notebook = runtime.notebook(ownerId);
-    await notebook.journal({ kind, note: `${request.id} (${request.from} → ${request.to}): ${note}` });
+    await notebook.journal({
+      kind, note: `${request.id} (${request.from} → ${request.to}): ${note}`,
+      provenance: kind === 'attention' ? { kind: 'delegation', request: request.id, workItem: request.workItem } : undefined,
+    });
     await notebook.commit(`journal ${request.id}`);
   }
 }

@@ -99,8 +99,8 @@ An owner is declared once (`owners/<id>.yaml`) and keeps one identity across ses
   also hold an `incus` section, and a `deploy` section for where its code runs (the ship action).
 - **Duties**: what it does on its own, on an elapsed interval (`every: 15m | 1d | 7d`), not at a local clock time.
   Calendar chat briefings can use the [external systemd runner](../extending.md#calendar-briefings).
-  Kinds: `survey` (look, update the notebook, and raise what it found as attention items: work the owner can plan
-  with the person in chat, never work items), `maintain-prs` (deterministic), `request-instance`, `app-updates`.
+  Kinds: `survey` (look, update the notebook, and record suggestions in owner backlog, never implicit human
+  decisions or work items), `maintain-prs` (deterministic), `request-instance`, `app-updates`.
 - **Conversation mode**: per-pattern `allow` / `ask` / `deny` rules for chats; `ask` means the person approves
   in the chat. Owners reach for their own tools first and can do anything else with approval.
 - **Tools**: onionsoup tools, plus any MCP servers declared in `mcp:` (visible to that owner alone, with
@@ -220,8 +220,8 @@ or `cancelled`. The plugin's cleanup pass (`removeIdlePlanWorktrees` in `plan-wo
 asks opencode for the session's status and last update, and removes the worktree and its branch once the session is
 not busy (or retrying) and has not changed for `PLAN_WORKTREE_LIMITS.idleBeforeRemovalHours` (24); an item without
 a session, or whose session is gone, counts from the item's own last update. A worktree with uncommitted changes, or
-commits no remote holds, is never removed: it stays, the item records why (`planWorktreeKept`), and the person's
-attention is raised once per reason, not every pass. Each removal is journaled (`plan-worktree-removed`).
+commits no remote holds, is never removed: it stays, the item records why (`planWorktreeKept`), and owner
+maintenance is recorded once per reason, not every pass. Each removal is journaled (`plan-worktree-removed`).
 
 **Draft publication and external PR recovery.** `onionsoup_propose_changes` accepts `draft: true`
 (`owners propose <owner> --draft --item <item> --note <title>` in the CLI). The saved publication
@@ -552,10 +552,12 @@ recovery nor a follow-up silently replays an unknown effect.
 `onionsoup_request_work` delegates to a declared repository owner that can change its repository (`canChange`).
 Acceptance creates one durable linked work item, which the receiver plans alone and submits with
 `onionsoup_submit_plan` and that item; it passes the normal plan approval, verification, review and publication gates. Both owners hear completion, and declined or failed work raises
-attention for both so the person can redirect it. Attention discovery imports only the previous seven days on its first run (the cutoff is persisted; older journal
+owner follow-up for both. Attention discovery imports only the previous seven days on its first run (the cutoff is persisted; older journal
 history remains intact). It then indexes appended bytes, caches unchanged files, and skips malformed records without
-breaking the inbox. Attention items can be acknowledged, resolved with an outcome, or reopened through `onionsoup_attention`. The inbox exposes acknowledge
-and resolve controls and keeps acknowledged items visible until resolved.
+breaking the inbox. Attention items can be acknowledged, resolved with an outcome, or reopened through `onionsoup_attention`.
+The human inbox includes only open human decisions; Seen removes a card from that queue and its owner's waiting
+count without starting work or deleting history. Informational owner follow-up and all acknowledged/resolved entries
+remain in the owner's backlog/history. Acknowledgment never makes an old condition newly urgent.
 
 ### Org chart and initiatives
 
@@ -625,7 +627,7 @@ Scope matching is an explicit reviewer assessment with a note, not deterministic
 directly (one-off requests, their own work), and it lists her initiatives. `onionsoup_steer` acts on work her initiatives
 assigned (approve a plan under the grant, send it back, cancel the work, or leave the report
 a note); reading is oversight, steering is authority. A report pushes back with `onionsoup_raise` (objection, question or blocked): the
-escalation is stored on the initiative, journaled to both, raised as the manager's attention, and wakes her. While it
+escalation is stored on the initiative, journaled to both, recorded as the manager's owner follow-up, and wakes her. While it
 is open she cannot approve that assignment's plans; she resolves it with `onionsoup_initiative resolve-escalation`.
 
 The surface shows the tree under **Org**, each initiative's assignments by dependency step with their state, work,
@@ -1152,7 +1154,8 @@ the implementer or reviewer loop can make or corroborate.
 
 ### Explicit attention assignment
 
-Attention **Seen** only records acknowledgment; neither its note nor old acknowledged records start work.
+Attention **Seen** records acknowledgment and leaves the human action queue while retaining owner history;
+neither its note nor old acknowledged records start work.
 **Assign repository fix** is a separate human action selecting a declared capable repository owner, repository,
 title, outcome and acceptance criteria. The host validates that scope and persists the human author and source
 in `state/attention/assignments` before creating one deterministic regular work request. The request is attributed
@@ -1300,4 +1303,28 @@ and does not depend on successful index writes. Recorded chat views are ordered 
 
 New host-generated plan-worktree cleanup notices carry a condition identity scoped to the work item and its persisted workspace generation. Repeated observations update that one entry without undoing Seen. Successful removal (or verified absence) journals a terminal resolution before forgetting the worktree, so append failures remain retryable. The index retains a resolved tombstone even if it discovers completion before the original notice; delayed observations cannot resurrect that generation. Human decision notes remain attached.
 
-This is deliberately narrow: legacy free-text attention remains unchanged, assignment completion does not imply that an underlying condition cleared, and no prose matching infers resolution. Other producers need their own explicit identity and positive clear evidence before adopting the mechanism. The explicit fact/decision tools construct fixed journal shapes and do not accept condition metadata. The index trusts the host-owned journal, just as legacy attention does; this is not a new filesystem security boundary. A recreated or newly adopted worktree receives a new generation key, persisted before creation so a crash cannot reuse a resolved generation. Existing legacy notices remain open until explicitly resolved; they are not matched to new tombstones.
+### Decision-only human inbox
+
+Host-authored `AttentionProvenance` is shared by journals and the attention index. Survey suggestions (in either
+configured raises mode), worktree cleanup, failed/declined delegations, keeper maintenance and manager escalations
+are owner backlog, not requests for a person's decision. Review exhaustion and explicit CI person dispositions
+remain human decisions. Ordinary engine approvals, questions, permissions and uncertain request recovery keep
+their existing gates and read-error behavior. This routing creates no new approval or execution authority.
+
+On the first routing upgrade, discovery replays journal cursors once, preserving stable card identities and all
+human decision receipts. Legacy classification requires the original journal record plus its exact old host
+envelope and related persisted records: worktree path/item, delegation request/participants/work item, or the
+initiative's exact escalation. Only the old work-mode survey envelope identifies a suggestion; ambiguous free-form
+attention and missing source evidence remain conservative human choices. There is no semantic prose guessing.
+
+Reconciliation updates only the attention index, never source journals, requests, initiatives or worktrees.
+Filesystem `ENOENT` positively clears an absent worktree notice; unreadable paths fail the snapshot, not silently
+resolve. Existing worktrees and unpublished commits remain intact. A stored escalation resolution clears its card.
+A linked request completion, recorded cancellation or cancelled linked work item clears delegation failure cards;
+a similarly worded replacement's success alone proves nothing. Human acknowledgments and original observation
+times are preserved. Cleared entries remain history across restarts; old cards are not deleted or replayed as work.
+
+Assignment completion does not prove unrelated underlying conditions cleared. The explicit fact/decision tools
+construct fixed journal shapes and cannot accept host routing or condition metadata. The index trusts the
+host-owned journal; this is not a new filesystem security boundary. A recreated or newly adopted worktree
+receives a new generation key persisted before creation, so a crash cannot reuse a resolved generation.

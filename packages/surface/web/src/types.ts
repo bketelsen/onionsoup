@@ -56,6 +56,7 @@ export interface DeskState {
   notes: JournalNote[];
   registers: Record<string, string>;
   reminders: ReminderSummary[];
+  backlog: import('@onionsoup/owners').Attention[];
 }
 
 import type { ProviderHealthView, ReminderSummary } from '@onionsoup/owners';

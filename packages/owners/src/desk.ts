@@ -1,5 +1,6 @@
 import { parseJournalRecord, type JournalRecord } from './journal-record.ts';
 import { listAttention } from './attention.ts';
+import { needsHumanDecision } from './attention-routing.ts';
 import { readFile, readdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { OwnerDeclaration } from './declarations.ts';
@@ -89,6 +90,7 @@ export async function deskState(runtime: Runtime, query: DeskQuery) {
     detail: `${request.workItem ? `Work ${request.workItem}: ` : ''}${request.reason ?? request.followUpResult?.summary ?? request.ask.purpose}`, at: request.updatedAt,
   }));
   const recent = items.filter(item => !isOpenWork(item)).slice(-5).reverse().map(item => ({ id: item.id, status: item.status, title: item.proposal.title, url: item.publication?.url }));
+  const attention = (await listAttention(runtime)).filter(entry => entry.owner === owner.id);
   return {
     owners,
     owner: { id: owner.id, name: owner.persona?.name ?? owner.id, title: owner.persona?.title ?? '', source: owner.persona?.source ?? '', model: owner.model, desk: resolve(runtime.desksRoot, owner.id) },
@@ -98,7 +100,8 @@ export async function deskState(runtime: Runtime, query: DeskQuery) {
     activity,
     notes,
     registers,
-    attention: (await listAttention(runtime)).filter(entry => entry.owner === owner.id),
+    attention,
+    backlog: attention.filter(entry => !needsHumanDecision(entry)),
     reminders: (await pendingReminders(runtime, owner.id)).map(reminderSummary),
   };
 }

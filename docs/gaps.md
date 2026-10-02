@@ -11,7 +11,14 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
 
 - **Attention assignment is repository-only.** Seen remains inert; explicit assignment creates one gated request
   without resolving the attention entry. Assignment generations, reassignment and a blocked-routing recovery UI
-  remain follow-ups. Existing acknowledged notes are never automatically interpreted as assignments.
+  remain follow-ups. Seen leaves the human decision queue and stays in owner history; existing acknowledged
+  notes are never automatically interpreted as assignments.
+
+- **Unclassified legacy attention still needs interpretation.** New survey suggestions, maintenance and manager
+  escalations carry host routing evidence and stay in owner backlog. Original host journal envelopes can identify
+  older worktree, delegation and escalation cards for non-destructive reconciliation. Missing source records and
+  ambiguous attention-mode survey prose remain conservative human choices; no model-text classifier or bulk
+  dismissal resolves them. Backlog visibility does not itself schedule owner work or grant new authority.
 
 - **Uncertain revision delivery requires inspection.** New inbox/manager plan revisions have durable delivery
   intent and stable receipt reconciliation; an uncertain send is not automatically retried. There is no delivery

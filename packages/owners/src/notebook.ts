@@ -5,7 +5,7 @@ import { join, relative } from 'node:path';
 import { promisify } from 'node:util';
 import { z } from 'zod';
 import type { NotebookEdit, NotebookRegister } from './artifacts.ts';
-import { parseJournalRecord, type AttentionCondition, type JournalRecord } from './journal-record.ts';
+import { parseJournalRecord, type AttentionCondition, type AttentionProvenance, type JournalRecord } from './journal-record.ts';
 import type { JournalCursor, MemoryPolicy } from './memory-config.ts';
 import { withRecordLock } from './record-lock.ts';
 
@@ -38,6 +38,7 @@ const REGISTER_TITLES: Record<NotebookRegister, string> = {
 export interface JournalEntry {
   /** Host evidence only: not accepted by the model journal tool. */
   condition?: AttentionCondition;
+  provenance?: AttentionProvenance;
   kind: string;
   workItem?: string;
   stage?: string;

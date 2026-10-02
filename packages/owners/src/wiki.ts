@@ -285,7 +285,7 @@ export class Wiki {
     throw new Error(`wiki_push_conflict: the remote changed the same lines; the commit is kept in ${this.directory}: ${gitStderr(failure)}`);
   }
 
-  /** Push the commit and journal it; a failed push is journaled too, and raises the person's attention. */
+  /** A failed push stays in the keeper's backlog, with its unpublished commit intact. */
   private async publish(change: ChangeRequest, done: string, commit: string) {
     const failure = await this.push().then(() => undefined, (error: unknown) => error);
     const isPushed = failure === undefined;
@@ -293,7 +293,10 @@ export class Wiki {
     await this.journal({ kind: change.kind, note: change.reason, outcome });
     if (isPushed) return;
     const reason = failure instanceof Error ? failure.message : String(failure);
-    await this.journal({ kind: 'attention', note: `wiki ${done}: ${reason}` });
+    await this.journal({
+      kind: 'attention', provenance: { kind: 'maintenance', code: 'wiki_push_failed' },
+      note: `wiki ${done}: ${reason}`,
+    });
     throw failure;
   }
 
