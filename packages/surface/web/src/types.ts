@@ -59,6 +59,7 @@ export interface DeskState {
   registers: Record<string, string>;
   reminders: ReminderSummary[];
   backlog: import('@onionsoup/owners').Attention[];
+  friction?: Awaited<ReturnType<typeof import('@onionsoup/owners').frictionBacklog>>;
 }
 
 import type { ProviderHealthView, ReminderSummary } from '@onionsoup/owners';

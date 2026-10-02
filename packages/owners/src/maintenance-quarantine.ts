@@ -11,6 +11,9 @@ import { withRecordLock } from './record-lock.ts';
 
 const Hash = z.string().regex(/^[a-f0-9]{64}$/);
 const Build = z.string().regex(/^[a-f0-9]{40}$/);
+export const RuntimeReleaseManifest = z.object({ buildId: Build, capabilities: z.object({
+  legacyMaintenanceQuarantine: z.literal(1), legacyMaintenanceRelease: z.literal(1).optional(),
+}).strict().optional() }).strict();
 const LegacyAdmission = AdmissionRecord.omit({ maintenance: true }).strict();
 export const MaintenanceQuarantineBody = z.object({ version: z.literal(1), recoveryDigest: Hash,
   targetBuildId: Build, oldBuildId: Build, admissions: z.array(LegacyAdmission).min(1), createdAt: z.iso.datetime() }).strict();
@@ -75,7 +78,7 @@ export async function maintenanceRuntimeManifest() {
   const path = process.env.ONIONSOUP_RELEASE_MANIFEST
     ?? join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'surface', 'release-manifest.json');
   try {
-    return z.object({ buildId: Build, capabilities: z.object({ legacyMaintenanceQuarantine: z.literal(1), legacyMaintenanceRelease: z.literal(1).optional() }).strict().optional() }).strict().parse(JSON.parse(await readFile(path, 'utf8')));
+    return RuntimeReleaseManifest.parse(JSON.parse(await readFile(path, 'utf8')));
   } catch { return undefined; }
 }
 export async function maintenanceRuntimeBuildId() {

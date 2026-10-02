@@ -9,8 +9,9 @@ Onionsoup runs **owners**: persistent agents that each own one domain, such as a
 virtualization hosts, a NAS or a wiki. An owner has a name and personality, a charter written by its person,
 a notebook it curates, and authority bound in configuration. It watches its domain, answers questions about
 it, and runs its own work: it plans with the person in chat following **skills** (a process adapted from
-obra/superpowers), and carries out an approved plan in its own session, handing small tasks to an
-**implementer subagent** and checking each with a **reviewer subagent** from another model family.
+obra/superpowers), and carries out an approved plan in its own session. It may implement and review tasks
+locally or delegate bounded work to its configured implementer/reviewer subagents when useful.
+Per-task dispatch is optional; the one final required independent-family publication review is not.
 
 The runtime, not the prompt, enforces how work happens: plans wait for a person's approval, and what an owner
 proposes is verified by host code in a sandbox, reviewed by a different model family, and only then committed,
@@ -34,7 +35,7 @@ templates, conventions and review guidance take precedence over this general wri
      gate: the person approves the plan (in chat, the inbox, or a manager under a grant)
           │
           ▼
-     work session: implementer subagent → reviewer subagent (another family), task by task
+     work session: local implementation/review, with optional bounded delegation
           │ onionsoup_propose_changes
           ▼
      host code: verify in the sandbox → required review (another family) → commit · push · PR
@@ -101,8 +102,10 @@ An owner is declared once (`owners/<id>.yaml`) and keeps one identity across ses
   Calendar chat briefings can use the [external systemd runner](../extending.md#calendar-briefings).
   Kinds: `survey` (look, update the notebook, and record suggestions in owner backlog, never implicit human
   decisions or work items), `maintain-prs` (deterministic), `request-instance`, `app-updates`.
-- **Conversation mode**: per-pattern `allow` / `ask` / `deny` rules for chats; `ask` means the person approves
-  in the chat. Owners reach for their own tools first and can do anything else with approval.
+- **Conversation mode**: per-pattern `allow` / `ask` / `deny` rules for chats. Repository-changing owners
+  have local edit/development conveniences in their already-authorized workspace; explicit declared denies
+  override them, including for delegated descendants. Unlisted commands still ask. These conveniences are
+  not shell containment: chat bash remains an acknowledged unsandboxed gap.
 - **Tools**: onionsoup tools, plus any MCP servers declared in `mcp:` (visible to that owner alone, with
   per-tool rules). The NAS owner gets truenas-mcp this way.
 - **Stewards**: an owner with `manages:` creates, changes and retires owners within its scope through a tool that
@@ -160,7 +163,9 @@ their `parentID`) never get the bootstrap.
 - `onionsoup-reviewer-<owner-id>`, one per owner: read-only (no edits, read-only bash), with the first `review`
   freelancer model outside the owner's family.
 
-An owner's task permission lets it start only its own two subagents, and subagents are denied every `onionsoup_*`
+An owner may implement and review tasks itself; implementer and task-review dispatch are independently optional.
+Missing task models do not block local work, but publication still requires its configured final independent-family
+review. An owner's task permission lets it start only its own two subagents, and subagents are denied every `onionsoup_*`
 tool: effects and records stay with the owner and host code. A subagent's edits, and commands outside the owner's
 allowed rules, are journaled to the owner whose session started it (kind `subagent-action`). A subagent whose model
 the configuration cannot supply is left out with `onionsoup_subagent_unavailable` in the log instead of breaking
@@ -190,13 +195,16 @@ at `<home>/plans/<owner>/<item>` on branch `plan/<item>`, and records it on the 
 one repository once shared a desk, so proposing either would have bundled the other's unreviewed changes and both
 stopped; with a worktree each they proceed and propose independently, and the desk stays for chat and small direct
 changes. A session reopened after a failed start reuses the worktree and syncs it. The session may edit its worktree
-without asking (a session-level rule; the owner's other chats keep their rules). Its first message, marked as a runtime notice, is the
-approved plan with any conditions of approval, and tells the owner to carry it out with
-`subagent-driven-development` (an implementer subagent for each small task, its reviewer subagent after each), to
+under the local-work conveniences unless configuration explicitly denies edits. No execution-session override
+bypasses a declared deny. Its first message, marked as a runtime notice, is the approved plan with any conditions
+of approval, and lets the owner use `executing-plans` locally or optional `subagent-driven-development`, to
 make and record the rulings the plan leaves open, and to end with `onionsoup_propose_changes` for the item. The
 reviewer subagent grades on the same scale as the required review (`REVIEW_SEVERITIES`), so blockers surface per task;
 there is no whole-change review of the owner's own, since the required review at proposal is one and a send-back
 commits nothing. After `DESK_CHANGE_LIMITS.reviewRoundsBeforePerson` send-backs, the person reads the diff. The item
+reuses its unchanged approved goal, approval and applicable grants for replies, retries and maintenance;
+changed scope and genuine world effects still use their original gates. There is no mandatory per-task
+review/reset or operator exact-file/two-acceptance protocol for owners. The item
 records the session (`session`). A plan approved in chat opens its session at once; one approved from the inbox, the
 CLI (`owners approve`) or by a manager stays `working` without a session, and the plugin opens it on its next pass
 (every `PLUGIN_LIMITS.noticeMs`). The plugin holds the opencode client, so sessions open only while the surface runs;
@@ -369,6 +377,11 @@ the deploy checkout, ship checks the full ledger and refuses with the IDs, title
 active runners, including other owners' work. Once clear, it fast-forwards, verifies in the sandbox, and restarts
 only the owner's configured deploy services through a delayed systemd unit that health-checks and rolls back. This
 up-front check does not prevent new work from starting during verification.
+This is the legacy generic checkout ship path, not the onionsoup production release procedure.
+Onionsoup itself uses the [guarded immutable deployment worker](../deployment.md): verified release
+and manifest, admission drain, atomic pointer switch, **both** owners and surface restarts, authenticated
+OpenCode/surface/build checks and verified rollback. Never edit or fast-forward the live main checkout or
+clear locks to bypass drain. A release rollback does not roll back configuration or state.
 
 ### Notebooks and memory
 
@@ -414,9 +427,19 @@ first seen on or after the cutoff, among the most recent 100 reports. It schedul
 investigation per interval (minimum one minute), after existing requests, due duties and runnable items, and while the maintainer has no reserved,
 runnable or running work. Admission and owner reservations keep it off deployment and existing worker paths.
 
-The worker reads the existing clean checkout, records its commit, and explicitly labels remote freshness unknown;
-it never fetches, resets or gathers infrastructure snapshots. A sandboxed owner hire with shell access denied returns observed/inferred/unknown
-facts and either a bounded proposed fix in that repository, missing evidence, or no action. A versioned sidecar in
+Before diagnosis the host collects a bounded incident bundle from declared roots and typed persisted records.
+It includes linked work and rebase siblings/rejections, request/effect checkpoints, host checks/review summaries,
+session identity/archive facts, owner schedules and duty timestamps, provider health, declared models/families,
+remote and credential **references**, maintenance/admission summaries, installed/configured build facts and
+safe local Git head/history/base/containment. No credentials, environment-file values, raw runs, transcripts or
+private tool output enter the bundle. Fixed host argv and configuration select paths and commands; reports
+and model output never do. Missing/unreadable facts have explicit reasons, and abbreviation is visible.
+The installed collector identity and configured deployment target are not live-service/plugin attestation;
+local source and Git history are explicitly not fetched.
+
+A sandboxed owner hire still has shell access denied. It receives the bundle before inspecting source and returns
+observed/inferred/unknown facts and either a bounded proposed fix, missing evidence, no action or positive closure.
+A versioned sidecar in
 `state/friction/investigations/<id>.json` holds the claim, result, session and cost. Unreadable wake/sidecar candidates are skipped with a diagnostic naming the report, so another valid report can proceed.
 The surface shows unavailable investigation status on a corrupt sidecar while preserving other reports. Original reports and pending wake
 files stay compatible; the sidecar is the processing status. Repeated discoveries adopt the saved result. A crashed
@@ -428,7 +451,15 @@ The Friction list/detail shows processing status and the proposed fix with its e
 `owners friction-investigation <id>` reads the effective triage, revision, local freshness and current approval digest;
 `originalTriage` separately retains the original evidence. Stale or already-fixed results have no approval digest. `owners friction-triage <id>` explicitly investigates one
 selected eligible wake under the CLI runtime lock (it cannot run beside the daemon). This operator command bypasses
-the daemon cadence but cannot repeat a saved/uncertain investigation. Neither investigation path sends messages, opens requests, publishes issues, edits code, or claims a fix completed.
+the daemon cadence but cannot repeat a saved/uncertain investigation. Diagnosis never edits code, publishes issues
+or invents authority. Missing operational evidence remains owner incident follow-up in the desk and
+`onionsoup_status` (`friction=<id>` reads its bounded evidence), never a new person Attention card.
+
+Under the existing opt-in policy, eligible, current `propose-fix` diagnoses route automatically through the
+configured owner's normal work acceptance, planning and publication workflow. The request is typed
+`ownerFollowUp`, not a person assignment or fabricated manager approval. No new grant is supplied.
+`routeProposals: false` retains explicit manual routing. Routine promotion needs no person relaying facts;
+actual plan/effect gates and applicable standing grants remain unchanged.
 
 The person's **Request this fix** action promotes the displayed proposal, bound to its digest, into an ordinary
 human-attributed work request. `owners friction-promote <id> <digest>` does the same; the read command above supplies
@@ -446,10 +477,24 @@ promotion refuses it without saving an intent, while a saved pending intent cons
 and retries on the normal recovery cadence without opening a request. A changed commit or proposal blocks a
 pending intent with `friction_source_stale` until revalidation and fresh approval. An existing request is never replaced.
 
-`owners friction-revalidate <id>` explicitly re-investigates a stale report against the current commit, under the
-same CLI admission as `friction-triage` and never from the daemon. A write-once claim per report and reference commit
-allows one initial read-only hire for that commit; a failed hire or a dead runner leaves the claim `failed` or
-`uncertain`, and ordinary revalidation never retries it. Results are appended as write-once revisions under
+`owners friction-revalidate <id>` explicitly re-investigates a source-stale report.
+`owners friction-refresh <id>` also refreshes completed diagnoses at the same source commit when host evidence
+changes. The lowest-priority daemon worker uses the latter path under the same cadence/reservation rules.
+A write-once evidence-generation claim binds source and bundle digest; unchanged or previously attempted
+generations do not consume another model call. A failed hire or a dead runner leaves the claim `failed` or
+`uncertain`, and ordinary revalidation never replays it. Unknown transport/in-flight outcomes hold later
+generations, not just the identical digest. Host-returned terminal assistant errors or invalid deliverables
+stay failed history but allow one diagnosis for materially new incident facts, without a person reset.
+Routine duty/journal/session timestamps remain context but are excluded from refresh identity; actual
+schedules, linked conditions/status/check/effect identities, source/containment, provider health status and
+recurring captures can change it. A post-closure recurrence invalidates the effective closure, returns to
+owner backlog and becomes eligible again; original closure history remains.
+Resolved linked journal conditions are scanned since the capture under a shared byte/file budget, before
+the short context event tail. Routine events and day rollover never age a receipt out of that tail.
+An abbreviated scan is explicit, never evidence of resolution. Duplicate links are capture-generation-bound:
+a recurring duplicate after its primary closes returns to follow-up; a still-unresolved source can be relinked
+with an append-only host-only revision and no invented model findings or extra hire.
+Results are appended as write-once revisions under
 `state/friction/investigations/<id>/`, published atomically; the original investigation is never rewritten. The
 latest `revised` revision is the effective proposal, and its digest includes the revision number, so a revised
 proposal needs fresh approval. A blocked intent that never routed is archived as superseded history before the new
@@ -473,19 +518,33 @@ attempt; this filesystem check does not prove the sandbox, provider or inference
 process's PATH to the existing installation before retrying. Older binaries reject retry metadata as uncertain,
 preserving the fail-closed rollback boundary. Original reports, investigations and revisions are retained.
 
-Only revalidation may answer `already-fixed`. That answer needs a `fixedBy` commit that exists and is an ancestor of
-the reference commit, and every cited source path must carry a line or range that exists at that commit. Otherwise the
-revision is saved `blocked` (`friction_fixed_by_unknown`, `friction_fixed_by_unreachable`,
-`friction_citation_unverified`) and does not take effect. An effective already-fixed result offers no
+An `already-fixed` answer needs a `fixedBy` commit contained in the reference history **and**
+`conditionEvidence` keys naming applicable positive host postconditions in the collected bundle.
+Supported conditions are linked original-goal host verification/acceptance, completed verified operational
+checkpoints or exact linked host condition-resolution receipts after the report. Mere source presence,
+source citations, model prose, request routing or a merged PR alone never retire friction.
+Unsupported initial closure becomes `needs-evidence`; unsupported revalidation is saved `blocked`
+(`friction_fixed_by_unknown`, `friction_fixed_by_unreachable`, `friction_operational_condition_unverified`)
+and does not replace the effective findings. An effective already-fixed result offers no
 **Request this fix**. The Friction view shows both commits, every revision including blocked ones, the original
 investigation, superseded intents, and any history that could not be read.
 
-Routing retries only saved human intents, at most three attempts per authorization (up to 20 pending intents per
+Routing retries saved intents, at most three attempts per routing budget (up to 20 pending intents per
 tick), then stops with a visible reason. **Retry request routing**, or
 `owners friction-promotion-retry <id> <digest>`, explicitly resets an exhausted routing budget after rechecking the
 captured recipient's current repository scope. It never resets an existing request's execution or terminal status.
-No investigation is automatically promoted, and no historical wakes or attention acknowledgments are backfilled. Disabling policy stops new dispatch; it does not cancel an already running read-only hire. No policy is installed
+Original reports and Attention Seen receipts are never rewritten or treated as work assignments.
+Disabling policy stops new discovery/routing; it does not cancel an already running read-only hire or
+an already-routed request. No policy is installed
 by an upgrade; choosing an activation-time cutoff preserves legacy pending wakes for separate approved backfill.
+For an authorized legacy diagnosis, `friction-refresh <id>` adds evidence/revision history without rewriting
+the original capture, paid claim or Attention decision. Exact duplicate symptoms with the same host-linked
+source incident are source-linked rather than diagnosed/routed twice. Repeated `owner_abandoned` rebases
+also require the same demonstrated original PR/head/rejection condition, not simply matching PR numbers.
+Different symptoms remain separate, and duplicate linkage is not a closure claim.
+The deterministic PR maintainer now honors a recorded `owner_abandoned` rejection for the exact original
+item/previous head, like an existing cancelled rebase. It does not repeatedly create the same unwanted update,
+close the remote PR, blacklist ordinary errors or suppress maintenance when the remote head changes.
 
 ### Requests between owners
 

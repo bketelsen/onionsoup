@@ -14,6 +14,8 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
   without resolving the attention entry. Assignment generations, reassignment and a blocked-routing recovery UI
   remain follow-ups. Seen leaves the human decision queue and stays in owner history; existing acknowledged
   notes are never automatically interpreted as assignments.
+  Host-bound person Seen remains valid for legacy entries; owners cannot acknowledge/resolve/reopen human
+  decisions or unknown provenance. Typed owner-housekeeping remains freely actionable.
 
 - **Unclassified legacy attention still needs interpretation.** New survey suggestions, maintenance and manager
   escalations carry host routing evidence and stay in owner backlog. Original host journal envelopes can identify
@@ -182,14 +184,22 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
 
 ## Runtime
 
-- **Friction issue publication and verified closure remain manual.** Owners can capture bounded, deduplicated friction reports
-  in the surface, with one durable pending wake intent for each new signature. An opt-in daemon worker investigates new reports into durable sidecars (see the design page); automatic proposal
-  promotion (explicit human promotion is supported), uncertain-session reconciliation and approved legacy backfill are not implemented.
-  Source freshness compares only with the local checkout (never fetched), and revalidation is manual
-  (`owners friction-revalidate`). A person can explicitly retry one `failed` claim once per reference commit
+- **Friction still cannot manufacture missing live evidence.** Opt-in triage collects bounded host incident
+  bundles before model diagnosis and routes applicable proposals into the configured owner's normal workflow,
+  without a manual promotion/relay ceremony. Missing operational facts stay owner incident follow-up; source,
+  installed collector manifest and configured release target do not attest a running service/plugin.
+  Provider health is recorded/reactive, not an active probe. Safe local history/containment is not remote freshness.
+  Same-source evidence refresh and authorized explicit legacy refresh retain original reports and revision history.
+  Positive applicable host conditions/version facts govern closure; model prose, source citations, a merged PR
+  or routing alone do not. Exact host-linked duplicate incidents source-link, not bulk-dismiss.
+  Unknown/in-flight outcome reconciliation and replay of the same paid generation remain unsupported.
+  Host-returned terminal analysis failures allow fresh incident generations under the configured cadence;
+  routine metadata churn does not trigger inference. Post-closure recurrence returns to owner follow-up.
+  Source freshness compares only with the clean local checkout (never fetched). A person can explicitly retry one `failed` source-revalidation claim once per reference commit
   with `owners friction-revalidation-retry`; uncertain attempts still require inspection and cannot be replayed.
   The recent-100 discovery window can miss older eligible reports after a burst; explicit ID investigation is available.
-  A blocked investigation needs operator review; there is no reset/retry control. Workaround delivery must pin the saved origin, and publishing a draft GitHub issue must have its own
+  A blocked or uncertain investigation still needs inspection; new evidence never overrides its paid claim.
+  Workaround delivery must pin the saved origin, and publishing a draft GitHub issue must have its own
   person approval gate. A missing failure event stays explicit and makes deduplication provisional. The opencode
   plugin exposes a message ID but no invocation ID; identical submissions in one assistant message can share an
   idempotency key. An interrupted pre-write submission blocks other reports of its signature until that submission

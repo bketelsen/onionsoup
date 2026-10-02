@@ -102,9 +102,9 @@ FOR multi-item feedback:
   4. Verify no regressions
 ```
 
-In subagent-driven-development you are the controller: dispatch an implementer with the findings instead of fixing them yourself, then a re-review.
+Fix findings yourself or optionally dispatch an implementer with the findings. Re-review the changed code locally, or use a task reviewer when a fresh perspective helps.
 
-After fixing host blocker findings: re-review, run the verification commands (verification-before-completion), and call `onionsoup_propose_changes` again with the same `item`.
+After fixing host blocker findings: review the fix locally or with an optional task reviewer, run the verification commands (verification-before-completion), and call `onionsoup_propose_changes` again with the same `item`. The unchanged approved goal and applicable standing grants still apply; a retry needs no replacement plan. Host code performs the final required independent-family review.
 
 ## When to Push Back
 

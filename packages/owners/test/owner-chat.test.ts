@@ -41,7 +41,7 @@ test('registered fallback denies writes, shell, subagents, MCP and direct effect
   await hooks.config!(config);
   const agents = config.agent as Record<string, { permission: Record<string, unknown>; prompt: string }>;
   assert.deepEqual(agents['onionsoup-owner-clippy'].permission, observationChatPermission());
-  assert.equal(agents.Bellonda.permission.edit, 'ask');
+  assert.equal(agents.Bellonda.permission.edit, 'allow', 'declared repository personas can work locally');
   assert.equal(agents['onionsoup-reviewer-clippy'], undefined);
   assert.ok(agents['onionsoup-reviewer-bellonda']);
   assert.doesNotMatch(JSON.stringify(config.mcp), /unsafe/);

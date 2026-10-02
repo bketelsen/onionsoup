@@ -13,7 +13,7 @@ const STALE_REASONS: Record<NonNullable<NonNullable<FrictionRecord['freshness']>
 function InvestigationDetails({ investigation }: { investigation: Investigation }) {
   return <>
     <p>Disposition: {investigation.disposition}</p>
-    {investigation.fixedBy && <p>Already fixed by {investigation.fixedBy}</p>}
+    {investigation.fixedBy && <p>Fixing source {investigation.fixedBy}; host condition evidence: {investigation.conditionEvidence?.join(', ') ?? 'unverified'}</p>}
     {(['observed', 'inferred', 'unknown'] as const).map(kind => <div key={kind}>
       <h4>{kind}</h4><ul>{investigation[kind].map((entry, index) => <li key={index}>{entry}</li>)}</ul>
     </div>)}
@@ -43,7 +43,7 @@ function RevisionHistory({ record }: { record: FrictionRecord }) {
   return <section className="space-y-2">
     <h3 className="font-semibold">Revisions</h3>
     <ol>{record.revisions.map(revision => <li key={revision.revision}>
-      Revision {revision.revision} · {revision.sourceCommit.slice(0, 8)} · {revision.state} · {revision.investigation.disposition}
+      Revision {revision.revision} · {revision.sourceCommit.slice(0, 8)} · {revision.state} · {revision.investigation?.disposition ?? 'source-linked duplicate'}
       {revision.blockedReason && <> · {revision.blockedReason}</>}
     </li>)}</ol>
   </section>;
@@ -103,6 +103,13 @@ export function FrictionDetail({ record, refresh }: { record: FrictionRecord; re
     {record.triage && <section className="space-y-2">
       <h3 className="font-semibold">Investigation: {record.triage.state}</h3>
       <p>Updated {record.triage.updatedAt}{record.triage.reason ? ` · ${record.triage.reason}` : ''}</p>
+      {record.triage.duplicateOf && <Button onClick={() => navigate('friction', record.triage!.duplicateOf!)}>View source-linked incident {record.triage.duplicateOf}</Button>}
+      {record.triage.bundle && <details>
+        <summary>Host incident evidence · {record.triage.bundle.collectedAt}{record.triage.bundle.abbreviated ? ' · abbreviated' : ''}</summary>
+        <p>Local and recorded facts, not live-service attestation. Missing observations remain owner follow-up.</p>
+        {record.triage.bundle.facts.map(fact => <p key={fact.key}>{fact.key}: {fact.status}
+          {fact.reason ? ` (${fact.reason})` : ''} · {JSON.stringify(fact.values)}</p>)}
+      </details>}
       {record.triage.investigation && <>
         <InvestigationDetails investigation={record.triage.investigation} />
         {record.triage.investigation.proposedWork && <>

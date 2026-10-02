@@ -161,7 +161,7 @@ const PR_MAINTENANCE: Record<string, { mode?: 'update-base'; description: string
   BEHIND: { mode: 'update-base', description: 'behind its base' },
 };
 
-async function neededMaintenance(runtime: Runtime, item: WorkItem, notes: string[], cancelled: Set<string>) {
+async function neededMaintenance(runtime: Runtime, item: WorkItem, notes: string[], suppressed: Set<string>) {
   const pr = await settledPullRequest(item.publication!.url);
   if (PR_STATES[pr.state] !== 'open') return undefined;
   const triage = await triageFailingCi(runtime, item, pr.headRefOid).catch(error => {
@@ -173,15 +173,15 @@ async function neededMaintenance(runtime: Runtime, item: WorkItem, notes: string
     return undefined;
   }
   const maintenance = PR_MAINTENANCE[pr.mergeable] ?? PR_MAINTENANCE[pr.mergeStateStatus];
-  if (!maintenance || cancelled.has(`${item.id}:${pr.headRefOid}`)) {
-    notes.push(`${item.publication!.url} ${maintenance ? 'update previously cancelled' : pr.mergeStateStatus.toLowerCase()}`);
+  if (!maintenance || suppressed.has(`${item.id}:${pr.headRefOid}`)) {
+    notes.push(`${item.publication!.url} ${maintenance ? 'update previously cancelled or abandoned at this head' : pr.mergeStateStatus.toLowerCase()}`);
     return undefined;
   }
   return { ...maintenance, head: pr.headRefOid };
 }
 
-async function openPrUpdate(runtime: Runtime, item: WorkItem, notes: string[], cancelled: Set<string>) {
-  const maintenance = await neededMaintenance(runtime, item, notes, cancelled);
+async function openPrUpdate(runtime: Runtime, item: WorkItem, notes: string[], suppressed: Set<string>) {
+  const maintenance = await neededMaintenance(runtime, item, notes, suppressed);
   if (!maintenance) return undefined;
   if (!canChange(runtime.owner(item.owner))) {
     notes.push(`${item.publication!.url} owner_cannot_change: update retained for owner maintenance`);
@@ -209,7 +209,8 @@ export async function maintainPullRequests(runtime: Runtime, ownerId: string) {
   const refreshed = await refreshPublications(runtime, ownerId);
   const items = (await runtime.ledger.list()).filter(item => item.owner === ownerId);
   const openRebases = new Set(items.filter(item => item.rebaseOf && !isFinished(item)).map(item => item.rebaseOf!.itemId));
-  const cancelledRebases = new Set(items.filter(item => item.rebaseOf && item.status === 'cancelled')
+  const suppressedRebases = new Set(items.filter(item => item.rebaseOf && (
+    item.status === 'cancelled' || (item.status === 'rejected' && /^owner_abandoned(?::|$)/.test(item.reason ?? ''))))
     .map(item => `${item.rebaseOf!.itemId}:${item.rebaseOf!.previousHead}`));
   const notes = [...refreshed.changed, ...refreshed.unreadable.map(url => `${url} state unreadable`)];
   const opened: WorkItem[] = [];
@@ -220,7 +221,7 @@ export async function maintainPullRequests(runtime: Runtime, ownerId: string) {
       && !candidate.publication);
     if (hasRepair) continue;
     if (openRebases.has(item.id)) continue;
-    const update = await openPrUpdate(runtime, item, notes, cancelledRebases);
+    const update = await openPrUpdate(runtime, item, notes, suppressedRebases);
     if (update) opened.push(update);
   }
   const notebook = runtime.notebook(ownerId);

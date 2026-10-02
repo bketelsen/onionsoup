@@ -1,7 +1,7 @@
 import { tmpdir } from 'node:os';
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
-import { mkdtemp, readdir, readFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import type { Config, Plugin } from '@opencode-ai/plugin';
@@ -11,6 +11,7 @@ import { BOOTSTRAP_SKILL, IMPLEMENTER_AGENT, reviewerAgent, SKILLS_DIRECTORY } f
 import { REVIEW_SEVERITIES } from '../src/repository-writing.ts';
 import { Runtime } from '../src/runtime.ts';
 import { withActiveHooks } from './active-hooks.ts';
+import { bashAction } from '../src/bash-rules.ts';
 
 const declarations = 'packages/owners/test/fixtures/owners';
 
@@ -46,6 +47,72 @@ test('a persona may start only its own implementer and reviewer, and its prompt 
   const milesTeg = agents['Miles Teg']!;
   assert.deepEqual(milesTeg.permission!.task, { '*': 'deny', [IMPLEMENTER_AGENT]: 'allow', [reviewerAgent('homelab')]: 'allow' });
   assert.match(String((milesTeg as { prompt?: string }).prompt), new RegExp(`subagent_type "${reviewerAgent('homelab')}"`));
+  assert.match(String((milesTeg as { prompt?: string }).prompt), /optional/);
+  assert.match(String((milesTeg as { prompt?: string }).prompt), /implement and review tasks yourself/);
+});
+
+async function configuredWithConversation(conversation: string) {
+  const root = await mkdtemp(join(tmpdir(), 'onionsoup-agent-rules-'));
+  const configuration = join(root, 'config');
+  await cp(declarations, configuration, { recursive: true });
+  const ownerPath = join(configuration, 'owners/homelab.yaml');
+  await writeFile(ownerPath, `${await readFile(ownerPath, 'utf8')}\nconversation: ${conversation}\n`);
+  const client = { session: { get: async ({ path }: { path: { id: string } }) => ({
+    data: { id: path.id, parentID: path.id === 'ses_child' ? 'ses_owner' : undefined },
+  }) } };
+  const hooks = await withActiveHooks({ client } as unknown as Parameters<Plugin>[0], {
+    declarations: configuration, state: join(root, 'state'),
+  });
+  const config: Config = {};
+  await hooks.config!(config);
+  return { hooks, root, configuration, agents: config.agent as Record<string, { prompt: string; permission: Record<string, unknown> }> };
+}
+
+test('repository owners edit and develop locally without prompts while observation and effect gates stay unchanged', async () => {
+  const { agents } = await configured();
+  const permission = agents['Miles Teg']!.permission!;
+  assert.equal(permission.edit, 'allow');
+  const bash = permission.bash as Record<string, string>;
+  assert.equal(bashAction(bash, 'npm run typecheck'), 'allow');
+  assert.equal(bashAction(bash, 'git push'), 'ask');
+  assert.equal(permission.onionsoup_plan_approval, 'ask');
+  assert.equal(permission.webfetch, 'ask');
+  assert.equal(agents.Odrade!.permission!.edit, 'ask', 'non-repository chat gains no edit authority');
+  assert.equal(bashAction(agents.Odrade!.permission!.bash as Record<string, string>, 'npm test'), 'ask');
+});
+
+test('declared edit and bash denies survive local execution permissions and subagent dispatch', async () => {
+  const { agents, hooks } = await configuredWithConversation('{ edit: deny, bash: { "*": ask, "pytest*": deny, "npm *": deny } }');
+  const permission = agents['Miles Teg']!.permission;
+  assert.equal(permission.edit, 'deny');
+  assert.equal(bashAction(permission.bash as Record<string, string>, 'pytest'), 'deny', 'configured verification cannot override a deny');
+  await hooks['chat.message']!({ sessionID: 'ses_owner', agent: 'Miles Teg' }, {} as never);
+  const before = hooks['tool.execute.before']!;
+  for (const sessionID of ['ses_owner', 'ses_child']) {
+    await assert.rejects(before({ sessionID, tool: 'edit', callID: `edit_${sessionID}` }, {
+      args: { filePath: 'README.md', oldString: 'old', newString: 'new' },
+    }), /owner_edit_denied/);
+    await assert.rejects(before({ sessionID, tool: 'bash', callID: `bash_${sessionID}` }, {
+      args: { command: 'npm test' },
+    }), /owner_bash_denied/);
+  }
+});
+
+test('optional task models may be unavailable without blocking local work or claiming their review replaced host review', async () => {
+  const fixture = await configuredWithConversation('{ edit: ask, bash: { "*": ask } }');
+  await rm(join(fixture.configuration, 'freelancers'), { recursive: true });
+  await mkdir(join(fixture.configuration, 'freelancers'));
+  const hooks = await withActiveHooks({} as Parameters<Plugin>[0], {
+    declarations: fixture.configuration, state: join(fixture.root, 'without-task-models'),
+  });
+  const config: Config = {};
+  await hooks.config!(config);
+  const agents = config.agent as Record<string, { prompt: string; permission: Record<string, unknown> }>;
+  assert.equal(agents[IMPLEMENTER_AGENT], undefined);
+  assert.equal(agents[reviewerAgent('homelab')], undefined);
+  assert.equal(agents['Miles Teg']!.permission.edit, 'allow');
+  assert.match(agents['Miles Teg']!.prompt, /unavailable.*locally/s);
+  assert.match(agents['Miles Teg']!.prompt, /required review from another model family/);
 });
 
 test('personas may put questions to the person with the question tool, which opencode denies by default; subagents may not', async () => {
@@ -76,6 +143,9 @@ test('the skills bootstrap goes into an owner\'s top-level session once, never i
   const bootstrapped = owner.messages[0]!.parts.filter(part => part.text.includes('<onionsoup-skills>'));
   assert.equal(bootstrapped.length, 1);
   assert.match(bootstrapped[0]!.text, new RegExp(`The ${BOOTSTRAP_SKILL} skill is below and already loaded`));
+  assert.match(bootstrapped[0]!.text, /executing-plans locally/);
+  assert.match(bootstrapped[0]!.text, /Implementation and task-review dispatch are optional/);
+  assert.match(bootstrapped[0]!.text, /one final required independent-family publication review/);
   const child = chat('ses_child', 'Miles Teg');
   await transform({}, child as never);
   assert.equal(child.messages[0]!.parts.length, 1, 'a child session is not bootstrapped');

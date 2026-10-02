@@ -1,4 +1,4 @@
-import { recoverFrictionPromotions } from './friction-promotion.ts';
+import { recoverFrictionPromotions, routeConfiguredFrictionProposals } from './friction-promotion.ts';
 import { recoverAttentionAssignments } from './attention-assignment.ts';
 import { noticeRequestProgress } from './request-status.ts';
 import { consumeFrictionWake, nextFrictionInvestigation } from './friction-work.ts';
@@ -238,7 +238,7 @@ async function reservedRequestOwners(runtime: Runtime) {
   return reserved;
 }
 
-/** Lowest-priority investigation: no refresh or work dispatch, and one bounded hire off the tick. */
+/** Lowest-priority diagnosis; one bounded hire off the tick, proposals use normal owner work. */
 export async function scheduleFriction(runtime: Runtime, log: TickLog, reserved: ReadonlySet<string>) {
   if (friction.size) return;
   const selected = await nextFrictionInvestigation(runtime, (id, reason) => log.error(id, new Error(reason)));
@@ -308,6 +308,7 @@ async function tickAdmitted(runtime: Runtime, log: TickLog) {
   }
   try {
     await recoverFrictionPromotions(runtime, log.error);
+    await routeConfiguredFrictionProposals(runtime, log.error);
   } catch (error) {
     log.error('friction promotions', error);
   }

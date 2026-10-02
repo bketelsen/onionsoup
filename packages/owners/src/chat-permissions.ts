@@ -45,17 +45,48 @@ export const READ_ONLY_CHAT_BASH: Record<string, 'allow' | 'ask'> = {
 };
 
 /**
- * An owner's bash rules in chat. opencode applies the last matching rule, so the owner's catch-all comes first, then
- * the read-only baseline, then the owner's own specific rules (an owner's `deny` still wins), then its verify commands.
+ * Routine development in an already-authorized repository workspace. These rules reduce prompts, not authority:
+ * chat bash is still unsandboxed, repository scripts can have effects, and host publication/resource gates remain.
  */
-export function chatBash(ownerBash: Record<string, string>, verify: readonly string[]) {
+export const LOCAL_DEVELOPMENT_BASH: Record<string, 'allow'> = {
+  'npm test*': 'allow',
+  'pnpm test*': 'allow',
+  'yarn test*': 'allow',
+  ...Object.fromEntries(['npm', 'pnpm', 'yarn'].flatMap(runner =>
+    ['test', 'build', 'check', 'typecheck', 'lint', 'format', 'dev'].map(script => [`${runner} run ${script}*`, 'allow' as const]))),
+  'node --test*': 'allow',
+  'go test*': 'allow',
+  'go vet*': 'allow',
+  'go build*': 'allow',
+  'pytest*': 'allow',
+  'python -m pytest*': 'allow',
+  'python3 -m pytest*': 'allow',
+  'cargo test*': 'allow',
+  'cargo check*': 'allow',
+  'cargo build*': 'allow',
+  'make test*': 'allow',
+  'make check*': 'allow',
+  'make build*': 'allow',
+  'make lint*': 'allow',
+};
+
+/**
+ * Last match wins in opencode. Declared rules follow every convenience rule, including configured verification.
+ * A declared catch-all deny gets no convenience exceptions; its explicitly configured exceptions still apply.
+ */
+export function chatBash(ownerBash: Record<string, string>, verify: readonly string[], canDevelop = false) {
   const { '*': catchAll = 'ask', ...specific } = ownerBash;
-  return {
+  const baseline: Record<string, string> = catchAll === 'deny' ? {} : {
     '*': catchAll,
     ...READ_ONLY_CHAT_BASH,
-    ...specific,
+    ...(canDevelop ? LOCAL_DEVELOPMENT_BASH : {}),
     ...Object.fromEntries(verify.map(command => [`${command}*`, 'allow'])),
   };
+  return Object.fromEntries<string>([
+    ['*', catchAll],
+    ...Object.entries(baseline).filter(([pattern]) => pattern !== '*' && !(pattern in specific)),
+    ...Object.entries(specific),
+  ]);
 }
 
 /**

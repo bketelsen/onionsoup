@@ -1,47 +1,48 @@
 ---
 name: ship-onionsoup
-description: Takes an onionsoup engine change from idea to running in production (plan, reviewed PR, merge, ship with health check and rollback). Use whenever asked to fix, change, release, deploy or ship onionsoup itself.
+description: Takes an onionsoup engine change from idea to running in production (plan, reviewed PR, merge, guarded release with health check and rollback). Use whenever asked to fix, change, release, deploy or ship onionsoup itself.
 ---
 
 # Ship an onionsoup change
 
-Done means the change is merged to `main`, running in `onionsoup-owners.service`, healthy, and the person has
-been told if the surface needs a restart.
+Work in an isolated development worktree. Never edit, fast-forward or rebuild a live checkout.
+Implementation/publication and production rollout may have different owners: a delegated implementation
+ends at its authorized merge and hands the tested commit to the rollout coordinator.
 
-## Steps
+## Implementation and publication
 
-1. Plan. For work that needs planning, brainstorm it with the person, write the plan, and submit it with
-   `onionsoup_submit_plan`. The person approves it in the chat, and it runs in its own session, where you carry it
-   out task by task with your implementer and reviewer subagents and end with `onionsoup_propose_changes` passing
-   the plan's `item`.
-2. Make small changes on your desk:
-   - Edit on your desk (a worktree of onionsoup).
-   - Run `npm run verify`, which covers the build, typecheck, tests and doc checks. Add a test in
-     `packages/owners/test/` for new behaviour.
-   - Update the docs the change touches: `docs/design/owners.md`, `docs/extending.md`, `docs/gaps.md`, `README.md`.
-3. Call `onionsoup_propose_changes` (with `item` when it carries out an approved plan). It verifies, has another
-   model family review, commits, pushes and opens a PR. Only blocker findings send it back. With your merge grant it
-   merges once review passes.
-4. Call `onionsoup_ship`. It first refuses if any item across the ledger has an active runner, naming the
-   items and stages; wait for or resolve them and retry. Otherwise it fast-forwards `~/projects/onionsoup` to
-   `origin/main`, runs `npm ci` and `npm run verify` in the sandbox (rolling back on failure), then restarts
-   only the configured deploy services from a delayed systemd unit that checks health after 45s and rolls
-   back if a service is down. Without a ship grant, the person approves in the chat.
-5. Confirm. About a minute later:
-   - `systemctl --user status onionsoup-owners` should be active on the new commit (`git -C ~/projects/onionsoup log -1`).
-   - Your journal should show `shipped`, not `attention`.
-6. If the change touched `plugin.ts` or anything it imports (tools, personas, the watcher), tell the person to
-   restart the surface (`onionsoup-surface.service`), unless it is in your deploy services. Ship does not restart it
-   otherwise, because a restart cuts off replies in progress.
+1. Use the original approved goal, acceptance criteria and work item. Replies, retries, PR maintenance and
+   unchanged resumptions reuse the recorded approval and applicable standing grants. New scope and genuine
+   creates/deletes or destructive effects retain their existing gates; chat prose supplies no authority.
+2. Implement locally or delegate bounded tasks when useful. Local task review and reviewer dispatch are
+   optional; neither substitutes for the one final required independent-family publication review.
+   Owner workspaces allow ordinary local edits/development without repeated prompts, while declared denies
+   and host world-effect gates still apply. Chat bash remains unsandboxed; convenience rules are not a boundary.
+3. Run targeted regressions and `npm run verify`; update directly related living documentation.
+   The test runner defaults to four Node test files concurrently in the actual child argv. Override with
+   `ONIONSOUP_TEST_CONCURRENCY` or `--test-concurrency`; do not put that flag in `NODE_OPTIONS`.
+   Go integration checks use the configured `ONIONSOUP_HOST_GO_ROOT`, not an arbitrary PATH version.
+4. Owner publication uses `onionsoup_propose_changes { item }`: host sandbox verification, final cross-family
+   review, then durable commit/push/PR checkpoints and configured merge gates. Fix real review blockers; do
+   not reset review history merely to retry. Only a truly exhausted final review budget needs the existing
+   person decision. App-native implementation sessions use their authorized PR workflow instead.
+5. Merge only the exact tested/reviewed head after required CI is green and blocking reviews are clear.
+   Report the PR, merged commit, evidence and remaining operational unknowns to the rollout owner.
 
-## Pitfalls
+## Production rollout
 
-- **Ship refuses:**
-  - while any owner has an item with an active runner; wait for or resolve the named items and retry;
-  - over local changes in the running checkout;
-  - when it cannot fast-forward.
+[docs/deployment.md](../../../docs/deployment.md) and `scripts/deploy-release.mjs` are canonical for
+onionsoup deployment, superseding the legacy checkout-based `onionsoup_ship` procedure.
 
-  Local changes or a failed fast-forward need inspection; report them instead of resetting the checkout.
-- **Reviews:** a review failure is information. Fix and re-propose; never merge around it.
-- **Rollback:** if the watchdog rolls back, the daemon is on the previous commit and `main` is ahead of it. Fix
-  forward with a new change; don't ship the same commit again.
+The authorized operator stages the exact merged commit as a new immutable release with matching dependencies,
+assets and release manifest, using the separate stable deployment worker. Guarded rollout drains admitted
+work, requires positive quiet/lease/session evidence, records rollback, atomically switches `current`,
+and restarts **both** `onionsoup-owners.service` and `onionsoup-surface.service`. The surface's OpenCode
+must load the plugin through the stable release pointer. Check both services, authenticated OpenCode health,
+surface behavior and the reported build ID; an active systemd process alone is not readiness or plugin attestation.
+
+Do not clear locks, admissions, notices or drain/quarantine records to make rollout proceed. Unknown effects
+stay held; use only the documented exact-receipt recovery procedure when applicable.
+Rollback switches to the retained verified release, restarts both units and verifies it. Failed rollback
+keeps the guard held. A code-pointer rollback does not roll back state or configuration; preserve their backups
+and handle any incompatibility explicitly. Never delete the old release.

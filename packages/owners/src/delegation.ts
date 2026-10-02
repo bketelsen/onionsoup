@@ -51,6 +51,16 @@ export function openOperatorWorkRequest(runtime: Runtime, source: OperatorAssign
     });
 }
 
+/** Host-selected self-work retains the ordinary plan gate and creates no human/manager approval. */
+export function openFrictionWorkRequest(runtime: Runtime, id: string, digest: string, to: string, proposal: ProposedWork) {
+  return runtime.requests.openIdentified(operatorWorkRequestId({ kind: 'friction', id }), to, to,
+    { kind: 'work', purpose: proposal.goal, proposal, ownerFollowUp: { kind: 'friction', id, digest } }, 'none', undefined, () => {
+      const receiver = runtime.owner(to);
+      if (!canChange(receiver)) throw new Error(`owner_cannot_change: ${to}`);
+      runtime.repositoryOwner(to, proposal.repository);
+    });
+}
+
 type Acceptance = (runtime: Runtime, request: ResourceRequest, ask: WorkAsk) => Promise<PublishDecision>;
 
 /** Who decides: work from the receiver's declared manager is accepted as assigned; a peer's is weighed by the receiver. */

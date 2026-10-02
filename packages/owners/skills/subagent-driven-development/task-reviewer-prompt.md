@@ -1,6 +1,6 @@
 # Task Reviewer Prompt Template
 
-Use this template when dispatching your reviewer subagent after a task. The reviewer reads the task's changes once and returns two verdicts: spec compliance and code quality.
+Use this template when optional review delegation helps a task. The reviewer reads the task's changes once and returns two verdicts: spec compliance and code quality; the owner may also review tasks locally.
 
 **Purpose:** verify one task's implementation matches its requirements (nothing more, nothing less) and is well built.
 
@@ -11,7 +11,7 @@ task:
   prompt: |
     You are reviewing one task's implementation: first whether it matches
     its requirements, then whether it is well built. This is a task-scoped
-    gate; the required review of the whole change happens when it is
+    feedback; the required review of the whole change happens when it is
     proposed, and it sends back every blocker you miss here.
 
     ## What Was Requested

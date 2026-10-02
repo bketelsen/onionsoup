@@ -48,14 +48,15 @@ task:
     branches or worktrees, or use gh; the owner's host code commits after
     review. Do not revert changes in the desk that you did not make.
 
-    While iterating, run the focused test for what you are changing; run
-    the full suite once before reporting.
+    Run the smallest tests covering the change, and broader checks when
+    integration risk requires them. Report the actual commands and outcomes.
 
     ## You Do Not Dispatch Subagents
 
     Do all of this task yourself. Never spawn a subagent to implement part
     of it, and never spawn a reviewer. Self-review means reading your own
-    diff. The controller dispatches a reviewer after you report.
+    diff. The owner reviews locally or optionally dispatches a task reviewer
+    after you report; host verification and final independent review remain required.
 
     ## Code Organization
 

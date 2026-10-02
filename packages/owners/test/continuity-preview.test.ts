@@ -10,7 +10,7 @@ import { reportFriction } from '../src/friction.ts';
 import { investigateFriction } from '../src/friction-work.ts';
 import { frictionProposalDigest, promoteFriction } from '../src/friction-promotion.ts';
 import { assignAttention } from '../src/attention-assignment.ts';
-import { changeAttention, listAttention } from '../src/attention.ts';
+import { changeAttention, listAttention, humanAttentionActor } from '../src/attention.ts';
 import { saveAskHandoff } from '../src/ask-handoffs.ts';
 import { beginAdmission } from '../src/deployment-admission.ts';
 import { continuityPreview } from '../src/continuity-preview.ts';
@@ -220,7 +220,7 @@ test('actual writer records appear with matching status and preview makes no sub
   await promoteFriction(runtime, record.id, frictionProposalDigest(triage)!, 'Fixture person');
   await runtime.notebook('clippy').journal({ kind: 'attention', note: 'A distinct check is broken' });
   const attention = (await listAttention(runtime))[0];
-  await changeAttention(runtime, attention.id, 'acknowledged', 'Fixture person', 'Seen');
+  await changeAttention(runtime, attention.id, 'acknowledged', humanAttentionActor(), 'Seen');
   await assignAttention(runtime, attention.id, { owner: 'clippy', repository: 'example/clippy', title: proposal.title,
     goal: proposal.goal, acceptance: proposal.acceptance }, 'Fixture person');
   await saveAskHandoff(runtime, { from: 'homelab', to: 'clippy', question: 'Check evidence',

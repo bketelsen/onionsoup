@@ -8,7 +8,7 @@ import {
   promoteFriction, retryFrictionPromotion, frictionPromotionView, frictionPromotionHistory,
   frictionFreshness, readRevisions, effectiveTriage, FrictionProposalDigest,
   ownerChatAgent, AttentionAssignmentInput, assignAttention, retryAttentionAssignment, attentionAssignmentView, attentionAssignmentTargets, type AttentionAssignmentView,
-  listAttention, needsHumanDecision, changeAttention, recoverRequest, reconcileRequest,
+  listAttention, needsHumanDecision, changeAttention, humanAttentionActor, recoverRequest, reconcileRequest,
   listFriction, frictionDetail, readFrictionTriage, type FrictionRecord,
   approveInitiative, reviseInitiative, cancelInitiative, initiativeViews, managerOf, planGrantFor, cancelReminder,
   type AssignmentView, type Initiative, type InitiativeView, type WorkItem,
@@ -556,7 +556,7 @@ export class SurfaceState {
     });
     const shown = effective?.triage ?? saved;
     const triage = shown ? { state: shown.state, updatedAt: shown.updatedAt,
-      reason: shown.reason, investigation: shown.investigation } : undefined;
+      reason: shown.reason, investigation: shown.investigation, bundle: shown.bundle, duplicateOf: shown.duplicateOf } : undefined;
     const latestRevised = revisions?.filter(revision => revision.state === 'revised').at(-1)?.revision ?? 0;
     const isConsistent = revisions && latestRevised === (effective?.revision ?? 0);
     const proposalDigest = isConsistent ? publicFrictionDigest(effective, freshness) : undefined;
@@ -644,8 +644,8 @@ export class SurfaceState {
         const request = await assignAttention(this.runtime, decision.id, decision.assignment, by);
         return `${request.id}: ${request.status}`;
       },
-      'acknowledge-attention': async () => (await changeAttention(this.runtime, decision.id, 'acknowledged', by, required(reason, 'reason'))).status,
-      'resolve-attention': async () => (await changeAttention(this.runtime, decision.id, 'resolved', by, required(reason, 'reason'))).status,
+      'acknowledge-attention': async () => (await changeAttention(this.runtime, decision.id, 'acknowledged', humanAttentionActor(), required(reason, 'reason'))).status,
+      'resolve-attention': async () => (await changeAttention(this.runtime, decision.id, 'resolved', humanAttentionActor(), required(reason, 'reason'))).status,
       'approve-initiative': async () => (await approveInitiative(this.runtime, decision.id, by, decision.note)).status,
       'revise-initiative': async () => (await reviseInitiative(this.runtime, decision.id, by, required(decision.note, 'note'))).status,
       'cancel-initiative': async () => (await cancelInitiative(this.runtime, decision.id, by, required(reason, 'reason'))).status,

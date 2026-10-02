@@ -327,7 +327,7 @@ test('an interrupted archive temp file is ignored and re-approval creates one co
   assert.equal(await readFile(leftover, 'utf8'), '{"version":');
 });
 
-test('already-fixed revision cannot promote and retains blocked old intent', async () => {
+test('source-only already-fixed revision cannot retire or promote and retains blocked old intent', async () => {
   const state = await fixture();
   const second = await pendingAtA(state);
   state.runtime.hire = async (_owner, request) => ({ value: request.schema.parse({
@@ -336,9 +336,10 @@ test('already-fixed revision cannot promote and retains blocked old intent', asy
   const revised = await revalidateFriction(state.runtime, id);
   if (revised.state === 'disabled') throw new Error('expected revalidation');
   assert.equal(revised.state, 'done');
-  assert.equal(revised.revision?.state, 'revised');
+  assert.equal(revised.revision?.state, 'blocked');
+  assert.equal(revised.revision?.blockedReason, 'friction_operational_condition_unverified');
   assert.equal(await effectiveProposalDigest(state.runtime, id), undefined);
-  await assert.rejects(promoteFriction(state.runtime, id, state.digest, 'Brian'), /friction_proposal_unavailable/);
+  await assert.rejects(promoteFriction(state.runtime, id, state.digest, 'Brian'), /friction_source_stale/);
   assert.equal((await frictionPromotionView(state.runtime, id))?.reason, 'friction_source_stale');
   assert.equal((await state.runtime.requests.list()).length, 0);
   assert.deepEqual(await frictionPromotionHistory(state.runtime, id), []);

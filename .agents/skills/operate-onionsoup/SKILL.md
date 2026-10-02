@@ -10,7 +10,8 @@ cause, and the fix is either applied through the normal gates or reported to the
 
 ## Where things are
 
-- **Engine:** `~/projects/onionsoup`, run as the user unit `onionsoup-owners.service`, which ticks every 60s:
+- **Engine:** the immutable release selected by the configured stable `current` pointer, run as the user
+  unit `onionsoup-owners.service`, which ticks every 60s:
   re-read the configuration, refresh the state of open PRs, process requests, supervise initiatives, run due
   duties, advance runnable work items (publications and rebases), raise work notices. Duties, requests and work
   items run in the background, so the tick itself stays short; `owners tick` waits for what it started.
@@ -25,9 +26,11 @@ cause, and the fix is either applied through the normal gates or reported to the
   `git -C <checkout> worktree list`. Proposing with the item publishes that worktree only; the owner's desk is for
   chat and direct changes. It outlives the merge (the session may still run a rollout from it): the plugin's cleanup
   pass removes it (and its branch) once the item is landed with its PR merged or closed, or cancelled, and its session
-  has been idle (not busy, no update) for `PLAN_WORKTREE_LIMITS.idleBeforeRemovalHours` (24). One with uncommitted
-  changes or unpushed commits is kept (`planWorktreeKept` on the item) and raises one attention item: look at it,
-  then remove it with `git -C <checkout> worktree remove <path>`. A plan approved before plan worktrees existed has
+  has been idle (not busy, no update) for `PLAN_WORKTREE_LIMITS.idleBeforeRemovalHours` (24). Routine cleanup
+  archives unique commits under durable local Git refs before retiring clean workspaces. Dirty, ignored or
+  unreadable content remains owner maintenance with a specific reason, not a person cleanup card.
+  Retained conversations remain archived history; never recreate their removed directory or manually remove
+  a kept worktree to silence a card. A plan approved before plan worktrees existed has
   no `planWorktree` and still works on the desk.
 - **Initiatives:** `state/initiatives/<id>.json`, a manager's assignments to its reports. Read them with
   `npm run owners -- initiatives` and `npm run owners -- initiative <id>`; assignment state there is derived from
@@ -41,6 +44,8 @@ cause, and the fix is either applied through the normal gates or reported to the
   for changes (`<owner>--<repo>--plans--<item>.json` for a plan's worktree). At the limit, `propose_changes` returns
   `needs-person` and hires no reviewer; after reading the diff,
   `npm run owners -- desk-review-reset <owner> [repository] [--item <plan>]` clears it.
+  This is only the final publication review budget, not a per-task review/reset ceremony. Local implementation
+  and local task review are permitted; delegate only when useful.
   A step that seems stuck is usually waiting on the person to merge the previous PR, on a plan approval, or on an
   open escalation from the report.
 - **Operator:** optional, declared in `operator.yaml` in the config directory; the surface shows its chat at the top
@@ -53,8 +58,22 @@ cause, and the fix is either applied through the normal gates or reported to the
 - **Provider health:** `state/provider-health/<provider>.json`, written when a hire or chat fails authentication
   (`[provider] <id>: authentication failing` in the daemon's or the surface's log, a `provider-auth` inbox entry and a
   red banner in the surface). It clears itself (`status: ok`, `recoveredAt`) on the next successful call to that
-  provider: fix the credentials (`opencode auth login`, or the key file named in `providers.yaml`), then send a chat
-  on one of its models to confirm. Deleting the file also clears it.
+  provider: the authorized person fixes credentials (`opencode auth login`, or the key reference in
+  `providers.yaml`), then confirms a successful call on a declared model. Never delete health evidence
+  or print envfile/key values to make the banner disappear.
+- **Friction:** configured triage collects a bounded host incident bundle before diagnosis: linked
+  ledger/request/effect/session/check/maintenance facts, local Git/history/containment, build identities,
+  schedules and declared model/provider/remote/credential references. It never reads credential values,
+  arbitrary model-selected paths or raw tool output. `owners friction-investigation <id>` reads the
+  evidence and reasons; `owners friction-refresh <id>` collects a new evidence generation for a completed
+  diagnosis, including at the same source commit. Unchanged or uncertain paid attempts are not repeated.
+  Eligible proposals route to the configured owner's normal plan/publication workflow without a person
+  relaying evidence or promoting every report (`routeProposals: false` retains manual routing).
+  Missing operational proof stays owner incident follow-up in status/desk, not Attention.
+  Duplicate reports source-link the same demonstrated host incident; neither a model claim nor a merged
+  PR/source change alone retires a report. Closure needs positive applicable host condition/version facts.
+- **Attention:** Seen is a host-bound person action. Owners can freely acknowledge/resolve/reopen typed
+  housekeeping, but cannot hide `ci_person`, `desk_review_exhausted` or ambiguous legacy human choices.
 - **Wiki:** optional, declared in `wiki.yaml` in the config directory (`repository`, `branch`, `pagesDirectory`,
   `listen`, `keeper`). The clone is `<ONIONSOUP_HOME>/wiki`, made on first use; the surface serves it read-only on
   `listen` and fetches and fast-forwards it every `WIKI_LIMITS.syncMs` (5 minutes; `wiki_sync_failed` or
@@ -97,6 +116,12 @@ cause, and the fix is either applied through the normal gates or reported to the
      `pipeline_removed` was open work of the retired freelancer pipeline; the owner plans it again if it is still
      wanted.
    - An `interrupted` item resumes with `npm run owners -- resume <item>`.
+   - `pausing` retains runner/effect/session claims until positive stopped evidence; `paused` is intentional,
+     not crash recovery. Explicit Resume reuses the original unchanged goal, plan and approval. Peer messages,
+     timers and notices never resume it. Do not delete locks or trust idle prose as stopping evidence.
+   - Non-PR operations complete through their original request and configured host checks, supported effect
+     postconditions and one final independent-family review. Missing legacy proof stays owner re-verification,
+     not a fake PR or a new manual Attention-cleanup ceremony.
    - A `failed` item retries its stage with `npm run owners -- retry <item> [--note ...]`, or is cancelled with
      `npm run owners -- cancel <item> --reason "..."`.
    - After a crash, `recover` marks items whose runner died as interrupted so they can be resumed.
@@ -106,13 +131,15 @@ cause, and the fix is either applied through the normal gates or reported to the
    - Tools not found: `PATH` in the unit file (node comes from mise or brew).
    - Writes denied: only the desk, `~/.cache`, `~/.npm`, `~/go` and the opencode dirs are writable.
    - Killed: memory cap.
-5. Fix engine bugs with a reviewed change (the ship-onionsoup skill), not by editing the running checkout. Ship
-   refuses to run over local changes.
+5. Fix engine bugs in an isolated worktree with a reviewed PR (the ship-onionsoup skill), never by editing or
+   fast-forwarding the live main checkout. Use immutable guarded releases from
+   [docs/deployment.md](../../../docs/deployment.md), not the legacy checkout ship instructions.
 
 ## Pitfalls
 
 - **Killing processes:** kill by PID. `pkill -f` patterns match the shell running them.
-- **Restarting the daemon:** a manual restart interrupts items with an active runner. Shipping checks the
-  full ledger first and refuses with the active item IDs and stages; wait for or resolve those items and retry.
-  Once shipping proceeds, its delayed restart still has a health check and rollback.
+- **Restarting services:** arbitrary restarts can interrupt effects or cut off replies. The guarded deployment
+  worker requires positive quiescence, restarts **both** owners and surface units, checks API/OpenCode/build
+  health and retains a verified rollback release. Unknown leases/effects keep the guard held; only supported
+  exact-receipt recovery may release them. Code rollback does not roll back state.
 - **Credentials:** never print values from env files (`truenas-mcp/.envrc`, `secrets/`).

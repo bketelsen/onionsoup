@@ -8,7 +8,8 @@ import { REVIEW_SEVERITIES } from './repository-writing.ts';
 
 /**
  * Owners run their own work: process lives in skills (adapted from obra/superpowers, see skills/NOTICE), and an
- * owner dispatches subagents for small tasks. Authority stays in configuration: the implementer's model comes from
+ * owner may dispatch subagents for useful bounded tasks, or implement and review locally. Authority stays in
+ * configuration: the implementer's model comes from
  * the implementation freelancer, and each owner's reviewer is a review freelancer model outside the owner's family.
  */
 export const SKILLS_DIRECTORY = fileURLToPath(new URL('../skills/', import.meta.url));
@@ -97,7 +98,10 @@ export function taskPermission(ownerId: string) {
 /** What an owner's prompt says about its subagents, so the skills can name them. */
 export function subagentsText(ownerId: string) {
   return `<subagents>
+Task delegation is optional: implement and review tasks yourself, or delegate implementation or review when useful.
 Implementer: task with subagent_type "${IMPLEMENTER_AGENT}". Reviewer (another model family): task with subagent_type "${reviewerAgent(ownerId)}".
+If a configured task agent is unavailable, continue locally. Local or delegated task reviews never replace the
+one final required independent-family review and host verification at publication.
 </subagents>`;
 }
 

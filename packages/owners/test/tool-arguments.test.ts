@@ -9,7 +9,12 @@ import { withActiveHooks } from './active-hooks.ts';
 
 test('the active plugin makes omitted webfetch defaults encodable without changing approval rules', async () => {
   const state = await mkdtemp(join(tmpdir(), 'onionsoup-webfetch-'));
-  const hooks = await withActiveHooks({} as PluginInput, {
+  const client = {
+    session: {
+      get: async ({ path }: { path: { id: string } }) => ({ data: { id: path.id } }),
+    },
+  };
+  const hooks = await withActiveHooks({ client } as unknown as PluginInput, {
     declarations: 'packages/owners/test/fixtures/owners', state,
   });
   const config: Config = {};

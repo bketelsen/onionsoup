@@ -1,19 +1,20 @@
 ---
 name: executing-plans
-description: Use when a plan is one or two tiny tasks not worth a subagent dispatch each - you implement it yourself on the desk task by task with TDD, get one review from your reviewer subagent at the end, verify, and end with onionsoup_propose_changes.
+description: Use to execute an approved plan locally, task by task with TDD and local review, optionally delegate implementation or review when useful, verify, and end with onionsoup_propose_changes.
 ---
 
 # Executing Plans
 
-Run the plan yourself, task by task, on the desk: no implementer per task, no reviewer per task. The review of the whole change is the host's required review when you propose. In an approved plan's execution session, "the desk" means the plan's own git worktree, the session's directory.
+Run the plan yourself, task by task, on the desk. Implementation and task-review agents are optional, independently per task; use subagent-driven-development if delegation helps. The review of the whole change is the host's one final required independent-family review when you propose, not another review you must dispatch. In an approved plan's execution session, "the desk" means the plan's own git worktree, the session's directory.
 
-**Why inline:** subagent-driven-development pays for a fresh implementer and reviewer on every task. For a tiny plan that is overhead. Inline execution keeps what those bought by other means: the task text is the spec, your notebook is your memory, TDD is the per-task gate, and the host's required review, from another model family, is the second pair of eyes.
+**Why inline:** dispatch is useful for fresh context or specialist work, not a gate on ordinary implementation. The task text is the spec, your notebook is your memory, TDD verifies each task, and the host's required review, from another model family, is the independent second pair of eyes.
 
 **Core principle:** the plan already did the thinking. Execute it exactly, prove each step with a test you watched fail and then pass, and leave a record that survives your own forgetting.
 
-**When not to use it:** a plan with more than a couple of tasks, or tasks that need judgment, goes to subagent-driven-development. Inline execution over a long plan gives its last tasks the least of you.
+**Choose per task:** any approved plan can run locally. Delegate bounded implementation or review when it benefits the work; if the configured agent is unavailable, continue locally.
 
 **Continuous execution:** do not pause to check in between tasks.
+Replies, retries and maintenance keep the unchanged approved goal and applicable standing grants. Do not ask for another approval of the same scope. New scope, explicit declared denies and world-effect gates remain binding.
 
 **Rulings, not stalls.** Conflicts, ambiguities, plan defects: decide them, with the approved plan and the decisions in your notebook as the authority. Record each ruling with `onionsoup_record_fact` as `Ruling: <what you decided> - <why> - <what it costs if wrong>`. A deviation from the plan without a recorded ruling is a decision made in secret.
 
@@ -30,7 +31,7 @@ You never commit, push, merge, open pull requests or deploy; `onionsoup_propose_
 
 ## The Task Loop
 
-Keep long output out of your context: redirect it to a file under `/tmp` and read the tail.
+Keep long output out of your context: redirect it to a scratch file inside the authorized workspace and read the tail.
 
 ### 1. Take the task
 
@@ -54,6 +55,7 @@ Before a task is complete, all of this is true with evidence in this session:
 - The final test run for the task passed.
 - Every `Expected:` line was compared against real output.
 - Every deviation has a recorded ruling.
+- You read the task's diff against its requirements, or used an optional task reviewer, and addressed correctness findings.
 
 verification-before-completion governs the claim. Record `Task <N>: complete, tests: <command> -> <result>` with `onionsoup_record_fact`, mark the todo complete, and take the next task.
 
