@@ -5,13 +5,15 @@ import { chatDirectory, chatPath } from './chats.ts';
 import type { ChatOrigin } from './chat-origin.ts';
 import { exchangeClient } from './exchange-client.ts';
 import type { NoticeMessage } from './exchange-notices.ts';
-import type { WorkItem } from './ledger.ts';
+import { isPaused, type WorkItem } from './ledger.ts';
+import { pausedSessionItem } from './work-pause.ts';
 import type { MaintenancePass } from './plugin-maintenance.ts';
 import type { WorkNotice } from './notices.ts';
 import { ownerChatAgent } from './owner-chat.ts';
 import { createOpeningSession, neededSession, openOwnerSession, ownerSessionClient } from './owner-sessions.ts';
 import { ownerMessageId } from './owner-messages.ts';
 import { itemSessionHistory, rememberedSession, rememberSession } from './session-history.ts';
+import { isRetiredSession } from './session-directories.ts';
 import { SessionOpeningStore } from './session-opening-store.ts';
 import type { Runtime } from './runtime.ts';
 
@@ -32,7 +34,8 @@ async function isDirectory(directory: string) {
 /** Historical transcript reads must not start an OpenCode instance in a removed or reused directory. */
 export async function ownerTranscriptTarget(runtime: Runtime, target: ChatOrigin) {
   const known = await rememberedSession(runtime, target.sessionID);
-  if (!known?.archived && await isDirectory(target.directory)) return target;
+  const isRetired = known && isRetiredSession(known, await runtime.ledger.list());
+  if (!isRetired && await isDirectory(target.directory)) return target;
   if (!known || known.directory !== target.directory) throw new Error('owner_message_history_identity_missing');
   return { ...target, directory: chatPath(runtime, known.owner) };
 }
@@ -72,7 +75,7 @@ async function ownedTarget(runtime: Runtime, notice: WorkNotice, target: ChatOri
 
 async function usableTarget(runtime: Runtime, client: Parameters<Plugin>[0]['client'], target: ChatOrigin) {
   const known = await rememberedSession(runtime, target.sessionID);
-  if (known?.archived || !await isDirectory(target.directory)) return false;
+  if ((known && isRetiredSession(known, await runtime.ledger.list())) || !await isDirectory(target.directory)) return false;
   const session = await observedSession(client, target);
   return !!session && !session.parentID && !session.time.archived;
 }
@@ -80,6 +83,7 @@ async function usableTarget(runtime: Runtime, client: Parameters<Plugin>[0]['cli
 async function recipientItem(runtime: Runtime, notice: WorkNotice, client: Parameters<Plugin>[0]['client'], pass: MaintenancePass) {
   const item = notice.workItem ? await runtime.ledger.get(notice.workItem) : undefined;
   if (!item || item.owner !== notice.owner) return undefined;
+  if (isPaused(item)) throw new Error('work_item_paused');
   if (item.activeRunner) throw new Error('owner_message_item_runner_busy');
   if (!neededSession(item)) return item;
   // The canonical reservation owns initial planning/execution. A message cannot race it with another opener.
@@ -166,6 +170,7 @@ async function continuation(runtime: Runtime, client: Parameters<Plugin>[0]['cli
 
 /** Exact owned sessions win. Only positive retirement/absence permits a fresh declared-workspace continuation. */
 export async function routeOwnerNotice(runtime: Runtime, client: Parameters<Plugin>[0]['client'], pass: MaintenancePass, notice: WorkNotice) {
+  if (notice.origin && await pausedSessionItem(runtime, notice.origin.sessionID)) throw new Error('work_item_paused');
   const { target, item, isUsable } = await targetForNotice(runtime, notice, client, pass);
   if (target && isUsable) return { origin: target, context: '' };
   const remembered = target ? await rememberedSession(runtime, target.sessionID) : undefined;

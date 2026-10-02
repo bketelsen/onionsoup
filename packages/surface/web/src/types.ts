@@ -1,5 +1,7 @@
 // Shapes the surface server returns. Kept loose where the engine or opencode owns the detail.
 
+export type { ItemRequestContext } from '../../src/item-request-public.ts';
+
 export interface OwnerSummary {
   id: string; name: string; title: string; source: string; icon: string; color: string; model: string; domain: string;
   chat: boolean; hasDesk: boolean; waiting: number; running: number; runtimeWork: RuntimeWork[]; activity: OwnerActivity;

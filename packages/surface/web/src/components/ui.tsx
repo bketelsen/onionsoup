@@ -92,10 +92,13 @@ export function timeAgo(value: string | number | undefined) {
   return `${Math.round(hours / 24)}d ago`;
 }
 
-export function statusTone(status: string): 'muted' | 'primary' | 'success' | 'error' | 'warning' | 'info' {
-  if (status === 'landed') return 'success';
-  if (status === 'failed' || status === 'rejected') return 'error';
-  if (status.startsWith('awaiting')) return 'warning';
-  if (['planning', 'working', 'implementing', 'reviewing', 'landing'].includes(status)) return 'info';
-  return 'muted';
+type StatusTone = 'muted' | 'primary' | 'success' | 'error' | 'warning' | 'info';
+const STATUS_TONES: Record<string, StatusTone> = {
+  pausing: 'warning', paused: 'muted', 'work-paused': 'muted',
+  landed: 'success', failed: 'error', rejected: 'error',
+  planning: 'info', working: 'info', implementing: 'info', reviewing: 'info', landing: 'info',
+};
+
+export function statusTone(status: string): StatusTone {
+  return STATUS_TONES[status] ?? (status.startsWith('awaiting') ? 'warning' : 'muted');
 }

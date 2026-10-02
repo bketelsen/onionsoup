@@ -5,6 +5,9 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { APP_UPDATE_LIMITS, reconcileAppUpdate, reviewAppUpdates, updateApp } from '../src/app-updates.ts';
 import { processRequests } from '../src/brokering.ts';
+import { listAttention } from '../src/attention.ts';
+import { needsHumanDecision } from '../src/attention-routing.ts';
+import { recoverRequest } from '../src/request-recovery.ts';
 import { Runtime } from '../src/runtime.ts';
 
 async function nasRuntime() {
@@ -88,6 +91,39 @@ test('image-only approved request pulls and redeploys images, follows job, then 
     assert.equal((await runtime.requests.get(request.id)).status, 'updated');
     assert.equal(writes.length, 1);
     assert.match(writes[0]!, /sudo -n midclt call app.pull_images '"radarr"' '\{"redeploy":true\}'/);
+  } finally {
+    APP_UPDATE_LIMITS.pollMs = previous;
+  }
+});
+
+test('host-confirmed app retry retires both exact participant alerts but not the interrupted recovery gate', async () => {
+  const runtime = await nasRuntime();
+  await runtime.notebook('homelab').ensure('# Fixture requester');
+  const opened = await runtime.requests.open('homelab', 'moneo', {
+    kind: 'update-app', app: 'radarr', fromVersion: '1', toVersion: '1', imageUpdates: true,
+    purpose: 'image patch', notesRead: [],
+  }, 'none');
+  const request = await runtime.requests.save({ ...opened, status: 'create-approved' });
+  scriptNas(runtime, { states: [app(true)], startError: true });
+  await processRequests(runtime);
+  assert.equal((await runtime.requests.get(request.id)).status, 'interrupted');
+  const failed = await listAttention(runtime);
+  assert.equal(failed.length, 2);
+  assert.ok(failed.every(entry => entry.status === 'open' && !needsHumanDecision(entry)
+    && entry.provenance?.kind === 'request-operation'));
+  await recoverRequest(runtime, request.id, 'retry', 'person', 'Inspected the failed image command');
+  const previous = APP_UPDATE_LIMITS.pollMs;
+  APP_UPDATE_LIMITS.pollMs = 1;
+  try {
+    scriptNas(runtime, { states: [app(true), app(false)] });
+    await processRequests(runtime);
+    const updated = await runtime.requests.get(request.id);
+    assert.equal(updated.status, 'updated');
+    assert.equal(updated.recovery.length, 1, 'the recovery approval remains recorded separately');
+    const resolved = await listAttention(runtime);
+    assert.equal(resolved.length, 2);
+    assert.ok(resolved.every(entry => entry.status === 'resolved'
+      && entry.resolution?.code === 'app_update_completed'));
   } finally {
     APP_UPDATE_LIMITS.pollMs = previous;
   }

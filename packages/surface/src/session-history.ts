@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { z } from 'zod';
-import { itemSessionHistory, rememberSession, rememberedSession, sessionHistory, SessionHistory, type Runtime } from '@onionsoup/owners';
+import { isRetiredSession, itemSessionHistory, rememberSession, rememberedSession, sessionHistory, SessionHistory, type Runtime } from '@onionsoup/owners';
 import type { OpencodeApi } from './opencode.ts';
 
 const ObservedSession = SessionHistory.omit({ owner: true, item: true, archived: true }).extend({ directory: z.string().optional() });
@@ -10,7 +10,16 @@ export type HistoricalSession = SessionHistory & { archived: boolean };
 export async function recordedSessions(runtime: Runtime, owner: string) {
   const items = (await runtime.ledger.list()).filter(item => item.owner === owner);
   const remembered = await sessionHistory(runtime, owner);
-  return [...new Map([...items.flatMap(itemSessionHistory), ...remembered].map(record => [record.id, record])).values()]
+  const references = items.flatMap(itemSessionHistory);
+  const identities = new Map(remembered.map(session => [session.id, session]));
+  for (const reference of references) {
+    const identity = identities.get(reference.id) ?? await rememberedSession(runtime, reference.id);
+    if (identity && (identity.owner !== reference.owner || identity.directory !== reference.directory || identity.parentID)) {
+      throw new Error('session_history_identity_conflict');
+    }
+  }
+  return [...new Map([...references, ...remembered].map(record => [record.id, record])).values()]
+    .map(record => ({ ...record, archived: isRetiredSession(record, items) }))
     .sort((left, right) => right.time.updated - left.time.updated || left.id.localeCompare(right.id));
 }
 

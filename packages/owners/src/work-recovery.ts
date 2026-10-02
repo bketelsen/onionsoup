@@ -4,6 +4,7 @@ import { queuePlanRevision } from './plan-revision.ts';
 import { OWNER_CHANGE_WORKFLOW } from './plan-work.ts';
 import { advanceRebase, REBASE_WORKFLOW } from './rebase.ts';
 import type { Runtime } from './runtime.ts';
+import { resumePausedItem, type WorkLifecycleActor } from './work-pause.ts';
 
 /**
  * What the runtime still advances on its own, and how a person recovers work. Owners do their work in their own
@@ -115,8 +116,13 @@ async function recoverItem(runtime: Runtime, itemId: string, by: string, kind: k
 }
 
 /** Record a person's recovery decision; the daemon executes the preserved stage on its next tick. */
-export function resumeItem(runtime: Runtime, itemId: string, by: string, note?: string) {
-  return recoverItem(runtime, itemId, by, 'resume', note);
+export async function resumeItem(runtime: Runtime, itemId: string, by: string | WorkLifecycleActor, note?: string) {
+  const item = await runtime.ledger.get(itemId);
+  const pause = item.pauses.at(-1);
+  if (item.status === 'paused' || item.status === 'pausing' || (pause?.resumedAt && item.status === pause.resumeStatus)) {
+    return resumePausedItem(runtime, itemId, by, note);
+  }
+  return recoverItem(runtime, itemId, typeof by === 'string' ? by : by.by, 'resume', note);
 }
 
 export function retryItem(runtime: Runtime, itemId: string, by: string, note?: string) {
@@ -125,7 +131,7 @@ export function retryItem(runtime: Runtime, itemId: string, by: string, note?: s
 
 const CANCELLABLE = new Set<WorkStatus>([
   'planning', 'awaiting-plan-approval', 'working', 'implementing', 'reviewing', 'landing',
-  'awaiting-push-approval', 'interrupted', 'failed', 'landed',
+  'awaiting-push-approval', 'interrupted', 'failed', 'landed', 'paused',
 ]);
 
 /**
@@ -135,6 +141,7 @@ const CANCELLABLE = new Set<WorkStatus>([
 export async function cancelItem(runtime: Runtime, itemId: string, by: string, reason: string) {
   const cancelled = await runtime.ledger.update(itemId, item => {
     if (item.activeRunner) throw new Error('work_item_active');
+    if (item.status === 'pausing') throw new Error('work_pause_stop_unconfirmed');
     if (item.status === 'landed' && (item.publication || item.rebaseOf)) throw new Error('published_work_cannot_cancel');
     if (!CANCELLABLE.has(item.status)) throw new Error(`not_cancellable: ${item.status}`);
     return { ...item, status: 'cancelled', reason, humanNotes: [...item.humanNotes, humanNote('cancellation', by, reason)] };

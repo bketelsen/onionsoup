@@ -103,7 +103,7 @@ test('an approved initiative dispatches in dependency order, auto-accepts, and c
   await supervise(runtime);
   const done = await runtime.initiatives.get(initiative.id);
   assert.equal(done.status, 'completed');
-  assert.match(done.outcome!, /all 2 assignments merged/);
+  assert.match(done.outcome!, /all 2 assignments completed/);
   const kinds = (await journalOf(runtime, 'odrade')).map(entry => entry.kind);
   for (const kind of ['initiative-drafted', 'initiative-submitted', 'initiative-approved', 'assignment-dispatched', 'initiative-completed']) assert.ok(kinds.includes(kind), kind);
   assert.ok((await journalOf(runtime, 'bellonda')).some(entry => entry.kind === 'assignment-dispatched'));

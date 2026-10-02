@@ -4,6 +4,8 @@ import { readFile, lstat, stat, readdir } from 'node:fs/promises';
 import { Runtime } from '../packages/owners/src/runtime.ts';
 import { chatPath } from '../packages/owners/src/chats.ts';
 import { beginDrain, listAdmissions, markDeploymentWaiting, releaseDrain } from '../packages/owners/src/deployment-admission.ts';
+import { workSessionDirectories } from '../packages/owners/src/session-directories.ts';
+import { rememberedSession } from '../packages/owners/src/session-history.ts';
 
 const fail = code => Object.assign(new Error(code), { code });
 
@@ -80,11 +82,28 @@ async function directories(runtime) {
     for (const view of runtime.repositoryViews(owner.id)) places.add(view.desk ?? join(runtime.desksRoot, owner.id));
   }
   if (runtime.declarations.operator) places.add(runtime.declarations.operator.directory);
-  for (const item of await runtime.ledger.list()) {
-    if (item.planWorktree) places.add(item.planWorktree);
-    if (item.session?.directory) places.add(item.session.directory);
+  const items = await runtime.ledger.list();
+  const history = [];
+  for (const item of items) {
+    if (!item.session) continue;
+    const session = await rememberedSession(runtime, item.session.sessionID);
+    if (!session) continue;
+    if (session.owner !== item.owner || session.directory !== item.session.directory) throw fail('deployment_session_identity_conflict');
+    history.push(session);
   }
-  return [...places];
+  let hasUnavailableWork = items.some(item => item.activeRunner !== undefined);
+  for (const scope of workSessionDirectories(items, history)) {
+    const exists = await stat(scope.directory).then(metadata => metadata.isDirectory(), error => {
+      if (error.code === 'ENOENT') return false;
+      throw fail('deployment_work_directory_unavailable');
+    });
+    if (!exists || scope.retired) {
+      if (scope.required) hasUnavailableWork = true;
+      continue;
+    }
+    places.add(scope.directory);
+  }
+  return { places: [...places], hasUnavailableWork };
 }
 
 async function independentOpencode(endpoint) {
@@ -175,8 +194,10 @@ export async function createAdmission(input) {
       throw fail('bootstrap_endpoint_changed');
     }
     if (await processes(endpoint)) return false;
+    const scopes = await directories(runtime);
+    if (scopes.hasUnavailableWork) return false;
     const found = new Set();
-    for (const directory of await directories(runtime)) {
+    for (const directory of scopes.places) {
       const status = await request(endpoint, '/session/status', directory);
       const permissions = await request(endpoint, '/permission', directory);
       const questions = await request(endpoint, '/question', directory);

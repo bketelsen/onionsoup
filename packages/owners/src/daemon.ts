@@ -201,7 +201,7 @@ async function runRequests(runtime: Runtime, log: TickLog) {
     for (const owner of requestParticipants(runtime, request)) busyOwners.add(owner);
   }
   for (const request of pendingRequests) {
-    if (request.status === 'work-running') {
+    if (request.status === 'work-running' || request.status === 'work-paused') {
       try {
         await processRequest(runtime, request.id, log.request);
       } catch (error) {

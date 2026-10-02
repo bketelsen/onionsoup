@@ -7,7 +7,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import { Runtime, rememberSession, sessionHistory } from '@onionsoup/owners';
 import { SurfaceState, type OpencodeApi, surfaceServer } from '@onionsoup/surface';
-import { removeIdlePlanWorktrees } from '../../owners/src/plan-worktrees.ts';
+import { PLAN_WORKTREE_LIMITS, removeIdlePlanWorktrees } from '../../owners/src/plan-worktrees.ts';
 import { readArchivedSessionMessages } from '../src/hire-store.ts';
 import { rememberObservedSessions } from '../src/session-history.ts';
 import type { AddressInfo } from 'node:net';
@@ -22,6 +22,8 @@ function fixtureApi(): OpencodeApi {
     events: async () => undefined,
   };
 }
+
+const afterRetention = () => new Date(Date.now() + (PLAN_WORKTREE_LIMITS.idleBeforeRemovalHours + 1) * 3_600_000);
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'owner-history-'));
@@ -46,7 +48,8 @@ async function fixture() {
 
 test('cleanup and restart preserve discoverable scoped read-only history without the worktree', async () => {
   const { runtime, item, directory, makeState } = await fixture();
-  await removeIdlePlanWorktrees(runtime, { activity: async () => ({ isBusy: false, updatedAt: 0 }) }, (_id, error) => { throw error; });
+  await removeIdlePlanWorktrees(runtime, { activity: async () => { throw new Error('missing_workspace_must_not_reach_transport'); } },
+    (_id, error) => { throw error; }, afterRetention());
   assert.equal((await runtime.ledger.get(item.id)).planWorktree, undefined);
   assert.equal((await sessionHistory(runtime, 'clippy'))[0].directory, directory);
   const reopened = await Runtime.open({ declarations: 'packages/owners/test/fixtures/owners', state: runtime.stateDirectory });
@@ -130,7 +133,8 @@ test('cleanup preserves observed titles for both planning origin and execution s
   for (const [id, place, title] of [['ses_history', directory, 'Execution notes'], ['ses_planning', origin.directory, 'Original discussion']]) {
     await rememberSession(runtime, { id, owner: 'clippy', directory: place, title, time: { created: 1, updated: 2 } });
   }
-  await removeIdlePlanWorktrees(runtime, { activity: async () => ({ isBusy: false, updatedAt: 0 }) }, (_id, error) => { throw error; });
+  await removeIdlePlanWorktrees(runtime, { activity: async () => { throw new Error('missing_workspace_must_not_reach_transport'); } },
+    (_id, error) => { throw error; }, afterRetention());
   const indexed = await sessionHistory(runtime, 'clippy');
   assert.equal(indexed.find(session => session.id === 'ses_planning')?.title, 'Original discussion');
   assert.equal(indexed.find(session => session.id === 'ses_history')?.title, 'Execution notes');

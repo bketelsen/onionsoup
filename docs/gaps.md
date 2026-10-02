@@ -35,6 +35,17 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
   External/manual work has no such evidence until a supported host proposal or reconciliation runs; between-tick transitions can be missed.
   Status does not independently check live services or prove deployment.
 
+- **Legacy operational reports may lack host evidence.** Non-PR completion now uses configured checks,
+  original-work execution provenance, supported Incus resource postconditions and one final independent-family
+  review. Old transcript-only E2E or cleanup reports cannot be imported as verification. Missing origin,
+  request tagging, creation checkpoints or required follow-up receipts need concrete owner re-verification,
+  not a fake PR or another human closure ceremony. Unsupported resource effect kinds remain unavailable.
+
+- **An unconfirmed pause remains stopping.** Intentional pause survives restart and peer messages, but a live
+  runner, unknown session opening or unconfirmed execution-tree stop remains `pausing` with its claim/receipt.
+  Neither idle prose nor process age proves stopping. Explicit resume is available only after positive stopped
+  evidence and unchanged approved intent; uncertain SDK admissions remain non-replayable.
+
 - **Uncertain direct-request review wakes need exact receipts.** A requester who is the receiving owner's manager
   can review under its existing applicable `approve-plans` grant. A separate durable continuation wakes that
   requester; informational notices remain inert. A retired requester workspace now routes to a fresh requester-owned
@@ -130,7 +141,8 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
 - **No budgets.** Per-owner cost caps and wake-rate limits are designed but not enforced, and cost is only tracked
   for providers that report it (Copilot); ChatGPT OAuth reports $0.
 
-- **Initiative chains stall on the person's merge.** An assignment completes only when its PR merges, so each step
+- **Repository initiative chains can stall on the person's merge.** A repository assignment completes when its PR merges
+  or its exact repository closure is accepted; verified operational assignments need no PR. Repository steps
   waits wherever a PR waits to be merged (the initiative view says so), unless the report holds a `merge` grant for
   its repository.
 - **No initiatives between peers.** Only a manager plans across owners, through its direct reports; peers still
@@ -145,13 +157,18 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
   shipped has no `planWorktree`; it proposes from the desk as before, so two such plans in one repository still
   bundle each other's changes. The person untangles them (cancel one, or move its changes by hand); new plans each
   get their own worktree.
-- **A finished plan's work session drops out of the lists a day after it goes quiet.** opencode lists sessions by
-  the directory they were made in, and the surface lists an owner's desk and the plan worktrees that still exist.
+- **Archived transcripts still depend on OpenCode.** opencode lists sessions by
+  the directory they were made in; the surface separately retains historical session identity after cleanup.
   A finished plan's worktree is removed once its session has been idle for
-  `PLAN_WORKTREE_LIMITS.idleBeforeRemovalHours` (24); after that the owner's chat list no longer shows the session
-  (the item still records it, in its old directory). Retained history stays readable, and addressed owner messages
+  `PLAN_WORKTREE_LIMITS.idleBeforeRemovalHours` (24); after that the session is archived history rather than an
+  active directory probe. The item retains its original identity. Retained history stays readable, and addressed owner messages
   open/reuse a fresh continuation rather than prompting or recreating the missing directory. Human archived chats
   remain read-only.
+- **Unique terminal plan archives are local.** Routine cleanup retains commits not squash-contained in the
+  configured base at named durable Git archive refs before retiring clean workspaces. It does not publish
+  those refs, reinterpret unique intent as accepted work or automatically prune them. Dirty/untracked,
+  ignored content and unreadable work remain preserved with an owner-maintenance reason; unsuccessful
+  cleanup does not retire the retained workspace's session metadata.
 - **Only the surface's opencode removes finished plans' worktrees.** The cleanup pass needs the session's activity,
   so it runs in the plugin; while the surface is down, finished plans keep their worktrees.
 
@@ -205,7 +222,9 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
   refresh that fails shows here as that provider's authentication failure.
 - **Sandbox: no network isolation.** After the credential proxy, outbound network access from a sandboxed process
   is still unrestricted; an allowlist or a proxy is the follow-up.
-- **App updates cannot roll back:** truenas-mcp exposes no rollback, so a failed update is raised for the person.
+- **App updates cannot roll back:** truenas-mcp exposes no rollback. Failure notes belong to both owners'
+  backlog and retire on exact host-confirmed update success; uncertain effect recovery still requires its
+  existing inspection/retry gate.
 - **Held app updates are only re-read on a new version** or after 7 days; a person cannot say "this app's
   changelog lives in its commit log" except through the owner's notebook.
 - **Charters are drafts written by Claude** for Bellonda, Miles Teg, Moneo and Leto. The person should rewrite

@@ -14,11 +14,12 @@ import {
   effectiveProposalDigest, writeRevision,
   readFrictionTriage, sourceSnapshot,
   submitInitiative,
-  type WorkItem,
+  WorkItem,
 } from '@onionsoup/owners';
 import { SurfaceState, surfaceServer, type OpencodeApi } from '@onionsoup/surface';
 import { DEFAULT_RELEASE_MANIFEST, readReleaseBuildId } from '../src/deployment-view.ts';
 import { publicFrictionDigest } from '../src/friction-public.ts';
+import { ItemRequestContext } from '../src/item-request-public.ts';
 
 test('state API reads pending deployment dynamically while retaining the installed build', async () => {
   const root = await mkdtemp(join(tmpdir(), 'surface-build-'));
@@ -78,6 +79,38 @@ function fakeOpencode() {
   };
   return { api, calls };
 }
+
+test('item HTTP and sections expose persisted request progress without inventing operational verification', async () => {
+  const { runtime, server, call } = await start();
+  const proposal = {
+    title: 'Verify infrastructure', goal: 'Verify infrastructure without a PR', rationale: 'Operational request',
+    acceptance: ['Host evidence proves the original goal'], size: 'small' as const,
+  };
+  try {
+    const request = await runtime.requests.open('homelab', 'clippy', {
+      kind: 'work', purpose: proposal.goal, proposal,
+    }, 'none');
+    const item = await runtime.ledger.create('clippy', 'owner-change', proposal, { request: request.id, status: 'working' });
+    await runtime.requests.save({ ...request, workItem: item.id, status: 'work-running' });
+    const response = await call('GET', `/api/items/${item.id}`);
+    assert.equal(response.status, 200);
+    const context = ItemRequestContext.parse(response.body);
+    const returnedItem = WorkItem.parse(response.body.item);
+    assert.ok(context.requestText);
+    assert.match(context.requestText, new RegExp(request.id));
+    assert.match(context.requestText, /unavailable; no readable, matching request-scoped host evidence/);
+    assert.doesNotMatch(context.requestText, /operational goal verified/i);
+    assert.equal(returnedItem.publication, undefined);
+    assert.equal((await runtime.requests.get(request.id)).status, 'work-running');
+    const html = ITEM_SECTIONS.map(Section => renderToStaticMarkup(createElement(Section, {
+      item: returnedItem, ...context,
+    }))).join('');
+    assert.match(html, /Request and host evidence/);
+    assert.match(html, new RegExp(request.id));
+  } finally {
+    server.close();
+  }
+});
 
 test('drain refuses new surface writes and retains an in-flight prompt lease until the HTTP request completes', async () => {
   let entered!: () => void;
@@ -786,6 +819,52 @@ test('person recovery decisions resume the exact stage, retry failures and cance
     assert.equal(cancelled.status, 'cancelled');
     assert.equal(cancelled.humanNotes.at(-1)?.by, 'tester');
     assert.equal(cancelled.reason, 'Keep the existing head');
+  } finally {
+    server.close();
+  }
+});
+
+test('human session stop persists a pause, aborts children, rejects messages and explicitly resumes original approval', async () => {
+  const busySessions = new Set(['ses_work', 'ses_child']);
+  const stopped: string[] = [];
+  const { runtime, server, call, calls } = await start(api => {
+    api.listSessions = async directory => [
+      { id: 'ses_work', directory, title: 'Original work', time: { created: 1, updated: 1 } },
+      { id: 'ses_child', directory, parentID: 'ses_work', title: 'Implementer', time: { created: 1, updated: 1 } },
+    ];
+    api.status = async () => Object.fromEntries([...busySessions].map(id => [id, { type: 'busy' }]));
+    api.abort = async (_directory, id) => { stopped.push(id); busySessions.delete(id); };
+  });
+  try {
+    await runtime.notebook('clippy').ensure('# Charter\n');
+    const proposal = { title: 'Original', goal: 'Approved original goal', rationale: 'r', acceptance: ['a'], size: 'small' as const };
+    const item = await runtime.ledger.create('clippy', 'owner-change', proposal, {
+      status: 'working', session: { sessionID: 'ses_work', directory: '/desks/clippy' },
+      planDocument: { markdown: 'Carry out the original plan', digest: 'original' },
+      planApproval: { by: 'original-person', at: '2026-10-01T00:00:00Z' },
+    });
+    const outcome = await call('POST', '/api/owners/clippy/sessions/ses_work/abort', {});
+    assert.equal(outcome.status, 200, String(outcome.body.error));
+    assert.equal(outcome.body.outcome, 'paused');
+    assert.deepEqual(stopped, ['ses_child', 'ses_work']);
+    const paused = await runtime.ledger.get(item.id);
+    assert.equal(paused.status, 'paused');
+    assert.ok(paused.pauses[0]?.stoppedAt);
+    assert.equal((await call('POST', '/api/owners/clippy/sessions/ses_work/prompt', { text: 'Resume please' })).status, 409);
+    assert.equal(calls.some(entry => entry[0] === 'prompt'), false);
+    assert.equal((await runtime.ledger.get(item.id)).status, 'paused');
+    const snapshot = (await call('GET', '/api/state')).body as { owners: { id: string; running: number }[] };
+    assert.equal(snapshot.owners.find(owner => owner.id === 'clippy')?.running, 0);
+    const resumed = await call('POST', '/api/decide', { action: 'resume-item', id: item.id });
+    assert.equal(resumed.status, 200, String(resumed.body.error));
+    const persisted = await runtime.ledger.get(item.id);
+    assert.equal(persisted.status, 'working');
+    assert.deepEqual(persisted.planApproval, item.planApproval);
+    assert.deepEqual(persisted.proposal, item.proposal);
+    assert.equal(persisted.session?.sessionID, 'ses_work');
+    const repeated = await call('POST', '/api/decide', { action: 'resume-item', id: item.id });
+    assert.equal(repeated.status, 200);
+    assert.equal((await runtime.ledger.get(item.id)).humanNotes.filter(note => note.kind === 'resume').length, 1);
   } finally {
     server.close();
   }

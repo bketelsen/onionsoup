@@ -4,7 +4,7 @@ import type { Attention } from './attention.ts';
 import type { Initiative } from './initiatives.ts';
 import type { AttentionProvenance } from './journal-record.ts';
 import type { WorkItem } from './ledger.ts';
-import type { ResourceRequest } from './requests.ts';
+import { describeAsk, type ResourceRequest } from './requests.ts';
 import type { Runtime } from './runtime.ts';
 
 /** Unknown legacy notes stay conservative until host provenance can classify them. */
@@ -54,6 +54,17 @@ function legacyDelegation(entry: Attention, evidence: Evidence): AttentionProven
   }
 }
 
+function legacyAppUpdate(entry: Attention, evidence: Evidence): AttentionProvenance | undefined {
+  for (const request of evidence.requests) {
+    if (request.ask.kind !== 'update-app') continue;
+    if (entry.owner !== request.from && entry.owner !== request.to) continue;
+    const prefix = `${request.id} (${request.from} → ${request.to}): ${describeAsk(request.ask)}: update failed: `;
+    if (entry.note.startsWith(prefix) && entry.note.endsWith('; a person should look')) {
+      return { kind: 'request-operation', request: request.id, operation: 'update-app', phase: 'execution' };
+    }
+  }
+}
+
 function legacyEscalation(entry: Attention, evidence: Evidence): AttentionProvenance | undefined {
   const matches: AttentionProvenance[] = [];
   for (const initiative of evidence.initiatives.filter(initiative => initiative.owner === entry.owner)) {
@@ -73,7 +84,7 @@ function legacySuggestion(entry: Attention): AttentionProvenance | undefined {
   }
 }
 
-const LEGACY_READERS = [legacyWorktree, legacyDelegation, legacyEscalation, legacySuggestion];
+const LEGACY_READERS = [legacyWorktree, legacyDelegation, legacyAppUpdate, legacyEscalation, legacySuggestion];
 
 async function absentWorktree(provenance: Extract<AttentionProvenance, { kind: 'plan-worktree' }>) {
   try {
@@ -90,6 +101,12 @@ const CLEAR_EVIDENCE: Record<AttentionProvenance['kind'], ClearEvidence> = {
   suggestion: async () => undefined,
   maintenance: async () => undefined,
   'human-decision': async () => undefined,
+  'request-operation': async (provenance, evidence) => {
+    if (provenance.kind !== 'request-operation') return undefined;
+    const request = evidence.requests.find(request => request.id === provenance.request);
+    return request?.ask.kind === provenance.operation && request.status === 'updated'
+      ? 'app_update_completed' : undefined;
+  },
   'plan-worktree': async provenance => provenance.kind === 'plan-worktree' ? absentWorktree(provenance) : undefined,
   delegation: async (provenance, evidence) => {
     if (provenance.kind !== 'delegation') return undefined;
@@ -118,6 +135,13 @@ export async function reconcileAttention(runtime: Runtime, entries: Attention[])
   const evidence: Evidence = { runtime, items, requests, initiatives };
   let changed = false;
   for (const entry of entries) {
+    if (entry.provenance?.kind === 'delegation' && entry.journal) {
+      const corrected = legacyAppUpdate(entry, evidence);
+      if (corrected?.kind === 'request-operation' && corrected.request === entry.provenance.request) {
+        entry.provenance = corrected;
+        changed = true;
+      }
+    }
     if (!entry.provenance && entry.journal) {
       const provenance = LEGACY_READERS.map(read => read(entry, evidence)).find(Boolean);
       if (provenance) {

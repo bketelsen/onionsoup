@@ -29,6 +29,12 @@ const INITIATIVE_HTTP_STATUS: Record<string, number> = {
   initiative_invalid_id: 400, initiative_not_found: 404,
 };
 
+const WORK_LIFECYCLE_HTTP_STATUS: Record<string, number> = {
+  work_item_paused: 409, work_not_paused: 409, work_not_pausable: 409, work_pause_binding_changed: 409,
+  work_pause_stop_unconfirmed: 409, work_pause_session_unavailable: 409, work_lifecycle_human_required: 403,
+  session_workspace_unavailable: 409,
+};
+
 /** Engine errors whose code (the text before the first colon) has an HTTP status keep their message. */
 async function codedRoute<T>(statuses: Record<string, number>, operation: () => Promise<T>) {
   try {
@@ -180,7 +186,7 @@ export function surfaceServer(state: SurfaceState, options: { webRoot: string; b
     route('POST', '/api/decide', async (_params, body) => {
       const parsed = Decision.safeParse(await body());
       if (!parsed.success) throw new HttpError(400, `invalid_decision: ${parsed.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`).join('; ')}`);
-      const outcome = await state.decide(parsed.data, by);
+      const outcome = await codedRoute(WORK_LIFECYCLE_HTTP_STATUS, () => state.decide(parsed.data, by));
       broadcast('onionsoup', { reason: 'decision' });
       return { outcome };
     }),
@@ -231,13 +237,15 @@ export function surfaceServer(state: SurfaceState, options: { webRoot: string; b
     }),
     route('POST', '/api/owners/:owner/sessions/:session/prompt', async (params, body) => {
       const { directory, agent } = await ownedSession(params.owner!, params.session!);
+      await codedRoute(WORK_LIFECYCLE_HTTP_STATUS, () => state.assertSessionNotPaused(params.session!));
       await state.opencode.prompt(directory, params.session!, agent(), text((await body()).text, 'text'));
       return { outcome: 'sent' };
     }),
     route('POST', '/api/owners/:owner/sessions/:session/abort', async params => {
       const { directory } = await ownedSession(params.owner!, params.session!);
-      await state.opencode.abort(directory, params.session!);
-      return { outcome: 'aborted' };
+      const outcome = await codedRoute(WORK_LIFECYCLE_HTTP_STATUS, () => state.stopSession(params.owner!, directory, params.session!));
+      broadcast('onionsoup', { reason: 'work-pause' });
+      return { outcome };
     }),
     route('POST', '/api/owners/:owner/permissions/:request', async (params, body) => {
       const directory = await ownedPending(params.owner!, 'permission', params.request!);

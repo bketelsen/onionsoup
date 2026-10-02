@@ -12,6 +12,7 @@ import { queueNotice, readNotice } from './notices.ts';
 import type { RequestStatus, ResourceRequest } from './requests.ts';
 import type { Runtime } from './runtime.ts';
 import { approvePlan, cancelItem, revisePlan } from './work-recovery.ts';
+import { managerWorkActor, resumePausedItem } from './work-pause.ts';
 import { SUPERVISION_LIMITS } from './plan-review-limits.ts';
 import { latestOwnerMessageTarget, ownerMessageId } from './owner-messages.ts';
 import { z } from 'zod';
@@ -36,12 +37,15 @@ const REQUEST_STATES: Partial<Record<RequestStatus, AssignmentState>> = {
   failed: 'failed',
   completed: 'completed',
   interrupted: 'blocked',
+  'work-paused': 'paused',
 };
 
 const ITEM_STATES: Partial<Record<WorkStatus, (item: WorkItem) => AssignmentState>> = {
   'awaiting-plan-approval': () => 'plan-waiting',
   'awaiting-push-approval': () => 'awaiting-person',
   interrupted: () => 'blocked',
+  pausing: () => 'paused',
+  paused: () => 'paused',
   landed: item => (item.publication ? 'awaiting-merge' : 'working'),
 };
 
@@ -312,7 +316,7 @@ function rollupOf(view: InitiativeView): Rollup {
   if (!live.length) return { status: 'cancelled', outcome: 'every assignment was cancelled' };
   const failed = live.find(assignment => assignment.state === 'failed');
   if (failed) return { status: 'failed', outcome: `${failed.id} (${failed.to}) failed: ${failed.requestRecord?.reason ?? 'no reason recorded'}` };
-  if (live.every(assignment => assignment.state === 'completed')) return { status: 'completed', outcome: `all ${live.length} assignments merged` };
+  if (live.every(assignment => assignment.state === 'completed')) return { status: 'completed', outcome: `all ${live.length} assignments completed` };
   return undefined;
 }
 
@@ -452,9 +456,11 @@ export type SteerInvocation = z.infer<typeof SteerInvocation>;
 type Steer = (runtime: Runtime, managerId: string, item: WorkItem, note: string, invocation?: SteerInvocation) => Promise<string>;
 
 /** What a manager may do to her reports' assigned work from chat. Approving needs the grant; sending back does not. */
-const STEERS: Record<'approve-plan' | 'revise-plan' | 'cancel' | 'note', Steer> = {
+const STEERS: Record<'approve-plan' | 'revise-plan' | 'resume' | 'cancel' | 'note', Steer> = {
   'approve-plan': async (runtime, managerId, item, note) => (await reviewReportPlan(runtime, managerId, item.id, { decision: 'approve', note })).status,
   'revise-plan': async (runtime, managerId, item, note) => (await reviewReportPlan(runtime, managerId, item.id, { decision: 'revise', note })).status,
+  resume: async (runtime, managerId, item, note) =>
+    (await resumePausedItem(runtime, item.id, await managerWorkActor(runtime, managerId, item), note)).status,
   cancel: async (runtime, managerId, item, note) => (await cancelItem(runtime, item.id, `owner:${managerId}`, note)).status,
   note: async (runtime, managerId, item, note, invocation) => {
     const initiative = await runtime.initiatives.get(item.assignment!.initiative);
@@ -469,6 +475,12 @@ export const STEER_ACTIONS = Object.keys(STEERS) as SteerAction[];
 export async function steerReportItem(runtime: Runtime, managerId: string, itemId: string, action: SteerAction,
   note: string, source?: SteerInvocation) {
   const context = await assignedItem(runtime, managerId, itemId);
+  if (action === 'resume') {
+    if (!note.trim()) throw new Error('steer_note_required: resume needs a note');
+    if (context && openEscalation(context.initiative, context.assignmentId)) throw new Error('work_resume_escalation_open');
+    const item = context?.item ?? await runtime.ledger.get(itemId);
+    return STEERS.resume(runtime, managerId, item, note);
+  }
   if (!context) throw new Error(`not_your_report_item: ${itemId} is not work in one of ${managerId}'s initiatives; direct request plans use onionsoup_review_request_plan with the exact request and plan binding`);
   if (action !== 'approve-plan' && !note.trim()) throw new Error(`steer_note_required: ${action} needs a note`);
   const invocation = source ? SteerInvocation.parse(source) : undefined;

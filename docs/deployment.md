@@ -126,9 +126,14 @@ The stage prints these exceptions when verifying. It does not depend on `ONIONSO
 (which only opts into the outer real-archive test); ordinary `npm run verify` still runs all seven tests.
 
 The drain stops new admitted turns and requires all live leases to finish. The worker reads
-`/session/status`, `/permission`, and `/question` for every declared owner chat/desk, operator
-directory and recorded plan/session directory; missing, malformed or unreadable responses hold
-the gate. It rejects another same-user opencode process detected through `/proc`. After a
+`/session/status`, `/permission`, and `/question` for active declared owner chat/desk, operator
+and execution directories. Historical terminal session references and archived workspaces are
+not active probe targets: probing a removed directory must never initialize an old OpenCode
+instance or recreate its workspace. Live leases and actual busy execution still hold the gate,
+including when their directory disappeared; absence is not proof of completion. Missing,
+malformed or unreadable active-scope responses hold the gate. An open PR alone does not make a missing,
+archived terminal workspace an active execution context. It rejects another same-user opencode process
+detected through `/proc`. After a
 five-second quiet interval it probes every second, and rechecks just before the atomic pointer switch.
 The plugin periodically reconciles a chat lease if its idle event was missed: its own
 directory-scoped status must report idle and its last assistant message must have completed

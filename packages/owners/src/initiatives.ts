@@ -42,6 +42,7 @@ export type Assignment = z.infer<typeof Assignment>;
  * waits on the person, since an assignment completes only when its PR merges.
  */
 export const AssignmentState = z.enum([
+  'paused',
   'cancelled', 'not-dispatched', 'requested', 'working', 'plan-waiting', 'awaiting-merge',
   'awaiting-person', 'blocked', 'completed', 'failed',
 ]);

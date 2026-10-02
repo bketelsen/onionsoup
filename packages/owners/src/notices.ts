@@ -49,6 +49,8 @@ function directories(runtime: Runtime) {
 interface Described { change: string; text: string }
 
 export function describeChange(item: WorkItem, previous: string | undefined): Described | undefined {
+  // Operational completion has its own exact requester notice and never pretends to be a publication.
+  if (item.status === 'landed' && !item.publication && !item.branch && !item.rebaseOf) return undefined;
   const [before, beforePr] = (previous ?? '|').split('|');
   const title = `"${item.proposal.title}"`;
   const pr = item.publication;
