@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import type { ChatOrigin } from './chat-origin.ts';
+import type { AttentionProvenance } from './journal-record.ts';
 import { canChange, directReports, isDirectReport, planGrantFor } from './declarations.ts';
 import { requestWork } from './delegation.ts';
 import {
@@ -141,10 +142,10 @@ async function validateInitiative(runtime: Runtime, initiative: Initiative) {
   }
 }
 
-async function journal(runtime: Runtime, ownerIds: Iterable<string>, kind: string, note: string) {
+async function journal(runtime: Runtime, ownerIds: Iterable<string>, kind: string, note: string, provenance?: AttentionProvenance) {
   for (const ownerId of new Set(ownerIds)) {
     const notebook = runtime.notebook(ownerId);
-    await notebook.journal({ kind, note });
+    await notebook.journal({ kind, note, provenance });
     await notebook.commit(`journal ${kind}`).catch(() => undefined);
   }
 }
@@ -434,7 +435,8 @@ async function askManager(runtime: Runtime, view: InitiativeView, item: WorkItem
   if (revisionsAsked(view, item.id) >= SUPERVISION_LIMITS.revisionsPerItem) {
     const note = `revision_limit_reached: sent back ${SUPERVISION_LIMITS.revisionsPerItem} times already; the person decides`;
     await recordPlanReview(runtime, view.id, { item: item.id, digest: plan.digest, verdict: 'escalate', note, by: 'runtime', at });
-    await journal(runtime, [view.owner], 'attention', `${item.id} (${item.owner}): plan left for the person: ${note}`);
+    await journal(runtime, [view.owner], 'attention', `${item.id} (${item.owner}): plan left for the person: ${note}`,
+      { kind: 'maintenance', code: 'plan_review_escalated', workItem: item.id });
     return;
   }
   await recordPlanReview(runtime, view.id, { item: item.id, digest: plan.digest, verdict: 'asked', note: '', by: 'runtime', at });
@@ -490,7 +492,8 @@ export async function raiseToManager(runtime: Runtime, reportId: string, raise: 
   const updated = await runtime.initiatives.update(initiative.id, current => ({ ...current, escalations: [...current.escalations, escalation] }));
   const where = `${initiative.id}/${assignment.id}${item ? ` (work ${item})` : ''}`;
   await journal(runtime, [reportId], 'escalation', `${escalation.id}: ${raise.kind} to ${initiative.owner} on ${where}: ${raise.note}`);
-  await journal(runtime, [initiative.owner], 'attention', `${reportId} escalated (${raise.kind}) on ${where}: ${raise.note}`);
+  await journal(runtime, [initiative.owner], 'attention', `${reportId} escalated (${raise.kind}) on ${where}: ${raise.note}`,
+    { kind: 'escalation', initiative: initiative.id, escalation: escalation.id });
   const answer = 'Answer it (onionsoup_steer note), bring in the person, and resolve it with onionsoup_initiative resolve-escalation.';
   await tellManager(runtime, updated, 'escalation', `${reportId} escalates (${raise.kind}, ${escalation.id}) on ${where}: ${raise.note}. ${answer}`);
   return escalation;

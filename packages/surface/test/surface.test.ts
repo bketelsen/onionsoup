@@ -827,11 +827,55 @@ test('attention and uncertain requests have durable decisions in the inbox', asy
     assert.ok(attention);
     assert.ok(inbox.some(entry => entry.kind === 'request-recovery' && entry.id === request.id));
     assert.equal((await call('POST', '/api/decide', { action: 'acknowledge-attention', id: attention.id, reason: 'Investigating' })).body.outcome, 'acknowledged');
+    const seen = (await call('GET', '/api/state')).body;
+    assert.ok(!(seen.inbox as { id: string }[]).some(entry => entry.id === attention.id));
+    assert.equal((seen.owners as { id: string; waiting: number }[]).find(owner => owner.id === 'bellonda')?.waiting, 3,
+      'only the two chat permissions and interrupted request remain waiting');
+    const history = (await call('GET', '/api/owners/bellonda')).body.backlog as { id: string; status: string }[];
+    assert.equal(history.find(entry => entry.id === attention.id)?.status, 'acknowledged');
     assert.equal((await call('POST', '/api/decide', { action: 'resolve-attention', id: attention.id, reason: 'Recovered' })).body.outcome, 'resolved');
     assert.equal((await call('POST', '/api/decide', { action: 'cancel-request', id: request.id, reason: 'No longer needed' })).body.outcome, 'failed');
     const remaining = (await call('GET', '/api/state')).body.inbox as { id: string }[];
     assert.ok(!remaining.some(entry => entry.id === attention.id || entry.id === request.id));
     assert.equal((await runtime.requests.get(request.id)).recovery[0]?.reason, 'No longer needed');
+  } finally {
+    server.close();
+  }
+});
+
+test('owner housekeeping and legacy suggestions do not count as waiting; human approvals, questions and permissions still do', async () => {
+  const { runtime, server, call } = await start(api => {
+    api.permissions = async directory => directory.endsWith('homelab')
+      ? [{ id: 'permission-fixture', sessionID: 'ses_1', permission: 'edit', patterns: ['config.yaml'], always: [], metadata: {} }] : [];
+    api.questions = async directory => directory.endsWith('homelab')
+      ? [{ id: 'question-fixture', sessionID: 'ses_1', questions: [
+        { question: 'Which authority?', header: 'Authority', options: [{ label: 'Keep', description: 'Keep current scope' }] },
+      ] }] : [];
+  });
+  try {
+    const notebook = runtime.notebook('homelab');
+    await notebook.ensure('# Fixture');
+    await notebook.journal({ kind: 'attention', note: 'Cleanup needs approval urgently', provenance: { kind: 'maintenance', code: 'cleanup' } });
+    await notebook.journal({ kind: 'attention', note: 'proposed work: Improve checks: Better checks (plan it with the owner in chat)' });
+    await notebook.journal({ kind: 'attention', note: 'Choose configured authority', provenance: { kind: 'human-decision', code: 'authority_discrepancy' } });
+    const proposal = { title: 'Actual plan', goal: 'Approved work', rationale: 'Fixture', acceptance: ['Done'], size: 'small' as const };
+    const item = await runtime.ledger.create('homelab', 'owner-change', proposal, {
+      status: 'awaiting-plan-approval', request: 'r-fixture', planDocument: { markdown: 'Plan', digest: 'fixture' },
+    });
+    const snapshot = (await call('GET', '/api/state')).body;
+    const inbox = snapshot.inbox as { id: string; kind: string; title: string }[];
+    const human = inbox.find(entry => entry.kind === 'attention')!;
+    assert.equal(human.title, 'Choose configured authority');
+    assert.ok(inbox.some(entry => entry.kind === 'plan' && entry.id === item.id));
+    assert.ok(inbox.some(entry => entry.kind === 'question'));
+    assert.ok(inbox.some(entry => entry.kind === 'permission'));
+    assert.equal((snapshot.owners as { id: string; waiting: number }[]).find(owner => owner.id === 'homelab')?.waiting, 4);
+    const page = (await call('GET', '/api/owners/homelab')).body;
+    assert.equal((page.backlog as { status: string }[]).filter(entry => entry.status === 'open').length, 2);
+    await call('POST', '/api/decide', { action: 'acknowledge-attention', id: human.id, reason: 'Seen' });
+    const seen = (await call('GET', '/api/state')).body;
+    assert.equal((seen.owners as { id: string; waiting: number }[]).find(owner => owner.id === 'homelab')?.waiting, 3);
+    assert.equal((await runtime.ledger.get(item.id)).status, 'awaiting-plan-approval');
   } finally {
     server.close();
   }

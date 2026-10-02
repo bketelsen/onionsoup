@@ -7,6 +7,7 @@ import { InitiativeView } from '../web/src/components/InitiativeView.tsx';
 import { OrgTree } from '../web/src/components/OrgView.tsx';
 import { InboxErrors } from '../web/src/components/InboxErrors.tsx';
 import { AttentionAssignment } from '../web/src/components/AttentionAssignment.tsx';
+import { OwnerBacklog } from '../web/src/components/OwnerBacklog.tsx';
 import { DecisionActions } from '../web/src/components/DecisionActions.tsx';
 import { WorkRecovery } from '../web/src/components/WorkRecovery.tsx';
 import { ReminderCard } from '../web/src/components/ReminderCard.tsx';
@@ -645,6 +646,21 @@ test('attention renders Seen separately from assignment and does not equate acce
   assert.match(assigned, /awaiting owner acceptance/);
   assert.match(assigned, /remains unresolved/);
   assert.match(assigned, /r-fixture/);
+});
+
+test('owner backlog and retained Seen history are informational, with no warning or assignment controls', () => {
+  const at = new Date().toISOString();
+  const html = renderToStaticMarkup(createElement(OwnerBacklog, { entries: [
+    { id: 'a-owner', owner: 'clippy', note: '<script>housekeeping</script>', at, status: 'open',
+      provenance: { kind: 'maintenance', code: 'cleanup' } },
+    { id: 'a-seen', owner: 'clippy', note: 'A retained choice', at, status: 'acknowledged',
+      decision: { by: 'person', reason: 'Seen, keep the evidence', at } },
+  ] }));
+  assert.match(html, /Owner backlog \(1\)/);
+  assert.match(html, /History \(1\)/);
+  assert.match(html, /Seen, keep the evidence/);
+  assert.match(html, /&lt;script&gt;housekeeping&lt;\/script&gt;/);
+  assert.doesNotMatch(html, /text-status-warning|Waiting on you|Assign repository fix|<button|<script>/);
 });
 
 test('approved child recovery displays attribution and inert text without execution controls', async () => {

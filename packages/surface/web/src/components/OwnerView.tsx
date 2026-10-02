@@ -6,6 +6,7 @@ import { ChatPane } from './ChatPane.tsx';
 import { Decision } from './Decision.tsx';
 import { Drawer, MenuButton } from './Drawer.tsx';
 import { MemoryMaintenance } from './MemoryMaintenance.tsx';
+import { OwnerBacklog } from './OwnerBacklog.tsx';
 import { ReminderCard } from './ReminderCard.tsx';
 import { Badge, BusyDots, Button, cx, Empty, OwnerIcon, Section, statusTone, timeAgo } from './ui.tsx';
 
@@ -19,7 +20,7 @@ const NOTE_LABELS: Record<string, string> = {
   'request-recovered': 'Request recovered', 'request-completed': 'Request completed',
   'create-approved': 'Create approved', 'request-opened': 'Request opened',
   'chat-decision': 'Noted', 'chat-action': 'Did', 'work-opened': 'Opened work', 'plan-approved': 'Plan approved', 'plan-rejected': 'Plan rejected',
-  published: 'Published', 'publish-failed': 'Publish failed', asked: 'Asked', answered: 'Answered', attention: 'Needs you', 'ci-triage': 'CI triage',
+  published: 'Published', 'publish-failed': 'Publish failed', asked: 'Asked', answered: 'Answered', attention: 'Follow-up', 'ci-triage': 'CI triage',
   'work-status': 'Work update', friction: 'Friction report', 'owner-created': 'Created owner', 'owner-updated': 'Updated owner', 'owner-retired': 'Retired owner', 'ship-started': 'Shipping', shipped: 'Shipped',
   'reminder-set': 'Set a reminder', 'reminder-fired': 'Reminder due', 'reminder-cancelled': 'Reminder cancelled',
   'wiki-write': 'Wrote a wiki page', 'wiki-move': 'Moved a wiki page', 'wiki-delete': 'Deleted a wiki page',
@@ -201,11 +202,12 @@ export function OwnerView({ owner, inbox, sessionId, refresh }: { owner: OwnerSu
               </button>
             ))}
           </Section>}
+          {desk && <OwnerBacklog entries={desk.backlog} />}
           {owner.hasDesk && <Section title="Activity" action={<Button variant="ghost" onClick={() => setNotebookOpen(true)}><RiBookOpenLine className="size-3.5" />Notebook</Button>}>
             {desk && !desk.notes.length && <Empty>Nothing yet.</Empty>}
             <ol className="flex flex-col gap-2">
               {desk?.notes.slice(0, 25).map((note, index) => (
-                <li key={index} className={cx('flex flex-col gap-0.5 border-l-2 pl-2', note.kind === 'attention' ? 'border-status-warning' : 'border-border', note.retracted && 'opacity-50 line-through')}>
+                <li key={index} className={cx('flex flex-col gap-0.5 border-l-2 border-border pl-2', note.retracted && 'opacity-50 line-through')}>
                   <span className="typography-micro text-muted-foreground">
                     {NOTE_LABELS[note.kind] ?? note.kind} · {timeAgo(note.at)}
                     {note.workItem && <> · <button className="text-primary hover:underline" onClick={() => navigate('item', note.workItem!)}>{note.workItem}</button></>}

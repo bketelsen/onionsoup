@@ -87,6 +87,7 @@ async function forgetPlanWorktree(runtime: Runtime, item: WorkItem) {
   await runtime.notebook(item.owner).journal({
     kind: 'attention-condition', workItem: item.id,
     condition: { key: `plan-worktree:${item.id}:${item.planWorktreeGeneration ?? 'legacy'}`, state: 'resolved' },
+    provenance: { kind: 'plan-worktree', workItem: item.id, path: item.planWorktree!, generation: item.planWorktreeGeneration },
     note: `Plan worktree for ${item.id} is no longer present; cleanup is complete.`,
   });
   await runtime.ledger.update(item.id, current => ({ ...current, planWorktree: undefined, planWorktreeKept: undefined }));
@@ -119,7 +120,7 @@ const keptNote = (why: string) => (path: string) => ({
   note: `plan worktree ${path} was kept: ${why}. Look at it with \`git -C ${path} status\`; remove it with \`git worktree remove\` once nothing in it is needed.`,
 });
 
-/** What the owner's journal says about each outcome; the kept ones and failures raise the person's attention. */
+/** Kept work and cleanup failures belong to owner maintenance, never an implicit human gate. */
 const REMOVAL_JOURNAL: Record<PlanWorktreeRemoval, RemovalJournal | undefined> = {
   removed: path => ({ kind: 'plan-worktree-removed', note: path }),
   absent: undefined,
@@ -145,6 +146,7 @@ async function removePlanWorktree(runtime: Runtime, item: WorkItem, path: string
   const entry = isRepeat ? undefined : REMOVAL_JOURNAL[outcome]?.(path, detail);
   if (entry) await runtime.notebook(item.owner).journal({
     ...entry, workItem: item.id, outcome,
+    provenance: { kind: 'plan-worktree', workItem: item.id, path, generation: item.planWorktreeGeneration },
     ...(entry.kind === 'attention' ? { kind: 'attention-condition', condition: { key: `plan-worktree:${item.id}:${item.planWorktreeGeneration ?? 'legacy'}`, state: 'open' as const } } : {}),
   });
   await recordKept(runtime, item, outcome);

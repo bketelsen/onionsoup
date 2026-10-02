@@ -8,7 +8,7 @@ import {
   promoteFriction, retryFrictionPromotion, frictionPromotionView, frictionPromotionHistory,
   frictionFreshness, readRevisions, effectiveTriage, FrictionProposalDigest,
   ownerChatAgent, AttentionAssignmentInput, assignAttention, retryAttentionAssignment, attentionAssignmentView, attentionAssignmentTargets, type AttentionAssignmentView,
-  listAttention, changeAttention, recoverRequest, reconcileRequest,
+  listAttention, needsHumanDecision, changeAttention, recoverRequest, reconcileRequest,
   listFriction, frictionDetail, readFrictionTriage, type FrictionRecord,
   approveInitiative, reviseInitiative, cancelInitiative, initiativeViews, managerOf, planGrantFor, cancelReminder,
   type AssignmentView, type Initiative, type InitiativeView, type WorkItem,
@@ -277,10 +277,10 @@ export class SurfaceState {
         detail: `${delivery!.reason}. Check the existing plan session before taking further action; do not blindly resubmit. Work ${item.id}.`,
       })),
       ...providerHealth.filter(view => view.status === 'failing').map(providerAuthEntry),
-      ...await Promise.all(attention.filter(entry => entry.status !== 'resolved').map(async entry => ({
+      ...await Promise.all(attention.filter(needsHumanDecision).map(async entry => ({
         kind: 'attention' as const, id: entry.id, owner: entry.owner, title: entry.note,
-        detail: entry.decision ? `${entry.status}: ${entry.decision.reason} (${entry.decision.by})` : 'Needs attention',
-        attentionStatus: entry.status, at: entry.decision?.at ?? entry.at,
+        detail: entry.decision ? `${entry.status}: ${entry.decision.reason} (${entry.decision.by})` : 'Human decision required',
+        attentionStatus: entry.status, at: entry.at,
         attentionAssignment: await attentionAssignmentView(this.runtime, entry.id),
         assignmentTargets: attentionAssignmentTargets(this.runtime),
       }))),

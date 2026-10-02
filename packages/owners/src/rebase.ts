@@ -122,7 +122,11 @@ const TRIAGE_OUTCOMES: Record<CiTriage['decision'], TriageOutcome> = {
     await runtime.notebook(item.owner).journal({ kind: 'ci-triage', workItem: item.id, outcome: 'flaky', note: `CI on ${item.publication!.url}: ${reason}` });
   },
   person: async (runtime, item, _headSha, reason) => {
-    await runtime.notebook(item.owner).journal({ kind: 'attention', workItem: item.id, outcome: 'person', note: `CI on ${item.publication!.url}: ${reason}` });
+    await runtime.notebook(item.owner).journal({
+      kind: 'attention', workItem: item.id, outcome: 'person',
+      provenance: { kind: 'human-decision', code: 'ci_person', workItem: item.id },
+      note: `CI on ${item.publication!.url}: ${reason}`,
+    });
   },
 };
 

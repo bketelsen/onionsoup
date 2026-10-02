@@ -2,7 +2,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, open, readFile, readdir, rename, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { AttentionCondition, parseJournalRecord, type JournalRecord } from './journal-record.ts';
+import { AttentionCondition, AttentionProvenance, parseJournalRecord, type JournalRecord } from './journal-record.ts';
+import { reconcileAttention } from './attention-routing.ts';
 import { withRecordLock } from './record-lock.ts';
 import type { Runtime } from './runtime.ts';
 
@@ -11,11 +12,17 @@ export const Attention = z.object({
   id: z.string(), owner: z.string(), note: z.string(), at: z.string(),
   status: z.enum(['open', 'acknowledged', 'resolved']).default('open'),
   condition: AttentionCondition.extend({ observedAt: z.string().datetime() }).optional(),
+  provenance: AttentionProvenance.optional(),
+  journal: z.object({ file: z.string(), line: z.number().int().nonnegative() }).optional(),
+  workItem: z.string().optional(),
+  outcome: z.string().optional(),
+  resolution: z.object({ code: z.string(), at: z.string().datetime() }).optional(),
   decision: z.object({ by: z.string(), reason: z.string(), at: z.string() }).optional(),
 });
 export type Attention = z.infer<typeof Attention>;
 const Cursor = z.object({ offset: z.number(), line: z.number(), size: z.number(), complete: z.boolean() });
 export const AttentionIndex = z.object({
+  routingVersion: z.number().int().nonnegative().default(0),
   cutoff: z.string(),
   cursors: z.record(z.string(), Cursor),
   entries: z.record(z.string(), Attention),
@@ -28,7 +35,10 @@ function indexPath(runtime: Runtime) {
 }
 
 async function fileStamp(path: string) {
-  const details = await stat(path).catch(() => undefined);
+  const details = await stat(path).catch(error => {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    return undefined;
+  });
   return details ? `${details.mtimeMs}:${details.size}` : '';
 }
 
@@ -37,14 +47,17 @@ async function readIndex(runtime: Runtime) {
   const stamp = await fileStamp(path);
   const cached = CACHE.get(path);
   if (stamp && cached?.stamp === stamp) return cached.index;
-  const content = await readFile(path, 'utf8').catch(() => undefined);
+  const content = await readFile(path, 'utf8').catch(error => {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    return undefined;
+  });
   if (content) {
     const index = AttentionIndex.parse(JSON.parse(content));
     CACHE.set(path, { stamp, index });
     return index;
   }
   const cutoff = new Date(Date.now() - ATTENTION_LIMITS.initialHistoryDays * 86_400_000).toISOString();
-  const index: AttentionIndex = { cutoff, cursors: {}, entries: {} };
+  const index: AttentionIndex = { routingVersion: 1, cutoff, cursors: {}, entries: {} };
   // Preserve decisions made by the earlier per-item format when first creating the index.
   const directory = join(runtime.stateDirectory, 'attention');
   for (const name of (await readdir(directory).catch(() => [])).filter(name => /^a-.*\.json$/.test(name))) {
@@ -74,7 +87,7 @@ async function writeIndex(runtime: Runtime, index: AttentionIndex) {
 }
 
 /** One generation of a host condition has one inbox identity, including a terminal tombstone. */
-function ingestCondition(index: AttentionIndex, owner: string, event: JournalRecord) {
+function ingestCondition(index: AttentionIndex, owner: string, event: JournalRecord, journal: Attention['journal']) {
   const condition = event.condition!;
   const digest = createHash('sha256').update(JSON.stringify([owner, condition.key])).digest('hex').slice(0, 24);
   const id = `a-condition-${digest}`;
@@ -84,6 +97,8 @@ function ingestCondition(index: AttentionIndex, owner: string, event: JournalRec
   index.entries[id] = Attention.parse({
     ...previous, id, owner, note: event.note ?? previous?.note ?? '', at: previous?.at ?? event.at,
     status, condition: { ...condition, observedAt: event.at },
+    provenance: event.provenance ?? previous?.provenance, journal,
+    workItem: event.workItem ?? previous?.workItem, outcome: event.outcome ?? previous?.outcome,
   });
 }
 
@@ -93,11 +108,17 @@ function ingestLine(index: AttentionIndex, owner: string, file: string, number: 
     const event = parseJournalRecord(line);
     if (!event) throw new Error('journal_record_invalid');
     if (event.at < index.cutoff) return;
-    if (event.kind === 'attention-condition' && event.condition) return ingestCondition(index, owner, event);
+    const journal = { file, line: number };
+    if (event.kind === 'attention-condition' && event.condition) return ingestCondition(index, owner, event, journal);
     if (event.kind !== 'attention') return;
     const digest = createHash('sha256').update(`${owner}/${file}/${number}/${line}`).digest('hex').slice(0, 24);
     const id = `a-${digest}`;
-    index.entries[id] ??= Attention.parse({ id, owner, note: event.note ?? '', at: event.at });
+    index.entries[id] = Attention.parse({
+      ...index.entries[id], id, owner,
+      note: index.entries[id]?.note ?? event.note ?? '', at: index.entries[id]?.at ?? event.at,
+      journal, provenance: event.provenance ?? index.entries[id]?.provenance,
+      workItem: event.workItem, outcome: event.outcome,
+    });
   } catch {
     // Log only the location, never potentially sensitive journal contents.
     console.warn(`attention_journal_invalid: ${owner}/${file}:${number + 1}`);
@@ -142,18 +163,27 @@ async function discover(runtime: Runtime, index: AttentionIndex) {
   let changed = false;
   for (const owner of runtime.declarations.owners.values()) {
     const directory = join(runtime.notebook(owner.id).directory, 'journal');
-    const files = (await readdir(directory).catch(() => []))
+    const files = (await readdir(directory).catch(error => {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      return [];
+    }))
       .filter(name => name.endsWith('.jsonl') && name.slice(0, 10) >= index.cutoff.slice(0, 10)).sort();
     for (const file of files) changed = await scanFile(runtime, index, owner.id, file) || changed;
   }
-  if (changed) await writeIndex(runtime, index);
+  return changed;
 }
 
 /** Incremental journal discovery: only appended bytes are parsed; malformed lines do not break the surface. */
 export async function listAttention(runtime: Runtime): Promise<Attention[]> {
   return withRecordLock(`${indexPath(runtime)}.lock`, async () => {
-    const index = await readIndex(runtime);
-    await discover(runtime, index);
+    const index = structuredClone(await readIndex(runtime));
+    // Replay original journal identities once to enrich old indexes without changing human decisions.
+    const needsMigration = index.routingVersion < 1;
+    if (needsMigration) index.cursors = {};
+    const discovered = await discover(runtime, index);
+    const reconciled = await reconcileAttention(runtime, Object.values(index.entries));
+    index.routingVersion = 1;
+    if (needsMigration || discovered || reconciled) await writeIndex(runtime, index);
     return Object.values(index.entries).filter(entry => runtime.declarations.owners.has(entry.owner));
   });
 }

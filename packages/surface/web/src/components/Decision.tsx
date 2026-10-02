@@ -12,7 +12,7 @@ import { Badge, Button, cx, OwnerIcon, timeAgo } from './ui.tsx';
 const KIND_LABELS: Record<InboxEntry['kind'], string> = {
   plan: 'Plan to approve', push: 'Force-push to approve', create: 'Create request', delete: 'Delete request',
   'plan-revision-blocked': 'Revision delivery blocked',
-  attention: 'Attention', 'request-recovery': 'Request interrupted', initiative: 'Initiative to approve',
+  attention: 'Human decision', 'request-recovery': 'Request interrupted', initiative: 'Initiative to approve',
   permission: 'Permission', question: 'Question', 'provider-auth': 'Model provider',
 };
 
@@ -80,7 +80,7 @@ export function Decision({ entry, owner, onDone, compact }: { entry: InboxEntry;
         {entry.sessionID && <Button variant="ghost" onClick={openChat}><RiChat3Line className="size-3.5" />Open chat</Button>}
       </div>
       {entry.kind === 'attention' && <>
-        <div className="typography-meta text-muted-foreground">Seen records acknowledgment; it does not start work. Assignment does not resolve this attention item.</div>
+        <div className="typography-meta text-muted-foreground">Seen removes this from your decision queue and keeps it in owner history; it does not start work. Assignment does not resolve this item.</div>
         <AttentionAssignment entry={entry} busy={busy} decide={decide} />
       </>}
       {NOTE_PLACEHOLDERS[entry.kind] && (

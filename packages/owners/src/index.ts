@@ -20,6 +20,8 @@ export { describeAsk, type ResourceRequest } from './requests.ts';
 export { domainSummary } from './roster.ts';
 
 export { listAttention, changeAttention, type Attention } from './attention.ts';
+export { needsHumanDecision } from './attention-routing.ts';
+export { AttentionProvenance } from './journal-record.ts';
 export { requestWork } from './delegation.ts';
 export { AssignmentRef, AssignmentState, Assignment, Initiative, InitiativeDraft, InitiativeStatus, INITIATIVE_LIMITS } from './initiatives.ts';
 export {
