@@ -112,7 +112,7 @@ async function setup(operator = false) {
     },
     prompt: async () => {
       if (watcherFirstMessage) await sayWatcher?.();
-      return { data: { info: { structured: { records: [] } } } };
+      return { data: { info: {}, parts: [{ type: 'text', text: '{"records":[]}' }] } };
     },
     delete: async () => {
       children.parent = (children.parent ?? []).filter(id => id !== 'watcher');

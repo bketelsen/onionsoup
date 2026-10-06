@@ -87,7 +87,7 @@ test('key-like text is masked: provider keys, GitHub tokens, bearer values, long
 test('an auth failure is stored masked, and neither the record nor any log line carries the key', async () => {
   const { runtime, state } = await openRuntime();
   const declaredKey = 'halogen-declared-key-value';
-  runtime.declarations = { ...runtime.declarations, providers: { halogen: { baseURL: 'http://h/v1', models: { m: {} }, structuredOutput: true, apiKey: new ApiKey(declaredKey) } } };
+  runtime.declarations = { ...runtime.declarations, providers: { halogen: { baseURL: 'http://h/v1', models: { m: {} }, apiKey: new ApiKey(declaredKey) } } };
   const logs = await capturingLogs(async () => {
     await recordProviderFailure(runtime, 'openai', { kind: 'chat', what: 'homelab' }, INCORRECT_KEY);
     await recordProviderFailure(runtime, 'halogen', { kind: 'hire', what: 'w-1: review' }, { message: `Unauthorized: key ${declaredKey} refused` });
@@ -118,7 +118,8 @@ function scriptedConnection(replies: Reply[]): ConnectHire {
 }
 
 const REFUSED: Reply = { data: { info: { role: 'assistant', error: { name: 'APIError', data: { message: INCORRECT_KEY.message, statusCode: 401 } } } } };
-const APPROVED: Reply = { data: { info: { role: 'assistant', cost: 0, structured: { decision: 'approve', summary: 'Fine', findings: [] } } } };
+const APPROVED: Reply = { data: { info: { role: 'assistant', cost: 0 },
+  parts: [{ type: 'text', text: JSON.stringify({ decision: 'approve', summary: 'Fine', findings: [] }) }] } };
 
 test('a hire refused for its API key marks the provider failing; a later delivered hire marks it recovered', async () => {
   const { runtime, state } = await openRuntime();

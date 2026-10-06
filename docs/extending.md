@@ -217,15 +217,13 @@ halogen:                              # provider id: models are halogen/<model i
     halogen-qwen3.8-flash-next:
       contextTokens: 78000            # optional: the context window; outputTokens (default 8192) needs it
   apiKeyFile: secrets/halogen.key     # optional: a file under secrets/, read at load and never logged
-  structuredOutput: true              # false: hires on its models ask for their JSON in the reply text
 ```
 
 The plugin adds it to the surface opencode's providers (your own opencode providers stay; one with the same id is
 replaced), and every sandboxed hire gets the same provider in its own opencode config, since the sandbox hides
 `~/.config/opencode`. Ids of opencode's built-in providers (`openai`, `anthropic`, `github-copilot`, `google`, …) are
-refused. Hires ask for structured output through a forced tool call; a model that refuses it, or answers without
-calling the tool, gets the hire again once in text mode, and later hires on it start there. Set
-`structuredOutput: false` when you know the endpoint cannot do it, to skip the failed first round.
+refused. Every hire asks for its deliverable as one JSON object in the reply text and validates it, so a model needs
+no forced tool call.
 
 Give its models a family, so cross-family review can pick them. A new family widens the choice: an owner on a
 Claude model can now be reviewed by Qwen, and the other way round.

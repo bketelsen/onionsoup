@@ -43,8 +43,6 @@ export const ProviderDeclaration = z.object({
   models: z.record(z.string().min(1), ProviderModel).refine(models => Object.keys(models).length > 0, 'declare at least one model'),
   /** A file under the config directory's secrets/ holding the API key; read at load, never logged. */
   apiKeyFile: z.string().min(1).optional(),
-  /** Whether the endpoint honours forced tool choice (opencode's structured output). False: hires ask for JSON in text. */
-  structuredOutput: z.boolean().default(true),
 });
 export type ProviderDeclaration = z.infer<typeof ProviderDeclaration>;
 
@@ -151,12 +149,6 @@ function opencodeProvider(providerId: string, provider: DeclaredProvider): Openc
  */
 export function opencodeProviders(providers: DeclaredProviders): Record<string, OpencodeProvider> {
   return Object.fromEntries(Object.entries(providers).map(([providerId, provider]) => [providerId, opencodeProvider(providerId, provider)]));
-}
-
-/** Whether a model ref names a declared provider that cannot do forced tool choice, so its hires start in text mode. */
-export function lacksStructuredOutput(providers: DeclaredProviders, model: string) {
-  const providerId = model.split('/')[0]!;
-  return providers[providerId]?.structuredOutput === false;
 }
 
 /** Text with every declared API key replaced, for errors and logs that quote a process's output. */

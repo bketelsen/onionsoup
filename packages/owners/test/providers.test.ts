@@ -8,7 +8,7 @@ import type { Config, Plugin } from '@opencode-ai/plugin';
 import { Verdict } from '../src/artifacts.ts';
 import { loadDeclarations } from '../src/declarations.ts';
 import { familyOf, pickModel } from '../src/families.ts';
-import { agentConfig, hireWithFallback } from '../src/opencode.ts';
+import { agentConfig, runHire } from '../src/opencode.ts';
 import { redactApiKeys } from '../src/providers.ts';
 import { withActiveHooks } from './active-hooks.ts';
 
@@ -57,20 +57,19 @@ async function capturingLogs(body: () => Promise<void>) {
 
 type ScriptedReply = { format?: unknown; text: string };
 
-/** A hire client whose structured replies fail with `structuredError` and whose text replies answer `textReply`. */
-function scriptedClient(prompts: ScriptedReply[], structuredError: string | undefined, textReply: () => object) {
+/** A hire client that records each prompt and answers `textReply`. */
+function scriptedClient(prompts: ScriptedReply[], textReply: () => object) {
   return {
     session: {
       create: async () => ({ data: { id: `ses_${prompts.length}` } }),
       abort: async () => ({ data: true }),
       prompt: async (options: { format?: unknown; parts: { text: string }[] }) => {
         prompts.push({ format: options.format, text: options.parts[0]!.text });
-        if (options.format && structuredError) return { data: { info: { role: 'assistant', error: { name: 'StructuredOutputError', data: { message: structuredError } } } } };
         return { data: textReply() };
       },
     },
     permission: { list: async () => ({ data: [] }), reply: async () => ({ data: true }) },
-  } as unknown as Parameters<typeof hireWithFallback>[0];
+  } as unknown as Parameters<typeof runHire>[0];
 }
 
 const APPROVAL = { info: { role: 'assistant', cost: 0 }, parts: [{ type: 'text', text: '{"decision":"approve","summary":"Fine","findings":[]}' }] };
@@ -83,7 +82,7 @@ test('providers.yaml is optional; a declared provider gets its defaults and vali
   assert.deepEqual((await loadDeclarations(fixture)).providers, {}, 'no file, no providers');
   const declarations = await loadDeclarations(await configWith(HALOGEN_YAML, { 'operator.yaml': `model: ${HALOGEN_MODEL}\n` }));
   assert.deepEqual(declarations.providers, {
-    halogen: { name: 'Halogen (selfie)', baseURL: 'http://10.0.1.200:8731/v1', models: { 'halogen-qwen3.8-flash-next': { contextTokens: 78000 } }, structuredOutput: true },
+    halogen: { name: 'Halogen (selfie)', baseURL: 'http://10.0.1.200:8731/v1', models: { 'halogen-qwen3.8-flash-next': { contextTokens: 78000 } } },
   });
   assert.equal(declarations.operator?.model, HALOGEN_MODEL);
 });
@@ -137,38 +136,20 @@ test('declared providers reach chats through the plugin config hook and hires th
   assert.ok(logs.every(line => !line.includes(API_KEY)), 'no API key in any log line');
 });
 
-test('a hire on a provider without structured output starts in text mode', async () => {
-  const { providers } = await loadDeclarations(await configWith(`${HALOGEN_YAML}  structuredOutput: false\n`));
+test('a hire on a declared provider asks for its JSON in the reply text, with no forced tool choice', async () => {
   const prompts: ScriptedReply[] = [];
-  const hired = await hireWithFallback(scriptedClient(prompts, 'unexpected', () => APPROVAL), reviewRequest(HALOGEN_MODEL), providers);
+  const hired = await runHire(scriptedClient(prompts, () => APPROVAL), reviewRequest(HALOGEN_MODEL));
   assert.equal(hired.value.decision, 'approve');
-  assert.equal(prompts.length, 1, 'no structured round to fail first');
+  assert.equal(prompts.length, 1);
   assert.equal(prompts[0]!.format, undefined);
   assert.match(prompts[0]!.text, /matches this JSON Schema/);
 });
 
-test('a model that answers without structured output is retried once in text mode, and remembered', async () => {
-  const prompts: ScriptedReply[] = [];
-  const client = scriptedClient(prompts, 'Model did not produce structured output', () => APPROVAL);
-  const request = reviewRequest('halogen/answers-in-prose');
-  const logs = await capturingLogs(async () => {
-    assert.equal((await hireWithFallback(client, request)).value.decision, 'approve');
-  });
-  assert.deepEqual(prompts.map(prompt => Boolean(prompt.format)), [true, false]);
-  assert.ok(logs.some(line => /halogen\/answers-in-prose did not produce structured output; asking for the JSON in its reply instead/.test(line)));
-  await hireWithFallback(client, request);
-  assert.equal(prompts.length, 3, 'its next hire starts in text mode');
-  assert.equal(prompts[2]!.format, undefined);
-});
-
-test('a text-mode retry that fails too surfaces its failure; there is no third round', async () => {
+test('a hire whose model call fails surfaces that failure without another round', async () => {
   const prompts: ScriptedReply[] = [];
   const failing = { info: { role: 'assistant', error: { name: 'APIError', data: { message: 'upstream_down' } } } };
-  const client = scriptedClient(prompts, 'Model did not produce structured output', () => failing);
-  await capturingLogs(async () => {
-    await assert.rejects(hireWithFallback(client, reviewRequest('halogen/fails-twice')), /APIError: upstream_down/);
-  });
-  assert.equal(prompts.length, 2);
+  await assert.rejects(runHire(scriptedClient(prompts, () => failing), reviewRequest('halogen/fails')), /APIError: upstream_down/);
+  assert.equal(prompts.length, 1);
 });
 
 test('server output quoted in a hire error has every declared API key redacted', async () => {

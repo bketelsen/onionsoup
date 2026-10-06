@@ -20,7 +20,7 @@ test('host bundle links ledger/rebase/review/check/effect/session/schedule/autho
   try {
     const runtime = state.runtime;
     runtime.declarations.providers = { fixture: { baseURL: 'https://example.invalid', models: { model: {} },
-      structuredOutput: true, apiKey: new ApiKey('PRIVATE_DECLARED_VALUE') } };
+      apiKey: new ApiKey('PRIVATE_DECLARED_VALUE') } };
     const request = await runtime.requests.open('clippy', 'clippy', { kind: 'work', purpose: state.proposal.goal, proposal: state.proposal }, 'none');
     await runtime.requests.save({ ...request, status: 'work-running', workItem: state.item.id });
     await runtime.ledger.update(state.item.id, item => ({ ...item, request: request.id,
