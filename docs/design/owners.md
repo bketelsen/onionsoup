@@ -132,9 +132,8 @@ requests from this identity. Opening chat creates its workspace folder if missin
 create a desk. Normal conversation history, context and decision journaling still work; this is observation-only
 with respect to domain effects, not a promise that chat creates no runtime records.
 
-New exchange notices can reach its latest human chat through the same no-reply delivery path. Previously
-quarantined notices remain quarantined. Reminder dispatch remains persona-gated, including already pending reminders;
-this change never wakes them. `canChange` and plan execution retain their existing persona requirement. This is a
+Previously quarantined exchange notices remain quarantined. Reminder dispatch remains persona-gated, including
+already pending reminders; this change never wakes them. `canChange` and plan execution retain their existing persona requirement. This is a
 compatible chat-availability change, not an automatic migration to new repository-write authority. The operator
 remains a separately configured identity. Registering the new agents requires the normal surface restart procedure;
 changing or removing an existing persona is not a history migration.
@@ -354,10 +353,9 @@ model. A conflict hires the owner (sandboxed, with its notebook) to decide wheth
 briefs the implementer hired next (the `implementation` freelancer), a reviewer from another family checks the
 resolution, and the force-push waits for the person (`approve-push`). Rebase maintenance preserves the whole PR, including earlier repairs, and skips
 patch-equivalent commits already integrated on the base by a squash merge. Desk publications use the same
-maintenance records. The chat that proposed a desk change is saved before publication starts, so later merge and
-close notices return to that chat. Open PRs stay in the owner's Work list and status text even when newer completed
-work fills its recent history. A desk PR merged immediately under a grant produces a merge notice, including when
-publication and merging happen between daemon ticks.
+maintenance records. The chat that proposed a desk change is saved before publication starts, so a later close
+notice returns to that chat; a merge, including one under a grant between daemon ticks, is journaled only. Open PRs
+stay in the owner's Work list and status text even when newer completed work fills its recent history.
 
 Migration policy: desk PRs created before ledger-backed publication remain untracked. Their legacy
 `desk-change-opened` journal entries are retained as history, but are not automatically imported: they do not
@@ -366,11 +364,11 @@ ledger-backed desk publications remain tracked; missing origins are not guessed 
 the retired `change` workflow fails once at daemon start with `pipeline_removed` (`retirePipelineItems`); its record
 stays, and the owner can plan it again.
 
-**Notices.** Owners hear how their work went: each daemon tick compares work items with what it last saw, journals
-changes the owner should act on (landed, failed, PR merged or closed), and queues a notice that the plugin posts,
-marked as coming from the runtime, into the item's work session first, else the chat the work came from. CI fix
-requests and send-backs of plans reach the owner the same way. The owner decides the next step in front of the
-person.
+**Notices.** Owners hear how their work went: each daemon tick compares work items with what it last saw and
+journals each change (landed, failed, rejected, PR merged or closed). Changes the owner must act on (all but a
+merge, which the person did) also queue a notice that the plugin posts, marked as coming from the runtime, into
+the item's work session first, else the chat the work came from. CI fix requests and send-backs of plans reach
+the owner the same way. The owner decides the next step in front of the person.
 
 **Shipping.** An owner with a `deploy` section and a `ship` grant ships its repository where it runs. Before touching
 the deploy checkout, ship checks the full ledger and refuses with the IDs, titles and statuses of any items with
@@ -549,8 +547,9 @@ close the remote PR, blacklist ordinary errors or suppress maintenance when the 
 ### Requests between owners
 
 Owners ask each other questions (`onionsoup_ask`: answered from the other owner's notebook and fresh evidence,
-split into observed, inferred and unknown). Each answer queues a durable runtime notice for the answering
-owner's latest person chat, discovered from existing nonchild sessions and persona user messages. The plugin
+split into observed, inferred and unknown). Both owners journal the exchange (`asked`, `answered`) and see it in
+their recent activity; no chat is posted a copy. Exchange notices already in the queue still go to the owner's
+latest person chat, discovered from existing nonchild sessions and persona user messages. The plugin
 waits for that chat to be idle, then posts with `noReply`; the decision watcher skips runtime notices. No person
 chat means the notice stays pending. A pinned destination and stable message ID reconcile a post accepted before
 a crash; transport failures retain the queue entry. Full exchanges remain in `notices/exchanges` under the state
@@ -569,7 +568,7 @@ prefer the item's execution session, then a proven recipient-owned planning orig
 never assigned to the item owner. Without an address, host-observed owner session history selects the recipient's
 most recently recorded general chat in its declared workspace, never an unrelated item's work session.
 Without one it uses a fenced desk continuation. No consultation hire, work request, approval layer or effect grant is created.
-Busy recipients wait in the existing work-notice queue. Status snapshots and consultation exchanges remain `noReply`.
+Busy recipients wait in the existing work-notice queue.
 
 Queue IDs are immutable, including delivered tombstones. Work-notice receipts retain the native message ID,
 destination, agent and exact rendered body before transport. Returned SDK errors are failures; only an exact
@@ -605,10 +604,9 @@ remains on the sidecar for diagnosis. A crash after an append but before its mar
 A process claim prevents concurrent consultation for the same origin. A live claimant yields
 `handoff_consultation_in_progress`; a dead claimant can be replaced. There is no timer that steals a live claim:
 a hung process must stop before retry, and PID reuse can conservatively delay recovery. No file lock spans inference. A new originating message is a new request, not semantic deduplication.
-The asked/answered journal entries and original exchange notice are best effort: a crash or write failure can
-omit them, and replay does not recreate them. The full answer/origin stay in the handoff record; the daemon repairs
-the separately tracked request-opened journal. Exchange notification and journals are informational, not the
-authoritative handoff state. Rollback leaves the
+The asked/answered journal entries are best effort: a crash or write failure can omit them, and replay does not
+recreate them. The full answer/origin stay in the handoff record; the daemon repairs the separately tracked
+request-opened journal. The journals are informational, not the authoritative handoff state. Rollback leaves the
 new sidecars unread by older binaries; regular requests retain their existing schema and execution semantics.
 
 The requester now receives a current cross-owner progress summary in chat context and `onionsoup_status`.
@@ -626,31 +624,15 @@ Host proposal attempts and supported external-PR reconciliation for delegated wo
 and blockers. Command arguments/output are excluded; review prose is redacted and bounded, prioritizing blocker
 findings and labeling omissions. This is attempt evidence, not proof of current workspace state, deployment or goal
 completion. Missing/unreadable evidence is unknown; old evidence is stale and a changed plan digest supersedes it.
-The same informational notice path exposes new attempt evidence without model wakes; adding this view does not
-replay historical requests or import past reviewer/model claims. Evidence writes are best-effort with metadata-only diagnostics and never change a proposal outcome.
-Old finished requests skip evidence reads on notice ticks while existing pending notices still recover.
-The next host attempt replaces the view; existing
-review history remains with its original records. Historical external work stays unknown until its supported fresh reconciliation runs.
+Status shows new attempt evidence without model wakes; it does not import past reviewer/model claims. Evidence
+writes are best-effort with metadata-only diagnostics and never change a proposal outcome. The next host attempt
+replaces the view; existing review history remains with its original records. Historical external work stays unknown until its supported fresh reconciliation runs.
 Consultation/status-only instructions apply to that interaction. A separately accepted work handoff follows its
 own goal and existing plan/effect gates; it never inherits permission to bypass those gates.
 
-New direct work requests and actionable asks retain the exact requester chat origin. The admitted daemon queues
-significant request/work/PR changes there as **informational `noReply` notices**, never model wakes, approvals or
-new work. Timestamp-only refreshes are suppressed. A persisted per-request outbox in
-`state/notices/request-progress` holds each notice before enqueueing; a stable ID lets the existing exchange
-transport reconcile posts accepted before a crash. Transition IDs preserve per-request delivery order. At most
-20 new transitions are queued per tick. On first observation an atomic `baseline.json` records the complete
-preexisting request snapshot before any notices are queued. That snapshot stays silent across restarts; requests
-created after it and subsequent significant changes can notify. A crash during baseline creation cannot create
-partial historical delivery. Existing pending outbox intents are flushed even if the owner has retired, so the
-exchange transport can retain an explicit undeliverable record. Origin-less legacy requests remain visible through status but receive
-no guessed-chat delivery or backfill. Missing/unavailable origin chats retain pending notices; retiring an owner
-uses the exchange transport's undeliverable record. The status summary remains useful even when delivery fails.
-
-These are snapshots of observed transitions, not an exhaustive event log: a transition occurring and disappearing
-between ticks can be missed. Queued snapshots retain observation times and may be old by delivery; read status
-for current records. Reads across request and ledger files are not transactional. Informational notices do not
-promise that a coordinator will automatically resume reasoning; they give it durable context for its next turn.
+New direct work requests and actionable asks retain the exact requester chat origin. The requester reads request
+progress when it needs it (`onionsoup_status`, chat context); the runtime posts no progress notices into its chat.
+Reads across request and ledger files are not transactional.
 
 Request kinds:
 
@@ -723,9 +705,10 @@ only its request id; its state (requested, working, plan waiting, waiting on the
 is derived from the request and work item. Completion still means merged, so a chain waits on the person wherever a
 PR waits to be merged.
 
-The manager hears how assigned work goes: the notice pass journals each change to her too and queues a manager
-notice into the initiative's chat (`WorkItem.origin` stays the item owner's chat), which wakes her there. Approval,
-send-back, cancellation, completion and failure of the initiative reach the same chat.
+The manager hears how assigned work goes: the notice pass journals each change to her too and, for the same
+changes that wake the owner, queues a manager notice into the initiative's chat (`WorkItem.origin` stays the item
+owner's chat), which wakes her there. Approval, send-back, cancellation, completion and failure of the initiative
+reach the same chat.
 
 **Plan approval under grant.** A report may give its manager `approve-plans` (a grant on the report's declaration,
 `to` its manager, target a repository or `*`; loading refuses one to anyone else with `grant_not_to_manager`). For
@@ -751,8 +734,8 @@ The shared `SUPERVISION_LIMITS.revisionsPerItem` budget bounds automatic send-ba
 person decides the next plan.
 
 The plugin's ordinary notice pass prepares a durable actionable continuation for each eligible direct-request
-plan generation in the request's original chat. Informational progress notices remain `noReply`. The new wake
-uses a stable native message receipt, waits for an idle origin and reconciles accepted delivery after restart.
+plan generation in the request's original chat. The wake uses a stable native message receipt, waits for an idle
+origin and reconciles accepted delivery after restart.
 Pre-send prerequisites retry; removed requester workspaces use the same owned continuation routing as addressed
 messages. New wakes save their exact body and reconcile matching transcript receipts. An uncertain attempted send
 without that receipt is blocked rather than blindly replayed; legacy ID-only evidence is not exact-body proof.

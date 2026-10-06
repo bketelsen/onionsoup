@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { lstat, readFile, readdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
+import { z } from 'zod';
 import { WorkItem, isFinished } from './ledger.ts';
 import { Handoff } from './ask-handoffs.ts';
 import { Assignment } from './attention-assignment.ts';
@@ -18,10 +19,15 @@ import { OperatorHandoffStore } from './operator-handoff-store.ts';
 import { Revision } from './plan-revision.ts';
 import { Wake as DirectReviewWake } from './direct-request-review-wake.ts';
 import { Wakes as OperatorWakes } from './operator-job-wake.ts';
-import { Cursor, Baseline } from './request-status.ts';
 import { WorkNotice, describeChange } from './notices.ts';
 import { ExchangeNotice } from './exchange-notices.ts';
 import { WorkNoticeDelivery } from './work-notice-delivery.ts';
+
+/** Request-progress notice state that older releases left behind; nothing writes it any more. */
+const RequestProgressCursor = z.object({ sequence: z.number().int().nonnegative(), fingerprint: z.string(),
+  pending: ExchangeNotice.optional() });
+const RequestProgressBaseline = z.object({ version: z.literal(1), observedAt: z.string(),
+  fingerprints: z.record(z.string(), z.string()) });
 
 /** Only continuation stores are covered here. Configuration, processes, workspaces and
  * OpenCode transcripts must independently match the encompassing recovery proof. */
@@ -194,12 +200,12 @@ function classifyNotices(files: Map<string, string>) {
   return jsonFiles(files, 'notices').map(path => {
     if (path === 'notices/seen.json') return noticeSeenDecision(files, path);
     if (path === 'notices/request-progress/baseline.json') {
-      Baseline.parse(parsed(files, path));
+      RequestProgressBaseline.parse(parsed(files, path));
       return decision(path, true, 'request_progress_baseline_retained');
     }
     if (path.startsWith('notices/request-progress/')) {
       if (!/^notices\/request-progress\/[a-f0-9]{64}\.json$/.test(path)) throw new Error('maintenance_inventory_identity');
-      const cursor = Cursor.parse(parsed(files, path));
+      const cursor = RequestProgressCursor.parse(parsed(files, path));
       return decision(path, !cursor.pending, 'request_progress_cursor_pending_or_single_use', 'single-use-protected');
     }
     if (path.startsWith('notices/exchanges/')) {

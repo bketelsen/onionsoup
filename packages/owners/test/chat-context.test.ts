@@ -120,10 +120,9 @@ test('askOwner gives the answering hire undistilled person choices and durably r
   const answer = await askOwner(runtime, 'clippy', 'Miles Teg', 'Which server should we use?');
   assert.match(answer.answer.answer, /smaller server/);
   assert.doesNotMatch(await notebook.orientation(), /Use the smaller server/);
-  const [notice] = await records(runtime, 'pending');
-  assert.match(notice!.text, /Which server should we use/);
-  assert.match(notice!.text, /Observed:[\s\S]*Choose the small one/);
-  assert.ok((await recentJournal(runtime, 'homelab')).some(entry => entry.kind === 'answered'));
+  assert.deepEqual(await records(runtime, 'pending'), [], 'the answerer\'s chat is not woken with a copy');
+  assert.ok((await recentJournal(runtime, 'homelab')).some(entry => entry.kind === 'answered' && entry.note?.includes('Which server should we use')));
+  assert.ok((await recentJournal(runtime, 'clippy')).some(entry => entry.kind === 'asked'));
 });
 
 test('durable notices discover pre-feature person chats and choose latest person activity without waking a model', async () => {

@@ -364,7 +364,7 @@ For direct work requests the manager personally sent, the same applicable grant 
 `onionsoup_review_request_plan`. Read `onionsoup_status request=<id>` first, then supply its exact `request`, `item`
 and `digest`, a `decision` (`approve`, `revise`, `needs-human`), `scope` (`matched`, `needs-human`) and factual `note`.
 Approve requires matched scope. Unresolved scope remains pending for the person; approval is never inferred from
-request acceptance, a delivered progress notice or an earlier conversational promise. A separate durable review
+request acceptance or an earlier conversational promise. A separate durable review
 continuation wakes the requester in the original chat. The status tool reports missing authority or delivery
 blockers, and human approval remains available in the inbox. These operations add no grants or merge authority.
 
@@ -534,9 +534,10 @@ Every chat system transform reads recent activity again. Owner answers also read
 including undistilled choices. Limits retain the newest eligible records; retractions found in the scanned window
 cancel matching decisions. Increase the age or byte limit when a busy journal pushes relevant context out.
 
-The plugin checks the durable exchange queue every 15 seconds. It selects the answering owner's latest person
-message among the inspected sessions, ignoring synthetic messages, runtime notices and other agents. Delivery
-uses `noReply`, so it adds transcript evidence without hiring an owner or watcher. Unreadable candidate sessions (including structured-output hires) are logged and skipped. Busy chats, failed
+An `onionsoup_ask` exchange is journaled for both owners (`asked`, `answered`) and shows in their recent activity;
+it is not posted into a chat. The plugin still drains exchange notices already in the durable queue every 15
+seconds. It selects the owner's latest person message among the inspected sessions, ignoring synthetic messages,
+runtime notices and other agents. Delivery uses `noReply`, so it adds transcript evidence without hiring an owner or watcher. Unreadable candidate sessions (including structured-output hires) are logged and skipped. Busy chats, failed
 session listings and missing person chats leave the notice queued. Exchanges survive plugin restarts; accepted posts use a stable
 message ID to avoid duplicates after acknowledgement loss. Full records are retained under
 `$ONIONSOUP_HOME/notices/exchanges/pending` or `delivered`, with absolute paths and their ID cited in the transcript. Owners without a persona do not queue new chat notices;

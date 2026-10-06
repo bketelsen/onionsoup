@@ -13,7 +13,8 @@ cause, and the fix is either applied through the normal gates or reported to the
 - **Engine:** the immutable release selected by the configured stable `current` pointer, run as the user
   unit `onionsoup-owners.service`, which ticks every 60s:
   re-read the configuration, refresh the state of open PRs, process requests, supervise initiatives, run due
-  duties, advance runnable work items (publications and rebases), raise work notices. Duties, requests and work
+  duties, advance runnable work items (publications and rebases), raise work notices (a merged PR is only
+  journaled; landed, failed, rejected and closed-PR changes wake the owner). Duties, requests and work
   items run in the background, so the tick itself stays short; `owners tick` waits for what it started.
 - **Config:** `~/.config/onionsoup` (`ONIONSOUP_CONFIG`).
 - **State:** `~/.local/share/onionsoup` (`ONIONSOUP_HOME`). It holds `state/` (ledger, requests, initiatives,

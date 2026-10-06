@@ -1,7 +1,6 @@
 import { Answer, AskOrigin, readAskHandoff, saveAskHandoff, resolveAskHandoff, withAskConsultation } from './ask-handoffs.ts';
 export { Answer } from './ask-handoffs.ts';
 import { clipped, recentChatDecisions } from './chat-context.ts';
-import { queueExchangeNotice } from './exchange-notices.ts';
 import type { OwnerDeclaration } from './declarations.ts';
 import { HireError } from './opencode.ts';
 import { incusEvidenceText, refreshWorkspace } from './owner.ts';
@@ -76,18 +75,16 @@ async function answerOwner(runtime: Runtime, fromId: string, toName: string, que
   const routed = handoff ? await resolveAskHandoff(runtime, handoff) : { request: undefined, handoffStatus: undefined };
   const { request, handoffStatus } = routed;
   if (!handoff) delete answer.proposedWork;
-  const followUpStatus = request ? `\nHost routed follow-up ${request.id}: ${request.status}. Use this existing request; do not open duplicate work. Ordinary plan/effect gates apply.` : handoffStatus ? `\nFollow-up ${handoffStatus.state}: ${handoffStatus.reason ?? 'no work proposed'}.` : '';
-  await recordExchange(runtime, asker, answerer, question, answer, followUpStatus).catch(error => {
+  await recordExchange(runtime, asker, answerer, question, answer).catch(error => {
     if (!handoff) throw error;
-    // The paid answer and request are durable; exchange notices are a best-effort view, not a gate.
+    // The paid answer and request are durable; the exchange journal is a best-effort record, not a gate.
     console.warn('handoff_exchange_record_failed');
   });
   return { answerer, answer, cost: result.cost, request, handoffStatus };
 }
 
 async function recordExchange(runtime: Runtime, asker: OwnerDeclaration, answerer: OwnerDeclaration,
-  question: string, answer: Answer, followUpStatus: string) {
-  await queueExchangeNotice(runtime, answerer.id, `${who(asker)} asked:\n${question}\n\nYou answered:\n${formatAnswer(answerer, answer)}${followUpStatus}`);
+  question: string, answer: Answer) {
   for (const [ownerId, kind] of [[asker.id, 'asked'], [answerer.id, 'answered']] as const) {
     const book = runtime.notebook(ownerId);
     await book.journal({ kind, note: `${asker.id} → ${answerer.id}: ${clipped(question, answerer.chatContext.entryChars)}`,

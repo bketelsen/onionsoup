@@ -1,12 +1,7 @@
 import { clipped } from './chat-context.ts';
-import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
 import { z } from 'zod';
 import { isDirectReport } from './declarations.ts';
-import { ExchangeNotice, queueExchangeNotice } from './exchange-notices.ts';
 import { ExternalPrObservation, isPaused, type WorkItem, type WorkStatus } from './ledger.ts';
-import { withRecordLock } from './record-lock.ts';
 import { describeAsk, type ResourceRequest, type RequestStatus } from './requests.ts';
 import type { Runtime } from './runtime.ts';
 import { RequestWorkEvidence, readRequestWorkEvidence } from './request-work-evidence.ts';
@@ -14,7 +9,7 @@ import { RequestAcceptance } from './request-closure-types.ts';
 import { getDirectRequestReview } from './direct-request-plan-review.ts';
 import { directRequestReviewWakeStatus } from './direct-request-review-wake.ts';
 
-export const REQUEST_STATUS_LIMITS = { staleMs: 24 * 60 * 60_000, recentMs: 7 * 24 * 60 * 60_000, noticesPerTick: 20, summaryRecords: 12, summaryChars: 12_000, fieldChars: 240 };
+export const REQUEST_STATUS_LIMITS = { staleMs: 24 * 60 * 60_000, recentMs: 7 * 24 * 60 * 60_000, summaryRecords: 12, summaryChars: 12_000, fieldChars: 240 };
 const RequestProgress = z.object({
   id: z.string(), from: z.string(), to: z.string(), purpose: z.string(), title: z.string(), status: z.string(),
   decision: z.string().optional(), reason: z.string().optional(), workItem: z.string().optional(),
@@ -230,7 +225,7 @@ async function directPlanReviewDetail(runtime: Runtime, request: ResourceRequest
     return history + [
       '', `Direct-request plan review: ${review.reviewed ? 'decision recorded; see above' : `eligible requester ${review.reviewer} under existing approve-plans grant`}.`,
       `Exact binding: request=${request.id}; item=${item.id}; digest=${review.digest}.`,
-      `Review continuation: ${wake ? `${wake.status}${wake.reason ? ` (${wake.reason})` : ''}` : 'not queued yet'}. Informational progress notices do not start review.`,
+      `Review continuation: ${wake ? `${wake.status}${wake.reason ? ` (${wake.reason})` : ''}` : 'not queued yet'}.`,
       `Original request purpose: ${review.request.ask.purpose}`,
       `Original requested scope: ${JSON.stringify(review.request.ask)}`,
       `Submitted proposal: ${JSON.stringify(review.item.proposal)}`,
@@ -262,101 +257,4 @@ export async function requestProgressSummary(runtime: Runtime, owner: string, no
   if (omitted > 0) sections.push(`${omitted} additional requests omitted; blockers may be among them. Read onionsoup_status offset=${offset + count} for the next page; use request=<id> for full details.`);
   if (!count) sections.push('No requests on this page.');
   return sections.join('\n\n');
-}
-
-export const Cursor = z.object({ sequence: z.number().int().nonnegative(), fingerprint: z.string(), pending: ExchangeNotice.optional() });
-type Cursor = z.infer<typeof Cursor>;
-function fingerprint(progress: RequestProgress) {
-  const { observedAt: _observedAt, lastRecordedAt: _lastRecordedAt, stale: _stale, hostEvidence, hostEvidenceState, ...significant } = progress;
-  // Preserve pre-evidence fingerprints: upgrading must not replay every historical request.
-  const evidenceState = hostEvidenceState === 'stale' ? 'recorded' : hostEvidenceState;
-  const current = hostEvidence ? { ...significant, hostEvidence, hostEvidenceState: evidenceState } : significant;
-  return createHash('sha256').update(JSON.stringify(current)).digest('hex');
-}
-async function saveCursor(path: string, cursor: Cursor) {
-  const temporary = `${path}.${randomUUID()}.tmp`;
-  await writeFile(temporary, JSON.stringify(cursor) + '\n', { mode: 0o600 });
-  await rename(temporary, path);
-}
-async function enqueuePending(runtime: Runtime, path: string, cursor: Cursor) {
-  if (!cursor.pending) return cursor;
-  await queueExchangeNotice(runtime, cursor.pending.owner, cursor.pending.text, cursor.pending);
-  const queued = { ...cursor, pending: undefined };
-  await saveCursor(path, queued);
-  return queued;
-}
-
-export const Baseline = z.object({ version: z.literal(1), observedAt: z.string(),
-  fingerprints: z.record(z.string(), z.string()) });
-
-/** Persist the entire first snapshot before queueing anything; an interrupted bootstrap has no partial effects. */
-async function noticeBaseline(runtime: Runtime, progress: readonly RequestProgress[]) {
-  const directory = join(runtime.stateDirectory, 'notices', 'request-progress');
-  await mkdir(directory, { recursive: true });
-  const path = join(directory, 'baseline.json');
-  return withRecordLock(`${path}.lock`, async () => {
-    const previous = await readFile(path, 'utf8').catch(error => {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      return undefined;
-    });
-    if (previous) return Baseline.parse(JSON.parse(previous));
-    const baseline = Baseline.parse({ version: 1, observedAt: new Date().toISOString(),
-      fingerprints: Object.fromEntries(progress.map(entry => [entry.id, fingerprint(entry)])) });
-    const temporary = `${path}.${randomUUID()}.tmp`;
-    await writeFile(temporary, JSON.stringify(baseline) + '\n', { mode: 0o600 });
-    await rename(temporary, path);
-    return baseline;
-  });
-}
-
-async function noticeRequest(runtime: Runtime, request: ResourceRequest, progress: RequestProgress, baselineFingerprint = '', pendingOnly = false) {
-  if (!request.origin) return false;
-  const directory = join(runtime.stateDirectory, 'notices', 'request-progress');
-  await mkdir(directory, { recursive: true });
-  const key = createHash('sha256').update(request.id).digest('hex');
-  const path = join(directory, `${key}.json`);
-  return withRecordLock(`${path}.lock`, async () => {
-    const contents = await readFile(path, 'utf8').catch(error => {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      return undefined;
-    });
-    let cursor = contents ? Cursor.parse(JSON.parse(contents)) : { sequence: 0, fingerprint: baselineFingerprint };
-    const hadPending = Boolean(cursor.pending);
-    cursor = await enqueuePending(runtime, path, cursor);
-    if (pendingOnly || !runtime.declarations.owners.has(request.from)) return hadPending;
-    const nextFingerprint = fingerprint(progress);
-    if (cursor.fingerprint === nextFingerprint) return hadPending;
-    const sequence = cursor.sequence + 1;
-    // Existing delivery sorts message IDs: preserve transition order within each request.
-    const id = `msg_${key.slice(0, 16)}${sequence.toString(16).padStart(16, '0')}`;
-    const pending = ExchangeNotice.parse({ id, owner: request.from, target: request.origin,
-      text: `Request progress (informational; no new authorization):\n${compactProgress(progress)}`,
-      at: progress.observedAt });
-    const next = { sequence, fingerprint: nextFingerprint, pending };
-    await saveCursor(path, next);
-    await enqueuePending(runtime, path, next);
-    return true;
-  });
-}
-
-/** Queue informational updates only; never hire a model, approve, retry or dispatch work. */
-export async function noticeRequestProgress(runtime: Runtime, onError: (id: string, error: unknown) => void) {
-  const items = new Map((await runtime.ledger.list()).map(item => [item.id, item]));
-  const cutoff = Date.now() - REQUEST_STATUS_LIMITS.recentMs;
-  const requests = (await runtime.requests.list()).filter(request => request.origin);
-  const eligible = new Set(requests.filter(request => !FINISHED.has(request.status) || Date.parse(request.updatedAt) >= cutoff
-    || Date.parse(request.workItem ? items.get(request.workItem)?.updatedAt ?? '' : '') >= cutoff).map(request => request.id));
-  const projections = new Map(await Promise.all(requests.map(async request => {
-    const item = request.workItem ? items.get(request.workItem) : undefined;
-    return [request.id, eligible.has(request.id) ? await recordedProgress(runtime, request, item) : requestProgress(request, item)] as const;
-  })));
-  const baseline = await noticeBaseline(runtime, [...projections.values()]);
-  let processed = 0;
-  for (const request of requests) {
-    try {
-      if (processed >= REQUEST_STATUS_LIMITS.noticesPerTick) break;
-      if (await noticeRequest(runtime, request, projections.get(request.id)!, baseline.fingerprints[request.id], !eligible.has(request.id))) processed++;
-    } catch (error) { onError(request.id, error); }
-  }
-  return processed;
 }

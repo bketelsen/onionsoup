@@ -544,3 +544,19 @@ test('a manager hears how assigned work went in the chat its initiative was draf
   assert.ok(pending[0]!.text.includes(`clippy's work ${item.id} "Repair domain" (assignment a1 of initiative ${initiative.id}) failed: verification_failed`));
   assert.ok((await journalOf(runtime, 'odrade')).some(entry => entry.kind === 'work-status' && entry.workItem === item.id && entry.outcome === 'failed'));
 });
+
+test('a merged PR is journaled without waking the chat; a failure still wakes it', async () => {
+  const runtime = await setup();
+  const origin = { sessionID: 'ses_clippy', directory: '/desks/clippy' };
+  const publication = { url: 'https://github.com/example/clippy/pull/1', branch: 'owners/work', by: 'clippy', at: '', state: 'open' as const };
+  const merging = await runtime.ledger.create('clippy', 'owner-change', proposal, { status: 'landed', branch: 'owners/work', publication, origin });
+  const failing = await runtime.ledger.create('clippy', 'owner-change', proposal, { status: 'working', origin });
+  const chatDirectory = async (ownerId: string) => `/desks/${ownerId}`;
+  assert.deepEqual(await noticeWorkChanges(runtime, chatDirectory), []);
+  await runtime.ledger.save({ ...merging, publication: { ...publication, state: 'merged' } });
+  await runtime.ledger.save({ ...failing, status: 'failed', reason: 'verification_failed' });
+  await noticeWorkChanges(runtime, chatDirectory);
+  const outcomes = (await journalOf(runtime, 'clippy')).filter(entry => entry.kind === 'work-status').map(entry => `${entry.workItem} ${entry.outcome}`);
+  assert.deepEqual(outcomes.sort(), [`${failing.id} failed`, `${merging.id} pr-merged`].sort());
+  assert.deepEqual((await pendingNotices(runtime)).map(notice => `${notice.workItem} ${notice.change}`), [`${failing.id} failed`]);
+});

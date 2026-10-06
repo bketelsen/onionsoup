@@ -1,46 +1,18 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readdir, readFile, writeFile, unlink } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { Runtime } from '../src/runtime.ts';
-import { REQUEST_STATUS_LIMITS, noticeRequestProgress, requestProgressDetail, requestProgress, requestProgressSummary, requestProgressText, requestVisibleTo } from '../src/request-status.ts';
-import { deliverExchangeNotices, type ExchangeClient, type NoticeMessage } from '../src/exchange-notices.ts';
+import { REQUEST_STATUS_LIMITS, requestProgressDetail, requestProgress, requestProgressSummary, requestProgressText, requestVisibleTo } from '../src/request-status.ts';
 
 const proposal = { title: 'Repair svu', goal: 'Fix the version check', rationale: 'CI evidence', acceptance: ['Check succeeds'], size: 'small' as const };
 const origin = { sessionID: 'odrade-origin', directory: '/fixture/chat/odrade' };
-async function setup(initialize = true) {
-  const runtime = await Runtime.open({ declarations: 'packages/owners/test/fixtures/owners', state: await mkdtemp(join(tmpdir(), 'request-progress-')) });
-  if (initialize) await noticeRequestProgress(runtime, fail);
-  return runtime;
+async function setup() {
+  return Runtime.open({ declarations: 'packages/owners/test/fixtures/owners', state: await mkdtemp(join(tmpdir(), 'request-progress-')) });
 }
 async function open(runtime: Runtime, withOrigin = true) {
   return runtime.requests.open('odrade', 'clippy', { kind: 'work', purpose: proposal.goal, proposal }, 'none', withOrigin ? origin : undefined);
-}
-async function notices(runtime: Runtime, kind = 'pending') {
-  const directory = join(runtime.stateDirectory, 'notices', 'exchanges', kind);
-  const names = (await readdir(directory).catch(() => [] as string[])).filter(name => name.endsWith('.json'));
-  return Promise.all(names.map(async name => JSON.parse(await readFile(join(directory, name), 'utf8'))));
-}
-function fail(_id: string, error: unknown): never { throw error; }
-
-function transport() {
-  const messages: NoticeMessage[] = [];
-  let posts = 0;
-  let failAfter = true;
-  const client: ExchangeClient = {
-    sessions: async () => { throw new Error('must_not_choose_different_chat'); },
-    idle: async target => { assert.deepEqual(target, origin); return true; },
-    messages: async () => messages,
-    post: async (target, body) => {
-      assert.deepEqual(target, origin);
-      assert.equal(body.noReply, true);
-      posts++;
-      messages.push({ info: { id: body.messageID, role: 'user', agent: body.agent, time: { created: Date.now() } }, parts: body.parts });
-      if (failAfter) { failAfter = false; throw new Error('accepted_then_disconnected'); }
-    },
-  };
-  return { client, posts: () => posts };
 }
 
 test('Odrade reads fresh linked progress, blocker, PR evidence and next action without relaying facts', async () => {
@@ -70,42 +42,10 @@ test('participants and direct receiver manager see progress; unrelated owners do
   assert.equal(await requestProgressSummary(runtime, 'moneo'), '');
 });
 
-test('significant transitions queue once across restarts; changing timestamp alone does not notify', async () => {
-  const runtime = await setup();
-  const request = await open(runtime);
-  assert.equal(await noticeRequestProgress(runtime, fail), 1);
-  assert.equal(await noticeRequestProgress(runtime, fail), 0);
-  await runtime.requests.update(request.id, current => ({ ...current }));
-  assert.equal(await noticeRequestProgress(runtime, fail), 0);
-  await runtime.requests.update(request.id, current => ({ ...current, status: 'declined', reason: 'Not the right approach' }));
-  assert.equal(await noticeRequestProgress(runtime, fail), 1);
-  const reopened = await Runtime.open({ declarations: 'packages/owners/test/fixtures/owners', state: runtime.stateDirectory });
-  assert.equal(await noticeRequestProgress(reopened, fail), 0);
-  const queued = await notices(runtime);
-  assert.equal(queued.length, 2);
-  assert.ok(queued.every(notice => JSON.stringify(notice.target) === JSON.stringify(origin)));
-  assert.match(queued.map(notice => notice.text).join('\n'), /Not the right approach/);
-});
-
-test('accepted delivery reconciles after disconnect without a second post or any work creation', async () => {
-  const runtime = await setup();
-  await open(runtime);
-  await noticeRequestProgress(runtime, fail);
-  const fake = transport();
-  const errors: unknown[] = [];
-  await deliverExchangeNotices(runtime, fake.client, (_id, error) => errors.push(error));
-  assert.equal(errors.length, 1);
-  await deliverExchangeNotices(runtime, fake.client, fail);
-  assert.equal(fake.posts(), 1);
-  assert.equal((await notices(runtime, 'delivered')).length, 1);
-  assert.equal((await runtime.ledger.list()).length, 0);
-});
-
-test('missing origin stays pull-visible and denial is never converted to work', async () => {
+test('a denial stays visible in the summary and is never converted to work', async () => {
   const runtime = await setup();
   const request = await open(runtime, false);
   await runtime.requests.update(request.id, current => ({ ...current, status: 'denied', reason: 'Not authorized' }));
-  assert.equal(await noticeRequestProgress(runtime, fail), 0);
   assert.match(await requestProgressSummary(runtime, 'odrade'), /Not authorized/);
   assert.equal((await runtime.ledger.list()).length, 0);
 });
@@ -118,19 +58,6 @@ test('stale or missing evidence stays explicit and never implies deployment', as
   assert.equal(progress.evidence, 'linked_work_missing');
   assert.match(requestProgressText(progress), /unknown/);
   assert.match(requestProgressText(progress), /Live state not probed/);
-});
-
-test('outbox crash before cursor completion adopts the same notice identity', async () => {
-  const runtime = await setup();
-  await open(runtime);
-  await noticeRequestProgress(runtime, fail);
-  const [notice] = await notices(runtime);
-  const directory = join(runtime.stateDirectory, 'notices', 'request-progress');
-  const [file] = (await readdir(directory)).filter(name => /^[a-f0-9]{64}\.json$/.test(name));
-  const cursor = JSON.parse(await readFile(join(directory, file), 'utf8'));
-  await writeFile(join(directory, file), JSON.stringify({ ...cursor, pending: notice }));
-  await noticeRequestProgress(runtime, fail);
-  assert.equal((await notices(runtime)).length, 1);
 });
 
 test('context bounds are explicit, retain blocker labels, and offer paginated full details', async () => {
@@ -158,68 +85,6 @@ test('request detail rejects traversal before attempting any filesystem lookup',
   for (const id of ['../private', 'r-../private', '/tmp/request', 'r-example/file', 'r-example\\file', 'r-.']) {
     assert.equal(await requestProgressDetail(runtime, 'odrade', id), 'request_id_invalid');
   }
-});
-
-test('first observation baselines historical origin-bearing requests without backfill across restart', async () => {
-  const runtime = await setup(false);
-  const historical = await open(runtime);
-  await runtime.requests.update(historical.id, request => ({ ...request, status: 'completed' }));
-  assert.equal(await noticeRequestProgress(runtime, fail), 0);
-  const reopened = await Runtime.open({ declarations: 'packages/owners/test/fixtures/owners', state: runtime.stateDirectory });
-  assert.equal(await noticeRequestProgress(reopened, fail), 0);
-  assert.equal((await notices(runtime)).length, 0);
-  await open(reopened);
-  assert.equal(await noticeRequestProgress(reopened, fail), 1);
-  await reopened.requests.update(historical.id, request => ({ ...request, reason: 'New evidence recorded after baseline' }));
-  assert.equal(await noticeRequestProgress(reopened, fail), 1);
-  assert.equal((await notices(runtime)).length, 2);
-});
-
-test('a pending outbox survives owner retirement and reaches the undeliverable record', async () => {
-  const runtime = await setup();
-  await open(runtime);
-  await noticeRequestProgress(runtime, fail);
-  const [notice] = await notices(runtime);
-  const directory = join(runtime.stateDirectory, 'notices', 'request-progress');
-  const [file] = (await readdir(directory)).filter(name => /^[a-f0-9]{64}\.json$/.test(name));
-  const cursor = JSON.parse(await readFile(join(directory, file), 'utf8'));
-  await writeFile(join(directory, file), JSON.stringify({ ...cursor, pending: notice }));
-  await unlink(join(runtime.stateDirectory, 'notices', 'exchanges', 'pending', `${notice.id}.json`));
-  runtime.declarations.owners.delete('odrade');
-  runtime.reloadDeclarations = async () => undefined;
-  assert.equal(await noticeRequestProgress(runtime, fail), 1);
-  assert.equal((await notices(runtime)).length, 1);
-  await deliverExchangeNotices(runtime, transport().client, fail);
-  const [undeliverable] = await notices(runtime, 'undeliverable');
-  assert.equal(undeliverable.undeliverableReason, 'owner_retired');
-  assert.equal(await noticeRequestProgress(runtime, fail), 0);
-});
-
-test('interrupted baseline write cannot partially backfill historical requests', async () => {
-  const runtime = await setup(false);
-  await open(runtime);
-  const directory = join(runtime.stateDirectory, 'notices', 'request-progress');
-  await mkdir(directory, { recursive: true });
-  await writeFile(join(directory, 'baseline.json.crashed.tmp'), '{partial');
-  assert.equal(await noticeRequestProgress(runtime, fail), 0);
-  const stored = await readFile(join(directory, 'baseline.json'), 'utf8');
-  assert.equal(await noticeRequestProgress(runtime, fail), 0);
-  assert.equal(await readFile(join(directory, 'baseline.json'), 'utf8'), stored);
-  assert.equal((await notices(runtime)).length, 0);
-});
-
-test('upgrade retains legacy notice fingerprints without replaying historical progress', async () => {
-  const { createHash } = await import('node:crypto');
-  const runtime = await setup();
-  const request = await open(runtime);
-  const progress = requestProgress(request, undefined);
-  const { observedAt, lastRecordedAt, stale, hostEvidence, hostEvidenceState, ...legacy } = progress;
-  const fingerprint = createHash('sha256').update(JSON.stringify(legacy)).digest('hex');
-  const key = createHash('sha256').update(request.id).digest('hex');
-  const directory = join(runtime.stateDirectory, 'notices', 'request-progress');
-  await writeFile(join(directory, `${key}.json`), JSON.stringify({ sequence: 7, fingerprint }));
-  assert.equal(await noticeRequestProgress(runtime, fail), 0);
-  assert.equal((await notices(runtime)).length, 0);
 });
 
 test('scoped evidence is bounded and redacted; corrupt or mismatched evidence stays unknown', async () => {
@@ -287,29 +152,3 @@ test('accepted assignment retains its original goal through feedback, revision, 
   assert.equal((await runtime.requests.list()).length, 1);
 });
 
-test('old finished requests skip new evidence projection but retain pending notice recovery', async () => {
-  const { createHash } = await import('node:crypto');
-  const { recordRequestWorkEvidence } = await import('../src/request-work-evidence.ts');
-  const runtime = await setup();
-  const request = await open(runtime);
-  const item = await runtime.ledger.create('clippy', 'owner-change', proposal, { request: request.id, status: 'landed' });
-  await runtime.requests.update(request.id, current => ({ ...current, status: 'completed', workItem: item.id }));
-  assert.equal(await noticeRequestProgress(runtime, fail), 1);
-  const [notice] = await notices(runtime);
-  const key = createHash('sha256').update(request.id).digest('hex');
-  const cursorPath = join(runtime.stateDirectory, 'notices', 'request-progress', `${key}.json`);
-  const cursor = JSON.parse(await readFile(cursorPath, 'utf8'));
-  await writeFile(cursorPath, JSON.stringify({ ...cursor, pending: notice }));
-  await unlink(join(runtime.stateDirectory, 'notices', 'exchanges', 'pending', `${notice.id}.json`));
-  const old = '2020-01-01T00:00:00.000Z';
-  await writeFile(join(runtime.requests.directory, `${request.id}.json`), JSON.stringify({
-    ...await runtime.requests.get(request.id), updatedAt: old,
-  }));
-  await writeFile(join(runtime.ledger.directory, `${item.id}.json`), JSON.stringify({ ...item, updatedAt: old }));
-  await recordRequestWorkEvidence(runtime, item, { stage: 'blocked', blocker: 'historical_sidecar_changed' });
-  assert.equal(await noticeRequestProgress(runtime, fail), 1, 'existing pending notice is recovered');
-  assert.equal(await noticeRequestProgress(runtime, fail), 0, 'old evidence changes are not projected');
-  const queued = await notices(runtime);
-  assert.equal(queued.length, 1);
-  assert.doesNotMatch(queued[0].text, /historical_sidecar_changed/);
-});

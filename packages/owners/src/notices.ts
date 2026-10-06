@@ -9,9 +9,10 @@ import { withRecordLock } from './record-lock.ts';
 
 /**
  * Owners hear how their work went. Each daemon tick compares every work item with what was last seen; a change the
- * owner should act on (landed, failed, rejected, its PR merged or closed) goes into the owner's journal, and, when
- * the work was opened from a chat, into a queue the opencode plugin delivers into that chat. The owner then decides
- * what to do next in front of the person. Deterministic host code throughout; no model is hired here.
+ * owner should know about (landed, failed, rejected, its PR merged or closed) goes into the owner's journal, and,
+ * when the owner must act on it and the work was opened from a chat, into a queue the opencode plugin delivers into
+ * that chat. The owner then decides what to do next in front of the person. Deterministic host code throughout; no
+ * model is hired here.
  */
 export const NOTICE_PREFIX = '[onionsoup notice]';
 
@@ -35,6 +36,9 @@ export const WorkNotice = z.object({
 export type WorkNotice = z.infer<typeof WorkNotice>;
 
 const NOTABLE = new Set(['landed', 'failed', 'rejected']);
+
+/** Changes that wake the owner in its chat; the rest (a merged PR: the person merged it) are journaled only. */
+const WAKES_OWNER = new Set(['landed', 'failed', 'rejected', 'pr-closed']);
 
 function key(item: WorkItem) {
   return `${item.status}|${item.publication?.state ?? ''}`;
@@ -148,8 +152,8 @@ async function raiseNotice(runtime: Runtime, item: WorkItem, previous: string | 
   if (!described) return undefined;
   const notice: WorkNotice = {
     id: `${item.id}-${described.change}${suffix}-${createHash('sha256').update(item.updatedAt).digest('hex').slice(0, 12)}`,
-    owner: audience.owner, workItem: item.id, change: described.change,
-    text: described.text, origin: await audience.origin(), at: new Date().toISOString(),
+    owner: audience.owner, workItem: item.id, change: described.change, text: described.text,
+    origin: WAKES_OWNER.has(described.change) ? await audience.origin() : undefined, at: new Date().toISOString(),
   };
   const notebook = runtime.notebook(audience.owner);
   await notebook.journal({ kind: 'work-status', workItem: item.id, outcome: described.change, note: described.text.slice(0, 500) });

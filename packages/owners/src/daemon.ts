@@ -1,6 +1,5 @@
 import { recoverFrictionPromotions, routeConfiguredFrictionProposals } from './friction-promotion.ts';
 import { recoverAttentionAssignments } from './attention-assignment.ts';
-import { noticeRequestProgress } from './request-status.ts';
 import { consumeFrictionWake, nextFrictionInvestigation } from './friction-work.ts';
 import { recoverAskHandoffs } from './ask-handoffs.ts';
 import { canReconcileRequest, reconcileRequest } from './request-recovery.ts';
@@ -315,7 +314,6 @@ async function tickAdmitted(runtime: Runtime, log: TickLog) {
   try {
     await runtime.requests.markInterrupted();
     await runRequests(runtime, log);
-    await noticeRequestProgress(runtime, log.error);
   } catch (error) {
     log.error('requests', error);
   }

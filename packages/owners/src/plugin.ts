@@ -170,8 +170,8 @@ const MANAGER_GUIDE = `
   Where a report granted you approve-plans, initiative plans wake you here: read them with onionsoup_status and
   approve or send back with onionsoup_steer. For direct requests you personally sent to a report, an applicable grant
   permits onionsoup_review_request_plan with the exact request/item/digest from onionsoup_status request. A separate
-  actionable continuation requests that review; informational progress notices do not wake you. Compare the original
-  scope and every plan assumption; use needs-human for unresolved scope, never promise approval before checking eligibility.
+  actionable continuation requests that review. Compare the original scope and every plan assumption;
+  use needs-human for unresolved scope, never promise approval before checking eligibility.
   Missing grants or missing origin chats leave approval with the person. onionsoup_status shows all your reports' work, assigned
   or not; onionsoup_steer also cancels the work or leaves the report a note on work your initiatives assigned.
   Reports push back with escalations; resolve them with your ruling (onionsoup_initiative resolve-escalation).
