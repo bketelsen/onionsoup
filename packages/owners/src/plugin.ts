@@ -131,7 +131,7 @@ function addDeclaredProviders(config: Pick<Config, 'provider'>, providers: Decla
   config.provider = { ...config.provider, ...opencodeProviders(providers) };
 }
 
-export const PLUGIN_LIMITS = { exchangeChars: 8_000, contextChars: 28_000, noticeMs: 15_000 };
+export const PLUGIN_LIMITS = { exchangeChars: 8_000, contextChars: 28_000, noticeMs: 15_000, declarationsMs: 15_000 };
 
 const WATCHER_AGENT = 'onionsoup-watcher';
 /** opencode names an MCP tool <server>_<tool>; an owner's servers are prefixed with its id. */
@@ -242,19 +242,11 @@ const WORK_GUIDES: Record<'changes' | 'observes', string> = {
   (onionsoup_request_work).`,
 };
 
-function agentPrompt(owner: OwnerDeclaration, persona: Persona, charter: string, roster: string, org: string, verify: readonly string[], guides: string) {
+function agentPrompt(owner: OwnerDeclaration, persona: Persona, verify: readonly string[], guides: string) {
   return `${persona.voice.trim()}
-
-<charter>
-${charter.trim()}
-</charter>
 
 ${subagentsText(owner.id)}
 
-<roster>
-${roster}
-</roster>
-${orgBlock(org)}
 <repository-writing>
 ${REPOSITORY_WRITING}
 </repository-writing>
@@ -408,7 +400,6 @@ const server: Plugin = async (input, options) => {
   }
   const owners = [...runtime.declarations.owners.values()];
   const personaOwners = owners.filter(owner => owner.persona);
-  const ownerByAgent = new Map(owners.map(owner => [ownerChatAgent(owner), runtime.owner(owner.id)]));
   const operator = runtime.declarations.operator;
   const operatorJobs = operator ? new OperatorJobs(runtime.stateDirectory, operator.directory, operator.name) : undefined;
   const operatorRecoveryPermissions = new OperatorRecoveryPermissions();
@@ -428,6 +419,19 @@ const server: Plugin = async (input, options) => {
   const memoryDirectory = operatorMemoryDirectory(operatorNotebook);
   let disposed = false;
   let initializing: Promise<void> | undefined;
+  let declarationsReadAt = Date.now();
+  /** Re-read the configuration at most every `PLUGIN_LIMITS.declarationsMs`: edits reach live chats without a restart. */
+  async function refreshDeclarations() {
+    if (Date.now() - declarationsReadAt < PLUGIN_LIMITS.declarationsMs) return;
+    declarationsReadAt = Date.now();
+    await runtime.reloadDeclarations()
+      .catch(error => console.warn('declarations_reload_failed', error instanceof Error ? error.message : String(error)));
+  }
+  /** The owner whose chat agent this is, as currently declared. */
+  function ownerOfAgent(agent: string) {
+    const declared = [...runtime.declarations.owners.values()].find(owner => ownerChatAgent(owner) === agent);
+    return declared ? runtime.owner(declared.id) : undefined;
+  }
   async function initializeRuntime() {
     if (disposed) throw new Error('plugin_instance_disposed');
     await assertMaintenanceAllowed(runtime.stateDirectory);
@@ -1012,7 +1016,7 @@ const server: Plugin = async (input, options) => {
   }
 
   function requireObservationOwner(agent: string) {
-    const owner = ownerByAgent.get(agent);
+    const owner = ownerOfAgent(agent);
     if (!owner) throw new Error(`onionsoup tools are for owners; ${agent} is not one`);
     return owner;
   }
@@ -1233,6 +1237,10 @@ const server: Plugin = async (input, options) => {
 
   /** An owner's notebook, facts, open work and recent activity, for each turn of its chat. */
   async function pushOwnerContext(owner: OwnerDeclaration, system: string[]) {
+    // Read each turn, so a charter, roster or reporting-line edit reaches the chat without a restart.
+    const charter = await runtime.text(`charters/${owner.id}.md`).catch(() => '(no charter yet)');
+    const roster = rosterText(runtime.declarations, owner.id);
+    if (owner.persona) system.push(`<charter>\n${charter.trim()}\n</charter>\n\n<roster>\n${roster}\n</roster>${orgBlock(orgText(runtime.declarations, owner.id))}`);
     const notebook = await runtime.notebook(owner.id).orientation().catch(() => '(notebook unavailable)');
     const work = await workSummary(owner.id);
     const activity = await recentActivityContext(runtime, owner.id);
@@ -1321,6 +1329,7 @@ const server: Plugin = async (input, options) => {
     },
     async 'tool.execute.before'(input, output) {
       await initializeRuntime();
+      await refreshDeclarations();
       if (operatorJobs) await checkOperatorChildTool(operatorJobs, input.sessionID, input.tool, output.args);
       if (await readChildAbandonment(runtime.stateDirectory, input.sessionID)) throw new Error('child_session_abandoned: preserved history is read-only');
       await assertWorkSessionRunning(input.sessionID);
@@ -1401,7 +1410,7 @@ const server: Plugin = async (input, options) => {
           mode: 'primary',
           description: `${persona.title} (${persona.source})`,
           model: owner.model,
-          prompt: owner.persona ? agentPrompt(owner, persona, charter, rosterText(runtime.declarations, owner.id), orgText(runtime.declarations, owner.id), verify, orgGuides(runtime, owner) + wikiGuide(runtime, owner))
+          prompt: owner.persona ? agentPrompt(owner, persona, verify, orgGuides(runtime, owner) + wikiGuide(runtime, owner))
             : observationChatPrompt(owner, charter, rosterText(runtime.declarations, owner.id)),
           permission,
         };
@@ -1457,7 +1466,7 @@ const server: Plugin = async (input, options) => {
         if (!admittedParent && !awaitingNudge.has(message.sessionID)) {
           admittedMessages.set(message.sessionID, message.messageID ?? output.message?.id);
         }
-        const owner = message.agent ? ownerByAgent.get(message.agent) : undefined;
+        const owner = message.agent ? ownerOfAgent(message.agent) : undefined;
         if (owner && !admittedParent) sessions.claim(message.sessionID, owner);
         if (!operator || message.agent !== operator.name || admittedParent) return;
         operatorSessions.claim(message.sessionID, operator);
@@ -1475,7 +1484,7 @@ const server: Plugin = async (input, options) => {
       answerQueuedPrompts(output.messages);
       const firstUser = output.messages.find(message => message.info.role === 'user');
       const part = firstUser?.parts[0];
-      if (!firstUser || !part || firstUser.info.role !== 'user' || !ownerByAgent.get(firstUser.info.agent)?.persona) return;
+      if (!firstUser || !part || firstUser.info.role !== 'user' || !ownerOfAgent(firstUser.info.agent)?.persona) return;
       if (firstUser.parts.some(candidate => candidate.type === 'text' && candidate.text.includes(BOOTSTRAP_MARKER))) return;
       if (await sessions.isChild(firstUser.info.sessionID)) return;
       firstUser.parts.unshift({ ...part, type: 'text', text: bootstrapText(), synthetic: true } as typeof part);
@@ -1483,7 +1492,10 @@ const server: Plugin = async (input, options) => {
 
     async 'experimental.chat.system.transform'(context, output) {
       if (!context.sessionID) return;
-      const owner = sessions.ownerOf(context.sessionID);
+      await refreshDeclarations();
+      const claimed = sessions.ownerOf(context.sessionID);
+      // The claim holds the owner as declared when the chat started; context comes from the current declaration.
+      const owner = claimed && runtime.declarations.owners.has(claimed.id) ? runtime.owner(claimed.id) : claimed;
       if (owner) await pushOwnerContext(owner, output.system);
       if (operatorSessions.ownerOf(context.sessionID)) output.system.push(await memoryIndexBlock(memoryDirectory));
     },
@@ -1537,7 +1549,7 @@ const server: Plugin = async (input, options) => {
     tool: {
       ...(operatorJobs && operatorSupervisor ? { [OPERATOR_JOB_TOOL]: operatorJobTool(operatorJobs, operatorSupervisor, input.client, agent => {
         if (agent === operator!.name) return;
-        if (ownerByAgent.has(agent)) requireOwner(agent);
+        if (ownerOfAgent(agent)) requireOwner(agent);
         throw new Error('operator_job_operator_only');
       }, operatorRecoveryPermissions, operatorWrites, operatorHandoffs, operatorApplications) } : {}),
       ...(operatorWrites ? { [OPERATOR_WRITE_TOOL]: operatorFileTool(operatorWrites, operatorWriteCalls),

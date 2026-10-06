@@ -401,7 +401,8 @@ and request for retry. Old timestamp markers are read on migration.
 Chat memory is deliberate. Tool calls that were not auto-allowed are journaled deterministically. After each
 exchange a watcher from another model family extracts only the person's decisions, kept only if the quote is
 verbatim; they land in the journal as candidates, and distill decides what enters the notebook. The person can
-retract a note from the Desk or in chat. Every owner sees a generated roster of the other owners.
+retract a note from the Desk or in chat. Every owner sees a generated roster of the other owners. Its charter, the
+roster and its reporting lines are read from the configuration each turn, so edits reach live chats without a restart.
 
 An owner records facts it observes, and rulings it makes while working, with `onionsoup_record_fact { fact,
 source, observedAt? }`. They come back to it word for word in every turn (`<recorded-facts>`, newest first, within

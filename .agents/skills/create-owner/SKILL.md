@@ -6,7 +6,8 @@ description: Creates a new onionsoup owner (declaration, charter draft, desk) in
 # Create an owner
 
 Done means the new owner validates, its config is committed in the person's config repo, and the person knows to
-restart the surface (so the plugin loads the new agent) and to rewrite the charter.
+restart the surface (so the plugin loads the new agent) and to rewrite the charter. Later charter, grant and
+repository edits reach live chats within 15 seconds; no restart.
 
 A steward (an owner with `manages:`, such as Odrade for Frostyard) does this through its `onionsoup_owners` tool,
 which validates, asks the person and commits; steps 7 and 9 are then done for it.
