@@ -174,11 +174,11 @@ subagent, and conflict resolution hires in rebases) and `review` (each owner's r
 review of desk changes, and the review of conflict resolutions). A `craft: planning` file, a `workflows/` directory
 and `workflow:` lines on owners are left over from the retired freelancer pipeline and ignored.
 
-Host hires that return a typed deliverable (reviews, owner answers and decisions, distill) ask opencode for
-structured output, which forces a tool call. A model that refuses forced tool choice (Copilot's `claude-opus-5.5`,
-anomalyco/opencode#46735) is retried at once in a new session in text mode: the brief ends with the JSON Schema, the
-reply's JSON is parsed and validated against the same schema, and the model starts in text mode for the rest of the
-process. Any model can therefore serve as an owner, implementer or reviewer.
+Host hires that return a typed deliverable (reviews, owner answers and decisions, distill) and the decision watcher
+ask for it in the reply text: the brief ends with the JSON Schema, and the reply's JSON is parsed and validated against
+the same schema, with one resend if it does not match. opencode's structured output forces a tool call, which Copilot's
+Claude models refuse (anomalyco/opencode#46735), so it is not used. Any model can serve as an owner, implementer or
+reviewer.
 
 **Plans and approval in chat.** `onionsoup_submit_plan { title, goal, plan, repository?, item? }` records the plan
 as an `owner-change` work item: status `awaiting-plan-approval`, the plan's markdown and digest, and the chat as its
@@ -1156,8 +1156,8 @@ one conversion, `opencodeProviders`: the plugin's config hook merges them into t
 config for owner chats and the operator, and `agentConfig` puts them into each sandboxed hire's
 `OPENCODE_CONFIG_CONTENT`, since the sandbox masks the host's opencode config. An API key comes from a file under the
 config directory's `secrets/`, read at load; it prints and serialises as `[redacted]`, travels only in the hire's
-environment, and server output quoted in a hire error is redacted. A provider that cannot force a tool call
-(`structuredOutput: false`) starts its hires in text mode. Built-in provider ids are refused (`provider_reserved`),
+environment, and server output quoted in a hire error is redacted. Hires ask for their deliverable as JSON in the
+reply text, never through a forced tool call. Built-in provider ids are refused (`provider_reserved`),
 and `families.yaml` decides a declared model's family like any other.
 
 ### Provider health

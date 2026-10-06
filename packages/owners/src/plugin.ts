@@ -20,6 +20,8 @@ import { readdir, readFile } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { tool, type Config, type Plugin } from '@opencode-ai/plugin';
+import { jsonFromText, jsonInstruction, replyText } from './json-reply.ts';
+import { answerQueuedPrompts } from './message-order.ts';
 import {
   canChange, directReports, hasIncus, isDirectReport, managerOf, OPERATOR_ID, repositoryShortName, type OperatorDeclaration, type OwnerDeclaration,
   type Persona,
@@ -1104,13 +1106,13 @@ const server: Plugin = async (input, options) => {
         body: {
           agent: WATCHER_AGENT,
           model: { providerID: providerID!, modelID: modelParts.join('/') },
-          format: { type: 'json_schema', schema: tool.schema.toJSONSchema(WatcherRecords) },
-          parts: [{ type: 'text', text: watcherBrief(ownerChatVoice(owner), userText, assistantText) }],
+          parts: [{ type: 'text', text: watcherBrief(ownerChatVoice(owner), userText, assistantText)
+            + jsonInstruction(tool.schema.toJSONSchema(WatcherRecords) as Record<string, unknown>) }],
         } as never,
       });
       promptCompleted = true;
       scope?.context.check();
-      const parsed = WatcherRecords.safeParse((reply.data?.info as { structured?: unknown } | undefined)?.structured);
+      const parsed = WatcherRecords.safeParse(jsonFromText(replyText(reply.data ?? {})));
       if (!parsed.success) return;
       const notebook = runtime.notebook(owner.id);
       const alreadyNoted = await sessionQuotes(owner.id, sessionID);
@@ -1421,7 +1423,7 @@ const server: Plugin = async (input, options) => {
         mode: 'primary',
         hidden: true,
         description: 'onionsoup: extracts decisions from owner chats',
-        prompt: 'You extract decisions from conversations and answer only with the structured output requested.',
+        prompt: 'You extract decisions from conversations and answer only with the JSON object requested.',
         permission: WATCHER_PERMISSION,
       };
     },
@@ -1470,6 +1472,7 @@ const server: Plugin = async (input, options) => {
 
     /** Owners' top-level sessions start with the skills bootstrap; subagents' child sessions never do. */
     async 'experimental.chat.messages.transform'(_input, output) {
+      answerQueuedPrompts(output.messages);
       const firstUser = output.messages.find(message => message.info.role === 'user');
       const part = firstUser?.parts[0];
       if (!firstUser || !part || firstUser.info.role !== 'user' || !ownerByAgent.get(firstUser.info.agent)?.persona) return;

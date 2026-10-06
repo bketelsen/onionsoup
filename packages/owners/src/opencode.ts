@@ -9,7 +9,8 @@ import { z } from 'zod';
 import type { ModelRef } from './declarations.ts';
 import { AssistantError, providerErrorOf, type ProviderError } from './provider-health.ts';
 import { maskKeyLike } from './secret-shapes.ts';
-import { lacksStructuredOutput, opencodeProviders, redactApiKeys, type DeclaredProviders } from './providers.ts';
+import { opencodeProviders, redactApiKeys, type DeclaredProviders } from './providers.ts';
+import { jsonFromText, jsonInstruction, replyText } from './json-reply.ts';
 import { freePort, spawnSandboxed, stopSandboxed } from './sandbox.ts';
 
 const run = promisify(execFile);
@@ -152,7 +153,6 @@ export interface HireResult<T> {
 
 interface AssistantInfo {
   role: string;
-  structured?: unknown;
   error?: AssistantError;
   cost?: number;
 }
@@ -296,54 +296,10 @@ export class Freelancers {
     const providers = this.providers();
     const connection = await this.connect(request, providers);
     try {
-      return await hireWithFallback(connection.client, request, providers);
+      return await runHire(connection.client, request);
     } finally {
       connection.close();
     }
-  }
-}
-
-/**
- * opencode asks for structured output by forcing a tool call, and some models refuse forced tool choice (Copilot's
- * claude-opus-5.5: anomalyco/opencode#46735), or answer without ever calling the tool (opencode then fails the turn
- * with a StructuredOutputError). Either comes on the first round, so such a hire starts again, once, in a new session
- * in text mode: the brief ends with the JSON Schema and the reply's JSON is parsed here. The model is remembered for
- * this process, so its later hires start in text mode. A declared provider with `structuredOutput: false` starts
- * its models' hires in text mode outright.
- */
-const FORCED_TOOL_REFUSED = /tool_choice: type "tool" and "any" are not supported/;
-const NO_STRUCTURED_OUTPUT = /StructuredOutputError|Model did not produce structured output/;
-
-/** Known ways a model turns down structured output, each with what the log says about it. */
-const STRUCTURED_OUTPUT_REFUSALS: Record<string, { signature: RegExp; reason: string }> = {
-  forcedToolChoice: { signature: FORCED_TOOL_REFUSED, reason: 'refuses forced tool choice' },
-  noStructuredOutput: { signature: NO_STRUCTURED_OUTPUT, reason: 'did not produce structured output' },
-};
-
-const textModeModels = new Set<string>();
-
-export type DeliveryMode = 'structured' | 'text';
-
-/** Why a first-round failure is a refusal of structured output, or undefined if it is some other failure. */
-function refusalReason(error: unknown) {
-  if (!(error instanceof HireError)) return undefined;
-  return Object.values(STRUCTURED_OUTPUT_REFUSALS).find(refusal => refusal.signature.test(error.message))?.reason;
-}
-
-function startingMode(model: ModelRef, providers: DeclaredProviders): DeliveryMode {
-  return textModeModels.has(model) || lacksStructuredOutput(providers, model) ? 'text' : 'structured';
-}
-
-export async function hireWithFallback<T>(client: HireSessionClient, request: HireRequest<T>, providers: DeclaredProviders = {}): Promise<HireResult<T>> {
-  const mode = startingMode(request.model, providers);
-  try {
-    return await runHire(client, request, mode);
-  } catch (error) {
-    const reason = mode === 'structured' ? refusalReason(error) : undefined;
-    if (!reason) throw error;
-    textModeModels.add(request.model);
-    log(`  … ${request.title}: ${request.model} ${reason}; asking for the JSON in its reply instead`);
-    return runHire(client, request, 'text');
   }
 }
 
@@ -352,44 +308,9 @@ export type HireSessionClient = Pick<HireClient, 'session' | 'permission'>;
 
 interface ReplyData { info?: AssistantInfo; parts?: { type: string; text?: string }[] }
 
-interface DeliveryModeSpec {
-  format: (schema: Record<string, unknown>) => Record<string, unknown> | undefined;
-  instruction: (schema: Record<string, unknown>) => string;
-  deliverable: (reply: ReplyData) => unknown;
-}
-
-const DELIVERY_MODES: Record<DeliveryMode, DeliveryModeSpec> = {
-  structured: {
-    format: schema => ({ type: 'json_schema', schema, retryCount: 2 }),
-    instruction: () => '',
-    deliverable: reply => reply.info?.structured,
-  },
-  text: {
-    format: () => undefined,
-    instruction: schema => `\n\nWhen you are done, your final reply must be only one JSON object that matches this JSON Schema, with no other text:\n${JSON.stringify(schema)}`,
-    deliverable: reply => jsonFromText((reply.parts ?? []).filter(part => part.type === 'text').map(part => part.text ?? '').join('')),
-  },
-};
-
-/** The JSON object in a reply: a fenced json block if there is one, else the outermost braces; the text if neither parses. */
-export function jsonFromText(text: string): unknown {
-  const fenced = [...text.matchAll(/```(?:json)?\s*\n([\s\S]*?)```/g)].at(-1)?.[1];
-  const braces = text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1);
-  for (const candidate of [fenced, braces]) {
-    if (!candidate?.trim()) continue;
-    try {
-      return JSON.parse(candidate);
-    } catch {
-      // Not JSON: try the next candidate, and let the schema reject the text if none parses.
-    }
-  }
-  return text;
-}
-
-/** One hire session in one delivery mode: the brief, then at most one request to resend a malformed deliverable. */
-export async function runHire<T>(client: HireSessionClient, request: HireRequest<T>, mode: DeliveryMode): Promise<HireResult<T>> {
+/** One hire session: the brief, then at most one request to resend a malformed deliverable. */
+export async function runHire<T>(client: HireSessionClient, request: HireRequest<T>): Promise<HireResult<T>> {
   const [providerID, ...rest] = request.model.split('/');
-  const spec = DELIVERY_MODES[mode];
   const schema = z.toJSONSchema(request.schema) as Record<string, unknown>;
   const startedAt = new Date().toISOString();
   const session = await client.session.create({ title: request.title });
@@ -400,31 +321,28 @@ export async function runHire<T>(client: HireSessionClient, request: HireRequest
   // A failed poll is retried on the next interval; the hire's own deadline still bounds it.
   const refuser = setInterval(() => void rejectPendingPermissions(client, request.directory, request.title).catch(() => undefined), HIRE_LIMITS.permissionPollMs);
   try {
-    // Synchronous on purpose: opencode 1.18.32 cannot list a session's messages once a prompt carried
-    // a json_schema format ("Expected OutputFormatJsonSchema"), so the reply must come from this call.
+    // Synchronous: the reply, and so the deliverable, comes from this call.
     const prompt = async (text: string) => {
-      const format = spec.format(schema);
       const reply = await client.session.prompt({
         sessionID,
         agent: `onionsoup-${request.role}`,
         model: { providerID: providerID!, modelID: rest.join('/') },
-        ...(format ? { format } : {}),
         parts: [{ type: 'text', text }],
       } as Parameters<HireClient['session']['prompt']>[0]);
       const data = reply.data as ReplyData | undefined;
       const info = data?.info;
       if (!info) throw new HireError(`no_assistant_reply: ${describeReplyError(reply.error)}`, sessionID);
       if (info.error) throw assistantFailure(info.error, sessionID);
-      return { info, deliverable: spec.deliverable(data) };
+      return { info, deliverable: jsonFromText(replyText(data!)) };
     };
     const brief = request.notesFile ? `${request.brief}\n\n${notesInstruction(request.notesFile)}` : request.brief;
-    const first = await prompt(`${brief}${spec.instruction(schema)}`);
+    const first = await prompt(`${brief}${jsonInstruction(schema)}`);
     let cost = first.info.cost ?? 0;
     let parsed = parseDeliverable(request.schema, first.deliverable);
     if (!parsed.success) {
       // The work is done; only the shape is wrong. Ask once, in the same session, for the corrected deliverable.
       log(`  … ${request.title}: deliverable did not match its schema; asking ${request.model} to resend it`);
-      const second = await prompt(`${resendInstruction(parsed.error)}${spec.instruction(schema)}`);
+      const second = await prompt(`${resendInstruction(parsed.error)}${jsonInstruction(schema)}`);
       cost += second.info.cost ?? 0;
       parsed = parseDeliverable(request.schema, second.deliverable);
       if (!parsed.success) throw new HireError(`deliverable_invalid: ${parsed.error.message.slice(0, 500)}`,

@@ -51,7 +51,7 @@ async function fixture() {
       effects.push('prompt');
       promptStarted.resolve();
       if (blockPrompt) await promptReleased.promise;
-      return { data: { info: { structured: { records: [] } } } };
+      return { data: { info: {}, parts: [{ type: 'text', text: '{"records":[]}' }] } };
     },
     delete: async () => {
       effects.push('delete');

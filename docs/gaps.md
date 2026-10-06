@@ -262,7 +262,7 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
 
 - **opencode cannot return structured-output sessions (seen in 1.18.32).** Once a prompt carries a `json_schema`
   format, listing that session's messages over HTTP fails with `BadRequest: Expected OutputFormatJsonSchema`.
-  Every hire asks for structured output, so two things work around it:
+  Hires stopped asking for structured output on 2026-10-06, but older hire sessions carry it, so two workarounds stay:
   - `packages/owners/src/opencode.ts` prompts hires synchronously and takes the deliverable from the prompt's own
     reply instead of reading the session back.
   - `packages/surface/src/hire-store.ts` reads hire sessions for the work item activity rail straight from

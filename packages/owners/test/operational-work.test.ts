@@ -78,7 +78,7 @@ async function setup(context: TestContext) {
       prompt: async (input: { model: { providerID: string; modelID: string }; parts: { text: string }[] }) => {
         prompts.push({ model: `${input.model.providerID}/${input.model.modelID}`, text: input.parts[0].text });
         await onReview();
-        return { data: { info: { role: 'assistant', cost: 0, structured: verdict } } };
+        return { data: { info: { role: 'assistant', cost: 0 }, parts: [{ type: 'text', text: JSON.stringify(verdict) }] } };
       },
     },
     permission: { list: async () => ({ data: [] }), reply: async () => ({ data: true }) },
