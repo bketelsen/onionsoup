@@ -417,7 +417,8 @@ action, not an automatic restart or a new plan approval. A direct manager's `oni
 its existing applicable `approve-plans` grant and work she requested.
 
 Persona owners with a declared `maintain-prs` duty can call `onionsoup_update_prs` without repository or head
-arguments. The same periodic selector covers `BEHIND` and conflicting PRs. Clean base updates retain the old
+arguments. The same periodic selector covers `BEHIND` and conflicting PRs; `refresh: true` also updates a
+mergeable PR whose head lacks the base tip. Clean base updates retain the old
 published head as an ancestor, run configured host checks and use an exact-head protected push.
 Conflicts still use owner resolution, independent review and the existing destructive rewrite gate.
 

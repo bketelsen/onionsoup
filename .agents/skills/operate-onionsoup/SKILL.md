@@ -103,6 +103,10 @@ cause, and the fix is either applied through the normal gates or reported to the
    - Notices about the work go to the work session first, then the chat it came from. A `failed` item with
      `pipeline_removed` was open work of the retired freelancer pipeline; the owner plans it again if it is still
      wanted.
+   - A published PR left behind its base: the `maintain-prs` duty updates only PRs GitHub reports conflicting or
+     `BEHIND`, and GitHub says `BEHIND` only when branch protection requires up-to-date branches, so a stale but
+     mergeable PR is journaled only with its merge state (`clean`, `blocked`). The owner brings it up to date with `onionsoup_update_prs refresh: true`
+     (base merge, host verification, push without rewriting history).
    - An `interrupted` item resumes with `npm run owners -- resume <item>`.
    - `pausing` retains runner/effect/session claims until positive stopped evidence; `paused` is intentional,
      not crash recovery. Explicit Resume reuses the original unchanged goal, plan and approval. Peer messages,

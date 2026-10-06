@@ -82,18 +82,42 @@ export async function refreshPublications(runtime: Runtime, ownerId?: string): P
 export const CI_TRIAGE_LIMITS = { logChars: 12_000 };
 
 const Check = z.object({ name: z.string(), bucket: z.string(), link: z.string().default('') });
+type Check = z.infer<typeof Check>;
 
 async function failingChecks(url: string) {
   const text = await run('gh', ['pr', 'checks', url, '--json', 'name,bucket,link']).then(result => result.stdout, error => (error as { stdout?: string }).stdout ?? '[]');
   return z.array(Check).parse(JSON.parse(text || '[]')).filter(check => check.bucket === 'fail');
 }
 
-async function failedLogs(checks: readonly z.infer<typeof Check>[]) {
-  const runIds = [...new Set(checks.map(check => check.link.match(/\/actions\/runs\/(\d+)/)?.[1]).filter(Boolean))] as string[];
+/** An Actions run link names its repository; the daemon runs outside any checkout, so gh needs it as `--repo`. */
+const ACTIONS_RUN_LINK = /^https?:\/\/[^/]+\/([^/]+\/[^/]+)\/actions\/runs\/(\d+)/;
+
+function actionsRuns(checks: readonly Check[]) {
+  const runs = new Map<string, { repository: string; runId: string }>();
+  for (const check of checks) {
+    const [, repository, runId] = check.link.match(ACTIONS_RUN_LINK) ?? [];
+    if (repository && runId) runs.set(`${repository}#${runId}`, { repository, runId });
+  }
+  return [...runs.values()];
+}
+
+function commandFailure(error: unknown) {
+  const stderr = (error as { stderr?: string }).stderr?.trim();
+  return stderr || (error instanceof Error ? error.message : String(error));
+}
+
+/** The failed steps' log, or why it could not be read, so triage never takes a gh failure for an empty log. */
+async function failedLog(repository: string, runId: string) {
+  const args = ['run', 'view', runId, '--repo', repository, '--log-failed'];
+  return run('gh', args, { maxBuffer: 64 * 1024 * 1024 }).then(result => result.stdout, error => `logs_unavailable: ${commandFailure(error)}`);
+}
+
+async function failedLogs(checks: readonly Check[]) {
+  const runs = actionsRuns(checks);
   const logs: string[] = [];
-  for (const runId of runIds) {
-    const text = await run('gh', ['run', 'view', runId, '--log-failed'], { maxBuffer: 64 * 1024 * 1024 }).then(result => result.stdout, () => '');
-    logs.push(`run ${runId}:\n${text.slice(-CI_TRIAGE_LIMITS.logChars / Math.max(1, runIds.length))}`);
+  for (const { repository, runId } of runs) {
+    const text = await failedLog(repository, runId);
+    logs.push(`run ${runId}:\n${text.slice(-CI_TRIAGE_LIMITS.logChars / Math.max(1, runs.length))}`);
   }
   return logs.join('\n\n');
 }
@@ -156,12 +180,35 @@ async function triageFailingCi(runtime: Runtime, item: WorkItem, headSha: string
   return decision.decision;
 }
 
-const PR_MAINTENANCE: Record<string, { mode?: 'update-base'; description: string }> = {
+type PrMaintenance = { mode?: 'update-base'; description: string };
+
+const PR_MAINTENANCE: Record<string, PrMaintenance> = {
   CONFLICTING: { description: 'conflicting' },
   BEHIND: { mode: 'update-base', description: 'behind its base' },
 };
 
-async function neededMaintenance(runtime: Runtime, item: WorkItem, notes: string[], suppressed: Set<string>) {
+/** A refresh brings a mergeable but stale PR up to date: GitHub says BEHIND only when protection requires it. */
+const STALE_ON_REFRESH: PrMaintenance = { mode: 'update-base', description: 'behind its base (refresh requested)' };
+
+/** One maintain-prs pass: what it notes, the heads whose updates were given up, and whether a refresh was asked for. */
+interface MaintenancePass { notes: string[]; suppressed: Set<string>; refresh: boolean }
+
+/** `git merge-base --is-ancestor` exits 1 for "not an ancestor"; anything else is an error. */
+const GIT_NOT_ANCESTOR = 1;
+
+/** Whether the PR's head lacks the current tip of its base branch, read from the owner's checkout after a fetch. */
+async function lacksBaseTip(runtime: Runtime, item: WorkItem, head: string) {
+  const repository = runtime.repositoryFor(item);
+  await git(repository.workspace, ['fetch', '-q', 'origin']);
+  const base = `origin/${repository.domain.baseBranch}`;
+  return git(repository.workspace, ['merge-base', '--is-ancestor', base, head]).then(() => false, error => {
+    if ((error as { code?: unknown }).code === GIT_NOT_ANCESTOR) return true;
+    throw new Error(`base_tip_unreadable: ${commandFailure(error)}`);
+  });
+}
+
+async function neededMaintenance(runtime: Runtime, item: WorkItem, pass: MaintenancePass) {
+  const { notes, suppressed } = pass;
   const pr = await settledPullRequest(item.publication!.url);
   if (PR_STATES[pr.state] !== 'open') return undefined;
   const triage = await triageFailingCi(runtime, item, pr.headRefOid).catch(error => {
@@ -172,7 +219,8 @@ async function neededMaintenance(runtime: Runtime, item: WorkItem, notes: string
     notes.push(`${item.publication!.url} CI failing: ${triage}`);
     return undefined;
   }
-  const maintenance = PR_MAINTENANCE[pr.mergeable] ?? PR_MAINTENANCE[pr.mergeStateStatus];
+  const maintenance = PR_MAINTENANCE[pr.mergeable] ?? PR_MAINTENANCE[pr.mergeStateStatus]
+    ?? (pass.refresh && await lacksBaseTip(runtime, item, pr.headRefOid) ? STALE_ON_REFRESH : undefined);
   if (!maintenance || suppressed.has(`${item.id}:${pr.headRefOid}`)) {
     notes.push(`${item.publication!.url} ${maintenance ? 'update previously cancelled or abandoned at this head' : pr.mergeStateStatus.toLowerCase()}`);
     return undefined;
@@ -180,8 +228,9 @@ async function neededMaintenance(runtime: Runtime, item: WorkItem, notes: string
   return { ...maintenance, head: pr.headRefOid };
 }
 
-async function openPrUpdate(runtime: Runtime, item: WorkItem, notes: string[], suppressed: Set<string>) {
-  const maintenance = await neededMaintenance(runtime, item, notes, suppressed);
+async function openPrUpdate(runtime: Runtime, item: WorkItem, pass: MaintenancePass) {
+  const { notes } = pass;
+  const maintenance = await neededMaintenance(runtime, item, pass);
   if (!maintenance) return undefined;
   if (!canChange(runtime.owner(item.owner))) {
     notes.push(`${item.publication!.url} owner_cannot_change: update retained for owner maintenance`);
@@ -190,7 +239,7 @@ async function openPrUpdate(runtime: Runtime, item: WorkItem, notes: string[], s
   const update = await runtime.ledger.create(item.owner, REBASE_WORKFLOW, {
     title: `Update "${item.proposal.title}" onto the current base`,
     goal: `Bring ${item.publication!.url} up to date with the base branch without changing what it does.`,
-    rationale: `GitHub reports the PR as ${maintenance.description}.`,
+    rationale: `The PR is ${maintenance.description}.`,
     acceptance: ['The PR applies cleanly to the current base', 'Host verification passes', 'The change is the same change the plan approved'],
     size: 'small', repository: item.proposal.repository,
   }, {
@@ -204,15 +253,20 @@ async function openPrUpdate(runtime: Runtime, item: WorkItem, notes: string[], s
   return update;
 }
 
-/** The maintain-prs duty: record lifecycle, triage CI, and update stale or conflicting published branches. */
-export async function maintainPullRequests(runtime: Runtime, ownerId: string) {
+/**
+ * The maintain-prs duty: record lifecycle, triage CI, and update stale or conflicting published branches. The
+ * duty acts on what GitHub reports; `refresh` (asked for by the owner) also updates a mergeable PR whose head
+ * lacks the base tip.
+ */
+export async function maintainPullRequests(runtime: Runtime, ownerId: string, options: { refresh?: boolean } = {}) {
   const refreshed = await refreshPublications(runtime, ownerId);
   const items = (await runtime.ledger.list()).filter(item => item.owner === ownerId);
   const openRebases = new Set(items.filter(item => item.rebaseOf && !isFinished(item)).map(item => item.rebaseOf!.itemId));
-  const suppressedRebases = new Set(items.filter(item => item.rebaseOf && (
+  const suppressed = new Set(items.filter(item => item.rebaseOf && (
     item.status === 'cancelled' || (item.status === 'rejected' && /^owner_abandoned(?::|$)/.test(item.reason ?? ''))))
     .map(item => `${item.rebaseOf!.itemId}:${item.rebaseOf!.previousHead}`));
   const notes = [...refreshed.changed, ...refreshed.unreadable.map(url => `${url} state unreadable`)];
+  const pass: MaintenancePass = { notes, suppressed, refresh: options.refresh ?? false };
   const opened: WorkItem[] = [];
   for (const item of items.filter(candidate => candidate.publication?.state === 'open'
     && !candidate.repairOf && !isPaused(candidate))) {
@@ -221,7 +275,7 @@ export async function maintainPullRequests(runtime: Runtime, ownerId: string) {
       && !candidate.publication);
     if (hasRepair) continue;
     if (openRebases.has(item.id)) continue;
-    const update = await openPrUpdate(runtime, item, notes, suppressedRebases);
+    const update = await openPrUpdate(runtime, item, pass);
     if (update) opened.push(update);
   }
   const notebook = runtime.notebook(ownerId);

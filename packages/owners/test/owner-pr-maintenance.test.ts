@@ -61,7 +61,8 @@ async function fixture() {
   return { root, declarations, state, runtime, remote, head, source };
 }
 
-async function fakeGithub(root: string, remote: string, operation: () => Promise<void>) {
+/** A gh that reports the PR as mergeable with `mergeStateStatus` (BEHIND only under required-up-to-date protection). */
+async function fakeGithub(root: string, remote: string, operation: () => Promise<void>, mergeStateStatus = 'BEHIND') {
   const bin = join(root, 'bin');
   await mkdir(bin);
   await writeFile(join(bin, 'package.json'), '{"type":"commonjs"}');
@@ -73,7 +74,7 @@ if (args[1] === 'checks') {
   console.log('[]');
 } else {
   const head = execFileSync('git', ['-C', ${JSON.stringify(remote)}, 'rev-parse', 'original']).toString().trim();
-  console.log(JSON.stringify({ url: ${JSON.stringify(url)}, state: 'OPEN', mergeable: 'MERGEABLE', mergeStateStatus: 'BEHIND', headRefOid: head }));
+  console.log(JSON.stringify({ url: ${JSON.stringify(url)}, state: 'OPEN', mergeable: 'MERGEABLE', mergeStateStatus: ${JSON.stringify(mergeStateStatus)}, headRefOid: head }));
 }
 `, { mode: 0o755 });
   const previous = process.env.PATH;
@@ -102,19 +103,48 @@ async function toolFixture() {
   return { ...context, hooks, toolContext };
 }
 
-test('only configured maintain-prs owners receive the argument-free update tool and its guide', async () => {
+test('only configured maintain-prs owners receive the update tool, whose only argument is refresh, and its guide', async () => {
   const { hooks } = await toolFixture();
   const config: Config = {};
   await hooks.config!(config);
   const clippyPermission = config.agent!['Clippy']!.permission as Record<string, unknown>;
   const homelabPermission = config.agent!['Miles Teg']!.permission as Record<string, unknown>;
   const defaultPermission = config.permission as Record<string, unknown>;
-  assert.deepEqual(Object.keys(hooks.tool!.onionsoup_update_prs!.args), []);
+  assert.deepEqual(Object.keys(hooks.tool!.onionsoup_update_prs!.args), ['refresh']);
   assert.equal(clippyPermission.onionsoup_update_prs, 'allow');
   assert.notEqual(homelabPermission.onionsoup_update_prs, 'allow');
   assert.equal(defaultPermission.onionsoup_update_prs, 'deny');
   assert.match(config.agent!['Clippy']!.prompt!, /onionsoup_update_prs runs your configured maintain-prs duty/);
+  assert.match(config.agent!['Clippy']!.prompt!, /refresh: true brings a stale PR up to date with its base now/);
   assert.doesNotMatch(config.agent!['Miles Teg']!.prompt!, /onionsoup_update_prs/);
+});
+
+test('a mergeable PR behind its base is left by the duty and brought up to date by refresh, without a person gate', async () => {
+  const { hooks, runtime, root, remote, head, source, toolContext } = await toolFixture();
+  await fakeGithub(root, remote, async () => {
+    const duty = await updateOwnerPullRequests(runtime, 'clippy');
+    assert.deepEqual(duty.updates, [], JSON.stringify(duty));
+    assert.match(duty.summary, /pull\/1 clean/);
+    assert.equal((await git(remote, ['rev-parse', 'original'])).trim(), head, 'the duty does not touch a mergeable PR');
+
+    const response = await hooks.tool!.onionsoup_update_prs!.execute({ refresh: true }, toolContext as never);
+    assert.ok(typeof response === 'string');
+    const report = JSON.parse(response) as { summary: string; updates: { id: string; status: string }[] };
+    assert.match(report.summary, /behind its base \(refresh requested\)/);
+    assert.equal(report.updates.length, 1, response);
+    assert.equal(report.updates[0]?.status, 'landed', response);
+    const updated = await runtime.ledger.get(report.updates[0]!.id);
+    assert.equal(updated.rebaseOf?.itemId, source.id);
+    assert.equal(updated.rebaseOf?.mode, 'update-base');
+    assert.equal(updated.implementations[0]?.verification[0]?.exitCode, 0);
+    assert.deepEqual(updated.humanNotes, []);
+    const published = (await git(remote, ['rev-parse', 'original'])).trim();
+    await git(remote, ['merge-base', '--is-ancestor', head, published]);
+    await git(remote, ['merge-base', '--is-ancestor', 'main', published]);
+
+    const again = await updateOwnerPullRequests(runtime, 'clippy', { refresh: true });
+    assert.deepEqual(again.updates, [], 'a PR that already holds the base tip is not refreshed again');
+  }, 'CLEAN');
 });
 
 test('the public owner tool advances a real behind PR with host verification and cannot select a foreign owner or head', async () => {

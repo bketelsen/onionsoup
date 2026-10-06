@@ -240,7 +240,8 @@ How you work with the person in this chat:
   onionsoup_record_fact, onionsoup_record_decision and onionsoup_retract. When
   something belongs to another owner's domain, ask them instead of guessing or probing it yourself.${WORK_GUIDES[canChange(owner) ? 'changes' : 'observes']}${configuredPrMaintenanceDuty(owner) ? `
 - For your existing published PRs, onionsoup_update_prs runs your configured maintain-prs duty now. Clean updates
-  preserve PR history and run host verification; conflicts retain the existing review and push-approval gate.` : ''}
+  preserve PR history and run host verification; conflicts retain the existing review and push-approval gate.
+  refresh: true brings a stale PR up to date with its base now, even one GitHub still calls mergeable.` : ''}
 - For a progress question, read onionsoup_status request=<id> for the existing request and its host test/review evidence;
   state missing or superseded evidence plainly. Do not open duplicate work to obtain a status update. Status-only scope
   applies to that interaction; a separately accepted handoff continues under its own goal and approval gates.
@@ -1663,12 +1664,14 @@ const server: Plugin = async (input, options) => {
         },
       }),
       onionsoup_update_prs: tool({
-        description: 'Run your declared maintain-prs duty now for your existing published PRs. Host code selects their configured repositories and recorded heads, verifies clean base updates and pushes without rewriting PR history. Conflicts retain the existing independent review and push-approval gate. No repository, branch or head arguments can grant authority.',
-        args: {},
-        async execute(_args, context) {
+        description: 'Run your declared maintain-prs duty now for your existing published PRs. Host code selects their configured repositories and recorded heads, verifies clean base updates and pushes without rewriting PR history. Conflicts retain the existing independent review and push-approval gate. No repository, branch or head arguments can grant authority. The duty updates only PRs GitHub reports as conflicting or behind (GitHub says behind only when branch protection requires up-to-date branches); refresh: true also brings a mergeable PR whose head lacks the base tip up to date now.',
+        args: {
+          refresh: tool.schema.boolean().optional().describe('Also merge the current base into mergeable PRs that lack it (default false)'),
+        },
+        async execute(args, context) {
           const owner = await messageCaller(context);
-          context.metadata({ title: 'updating declared pull requests' });
-          return JSON.stringify(await updateOwnerPullRequests(runtime, owner.id));
+          context.metadata({ title: args.refresh ? 'refreshing declared pull requests' : 'updating declared pull requests' });
+          return JSON.stringify(await updateOwnerPullRequests(runtime, owner.id, { refresh: args.refresh === true }));
         },
       }),
       onionsoup_sync_desk: tool({
