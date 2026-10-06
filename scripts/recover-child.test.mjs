@@ -54,7 +54,8 @@ test('preview and digest approval recover one inactive HTTP400 child without rew
   assert.equal(saved.database,database);
   assert.deepEqual(await readFile(database),before);
   const admission=await createAdmission(input);
-  assert.equal(await admission.bootstrapQuiet(['ses_parent'],endpoint),true,'guarded rollout understands abandonment without claiming success');
+  const staleCandidate={childID:input.child,parentID:input.parent,directory:input.directory,digest:'0'.repeat(64)};
+  assert.equal(await admission.childRecoveryQuiet(staleCandidate,endpoint),true,'a recorded abandonment is terminal without claiming success');
 });
 
 test('busy child, pending prompt, independent process and changing history all refuse recovery',async context=>{

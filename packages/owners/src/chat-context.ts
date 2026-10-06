@@ -8,7 +8,7 @@ import type { Runtime } from './runtime.ts';
 
 export const CHAT_CONTEXT_DEFAULTS = {
   ageHours: 48, maxEntries: 32, maxChars: 8_000, entryChars: 2_000,
-  scanBytes: 131_072, noticeChars: 12_000, noticeSessions: 30,
+  scanBytes: 131_072, noticeSessions: 30,
 };
 export const ChatContextPolicy = z.object({
   ageHours: z.number().int().positive().default(CHAT_CONTEXT_DEFAULTS.ageHours),
@@ -16,7 +16,6 @@ export const ChatContextPolicy = z.object({
   maxChars: z.number().int().positive().default(CHAT_CONTEXT_DEFAULTS.maxChars),
   entryChars: z.number().int().positive().default(CHAT_CONTEXT_DEFAULTS.entryChars),
   scanBytes: z.number().int().positive().default(CHAT_CONTEXT_DEFAULTS.scanBytes),
-  noticeChars: z.number().int().positive().default(CHAT_CONTEXT_DEFAULTS.noticeChars),
   noticeSessions: z.number().int().positive().default(CHAT_CONTEXT_DEFAULTS.noticeSessions),
 });
 export type ChatContextPolicy = z.infer<typeof ChatContextPolicy>;

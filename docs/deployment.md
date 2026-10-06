@@ -130,7 +130,10 @@ exact names. The filter is quoted so spaces cannot silently exclude other tests.
 The stage prints these exceptions when verifying. It does not depend on `ONIONSOUP_DEPLOY_E2E`
 (which only opts into the outer real-archive test); ordinary `npm run verify` still runs all seven tests.
 
-The drain stops new admitted turns and requires all live leases to finish. The worker reads
+The drain stops new admitted turns and requires all live leases to finish. A lease whose process
+(PID and `/proc` start time) is gone never holds the drain; starting an admission or a drain deletes
+such dead leases for chat, chat-message, watcher, tool, surface, CLI, daemon and plugin-maintenance
+kinds, and leaves dead leases of any other kind in place for diagnosis. The worker reads
 `/session/status`, `/permission`, and `/question` for active declared owner chat/desk, operator
 and execution directories. Historical terminal session references and archived workspaces are
 not active probe targets: probing a removed directory must never initialize an old OpenCode
@@ -149,67 +152,7 @@ unreadable or malformed evidence retains the lease, as do in-flight messages, to
 and operator memory nudges. A held lease therefore needs investigation rather than manually
 clearing the drain on the strength of an absent status alone.
 
-Host exchange notices use a bounded delivery admission rather than a chat-turn admission. The
-plugin recognizes only a one-use, expiring delivery capability from the running host publisher,
-matched to the message, agent, directory and top-level session. The capability is removed before
-the message is persisted. A copied prefix, delivered notice ID, ordinary `noReply` API call, or
-message from another process does not authorize this bypass. A callback carrying an expired,
-consumed or unknown delivery capability is rejected before chat bookkeeping; a client timeout
-does not prove the server stopped. Ordinary messages without a capability retain normal gates.
-Exact delivered notice evidence may be ignored when checking a genuine turn's final reply. A
-later human message, changed notice, pending delivery or unknown entry remains blocking.
-
-### One-time bridge for the 04d26ea → 41aed2f deployment
-
-If the **already staged** target is `41aed2f0301d86f52e51f63aa9628faa70f5a233` and
-`current` still points to `04d26ea4857933f47b9b9650003706a6c70dc142`, the old
-opencode can retain live PID-bound chat leases even after its sessions go idle. The stable
-worker waits for those leases and cannot start its own drain. The one-time external
-`bootstrap-leases` command is for that exact transition. The previously installed stable
-worker does **not** have this handler; invoking it at `/opt/onionsoup-deploy` returns
-`unknown_command`. First prepare a separately reviewed bootstrap installation from the
-verified code containing this command and its matching `scripts/`, `packages/owners/`,
-`package.json`, lockfile and installed `node_modules`. Place the complete tree at a distinct,
-absolute path (for example `/opt/onionsoup-bootstrap-41aed2f`), and verify its contents and
-dependencies against the reviewed artifact before use. Install it while no bootstrap process
-is running, by copying to a new directory and atomically renaming that directory into place;
-never copy files into a running executable tree. **Do not overwrite or change** the stable
-worker installation, its service/timer command, or the currently running worker. The
-bootstrap process and stable timer share `deploy/worker.lock`, while the old worker remains
-able to process its existing checkpoint format. Run the separately installed command in an
-independent oneshot/timer **outside any surface/opencode chat**, with
-the same absolute `--root`, `--state`, `--config` and loopback `--surface-url` used by
-the worker, and both explicit expected full commit IDs:
-
-```text
-node /opt/onionsoup-bootstrap-41aed2f/scripts/deploy-release.mjs bootstrap-leases \
-  --root /absolute/release/root --state /absolute/onionsoup/state \
-  --config /absolute/onionsoup/config --surface-url http://127.0.0.1:4747/ \
-  --expected-old 04d26ea4857933f47b9b9650003706a6c70dc142 \
-  --expected-target 41aed2f0301d86f52e51f63aa9628faa70f5a233
-```
-
-It takes `deploy/worker.lock` against the timer, checks the exact pending intent,
-old pointer and manifests, authenticates the old opencode endpoint from its surface
-process identity, and accepts only live `chat:<session-id>` leases owned by that
-child PID and `/proc` start time. It probes known directories for busy statuses,
-permissions, questions, and independent opencode processes; for every leased parent
-and every descendant in its directory it requires the latest user message to be
-followed at the transcript tail by a completed assistant `stop` with that user's
-`parentID`. Missing or malformed transcript, ancestry or child enumeration holds the
-lease. These checks run through
-the same quiet interval on both sides of the admission-locked drain. If quiet, it
-restarts **only** the old surface (and its opencode child), verifies old-build health,
-changed child identity and dead leases, then leaves the intent **draining**. The
-existing worker timer finishes the target activation. A busy or unreadable probe
-before restart reopens admission where safe; uncertain post-restart health retains
-the drain and a bootstrap marker at `deploy/rollback.json` that the old worker's
-checkpoint validation also refuses; the timer and cancel path stay blocked for
-investigation. Check pending intent, endpoint and service health before
-retrying. This command is deliberately single-use for these two commits and does
-not install the worker or enable a timer.
-
-It checks both user units, the surface's reported build ID and opencode status, and the authenticated
+Readiness checks both user units, the surface's reported build ID and opencode status, and the authenticated
 `/global/health` on the opencode child whose private endpoint record matches the live surface
 process. The worker never accepts a caller-chosen opencode URL. The surface URL is the configured
 loopback endpoint from `deploy.env`, distinct from the private opencode endpoint.
@@ -256,90 +199,3 @@ the guarded deployment procedure; approval is not permission to delete its live 
 restart under the existing drain, activity checks, checkpoints and rollback health checks.
 
 Recovery receipts identify both the approving person (`--approved-by`) and the recording OS user. The command, state and live surface must belong to the same OS user. Receipts bind the canonical database path and full original child rows; changed, unavailable or newly extended evidence retains the admission. Every additional child requires its own explicit approval.
-
-### Recovering admissions stranded by informational notices
-
-`scripts/recover-notice-admissions.mjs` is a separate operator-only bridge for a surface whose
-older plugin admitted a host `noReply` exchange notice as a turn. It does not delete leases,
-rewrite transcripts, manufacture an answer, or treat an unfinished real turn as completed.
-The historical `bootstrap-leases` migration above retains its original pinned builds.
-
-First stage the approved target through the normal release process. Keep a separately verified
-copy of this recovery command and its dependencies outside the release root, at the reviewed
-commit. Supply the exact current and staged build IDs, paths and each selected session:
-
-```sh
-node --conditions=onionsoup-source --import tsx scripts/recover-notice-admissions.mjs \
-  --root /absolute/release/root --state /absolute/onionsoup/state \
-  --config /absolute/onionsoup/config --surface-url http://127.0.0.1:4747/ \
-  --expected-old <current-commit> --expected-target <staged-commit> \
-  --session <exact-session-id>
-```
-
-Repeat `--session` for every selected session. Preview is read-only. It requires that this exact
-set accounts for every live admission, that the leases belong to the verified surface's OpenCode
-process, and that all known directories are quiet without permissions, questions, independent
-OpenCode processes or active item runners. Selected chats must be top-level and have no children.
-Each trailing entry must match a durable delivered host notice in identity, target, agent and
-complete rendered text; the preceding real turn must have its own completed assistant final.
-Legacy delivery records can be reconstructed only for the pinned affected build
-`b2db85b5fa46b1d8f6608ab6e1c3e29a75da0f95`; other builds need recorded delivery evidence.
-
-After the person approves the returned digest and exact selection, repeat the command with
-`--approve-digest <digest> --approved-by <person>`. The receipt separately records the approving
-person and the OS user running the command. The digest binds both manifests, current pointer, endpoint identity,
-selected leases, transcript and notice evidence. Apply takes the worker lock, starts the drain,
-and repeats the evidence and quiet checks. It writes a durable recovery checkpoint before
-restarting only the old surface. Both services must then be healthy on the unchanged old build,
-the endpoint must identify a replacement process, and every admission must be dead. Original
-lease files and all conversation and notice records remain intact. An immutable completion
-receipt is saved under `state/deploy/notice-admission-recoveries/`; the drain remains held so
-the existing release worker can deploy the already approved target through its normal checks.
-
-An uncertain restart or failed health check retains `state/deploy/rollback.json` and the drain;
-the old worker recognizes the checkpoint and refuses to continue. Repeating the identical
-approved command may finish only after proving the replacement healthy and evidence unchanged.
-It never retries an uncertain restart. A completed receipt makes later repeats inert. Changed
-evidence, additional admissions, or incomplete work requires a fresh diagnosis and approval;
-never remove a checkpoint or lease to force progress.
-The identical approved digest can resume an interruption between starting the drain and writing
-the checkpoint. Failures before a checkpoint reopen admissions; any partial checkpoint remains
-held for diagnosis.
-
-### A failed native tool holding a completed tree
-
-OpenCode 1.18.33 skips `tool.execute.after` when a native tool throws. A plugin predating
-terminal-error reconciliation can therefore retain the child's tool marker on its parent
-after both have finished. Current plugins reconcile an exact persisted terminal error;
-the normal idle and final-answer checks still decide when a chat can be released.
-
-For the affected `b2db85b5fa46b1d8f6608ab6e1c3e29a75da0f95` runtime only, the notice recovery
-command accepts one additional `--failed-tool-proof /absolute/selection.json`. Include that
-tree's top-level session in the existing `--session` list. The JSON selection has these fields:
-
-```json
-{
-  "sessionID": "ses_exactParent",
-  "directory": "/absolute/plan/worktree",
-  "toolSessionID": "ses_exactChild",
-  "messageID": "msg_exactFailedAssistant",
-  "callID": "call_exactFailedPatch",
-  "treeDigest": "<64-character SHA-256 from the inspected tree>"
-}
-```
-
-The read-only `readFailedToolTree` helper in `scripts/failed-tool-admission-proof.mjs` produces
-the fingerprint from the verified endpoint's original messages and ancestry. Capture and
-inspect it before approval; a new digest is not permission to include new work. The proof
-requires the selected native `apply_patch` expected-lines validation error to be the only
-tool error in the entire tree, bound to its child's latest user turn. Every parent and
-descendant must have its own completed final answer, all tools must be terminal, and the
-exact tree must remain unchanged. Busy work, notices after a final answer, new children,
-different calls, missing evidence, another runtime version, or another old build refuse
-recovery. A completed tree without that failed-call evidence is ineligible.
-
-This proof supplements the existing notice proofs in the same digest, drain, checkpoint,
-single old-surface restart and immutable receipt. It does not abandon children, clear lease
-files, edit messages or invoke synthetic plugin callbacks. The global activity checks and
-uncertain-restart protections above still apply. No recovery or deployment follows from
-collecting the fingerprint or opening a draft change.

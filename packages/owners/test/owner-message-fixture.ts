@@ -1,10 +1,9 @@
 import type { Plugin } from '@opencode-ai/plugin';
-import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { ChatOrigin } from '../src/chat-origin.ts';
-import type { NoticeMessage } from '../src/exchange-notices.ts';
+import type { TranscriptMessage } from '../src/transcript-client.ts';
 import { MaintenancePass } from '../src/plugin-maintenance.ts';
 import { Runtime } from '../src/runtime.ts';
 import { rememberSession } from '../src/session-history.ts';
@@ -26,7 +25,7 @@ export async function messageFixture() {
   await git(checkout, ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', 'commit', '-q', '--allow-empty', '-m', 'Fixture']);
   await git(checkout, ['worktree', 'add', '-q', '-b', 'desk/homelab', chatPath(runtime, 'homelab')]);
   const sessions = new Map<string, Session>();
-  const transcripts = new Map<string, NoticeMessage[]>();
+  const transcripts = new Map<string, TranscriptMessage[]>();
   const busy = new Set<string>();
   const sends: Prompt[] = [];
   const queries: { method: string; id?: string; directory: string }[] = [];
@@ -72,10 +71,7 @@ export async function messageFixture() {
       },
     },
   } as unknown as Parameters<Plugin>[0]['client'];
-  const pass = () => new MaintenancePass(join(runtime.stateDirectory, 'test-passes', `${randomUUID()}.json`), {
-    version: 1, instanceID: randomUUID(), operationID: randomUUID(), kind: 'plugin:notices', directory: root,
-    startedAt: new Date().toISOString(), phase: 'work-notices', status: 'running', calls: [],
-  });
+  const pass = () => new MaintenancePass();
   const addSession = async (owner: string, id: string, directory = join(root, id), archived = false): Promise<ChatOrigin> => {
     if (!archived) await mkdir(directory, { recursive: true });
     const session = { id, directory, title: 'Fixture session', time: { created: 1, updated: 1, ...(archived ? { archived: 1 } : {}) } };

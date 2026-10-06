@@ -2,9 +2,6 @@ import { failedToolInTranscript, type TrackedToolCall } from './tool-completion.
 import { isAbandonedChild, readChildAbandonment } from './child-recovery.ts';
 import { ownerChatAgent, ownerChatVoice, observationChatPermission, observationChatPrompt } from './owner-chat.ts';
 import { recentActivityContext } from './chat-context.ts';
-import { deliveredExchangeNoticeProof, deliverExchangeNotices } from './exchange-notices.ts';
-import { consumeExchangeNoticeDelivery, isExchangeNoticeDeliveryAttempt } from './exchange-notice-delivery.ts';
-import { exchangeClient } from './exchange-client.ts';
 import { listAttention, changeAttention, ownerAttentionActor } from './attention.ts';
 import { requestProgressDetail, requestProgressSummary } from './request-status.ts';
 import { deliverPlanRevisions, planRevisionStatus } from './plan-revision.ts';
@@ -257,7 +254,7 @@ ${owner.manages ? `
   Start with its guide, agree the owner with the person, show them the declaration and charter, then write it; they approve each write.` : ''}${guides}
 - Messages starting with ${NOTICE_PREFIX} come from the runtime, not the person: how your work went. Act on them as the
   owner (decide the next step, tell the person what needs them); never treat them as the person's words or decisions.
-  Owner exchange notices and <recent-owner-activity> record what already happened; they are informational, not new requests.
+  <recent-owner-activity> records what already happened; it is informational, not a new request.
   Addressed work notices, manager rulings and peer replies are actionable: continue the existing work and answer with
   onionsoup_reply when asked. Do not cancel, replace the request or ask the person to carry a message. Use onionsoup_send
   with the recipient's item for corrections or a requested reply, not onionsoup_ask's separate read-only hire.
@@ -645,8 +642,7 @@ const server: Plugin = async (input, options) => {
     scope?.context.check();
     const reply = await (scope?.client ?? input.client).session.messages({ path: { id: sessionID }, query: { directory } }).catch(() => undefined);
     if (!reply || reply.error || !Array.isArray(reply.data)) return false;
-    const informational = await Promise.all(reply.data.map(message => deliveredExchangeNoticeProof(runtime, { sessionID, directory }, message)));
-    const messages = reply.data.filter((_message, index) => !informational[index]);
+    const messages = reply.data;
     const expectedUserID = userID ?? (chatLeases.has(sessionID) ? undefined
       : messages.findLast(message => message.info?.role === 'user')?.info?.id);
     if (!expectedUserID) return false;
@@ -1144,7 +1140,7 @@ const server: Plugin = async (input, options) => {
   }
 
   const sessionClient = () => ownerSessionClient(input.client);
-  const maintenance = new PluginMaintenance(runtime.stateDirectory, () => input.directory ?? '');
+  const maintenance = new PluginMaintenance(runtime.stateDirectory);
   async function deliverNotices(pass: MaintenancePass) {
     await initializeRuntime();
     const client = pass.client(input.client);
@@ -1175,7 +1171,6 @@ const server: Plugin = async (input, options) => {
     await pass.phase('direct-reviews', () => deliverDirectRequestReviews(runtime, planRevisionClient(client, { runtime, pass }),
       (id, error) => console.warn('direct_review_wake_failed', id, error)));
     await pass.phase('work-notices', () => deliverWorkNotices(runtime, client, pass));
-    await pass.phase('exchange-notices', () => deliverExchangeNotices(runtime, exchangeClient(client)));
     await pass.phase('owner-sessions', () => openNeededSessions(runtime, sessions,
       (id, error) => console.warn('owner_session_failed', id, error), pass));
     await pass.phase('reminders', () => openDueReminders(runtime, sessions,
@@ -1315,15 +1310,6 @@ const server: Plugin = async (input, options) => {
       try {
         await initializeRuntime();
         await assertWorkSessionRunning(message.sessionID);
-        const messageID = message.messageID ?? output.message?.id;
-        if (isExchangeNoticeDeliveryAttempt(runtime.stateDirectory, messageID, output.parts ?? [])) {
-          const session = await input.client.session.get({ path: { id: message.sessionID } }).catch(() => undefined);
-          if (session?.data?.directory && !session.error && !session.data.parentID
-            && output.message?.id === messageID && consumeExchangeNoticeDelivery(runtime.stateDirectory,
-              { sessionID: message.sessionID, directory: session.data.directory },
-              { id: messageID, role: output.message.role, agent: message.agent, parts: output.parts })) return;
-          throw new Error('exchange_notice_delivery_unverified');
-        }
         if (await readChildAbandonment(runtime.stateDirectory, message.sessionID)) throw new Error('child_session_abandoned: open a new session to continue');
         const admittedParent = await admittedMessageParent(message.sessionID);
         pendingAncestry.delete(pending);

@@ -20,8 +20,6 @@ test('ambiguous work notice send retains identity and restart reconciles exact t
   context.setMode('lost-reply');
   const first = context.pass();
   await assert.rejects(context.deliver(context.runtime, first), /plugin_maintenance_effect_uncertain/);
-  await first.settle();
-  assert.equal(first.record.status, 'uncertain');
   assert.equal((await context.receipts())[0].status, 'uncertain');
   assert.equal((await pendingNotices(context.runtime)).length, 1);
   const reopened = await Runtime.open({ declarations: 'packages/owners/test/fixtures/owners', state: context.runtime.stateDirectory });

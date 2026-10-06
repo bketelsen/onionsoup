@@ -132,7 +132,7 @@ requests from this identity. Opening chat creates its workspace folder if missin
 create a desk. Normal conversation history, context and decision journaling still work; this is observation-only
 with respect to domain effects, not a promise that chat creates no runtime records.
 
-Previously quarantined exchange notices remain quarantined. Reminder dispatch remains persona-gated, including
+Reminder dispatch remains persona-gated, including
 already pending reminders; this change never wakes them. `canChange` and plan execution retain their existing persona requirement. This is a
 compatible chat-availability change, not an automatic migration to new repository-write authority. The operator
 remains a separately configured identity. Registering the new agents requires the normal surface restart procedure;
@@ -431,18 +431,8 @@ close the remote PR, blacklist ordinary errors or suppress maintenance when the 
 
 Owners ask each other questions (`onionsoup_ask`: answered from the other owner's notebook and fresh evidence,
 split into observed, inferred and unknown). Both owners journal the exchange (`asked`, `answered`) and see it in
-their recent activity; no chat is posted a copy. Exchange notices already in the queue still go to the owner's
-latest person chat, discovered from existing nonchild sessions and persona user messages. The plugin
-waits for that chat to be idle, then posts with `noReply`; the decision watcher skips runtime notices. No person
-chat means the notice stays pending. A pinned destination and stable message ID reconcile a post accepted before
-a crash; transport failures retain the queue entry. Full exchanges remain in `notices/exchanges` under the state
-directory, and shortened notices cite their record ID. Delivery records preserve the exact rendered text and
-agent; acceptance reconciliation requires that exact persisted message, not its ID alone. An expiring host-only
-delivery capability exempts the informational post from chat-turn admission while a bounded delivery lease
-protects the post itself. Genuine messages retain normal gates, even when they copy notice text. Completed
-real turns can ignore exact delivered notices at their tail; old stranded admissions need the separate
-[operator recovery procedure](../deployment.md#recovering-admissions-stranded-by-informational-notices).
-Owners also open requests to each other.
+their recent activity; no chat is posted a copy. Exchange notices left in `notices/exchanges` by older builds
+are inert: nothing delivers them. Owners also open requests to each other.
 
 **Addressed conversation is not consultation.** `onionsoup_send { to, text, item?, session? }` queues actionable
 conversation for a declared owner's actual context; `onionsoup_reply { message, text }` returns to the recorded
@@ -647,14 +637,12 @@ matching surface release manifest and a host opencode plugin URL through that po
 worker discovers the surface's spawned, authenticated opencode endpoint through the shared
 state directory. Its drain covers admitted work and known chat directories, not every
 possible independent opencode session; its readiness checks do not attest the loaded plugin.
-Each OpenCode plugin instance owns its maintenance timers. Its `dispose` hook stops all three timers,
-shares cancellation across maintenance reads, and returns after a bounded wait. A transport that ignores
-cancellation still owns its admission until its underlying promise settles; a timeout is not completion.
-Maintenance admissions carry instance, operation and directory identity. The latest operation record for
-each instance/kind in `state/plugin-maintenance/` records its phase, pending or uncertain SDK calls and
-settled/released status. Uncertain passes are archived before a later pass runs; their admissions remain
-held, while exact domain claims prevent replay and unrelated maintenance can continue. This is
-maintenance evidence, not proof that a chat or child completed.
+Each OpenCode plugin instance owns its maintenance timers. Its `dispose` hook stops the timers,
+shares cancellation across maintenance reads, and returns after a bounded wait. Each pass holds an
+admission lease until its SDK calls settle, then releases it, even when an invoked effect's outcome is
+uncertain; a transport that ignores cancellation keeps the lease until its promise settles. Exact domain
+receipts (work notice deliveries, session openings) prevent replaying an uncertain effect. A pass that
+overruns its time budget is stopped and logged with its phase; nothing else is recorded.
 Successful late effect receipts may be saved, but stopped passes cannot start another SDK effect or phase.
 An already-started host placement or stash/restore transaction finishes under its held admission.
 

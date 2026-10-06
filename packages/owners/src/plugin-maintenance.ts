@@ -1,85 +1,51 @@
 import { randomUUID } from 'node:crypto';
-import { join } from 'node:path';
-import { z } from 'zod';
 import type { Plugin } from '@opencode-ai/plugin';
-import { AdmissionRecord, beginAdmission, type AdmissionLease } from './deployment-admission.ts';
-import { writeDurableFile } from './durable-file.ts';
+import { beginAdmission } from './deployment-admission.ts';
 import { MaintenanceEffectNotStarted, MaintenanceUncertainError, type MaintenanceContext } from './maintenance-context.ts';
 
 export const PLUGIN_MAINTENANCE_LIMITS = { budgetMs: 20_000, disposeMs: 1_000, effectTimeoutMs: 10_000 };
-export const MaintenanceOperation = z.object({
-  version: z.literal(1), instanceID: z.uuid(), operationID: z.uuid(), kind: z.string(), directory: z.string(),
-  admission: AdmissionRecord.optional(), startedAt: z.string(), endedAt: z.string().optional(),
-  status: z.enum(['running', 'stopping', 'uncertain', 'settled', 'released']), phase: z.string(),
-  calls: z.array(z.object({ id: z.uuid(), method: z.string(), effect: z.boolean(),
-    status: z.enum(['pending', 'uncertain']) })),
-});
-type Operation = z.infer<typeof MaintenanceOperation>;
 type Client = Parameters<Plugin>[0]['client'];
+/** Whether each SDK session method has an effect outside the plugin. */
 const METHODS: Record<string, boolean> = {
   get: false, list: false, status: false, messages: false, children: false,
   create: true, prompt: true, promptAsync: true, delete: true, abort: true,
 };
 
-/** One pass owns its promises until they actually settle, even when a transport ignores abort. */
+function isErrorResponse(response: unknown) {
+  return !!response && typeof response === 'object' && 'error' in response && !!response.error;
+}
+
+/** One pass owns its SDK calls until they actually settle, even when a transport ignores abort. */
 export class MaintenancePass implements MaintenanceContext {
   readonly controller = new AbortController();
   readonly signal = this.controller.signal;
-  private writing: Promise<void> = Promise.resolve();
+  currentPhase = 'admitted';
   private readonly pending = new Set<Promise<unknown>>();
-  constructor(readonly path: string, readonly record: Operation,
-    readonly limits = PLUGIN_MAINTENANCE_LIMITS) {}
+  constructor(readonly limits = PLUGIN_MAINTENANCE_LIMITS) {}
 
   check() { this.signal.throwIfAborted(); }
 
-  save() {
-    const snapshot = JSON.stringify(MaintenanceOperation.parse(this.record), null, 2);
-    this.writing = this.writing.catch(() => undefined).then(() => writeDurableFile(this.path, snapshot));
-    return this.writing;
-  }
-
-  stop() {
-    this.controller.abort(new Error('plugin_maintenance_stopped'));
-    if (this.record.status !== 'running') return;
-    this.record.status = 'stopping';
-    void this.save().catch(() => undefined);
-  }
+  stop() { this.controller.abort(new Error('plugin_maintenance_stopped')); }
 
   async phase<T>(name: string, operation: () => Promise<T>): Promise<T> {
     this.check();
-    this.record.phase = name;
-    await this.save();
-    this.check();
+    this.currentPhase = name;
     return operation();
   }
 
-  private async invoke<T>(method: string, effect: boolean, operation: () => Promise<T>) {
+  /** A stopped pass never starts an effect; an invoked effect that fails is uncertain, not proven unsent. */
+  private async invoke<T>(effect: boolean, operation: () => Promise<T>) {
     if (this.signal.aborted) throw effect ? new MaintenanceEffectNotStarted() : this.signal.reason;
-    const call: Operation['calls'][number] = { id: randomUUID(), method, effect, status: 'pending' };
-    let invoked = false;
+    let response: T;
     try {
-      this.check();
-      this.record.calls.push(call);
-      await this.save();
-      this.check();
-      invoked = true;
-      const response = await operation();
-      if (effect && response && typeof response === 'object' && 'error' in response && response.error) {
-        throw new MaintenanceUncertainError();
-      }
-      if (!effect) this.check();
-      return response;
+      response = await operation();
     } catch (error) {
-      if (effect && invoked) {
-        call.status = 'uncertain';
-        throw new MaintenanceUncertainError();
-      }
-      if (effect && !invoked) throw new MaintenanceEffectNotStarted();
+      if (effect) throw new MaintenanceUncertainError();
       throw error;
-    } finally {
-      if (call.status !== 'uncertain') this.record.calls = this.record.calls.filter(current => current !== call);
-      await this.save();
     }
+    if (effect && isErrorResponse(response)) throw new MaintenanceUncertainError();
+    if (!effect) this.check();
+    return response;
   }
 
   /** Only this pass's adapters use this client; foreground tools and detached workers retain their own lifecycle. */
@@ -92,7 +58,7 @@ export class MaintenancePass implements MaintenanceContext {
         if (effect === undefined) throw new Error('plugin_maintenance_method_unsupported');
         const signals = [effect ? AbortSignal.timeout(this.limits.effectTimeoutMs) : this.signal];
         if (options.signal instanceof AbortSignal) signals.push(options.signal);
-        const pending = this.invoke(String(property), effect,
+        const pending = this.invoke(effect,
           () => Reflect.apply(method, target, [{ ...options, signal: AbortSignal.any(signals) }]) as Promise<unknown>);
         this.pending.add(pending);
         void pending.finally(() => this.pending.delete(pending)).catch(() => undefined);
@@ -102,12 +68,9 @@ export class MaintenancePass implements MaintenanceContext {
     return new Proxy(client, { get: (target, property) => property === 'session' ? session : Reflect.get(target, property) });
   }
 
+  /** Promise.all may have rejected while sibling calls are still active. Never release ahead of those calls. */
   async settle() {
-    // Promise.all may have rejected while sibling calls are still active. Never release ahead of those calls.
     await Promise.allSettled([...this.pending]);
-    this.record.status = this.record.calls.length ? 'uncertain' : 'settled';
-    this.record.endedAt = new Date().toISOString();
-    await this.save();
   }
 }
 
@@ -122,16 +85,14 @@ interface Slot {
   timer: ReturnType<typeof setInterval>;
   running?: Promise<void>;
   pass?: MaintenancePass;
-  cleanup?: () => Promise<void>;
 }
 
-/** Timers belong to one actual OpenCode instance. Legacy leases are never adopted or cleaned here. */
+/** Timers belong to one actual OpenCode instance; each pass holds an admission lease until its calls settle. */
 export class PluginMaintenance {
   readonly instanceID = randomUUID();
   private stopped = false;
   private readonly slots: Slot[] = [];
-  constructor(readonly home: string, readonly directory: string | (() => string),
-    readonly limits = PLUGIN_MAINTENANCE_LIMITS) {}
+  constructor(readonly home: string, readonly limits = PLUGIN_MAINTENANCE_LIMITS) {}
 
   start(kind: string, intervalMs: number, operation: (pass: MaintenancePass) => Promise<unknown>,
     onError: (error: unknown) => void, admitted = true) {
@@ -153,46 +114,24 @@ export class PluginMaintenance {
   }
 
   private async tick(slot: Slot, kind: string, operation: (pass: MaintenancePass) => Promise<unknown>, admitted: boolean) {
-    if (slot.cleanup) await slot.cleanup();
-    if (this.stopped) return;
-    if (slot.pass?.record.status === 'uncertain') {
-      const previous = slot.pass.record;
-      await writeDurableFile(join(this.home, 'plugin-maintenance', this.instanceID, 'uncertain', `${previous.operationID}.json`),
-        JSON.stringify(MaintenanceOperation.parse(previous), null, 2));
-    }
-    const operationID = randomUUID();
-    const directory = typeof this.directory === 'function' ? this.directory() : this.directory;
-    const metadata = { instanceID: this.instanceID, operationID, directory };
-    const lease = admitted ? await beginAdmission(this.home, kind, metadata) : undefined;
-    const record = MaintenanceOperation.parse({ version: 1, ...metadata, kind, admission: lease,
-      startedAt: new Date().toISOString(), status: 'running', phase: 'admitted', calls: [] });
-    const path = join(this.home, 'plugin-maintenance', this.instanceID, `${kind.replaceAll(':', '-')}.json`);
-    const pass = new MaintenancePass(path, record, this.limits);
+    const lease = admitted ? await beginAdmission(this.home, kind) : undefined;
+    const pass = new MaintenancePass(this.limits);
     slot.pass = pass;
     if (this.stopped) pass.stop();
-    const deadline = setTimeout(() => pass.stop(), this.limits.budgetMs);
+    const deadline = setTimeout(() => {
+      console.warn('plugin_maintenance_budget_exceeded', kind, pass.currentPhase);
+      pass.stop();
+    }, this.limits.budgetMs);
     deadline.unref?.();
     try {
-      await pass.save();
       pass.check();
       await operation(pass);
     } finally {
       pass.stop();
       clearTimeout(deadline);
       await pass.settle();
-      if (record.status === 'settled') await this.release(slot, pass, lease);
-    }
-  }
-
-  private async release(slot: Slot, pass: MaintenancePass, lease?: AdmissionLease) {
-    // Persist settled proof before unlink. A failed unlink is retried by the owning slot, not a new operation.
-    slot.cleanup = async () => {
       await lease?.release();
-      pass.record.status = 'released';
-      await pass.save();
-      slot.cleanup = undefined;
-    };
-    await slot.cleanup();
+    }
   }
 
   async dispose() {
@@ -209,7 +148,5 @@ export class PluginMaintenance {
       ]);
     } finally { clearTimeout(timer); }
     for (const [kind, holder] of processHolders) if (holder === this.instanceID) processHolders.delete(kind);
-    // Only positive settled proof permits a cleanup retry. Unknown and still-running calls remain admitted.
-    for (const slot of this.slots) if (slot.cleanup) void slot.cleanup().catch(() => undefined);
   }
 }

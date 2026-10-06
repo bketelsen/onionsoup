@@ -45,7 +45,7 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
 - **An unconfirmed pause remains stopping.** Intentional pause survives restart and peer messages, but a live
   runner, unknown session opening or unconfirmed execution-tree stop remains `pausing` with its claim/receipt.
   Neither idle prose nor process age proves stopping. Explicit resume is available only after positive stopped
-  evidence and unchanged approved intent; uncertain SDK admissions remain non-replayable.
+  evidence and unchanged approved intent; uncertain SDK effects remain non-replayable.
 
 - **Uncertain direct-request review wakes need exact receipts.** A requester who is the receiving owner's manager
   can review under its existing applicable `approve-plans` grant. A separate durable continuation wakes that
@@ -94,11 +94,8 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
   cannot attest the responding build or loaded plugin. The person accepted this risk for
   [guarded deployment](deployment.md); a global status protocol and plugin attestation remain
   follow-ups. `Type=simple` does not itself signal readiness.
-- **Legacy maintenance admissions lack operation proof.** Instance disposal now stops maintenance timers,
-  and new records bind maintenance to instance/operation identity. This cannot identify the unfinished
-  operation behind an older live-PID lease. Age, idle chats and a stopped lock helper do not prove its
-  effect completed. Guarded rollout continues to refuse those leases. Unknown new session openings or
-  notice sends retain their exact claims and receipts without replay; recovery is not implemented.
+- **Uncertain session openings and notice sends have no recovery command.** They retain their exact claims and
+  receipts without replay; a person diagnoses them.
 - **snosi builds run only in CI.** mkosi needs root, so Murbella verifies with snosi's static checks and relies on
   GitHub Actions for builds (CI failures wake her). Local builds would need a privileged build VM on minideb,
   requested from Miles Teg like the smoke-test instances.

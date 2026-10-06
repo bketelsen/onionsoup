@@ -16,8 +16,16 @@ export const AdmissionRecord = z.object({
   kind: z.string().trim().min(1),
   pid: z.number().int().positive(),
   startTime: z.string().regex(/^\d+$/),
+  /** Written by older plugins; still parsed so their lease files stay readable. */
   maintenance: z.object({ instanceID: z.uuid(), operationID: z.uuid(), directory: z.string() }).optional(),
 });
+
+/** A dead lease of these kinds held only its own process's turn, tool, request or pass; nothing is left to finish. */
+const PRUNABLE_KINDS = [
+  /^(chat|chat-message|watcher|tool|surface)(:|$)/,
+  /^(cli|daemon)(-|$)/,
+  /^plugin:(notices|operator-jobs|chat-reconciliation)$/,
+];
 
 export type Admission = z.infer<typeof AdmissionRecord> & { alive: boolean };
 export type AdmissionLease = Admission & { release(): Promise<void> };
@@ -28,6 +36,12 @@ function deployDirectory(stateDirectory: string): string {
 
 async function withAdmissionLock<T>(stateDirectory: string, operation: () => Promise<T>): Promise<T> {
   return withRecordLock(join(deployDirectory(stateDirectory), 'admission.lock'), operation);
+}
+
+async function unlinkIfPresent(path: string): Promise<void> {
+  await unlink(path).catch(error => {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  });
 }
 
 async function atomicJson(path: string, value: unknown): Promise<void> {
@@ -49,9 +63,7 @@ async function atomicJson(path: string, value: unknown): Promise<void> {
       await parent.close();
     }
   } finally {
-    await unlink(temporary).catch(error => {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-    });
+    await unlinkIfPresent(temporary);
   }
 }
 
@@ -116,16 +128,28 @@ async function readAdmissions(stateDirectory: string): Promise<Admission[]> {
   return admissions;
 }
 
+function isPrunable(admission: Admission) {
+  return !admission.alive && PRUNABLE_KINDS.some(pattern => pattern.test(admission.kind));
+}
+
+/** Deletes dead leases of prunable kinds; a live lease, or a dead one of another kind, is never removed. */
+async function pruneDeadAdmissions(stateDirectory: string): Promise<Admission[]> {
+  const admissions = await readAdmissions(stateDirectory);
+  const dead = admissions.filter(isPrunable);
+  const leases = join(deployDirectory(stateDirectory), 'leases');
+  await Promise.all(dead.map(admission => unlinkIfPresent(join(leases, `${admission.id}.json`))));
+  return admissions.filter(admission => !dead.includes(admission));
+}
+
 /** Atomically checks the drain gate and persists a lease before returning to the caller. */
-export async function beginAdmission(stateDirectory: string, kind: string,
-  maintenance?: z.infer<typeof AdmissionRecord>['maintenance']): Promise<AdmissionLease> {
+export async function beginAdmission(stateDirectory: string, kind: string): Promise<AdmissionLease> {
   const admitted = await withAdmissionLock(stateDirectory, async () => {
     const intent = await readIntent(stateDirectory);
     if (intent?.status === 'draining') throw new Error('deployment_draining');
-    await readAdmissions(stateDirectory);
+    await pruneDeadAdmissions(stateDirectory);
     const startTime = await processStartTime(process.pid);
     if (!startTime) throw new Error('deployment_process_state_unknown');
-    const record = AdmissionRecord.parse({ id: randomUUID(), kind, pid: process.pid, startTime, maintenance });
+    const record = AdmissionRecord.parse({ id: randomUUID(), kind, pid: process.pid, startTime });
     await mkdir(join(deployDirectory(stateDirectory), 'leases'), { recursive: true });
     await atomicJson(join(deployDirectory(stateDirectory), 'leases', `${record.id}.json`), record);
     return record;
@@ -145,7 +169,7 @@ export async function beginAdmission(stateDirectory: string, kind: string,
   };
 }
 
-/** Includes dead leases for diagnostics; only alive leases prevent completing a drain. */
+/** Includes dead leases not yet pruned; only alive leases prevent completing a drain. */
 export async function listAdmissions(stateDirectory: string): Promise<Admission[]> {
   return withAdmissionLock(stateDirectory, () => readAdmissions(stateDirectory));
 }
@@ -190,7 +214,7 @@ export async function beginDrain(stateDirectory: string, targetBuildId: string):
     if (!current) throw new Error('deployment_not_armed');
     if (current.targetBuildId !== targetBuildId) throw new Error('deployment_target_mismatch');
     if (!['armed', 'waiting', 'draining'].includes(current.status)) throw new Error('deployment_not_armed');
-    const admissions = await readAdmissions(stateDirectory);
+    const admissions = await pruneDeadAdmissions(stateDirectory);
     if (current.status !== 'draining') await writeIntent(stateDirectory, { ...current, status: 'draining' });
     return admissions;
   });
@@ -212,7 +236,7 @@ export async function pauseDrain(stateDirectory: string, targetBuildId: string):
   });
 }
 
-/** Only a drained deployment can leave the admission gate; dead leases remain visible. */
+/** Only a drained deployment can leave the admission gate; dead leases never hold it. */
 export async function releaseDrain(
   stateDirectory: string,
   targetBuildId: string,

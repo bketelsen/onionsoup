@@ -191,7 +191,7 @@ export async function createAdmission(input) {
       endpoint.opencodePid !== expectedEndpoint.opencodePid ||
       endpoint.opencodeStartTime !== expectedEndpoint.opencodeStartTime ||
       endpoint.surfacePid !== expectedEndpoint.surfacePid || endpoint.url !== expectedEndpoint.url)) {
-      throw fail('bootstrap_endpoint_changed');
+      throw fail('quiet_endpoint_changed');
     }
     if (await processes(endpoint)) return false;
     const scopes = await directories(runtime);
@@ -209,12 +209,12 @@ export async function createAdmission(input) {
       if (!Array.isArray(sessions)) throw fail('deployment_opencode_invalid');
       for (const session of sessions) {
         if (!chatSessions.includes(session?.id)) continue;
-        if (session.parentID || session.directory !== directory) throw fail('bootstrap_session_unverified');
+        if (session.parentID || session.directory !== directory) throw fail('quiet_session_unverified');
         found.add(session.id);
         if (!await completedTree(endpoint, session, directory, status, new Set(), candidate)) return false;
       }
     }
-    if (found.size !== chatSessions.length) throw fail('bootstrap_session_unverified');
+    if (found.size !== chatSessions.length) throw fail('quiet_session_unverified');
     checks.onProbe?.();
     return true;
   }
@@ -238,14 +238,6 @@ export async function createAdmission(input) {
       for (let sample = 0; sample < QUIET_SAMPLES; sample++) {
         await sleep(QUIET_SAMPLE_MS);
         if (!await probe(options)) return false;
-      }
-      return true;
-    },
-    async bootstrapQuiet(chatSessions, expectedEndpoint) {
-      if (!await probe({ ignoreLeases: true, chatSessions, expectedEndpoint })) return false;
-      for (let sample = 0; sample < QUIET_SAMPLES; sample++) {
-        await sleep(QUIET_SAMPLE_MS);
-        if (!await probe({ ignoreLeases: true, chatSessions, expectedEndpoint })) return false;
       }
       return true;
     },
