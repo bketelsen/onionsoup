@@ -4,7 +4,6 @@ import type { ChatOrigin } from './chat-origin.ts';
 import { chatDirectory } from './chats.ts';
 import { deskSyncText, syncOwnerDesk, type DeskSyncReport } from './desk-sync.ts';
 import type { WorkItem } from './ledger.ts';
-import { isPaused } from './ledger.ts';
 import { executionPrompt, OWNER_CHANGE_WORKFLOW, planningPrompt } from './plan-work.ts';
 import { ensurePlanWorktree, syncPlanWorktree } from './plan-worktrees.ts';
 import { rememberSession, itemSessionHistory } from './session-history.ts';
@@ -126,13 +125,7 @@ function openingItemBinding(item: WorkItem) {
 async function claim(runtime: Runtime, item: WorkItem, kind: SessionKind, origin: ChatOrigin) {
   try {
     return await runtime.ledger.update(item.id, current => {
-      const comparable = isPaused(current) && current.pauses.at(-1)?.resumeStatus === item.status
-        ? { ...current, status: item.status, reason: item.reason, humanNotes: item.humanNotes,
-          pauses: item.pauses, updatedAt: item.updatedAt }
-        : current;
-      if (!kind.isNeeded(comparable) || JSON.stringify(comparable) !== JSON.stringify(item)) {
-        throw new Error('owner_session_already_open');
-      }
+      if (!kind.isNeeded(current) || JSON.stringify(current) !== JSON.stringify(item)) throw new Error('owner_session_already_open');
       return { ...current, ...kind.recorded(origin, current.owner) };
     });
   } catch (error) {
@@ -170,18 +163,11 @@ export async function createOpeningSession(store: SessionOpeningStore, reservati
 }
 
 export async function promptOpeningSession(store: SessionOpeningStore, reservation: SessionOpening,
-  client: OwnerSessionClient, origin: ChatOrigin, agent: string, text: string,
-  context?: MaintenanceContext, beforePrompt?: () => Promise<void>) {
+  client: OwnerSessionClient, origin: ChatOrigin, agent: string, text: string, context?: MaintenanceContext) {
   context?.check();
   await store.advance(reservation, 'prompting');
   await sessionOpeningPhase(context, 'session-prompt', async () => {
     context?.check();
-    try {
-      await beforePrompt?.();
-    } catch (error) {
-      await store.stoppedBeforePrompt(reservation);
-      throw error;
-    }
     await client.prompt(origin, agent, text, reservation.messageID);
     await store.advance(reservation, 'opened');
   });
@@ -217,11 +203,7 @@ export async function openOwnerSession(runtime: Runtime, client: OwnerSessionCli
     for (const session of itemSessionHistory(claimed)) {
       await rememberSession(runtime, session).catch(() => console.warn('owner_session_history_not_recorded', item.id, session.id));
     }
-    if (isPaused(await runtime.ledger.get(itemId))) throw new Error('work_item_paused');
-    await promptOpeningSession(store, reservation, client, origin, persona.name, `${kind.prompt(claimed)}${note}`,
-      context, async () => {
-        if (isPaused(await runtime.ledger.get(itemId))) throw new Error('work_item_paused');
-      });
+    await promptOpeningSession(store, reservation, client, origin, persona.name, `${kind.prompt(claimed)}${note}`, context);
     context?.check();
     await runtime.notebook(item.owner).journal({ kind: 'owner-session-opened', workItem: item.id, outcome: kindName, session: origin.sessionID });
     return origin;
@@ -236,7 +218,6 @@ export async function openOwnerSession(runtime: Runtime, client: OwnerSessionCli
 
 async function requireOpeningItem(runtime: Runtime, expected: WorkItem) {
   const current = await runtime.ledger.get(expected.id);
-  if (isPaused(current)) throw new Error('work_item_paused');
   if (JSON.stringify(current) !== JSON.stringify(expected)) throw new Error('owner_session_item_changed');
 }
 

@@ -4,8 +4,7 @@ import { z } from 'zod';
 import { chatDirectory, chatPath } from './chats.ts';
 import type { ChatOrigin } from './chat-origin.ts';
 import { transcriptClient, type TranscriptMessage } from './transcript-client.ts';
-import { isPaused, type WorkItem } from './ledger.ts';
-import { pausedSessionItem } from './work-pause.ts';
+import type { WorkItem } from './ledger.ts';
 import type { MaintenancePass } from './plugin-maintenance.ts';
 import type { WorkNotice } from './notices.ts';
 import { ownerChatAgent } from './owner-chat.ts';
@@ -82,7 +81,6 @@ async function usableTarget(runtime: Runtime, client: Parameters<Plugin>[0]['cli
 async function recipientItem(runtime: Runtime, notice: WorkNotice, client: Parameters<Plugin>[0]['client'], pass: MaintenancePass) {
   const item = notice.workItem ? await runtime.ledger.get(notice.workItem) : undefined;
   if (!item || item.owner !== notice.owner) return undefined;
-  if (isPaused(item)) throw new Error('work_item_paused');
   if (item.activeRunner) throw new Error('owner_message_item_runner_busy');
   if (!neededSession(item)) return item;
   // The canonical reservation owns initial planning/execution. A message cannot race it with another opener.
@@ -169,7 +167,6 @@ async function continuation(runtime: Runtime, client: Parameters<Plugin>[0]['cli
 
 /** Exact owned sessions win. Only positive retirement/absence permits a fresh declared-workspace continuation. */
 export async function routeOwnerNotice(runtime: Runtime, client: Parameters<Plugin>[0]['client'], pass: MaintenancePass, notice: WorkNotice) {
-  if (notice.origin && await pausedSessionItem(runtime, notice.origin.sessionID)) throw new Error('work_item_paused');
   const { target, item, isUsable } = await targetForNotice(runtime, notice, client, pass);
   if (target && isUsable) return { origin: target, context: '' };
   const remembered = target ? await rememberedSession(runtime, target.sessionID) : undefined;

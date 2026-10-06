@@ -10,11 +10,8 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
   addressed owner continuations carry bounded retained context into a fresh declared workspace. Existing explicit
   ledger references are readable without a bulk backfill.
 
-- **Attention assignment is repository-only.** Seen remains inert; explicit assignment creates one gated request
-  without resolving the attention entry. Assignment generations, reassignment and a blocked-routing recovery UI
-  remain follow-ups. Seen leaves the human decision queue and stays in owner history; existing acknowledged
-  notes are never automatically interpreted as assignments.
-  Host-bound person Seen remains valid for legacy entries; owners cannot acknowledge/resolve/reopen human
+- **Attention is not work.** Seen leaves the human decision queue and stays in owner history; nothing in the inbox
+  turns an attention entry into work, so the person asks an owner in chat. Host-bound person Seen remains valid for legacy entries; owners cannot acknowledge/resolve/reopen human
   decisions or unknown provenance. Typed owner-housekeeping remains freely actionable.
 
 - **Unclassified legacy attention still needs interpretation.** New survey suggestions and maintenance carry host
@@ -33,19 +30,12 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
 - **Cross-owner progress is recorded state, not omniscience.** Request participants and the receiving owner's
   direct manager can read linked progress without relaying it through the person; nothing posts it into their
   chats. Request-scoped host proposal attempts expose bounded test/review evidence, with stale and superseded labels.
-  External/manual work has no such evidence until a supported host proposal or reconciliation runs.
+  External/manual work has no such evidence until a supported host proposal runs.
   Status does not independently check live services or prove deployment.
 
-- **Legacy operational reports may lack host evidence.** Non-PR completion now uses configured checks,
-  original-work execution provenance, supported Incus resource postconditions and one final independent-family
-  review. Old transcript-only E2E or cleanup reports cannot be imported as verification. Missing origin,
-  request tagging, creation checkpoints or required follow-up receipts need concrete owner re-verification,
-  not a fake PR or another human closure ceremony. Unsupported resource effect kinds remain unavailable.
-
-- **An unconfirmed pause remains stopping.** Intentional pause survives restart and peer messages, but a live
-  runner, unknown session opening or unconfirmed execution-tree stop remains `pausing` with its claim/receipt.
-  Neither idle prose nor process age proves stopping. Explicit resume is available only after positive stopped
-  evidence and unchanged approved intent; uncertain SDK effects remain non-replayable.
+- **Delegated work without a PR does not complete.** A work request completes when its PR merges. Work that
+  changes no repository (an operational check, a cleanup) stays `work-running` until the person cancels it, and
+  then the request reads `failed`. There is no way to stop work for a while and resume it; cancel it instead.
 
 - **Uncertain direct-request review wakes need exact receipts.** A requester who is the receiving owner's manager
   can review under its existing applicable `approve-plans` grant. A separate durable continuation wakes that
@@ -154,14 +144,8 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
   have no pruning, and an interrupted submission blocks its signature's later reports until that submission retries.
 
 - **Legacy desk PRs remain untracked.** PRs recorded only as `desk-change-opened` journal entries before
-  ledger-backed desk publication are not backfilled. They need manual GitHub maintenance; approved request
-  items with their clean source worktree can now be explicitly reconciled using `owners reconcile-pr` after
-  fresh verification and review, or factually linked with `owners observe-merged-pr` without accepting
-  completion or clearing outstanding review findings. Later merged fixes can satisfy the original goal through
-  explicit `owners prepare-request-closure` and `owners accept-request` commands, with fresh verification,
-  independent review and a separate human acceptance receipt. This narrow flow has no browser acceptance
-  button, bulk backfill or general live-outcome attestation. Newly proposed
-  desk changes have ledger records, maintenance and originating-chat notices.
+  ledger-backed desk publication are not backfilled. They need manual GitHub maintenance, and a request whose PR
+  was opened outside onionsoup does not complete when that PR merges. Newly proposed desk changes have ledger records, maintenance and originating-chat notices.
 
 - **Sandbox: provider credentials are still readable.** Masking the host opencode config/state closed the plugin
   path (`~/.config/opencode`), but `~/.local/share/opencode/auth.json` stays writable in every sandbox because
@@ -220,7 +204,7 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
   started after the surface did. The activity rail finds an item's hire sessions by title in opencode's store
   (`readSessionsTitled` in `packages/surface/src/hire-store.ts`) instead.
 
-- Desk reviewers receive tree-bound host check metadata and original task criteria. Explicit repository-request closure can now accept a reviewed integrated result after historical merges and follow-up fixes. A general evidence-unavailable workflow and live-environment evidence adapters remain future work; command success alone is not deployment or goal completion.
+- Desk reviewers receive tree-bound host check metadata and original task criteria. A general evidence-unavailable workflow and live-environment evidence adapters remain future work; command success alone is not deployment or goal completion.
 
 - **Persona-free owners have observation chat only.** They can inspect recorded state and consult other owners,
   but cannot execute domain changes or reminders. Migrating the legacy persona requirement in `canChange` to an

@@ -21,8 +21,7 @@ import {
   type Persona,
 } from './declarations.ts';
 import { askOwner, formatAnswer } from './ask.ts';
-import { requestInstance, requestPublish, FOLLOW_UPS } from './brokering.ts';
-import { completeOperationalWork, releaseOperationalInstance, reverifyOperationalWork } from './operational-work.ts';
+import { releaseInstance, requestInstance, requestPublish, FOLLOW_UPS } from './brokering.ts';
 import { checkoutPullRequest, proposeDeskChanges } from './desk-changes.ts';
 import { deskSyncText, syncOwnerDesk } from './desk-sync.ts';
 import { configuredPrMaintenanceDuty, updateOwnerPullRequests } from './owner-pr-maintenance.ts';
@@ -59,8 +58,6 @@ import { bashAction } from './bash-rules.ts';
 import { SessionOwners } from './session-owners.ts';
 import { beginAdmission, type AdmissionLease } from './deployment-admission.ts';
 import { openNeededSessions, ownerSessionClient } from './owner-sessions.ts';
-import { pausedSessionItem, settleItemPause } from './work-pause.ts';
-import { workPauseClient } from './work-pause-client.ts';
 import { cancelReminder, openDueReminders, setReminder } from './reminder-work.ts';
 import { parseReminderRequest } from './reminders.ts';
 import { PLAN_APPROVAL_PERMISSION, PlanSubmission, submitPlan } from './plan-work.ts';
@@ -143,7 +140,7 @@ const MANAGER_GUIDE = `
 - You manage direct reports. Fan work out with onionsoup_request_work, one request per report (they accept it
   automatically), and follow it with onionsoup_status: it shows all your reports' work, and request=<id> each request's
   progress. Talk to a report in its work session with onionsoup_send and answer it with onionsoup_reply. On work you
-  requested, onionsoup_steer cancels it or leaves the report a note, or resumes it after an intentional pause.
+  requested, onionsoup_steer cancels it or leaves the report a note.
   Where a report granted you approve-plans, its plans for your requests are yours to review:
   onionsoup_review_request_plan with the exact request/item/digest from onionsoup_status request. A separate
   actionable continuation requests that review. Compare the original scope and every plan assumption;
@@ -232,7 +229,6 @@ How you work with the person in this chat:
   behavior that fails expectations), onionsoup_remind (wake yourself later for a one-off check),
   onionsoup_request_instance (ask for an instance behind the existing create gate),
   onionsoup_release_instance (release that request behind the delete gate),
-  onionsoup_complete_work (complete approved operational work with host checks and final independent review, no fake PR),
   onionsoup_wiki (the homelab wiki: search it before asking the person about homelab facts),
   onionsoup_record_fact, onionsoup_record_decision and onionsoup_retract. When
   something belongs to another owner's domain, ask them instead of guessing or probing it yourself.${WORK_GUIDES[canChange(owner) ? 'changes' : 'observes']}${configuredPrMaintenanceDuty(owner) ? `
@@ -284,7 +280,6 @@ const RESTRICTED_TOOLS: Record<string, (runtime: Runtime, owner: OwnerDeclaratio
   [STEWARD_TOOL]: (_runtime, owner) => Boolean(owner.manages),
   [STEER_TOOL]: isManagerOwner,
   [REQUEST_REVIEW_TOOL]: isManagerOwner,
-  onionsoup_complete_work: (_runtime, owner) => canChange(owner),
   onionsoup_update_prs: (_runtime, owner) => Boolean(configuredPrMaintenanceDuty(owner)),
 };
 
@@ -1146,27 +1141,6 @@ const server: Plugin = async (input, options) => {
     await initializeRuntime();
     const client = pass.client(input.client);
     const sessions = ownerSessionClient(client);
-    const pauseClient = workPauseClient({
-      sessions: async directory => {
-        const reply = await client.session.list({ query: { directory } });
-        if (reply.error || !reply.data) throw new Error('work_pause_sessions_unavailable');
-        return reply.data;
-      },
-      statuses: async directory => {
-        const reply = await client.session.status({ query: { directory } });
-        if (reply.error || !reply.data) throw new Error('work_pause_status_unavailable');
-        return reply.data;
-      },
-      abort: async (directory, id) => {
-        const reply = await client.session.abort({ path: { id }, query: { directory } });
-        if (reply.error) throw new Error('work_pause_abort_uncertain');
-      },
-    });
-    for (const item of await runtime.ledger.list()) {
-      if (item.status !== 'pausing') continue;
-      await pass.phase('work-pause', () => settleItemPause(runtime, item.id, pauseClient))
-        .catch(error => console.warn('work_pause_stop_unconfirmed', item.id, error));
-    }
     await pass.phase('plan-revisions', () => deliverPlanRevisions(runtime, planRevisionClient(client, { runtime, pass }),
       (id, error) => console.warn('plan_revision_delivery_failed', id, error)));
     await pass.phase('direct-reviews', () => deliverDirectRequestReviews(runtime, planRevisionClient(client, { runtime, pass }),
@@ -1187,15 +1161,6 @@ const server: Plugin = async (input, options) => {
     pass => pass.phase('chat-reconciliation', () => reconcileChats(pass)),
     error => console.warn('plugin_chat_reconciliation_failed', error), false);
 
-  async function assertWorkSessionRunning(sessionID: string) {
-    const paused = await pausedSessionItem(runtime, sessionID, async id => {
-      const reply = await input.client.session.get({ path: { id } });
-      if (reply.error || !reply.data || reply.data.id !== id) throw new Error('work_pause_session_identity_unavailable');
-      return reply.data.parentID;
-    });
-    if (paused) throw new Error('work_item_paused');
-  }
-
   return {
     dispose: () => {
       disposed = true;
@@ -1205,7 +1170,6 @@ const server: Plugin = async (input, options) => {
       await initializeRuntime();
       await refreshDeclarations();
       if (await readChildAbandonment(runtime.stateDirectory, input.sessionID)) throw new Error('child_session_abandoned: preserved history is read-only');
-      await assertWorkSessionRunning(input.sessionID);
       const key = `${input.sessionID}:${input.callID}`;
       if (trackedTools.has(key)) throw new Error('tool_call_already_active');
       if (retiredTools.has(key)) throw new Error('tool_call_already_finished');
@@ -1310,7 +1274,6 @@ const server: Plugin = async (input, options) => {
       activeMessages.set(message.sessionID, (activeMessages.get(message.sessionID) ?? 0) + 1);
       try {
         await initializeRuntime();
-        await assertWorkSessionRunning(message.sessionID);
         if (await readChildAbandonment(runtime.stateDirectory, message.sessionID)) throw new Error('child_session_abandoned: open a new session to continue');
         const admittedParent = await admittedMessageParent(message.sessionID);
         pendingAncestry.delete(pending);
@@ -1500,7 +1463,7 @@ const server: Plugin = async (input, options) => {
         },
       }),
       [STEER_TOOL]: tool({
-        description: 'For managers: act on work you requested from a direct report. "cancel" cancels it; "note" queues a note to its work session without resuming paused work; "resume" explicitly resumes the ORIGINAL intentionally paused work, preserving its goal, plan and approvals, only under the configured approve-plans grant. Plans are reviewed with onionsoup_review_request_plan.',
+        description: 'For managers: act on work you requested from a direct report. "cancel" cancels it; "note" queues a note to its work session. Plans are reviewed with onionsoup_review_request_plan.',
         args: {
           item: tool.schema.string().describe('The work item id'),
           action: tool.schema.enum(STEER_ACTIONS as [typeof STEER_ACTIONS[number], ...typeof STEER_ACTIONS]),
@@ -1605,22 +1568,8 @@ const server: Plugin = async (input, options) => {
         args: { request: tool.schema.string() },
         async execute(args, context) {
           const owner = await messageCaller(context);
-          return JSON.stringify(await releaseOperationalInstance(runtime, owner.id, args.request,
+          return JSON.stringify(await releaseInstance(runtime, owner.id, args.request,
             { sessionID: context.sessionID, directory: context.directory }));
-        },
-      }),
-      onionsoup_complete_work: tool({
-        description: 'Complete an approved original operational request without a PR. Call only from its execution session or proven host continuation. Host code runs configured checks, observes exact gated resource cleanup and gets one independent-family goal/evidence review. Dirty or unpublished repository changes still require onionsoup_propose_changes. Reports and arbitrary resource IDs cannot complete work.',
-        args: { item: tool.schema.string(),
-          action: tool.schema.enum(['complete', 'reverify']).optional().describe('Complete from execution, or queue a concrete original-work reverify continuation from any owner chat') },
-        async execute(args, context) {
-          const owner = await messageCaller(context);
-          const actions = {
-            complete: () => completeOperationalWork(runtime, owner.id, args.item,
-              { sessionID: context.sessionID, directory: context.directory }),
-            reverify: () => reverifyOperationalWork(runtime, owner.id, args.item),
-          };
-          return JSON.stringify(await actions[args.action ?? 'complete']());
         },
       }),
       onionsoup_propose_changes: tool({

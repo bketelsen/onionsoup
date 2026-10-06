@@ -1,10 +1,8 @@
 import { execFile } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { promisify } from 'node:util';
 import { z } from 'zod';
-import { isPaused, requireRunnerClaim, type Verification, type WorkItem } from './ledger.ts';
-import { settleItemPause, stoppedRunnerPause } from './work-pause.ts';
+import type { Verification, WorkItem } from './ledger.ts';
 import { OWNER_CHANGE_WORKFLOW } from './plan-work.ts';
 import { effectiveDecision, Verdict } from './artifacts.ts';
 import { requestPublish } from './brokering.ts';
@@ -147,7 +145,6 @@ async function repairHead(deskPath: string, item: WorkItem) {
 async function ownItem(runtime: Runtime, ownerId: string, itemId: string) {
   const item = await runtime.ledger.get(itemId);
   if (item.owner !== ownerId) throw new Error(`item_not_yours: ${item.id} belongs to ${item.owner}`);
-  if (isPaused(item)) throw new Error('work_item_paused');
   return item;
 }
 
@@ -257,7 +254,7 @@ async function requestScopedReview(runtime: Runtime, owner: RepositoryOwner, sco
   return review;
 }
 
-export async function requestScopedVerification(runtime: Runtime, owner: RepositoryOwner, item: WorkItem | undefined, directory: string) {
+async function requestScopedVerification(runtime: Runtime, owner: RepositoryOwner, item: WorkItem | undefined, directory: string) {
   const verifiedTree = await snapshotTree(directory);
   await recordRequestWorkEvidence(runtime, item, { stage: 'verifying' });
   const { verification, failure } = await verifyDesk(owner, directory, runtime.toolsDirectory).catch(async error => {
@@ -362,7 +359,6 @@ async function continueDeskPublication(runtime: Runtime, itemId: string) {
 const PERMANENT_FAILURES = new Set(['desk_changed_since_review', 'desk_head_changed', 'desk_pr_closed']);
 
 function deskResult(item: WorkItem): DeskChangeResult {
-  if (isPaused(item)) return { outcome: 'in-progress', summary: `Publication ${item.id} is ${item.status}; explicit resume is required.` };
   if (item.activeRunner) return { outcome: 'in-progress', summary: `Publication ${item.id} is running at ${item.deskPublication!.stage}.` };
   if (item.status === 'failed') return deskFailure(item);
   const outcome = item.publication?.state === 'merged' ? 'merged' : 'opened';
@@ -521,34 +517,22 @@ const DESK_STEPS: Partial<Record<DeskStage, DeskStep>> = {
 export async function advanceDeskPublication(runtime: Runtime, itemId: string) {
   let item = await runtime.ledger.update(itemId, current => {
     if (current.activeRunner) throw new Error('work_item_active');
-    if (isPaused(current)) throw new Error('work_item_paused');
     if (current.status === 'cancelled') throw new Error('work_item_cancelled');
-    return { ...current, status: 'landing', resumeStatus: 'landing',
-      activeRunner: process.pid, runnerClaim: randomUUID(), reason: undefined };
+    return { ...current, status: 'landing', resumeStatus: 'landing', activeRunner: process.pid, reason: undefined };
   });
-  const claimed = item;
   try {
     let step = DESK_STEPS[item.deskPublication!.stage];
     while (step) {
       const changes = await step(runtime, item);
-      item = await runtime.ledger.update(item.id, current => {
-        requireRunnerClaim(current, claimed);
-        return { ...current, ...changes };
-      });
-      if (isPaused(item)) {
-        item = await runtime.ledger.update(item.id, current => stoppedRunnerPause(current, { ...current, status: 'landing' }, claimed));
-        return settleItemPause(runtime, item.id);
-      }
+      item = await runtime.ledger.update(item.id, current => ({ ...current, ...changes }));
       step = DESK_STEPS[item.deskPublication!.stage];
     }
-    item = await runtime.ledger.update(item.id, current =>
-      stoppedRunnerPause(current, { ...current, status: 'landed' }, claimed));
+    item = await runtime.ledger.update(item.id, current => ({ ...current, status: 'landed', activeRunner: undefined }));
   } catch (error) {
-    item = await runtime.ledger.update(item.id, current => stoppedRunnerPause(current, {
-      ...current, status: 'failed', reason: error instanceof Error ? error.message : String(error),
-    }, claimed));
+    item = await runtime.ledger.update(item.id, current => ({
+      ...current, status: 'failed', activeRunner: undefined, reason: error instanceof Error ? error.message : String(error),
+    }));
   }
-  if (isPaused(item)) return settleItemPause(runtime, item.id);
   if (item.status === 'landed') item = await recordDeskPublication(runtime, item);
   return item;
 }
@@ -563,26 +547,4 @@ async function recordDeskPublication(runtime: Runtime, item: WorkItem) {
     const reason = `desk_publication_journal_failed: ${error instanceof Error ? error.message : String(error)}`;
     return runtime.ledger.update(item.id, current => ({ ...current, reason }));
   }
-}
-
-/** Fresh host evidence and required cross-family review for an already committed external PR. No publication effects. */
-export async function reviewExternalPublication(runtime: Runtime, item: WorkItem, directory: string, base: string) {
-  const owner = runtime.repositoryFor(item);
-  const { verification, failure, changed, evidence } = await requestScopedVerification(runtime, owner, item, directory);
-  if (failure) throw new Error(`external_verification_failed: ${failure.summary}`);
-  if (changed) throw new Error('review_evidence_stale');
-  const target: DeskTarget = { kind: 'plan', item, path: directory };
-  const scope = reviewScope(owner, target);
-  if (waitingForPerson(scope, await deskReviewRounds(runtime, owner.id, scope.subject))) {
-    await recordRequestWorkEvidence(runtime, item, { stage: 'blocked', verification: evidence, blocker: 'review_round_limit' });
-    throw new Error('external_review_needs_person');
-  }
-  const review = await requestScopedReview(runtime, owner, scope, target, {
-    title: item.proposal.title, summary: item.proposal.goal, item: item.id,
-  }, evidence, item.proposal.acceptance, base);
-  if (effectiveDecision(review.verdict) !== 'approve') {
-    await needsWork(runtime, owner, scope, item.proposal.title, review);
-    throw new Error('external_review_needs_work');
-  }
-  return { ...review, verification };
 }

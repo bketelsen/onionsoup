@@ -5,14 +5,13 @@ import {
   listChildAbandonments, abandonedChildMessages,
   planRevisionStatus, approveCreate, approveDelete, approvePlan, approvePush, chatDirectory, createApproval, denyRequest, deskState, describeAsk,
   domainSummary, itemText, revisePlan, resumeItem, retryItem, cancelItem, memoryFingerprint, type ResourceRequest, type Runtime,
-  ownerChatAgent, AttentionAssignmentInput, assignAttention, retryAttentionAssignment, attentionAssignmentView, attentionAssignmentTargets, type AttentionAssignmentView,
+  ownerChatAgent,
   listAttention, needsHumanDecision, changeAttention, humanAttentionActor, recoverRequest, reconcileRequest,
   listFriction, frictionDetail, type FrictionRecord,
   managerOf, cancelReminder, type WorkItem,
   isDelegated, isFinished, OWNER_CHANGE_WORKFLOW, PLAN_APPROVAL_PERMISSION, OPERATOR_ID, operatorChatDirectory, WIKI_DELETE_PERMISSION,
   providerHealthViews, type ProviderHealthView, type OwnerDeclaration,
   workSessionDirectories,
-  pauseItem, settleItemPause, humanWorkActor, pausedSessionItem, workPauseClient,
   requestProgressDetail,
 } from '@onionsoup/owners';
 import type { OpencodeApi, PendingPermission, PendingQuestion } from './opencode.ts';
@@ -80,7 +79,6 @@ export const Decision = z.object({
   note: z.string().optional(),
   reason: z.string().optional(),
   withDelete: z.boolean().optional(),
-  assignment: AttentionAssignmentInput.optional(),
 });
 export type Decision = z.infer<typeof Decision>;
 
@@ -92,8 +90,6 @@ export interface InboxEntry {
   detail: string;
   at?: string;
   attentionStatus?: string;
-  attentionAssignment?: AttentionAssignmentView;
-  assignmentTargets?: ReturnType<typeof attentionAssignmentTargets>;
   /** For permission and question entries: the chat they came from. */
   sessionID?: string;
   permission?: PendingPermission;
@@ -237,13 +233,11 @@ export class SurfaceState {
         detail: `${delivery!.reason}. Check the existing plan session before taking further action; do not blindly resubmit. Work ${item.id}.`,
       })),
       ...providerHealth.filter(view => view.status === 'failing').map(providerAuthEntry),
-      ...await Promise.all(attention.filter(needsHumanDecision).map(async entry => ({
+      ...attention.filter(needsHumanDecision).map(entry => ({
         kind: 'attention' as const, id: entry.id, owner: entry.owner, title: entry.note,
         detail: entry.decision ? `${entry.status}: ${entry.decision.reason} (${entry.decision.by})` : 'Human decision required',
         attentionStatus: entry.status, at: entry.at,
-        attentionAssignment: await attentionAssignmentView(this.runtime, entry.id),
-        assignmentTargets: attentionAssignmentTargets(this.runtime),
-      }))),
+      })),
       ...requests.filter(request => request.status === 'interrupted').map(request => ({
         kind: 'request-recovery' as const, id: request.id, owner: request.to, title: describeAsk(request.ask),
         detail: requestRecoveryDetail(request), at: request.updatedAt,
@@ -505,19 +499,12 @@ export class SurfaceState {
       'approve-create': async () => (await approveCreate(this.runtime, decision.id, by, decision.withDelete ?? true)).status,
       'approve-delete': async () => (await approveDelete(this.runtime, decision.id, by)).status,
       'deny-request': async () => (await denyRequest(this.runtime, decision.id, by, reason || 'denied from the surface')).status,
-      'pause-item': async () => (await this.pauseWork(decision.id, required(reason, 'reason'))).status,
-      'resume-item': async () => (await resumeItem(this.runtime, decision.id, humanWorkActor(), reason)).status,
+      'resume-item': async () => (await resumeItem(this.runtime, decision.id, by, reason)).status,
       'retry-item': async () => (await retryItem(this.runtime, decision.id, by, reason)).status,
       'cancel-item': async () => (await cancelItem(this.runtime, decision.id, by, required(reason, 'reason'))).status,
       'reconcile-request': async () => (await reconcileRequest(this.runtime, decision.id)).status,
       'retry-request': async () => (await recoverRequest(this.runtime, decision.id, 'retry', by, required(reason, 'reason'))).status,
       'cancel-request': async () => (await recoverRequest(this.runtime, decision.id, 'cancel', by, required(reason, 'reason'))).status,
-      'retry-attention-assignment': async () => (await retryAttentionAssignment(this.runtime, decision.id, by)).status,
-      'assign-attention': async () => {
-        if (!decision.assignment) throw new Error('attention_assignment_required');
-        const request = await assignAttention(this.runtime, decision.id, decision.assignment, by);
-        return `${request.id}: ${request.status}`;
-      },
       'acknowledge-attention': async () => (await changeAttention(this.runtime, decision.id, 'acknowledged', humanAttentionActor(), required(reason, 'reason'))).status,
       'resolve-attention': async () => (await changeAttention(this.runtime, decision.id, 'resolved', humanAttentionActor(), required(reason, 'reason'))).status,
       'cancel-reminder': async () => (await cancelReminder(this.runtime, decision.id, by, reason ?? '')).status,
@@ -525,37 +512,6 @@ export class SurfaceState {
     const action = actions[decision.action];
     if (!action) throw new Error(`unknown_decision: ${decision.action}`);
     return action();
-  }
-
-  private async pauseWork(itemId: string, reason: string) {
-    const item = await pauseItem(this.runtime, itemId, humanWorkActor(), reason);
-    const client = workPauseClient({
-      sessions: directory => this.opencode.listSessions(directory),
-      statuses: directory => this.opencode.status(directory),
-      abort: (directory, sessionID) => this.opencode.abort(directory, sessionID),
-    });
-    return settleItemPause(this.runtime, itemId, { stop: async origin => {
-      const directory = await this.sessionDirectory(item.owner, origin.sessionID);
-      if (directory !== origin.directory) throw new Error('work_pause_session_unavailable');
-      return client.stop(origin);
-    } });
-  }
-
-  async assertSessionNotPaused(sessionID: string) {
-    if (await pausedSessionItem(this.runtime, sessionID)) throw new Error('work_item_paused');
-  }
-
-  /** Stop on the work session is an intentional lifecycle decision, not merely an SDK abort. */
-  async stopSession(ownerId: string, directory: string, sessionID: string) {
-    const linked = (await this.runtime.ledger.list()).filter(item => item.owner === ownerId
-      && !isFinished(item) && item.session?.sessionID === sessionID && item.session.directory === directory);
-    if (!linked.length) {
-      await this.opencode.abort(directory, sessionID);
-      return 'aborted';
-    }
-    const stopped = await Promise.all(linked.map(item =>
-      this.pauseWork(item.id, 'Stopped intentionally by the person in the work conversation')));
-    return stopped.some(item => item.status === 'pausing') ? 'pausing' : 'paused';
   }
 
   async retract(ownerId: string, note: string) {

@@ -9,8 +9,6 @@ export { wake } from './owner.ts';
 export { distill, requestDistill, memoryStatus, memoryFingerprint } from './memory.ts';
 export { MemoryPolicy, MemoryState, type MemoryStatus } from './memory-config.ts';
 export { advance, approvePlan, revisePlan, resumeItem, retryItem, cancelItem, retirePipelineItems } from './work-recovery.ts';
-export { pauseItem, settleItemPause, humanWorkActor, pausedSessionItem, type WorkPauseClient } from './work-pause.ts';
-export { workPauseClient, type WorkPauseTransport } from './work-pause-client.ts';
 export { isDelegated, OWNER_CHANGE_WORKFLOW, PLAN_APPROVAL_PERMISSION } from './plan-work.ts';
 export { approvePush } from './rebase.ts';
 export { approveCreate, approveDelete, denyRequest } from './brokering.ts';
@@ -25,7 +23,6 @@ export { listAttention, changeAttention, humanAttentionActor, ownerAttentionActo
 export { needsHumanDecision } from './attention-routing.ts';
 export { AttentionProvenance } from './journal-record.ts';
 export { requestWork } from './delegation.ts';
-export { completeOperationalWork, reverifyOperationalWork, reconcileOperationalWork, releaseOperationalInstance } from './operational-work.ts';
 export { requestProgressDetail } from './request-status.ts';
 export { planGrantFor } from './declarations.ts';
 export { recoverRequest, reconcileRequest } from './request-recovery.ts';
@@ -46,8 +43,6 @@ export {
   beginAdmission, listAdmissions, armDeployment, markDeploymentWaiting, beginDrain, releaseDrain,
   type AdmissionLease,
 } from './deployment-admission.ts';
-export { AttentionAssignmentInput, assignAttention, retryAttentionAssignment, attentionAssignmentView, attentionAssignmentTargets,
-  type AttentionAssignmentView } from './attention-assignment.ts';
 export { planRevisionStatus } from './plan-revision.ts';
 export { OwnerMessageInput, OwnerReplyInput, sendOwnerMessage, replyToOwnerMessage } from './owner-messages.ts';
 

@@ -185,8 +185,7 @@ The manager fans cross-repository change out in chat: one `onionsoup_request_wor
 the order the change needs. Each report accepts its manager's request automatically, plans it in a session of its
 own, and pushes back with `onionsoup_send` when the work is wrong, unclear or blocked. The manager follows the work
 with `onionsoup_status` (`request=<id>` for one request), talks to a report with `onionsoup_send` / `onionsoup_reply`,
-and with `onionsoup_steer` cancels a request's work, leaves the report a note on it, or resumes it after an
-intentional pause. A steward may put owners in its scope under itself, but only you set any other reporting line or
+and with `onionsoup_steer` cancels a request's work or leaves the report a note on it. A steward may put owners in its scope under itself, but only you set any other reporting line or
 grant.
 
 With an `approve-plans` grant, the manager reviews the plans of work she sent with
@@ -359,7 +358,6 @@ chatContext:
   maxChars: 8000
   entryChars: 2000
   scanBytes: 131072       # total recent journal bytes read per context refresh
-  noticeSessions: 30     # continuation sessions followed when checking operational work
 ```
 
 Every chat system transform reads recent activity again. Owner answers also read recent person decisions,
@@ -396,20 +394,9 @@ What host code still advances is a lookup table in `packages/owners/src/work-rec
 (`owner-change`, `desk-publication`, `rebase`) names its `advance` step and when it is runnable, and `FIRST_STEP` says
 where stopped work continues. A new kind of host-run work adds an entry there; the dispatcher does not change. It
 should record `resumeStatus` before claiming an active stage and clear `activeRunner` when it finishes. Person
-decisions use `approvePlan`, `revisePlan`, `pauseItem`, `resumeItem`, `retryItem` and `cancelItem`; cancellation of active work is
+decisions use `approvePlan`, `revisePlan`, `resumeItem`, `retryItem` and `cancelItem`; cancellation of active work is
 refused. Desk publication (also used by approved plans and CI repairs) keeps its persisted stage to reconcile
 retries against the local commit and existing GitHub PR before repeating effects.
-
-Use `owners pause <item> --reason "Intentional stop"` for a deliberate stop, not crash recovery.
-The surface's Pause control and Stop in a linked work conversation use the same host action. The receipt
-first records `pausing`; the upgraded plugin confirms the execution tree stopped before `paused`.
-Only exact host-recorded work sessions are stopped; a shared submitting desk conversation stays usable.
-With no execution session, the item pauses without aborting that conversation.
-Do not erase an active runner or an uncertain delivery receipt to force that transition. Read the item and its
-latest pause receipt before treating it as settled. `owners resume <item> --note "Continue unchanged work"`
-or the surface's Resume control restores the exact saved stage and approved goal. This is an explicit human
-action, not an automatic restart or a new plan approval. A direct manager's `onionsoup_steer` resume needs
-its existing applicable `approve-plans` grant and work she requested.
 
 Persona owners with a declared `maintain-prs` duty can call `onionsoup_update_prs` without repository or head
 arguments. The same periodic selector covers `BEHIND` and conflicting PRs; `refresh: true` also updates a
@@ -442,54 +429,8 @@ it does not prove a full static asset tree from index content alone.
 
 For reviewed trial changes, pass `draft: true` to `onionsoup_propose_changes` or use
 `owners propose <owner> --item <item> --draft --note <title>`. This persists a no-merge
-publication boundary even when the owner has a merge grant. To recover an approved request
-whose PR was published externally, the person uses `owners reconcile-pr <owner> <item> <url>`;
-see [draft publication and recovery](design/owners.md) for its exact-source verification and
-review requirements. For a historical merged-PR fact without accepted completion, use
-`owners observe-merged-pr <owner> <item> <url>`. It preserves current review findings as
-follow-up and leaves the request open; it does not run another review or dispatch work.
-None of these operations establishes deployment.
+publication boundary even when the owner has a merge grant; see
+[draft publication](design/owners.md). A draft PR does not establish deployment.
 
-For an approved delegated infrastructure/E2E task with no repository publication, use
-`onionsoup_complete_work { item: "<original-item>", action: "complete" }` from its execution session or
-host-proven original-work continuation. The tool selects only the original work, not arbitrary resource IDs.
-It runs configured sandbox checks, observes supported resource postconditions and hires one final independent-family
-reviewer against the original goal. A durable checkpoint repairs completion and requester notification after a
-crash without another review or a fake PR. Ordinary create/delete approval remains mandatory.
-
-If legacy evidence is missing, use `action: "reverify"` to queue the owner in that same work context.
-Actual resource records need the original host origin, creation checkpoint, accepted decision, exact managed
-request identity, effect approvals, required successful host follow-up and positively observed deletion.
-Owner reports do not replace them, and re-verification never blindly creates a new VM. The normal
-`onionsoup_request_instance` and `onionsoup_release_instance` tools retain their create/delete gates.
-Intentional pause must be explicitly resumed before completion or re-verification; unchanged approved work
-does not need the repository closure-candidate/human-acceptance ritual below.
-
-For a historically merged request whose outstanding findings were fixed by later merged PRs,
-the person can prepare and explicitly accept closure:
-
-```sh
-owners prepare-request-closure <owner> <item> --directory /path/to/clean-integrated-checkout --follow-up https://github.com/org/repo/pull/107
-owners accept-request <owner> <item> <printed-closure-digest> --note "Why the original scoped goal is satisfied"
-```
-
-Repeat `--follow-up` for each relevant merged fix. Use a separate clean worktree at the fetched
-configured base tip; keep the original plan worktree and review history intact. Preparation verifies
-GitHub merge facts and local ancestry, runs every configured verification command, and hires the
-configured reviewer from another model family against the original goal, approved plan and historical
-findings. It prints the evidence and digest; it does not complete the request. Inspect that evidence
-before accepting. Missing evidence, unresolved findings or an unmerged follow-up block preparation.
-Repeating unchanged preparation reuses its still-fresh candidate without another review.
-
-Acceptance requires that exact digest, a nonempty rationale and unchanged scope, configuration,
-source and merge facts. Evidence expires after the repository’s `requestClosureEvidenceMaxAgeMs` (default 24 hours);
-changed or expired evidence needs fresh preparation. The command records the local account as the
-person accepting, retains the original records, marks the work landed and completes its linked request.
-An identical acceptance retry repairs the request projection after interruption without recording a
-second acceptance. A different digest or rationale cannot replace an existing acceptance.
-
-These are trusted host CLI actions under the existing runtime/admission lock, not owner MCP tools or
-new standing grants. A running daemon's runtime lock can require the normal guarded maintenance window;
-do not interrupt active work to run them. The surface and coordinator show the acceptance receipt,
-verified follow-ups and original historical review separately. Repository acceptance does not attest
-deployment, close unrelated friction reports or dispatch more work.
+Owners ask for instances with `onionsoup_request_instance` and give them back with `onionsoup_release_instance` from
+the session that asked; both keep their create/delete gates.

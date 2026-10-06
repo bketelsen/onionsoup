@@ -144,7 +144,7 @@ test('a person sends an owner plan back with feedback; only owner plans are appr
 
 test('survey context says when landed work is not yet on the base branch', async () => {
   const { workSoFarText } = await import('../src/briefs.ts');
-  const base = { owner: 'clippy', workflow: 'desk-publication', implementations: [], verdicts: [], replans: 0, hires: [], humanNotes: [], pauses: [], directRequestPlanReviews: [], createdAt: '', updatedAt: '' };
+  const base = { owner: 'clippy', workflow: 'desk-publication', implementations: [], verdicts: [], replans: 0, hires: [], humanNotes: [], directRequestPlanReviews: [], createdAt: '', updatedAt: '' };
   const proposal = { title: 'Alignment tests', goal: 'g', rationale: 'r', acceptance: ['a'], size: 'small' as const };
   const publication = { url: 'https://github.com/x/y/pull/2', branch: 'owners/w-3', by: 'clippy', at: '', state: 'open' as const };
   const text = workSoFarText([
@@ -208,6 +208,33 @@ test('without a lease the release waits for a delete approval', async () => {
   await approveDelete(runtime, opened.id, 'bjk');
   await processRequests(runtime);
   assert.equal((await runtime.requests.get(opened.id)).status, 'deleted');
+});
+
+test('an owner releases only its own provisioned instance, from the session that requested it, into the delete gate', async () => {
+  const { approveCreate, processRequests, releaseInstance, requestInstance } = await import('../src/brokering.ts');
+  const { runtime, calls } = await incusRuntime();
+  const origin = { sessionID: 'ses_requester', directory: '/chats/clippy' };
+  const ask = { kind: 'instance' as const, image: 'images:debian/13', purpose: 'p', expectedMinutes: 5 };
+  const decision = { decision: 'accept' as const, reply: 'ok', remote: 'minideb', image: 'images:debian/13', nameSuffix: 'release' };
+  const opened = await requestInstance(runtime, 'clippy', 'homelab', ask, 'none', origin);
+  await runtime.requests.save({ ...opened, status: 'awaiting-create-approval', decision });
+  await assert.rejects(releaseInstance(runtime, 'clippy', opened.id, origin), /instance_release_scope_mismatch/, 'nothing to release yet');
+  await approveCreate(runtime, opened.id, 'bjk', false);
+  await processRequests(runtime);
+  assert.equal((await runtime.requests.get(opened.id)).status, 'provisioned');
+  await assert.rejects(releaseInstance(runtime, 'clippy', opened.id, { ...origin, sessionID: 'ses_other' }), /instance_release_scope_mismatch/);
+  await assert.rejects(releaseInstance(runtime, 'moneo', opened.id, origin), /instance_release_scope_mismatch/);
+  assert.equal((await releaseInstance(runtime, 'clippy', opened.id, origin)).status, 'awaiting-delete-approval');
+  await processRequests(runtime);
+  assert.ok(!calls.some(call => call[0] === 'delete'), 'release without a lease waits for the person');
+
+  const leased = await requestInstance(runtime, 'clippy', 'homelab', ask, 'none', origin);
+  await runtime.requests.save({ ...leased, status: 'awaiting-create-approval', decision: { ...decision, nameSuffix: 'leased' } });
+  await approveCreate(runtime, leased.id, 'bjk', true);
+  await processRequests(runtime);
+  assert.equal((await releaseInstance(runtime, 'clippy', leased.id, origin)).status, 'delete-approved');
+  await processRequests(runtime);
+  assert.equal((await runtime.requests.get(leased.id)).status, 'deleted');
 });
 
 test('create and delete guards hold regardless of what an owner decides', async () => {
@@ -345,7 +372,7 @@ test('a config that still declares the retired planner and workflows loads, and 
 test('status shows recent outcomes of finished work', async () => {
   const { statusText } = await import('../src/desk.ts');
   const now = new Date('2026-09-23T12:00:00Z');
-  const base = { owner: 'murbella', workflow: 'desk-publication', implementations: [], verdicts: [], replans: 0, hires: [], humanNotes: [], pauses: [], directRequestPlanReviews: [], createdAt: '2026-09-23T09:30:00Z', updatedAt: '2026-09-23T09:40:00Z' };
+  const base = { owner: 'murbella', workflow: 'desk-publication', implementations: [], verdicts: [], replans: 0, hires: [], humanNotes: [], directRequestPlanReviews: [], createdAt: '2026-09-23T09:30:00Z', updatedAt: '2026-09-23T09:40:00Z' };
   const proposal = { title: 'Fix vscode sysext', goal: 'g', rationale: 'r', acceptance: ['a'], size: 'small' as const };
   const landed = { ...base, id: 'w-1', proposal, status: 'landed' as const, branch: 'owners/w-1', landedCommit: 'a077b107d06000bd' };
   const rebase = { ...landed, id: 'w-2', rebaseOf: { itemId: 'w-0', branch: 'owners/w-0', prUrl: 'https://github.com/x/y/pull/1', previousHead: 'abc' } };

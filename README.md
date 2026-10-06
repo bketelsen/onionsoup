@@ -16,12 +16,8 @@ including manager rulings and corrections. Busy sessions receive queued messages
 get a fresh continuation without replacing the original request. `onionsoup_ask` stays a separate read-only
 consultation, and informational progress notices do not wake an owner.
 
-Deliberately stopped work has an explicit paused lifecycle rather than appearing to run indefinitely.
-Paused work retains its approved goal and history, and only an authorized explicit resume restarts it.
 Published PR maintenance distinguishes a branch behind its base from a conflicting branch: clean
 updates preserve its published commits and run host checks without adding a new approval ceremony.
-Approved infrastructure/E2E work can complete without a PR through original-goal-bound host checks,
-supported effect receipts and one final independent-family review; owner reports alone never suffice.
 
 ## Quick start
 
@@ -56,7 +52,7 @@ Then read [creating your own owners and tools](docs/extending.md).
 owners init | daemon | tick
 owners wake <owner> <duty> | distill <owner> | ask <from> <to> --note "question"
 owners items | show <item> | approve <item> [--note] | revise-plan <item> --note   # plans waiting in the inbox
-owners pause <item> --reason | resume <item> [--note] | retry <item> [--note] | cancel <item> --reason | run <item> | propose <owner> --note "title"
+owners resume <item> [--note] | retry <item> [--note] | cancel <item> --reason | run <item> | propose <owner> --note "title"
 owners requests | approve-create <request> [--with-delete] | approve-delete <request> | deny-request <request> --reason
 owners approve-push <item> | request-publish <owner> <site> | desk <owner> | notebook <owner>
 ```

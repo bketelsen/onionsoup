@@ -108,12 +108,8 @@ cause, and the fix is either applied through the normal gates or reported to the
      mergeable PR is journaled only with its merge state (`clean`, `blocked`). The owner brings it up to date with `onionsoup_update_prs refresh: true`
      (base merge, host verification, push without rewriting history).
    - An `interrupted` item resumes with `npm run owners -- resume <item>`.
-   - `pausing` retains runner/effect/session claims until positive stopped evidence; `paused` is intentional,
-     not crash recovery. Explicit Resume reuses the original unchanged goal, plan and approval. Peer messages,
-     timers and notices never resume it. Do not delete locks or trust idle prose as stopping evidence.
-   - Non-PR operations complete through their original request and configured host checks, supported effect
-     postconditions and one final independent-family review. Missing legacy proof stays owner re-verification,
-     not a fake PR or a new manual Attention-cleanup ceremony.
+   - Delegated work completes when its PR merges. Work that changes no repository stays `working` (its request
+     `work-running`) until it is cancelled; there is no pause.
    - A `failed` item retries its stage with `npm run owners -- retry <item> [--note ...]`, or is cancelled with
      `npm run owners -- cancel <item> --reason "..."`.
    - After a crash, `recover` marks items whose runner died as interrupted so they can be resumed.

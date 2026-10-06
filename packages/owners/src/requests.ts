@@ -5,7 +5,6 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import { ProposedWork } from './artifacts.ts';
 import { ChatOrigin } from './chat-origin.ts';
-import { OperationalCompletion } from './operational-work-types.ts';
 
 export const REQUEST_LIMITS = { decisionAttempts: 3, retryBaseMs: 60_000, retryMaxMs: 15 * 60_000, reconcileMs: 5 * 60_000 };
 
@@ -47,6 +46,7 @@ export const RequestStatus = z.enum([
   'failed',
   'interrupted',
   'work-running',
+  /** Legacy: intentional pause was removed (2026-10). One finished request's last operation still names it; nothing sets it. */
   'work-paused',
   'completed',
 ]);
@@ -80,9 +80,6 @@ export const UpdateAppAsk = z.object({
 });
 export type UpdateAppAsk = z.infer<typeof UpdateAppAsk>;
 
-export const OperatorAssignmentSource = z.object({ kind: z.literal('attention'), id: z.string().min(1) });
-export type OperatorAssignmentSource = z.infer<typeof OperatorAssignmentSource>;
-
 /**
  * Legacy: the initiative assignment a request or work item carried out. Initiatives were removed (2026-10); records
  * that still name one keep parsing and saving unchanged, and nothing reads or writes it.
@@ -93,7 +90,6 @@ export const WorkAsk = z.object({
   kind: z.literal('work'), purpose: z.string(), proposal: ProposedWork,
   /** Legacy, see AssignmentRef. */
   assignment: AssignmentRef.optional(),
-  operatorAssignment: z.object({ by: z.string().min(1), source: OperatorAssignmentSource }).optional(),
 });
 export type WorkAsk = z.infer<typeof WorkAsk>;
 
@@ -131,9 +127,6 @@ export const RequestCheckpoint = z.object({
   jobId: z.number().optional(),
   instance: z.object({ remote: z.string(), name: z.string(), image: z.string() }).optional(),
   publication: z.object({ commit: z.string(), previous: z.string(), digest: z.string(), verifiedAt: z.string().optional() }).optional(),
-  operational: OperationalCompletion.optional(),
-  operationalNoticeQueued: z.boolean().optional(),
-  operationalOrigin: ChatOrigin.optional(),
 });
 export type RequestCheckpoint = z.infer<typeof RequestCheckpoint>;
 
@@ -227,22 +220,6 @@ export class Requests {
 
   async update(id: string, change: (current: ResourceRequest) => ResourceRequest) {
     return withRecordLock(`${this.path(id)}.lock`, async () => this.write(ResourceRequest.parse(change(await this.get(id)))));
-  }
-
-  /** Request → ledger lock order; a related guard must stay held until this host-only commit finishes. */
-  async updateGuarded(id: string, change: (current: ResourceRequest,
-    commit: (updated: ResourceRequest) => Promise<ResourceRequest>) => Promise<ResourceRequest>) {
-    return withRecordLock(`${this.path(id)}.lock`, async () =>
-      change(await this.get(id), updated => this.write(ResourceRequest.parse(updated))));
-  }
-
-  /** Atomically project a durable result; undefined preserves even the original update timestamp. */
-  async updateIfChanged(id: string, change: (current: ResourceRequest) => ResourceRequest | undefined) {
-    return withRecordLock(`${this.path(id)}.lock`, async () => {
-      const current = await this.get(id);
-      const updated = change(current);
-      return updated ? this.write(ResourceRequest.parse(updated)) : current;
-    });
   }
 
   private async write(request: ResourceRequest) {

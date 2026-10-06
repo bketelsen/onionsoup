@@ -75,7 +75,7 @@ function fakeOpencode() {
   return { api, calls };
 }
 
-test('item HTTP and sections expose persisted request progress without inventing operational verification', async () => {
+test('item HTTP and sections expose persisted request progress', async () => {
   const { runtime, server, call } = await start();
   const proposal = {
     title: 'Verify infrastructure', goal: 'Verify infrastructure without a PR', rationale: 'Operational request',
@@ -94,7 +94,6 @@ test('item HTTP and sections expose persisted request progress without inventing
     assert.ok(context.requestText);
     assert.match(context.requestText, new RegExp(request.id));
     assert.match(context.requestText, /unavailable; no readable, matching request-scoped host evidence/);
-    assert.doesNotMatch(context.requestText, /operational goal verified/i);
     assert.equal(returnedItem.publication, undefined);
     assert.equal((await runtime.requests.get(request.id)).status, 'work-running');
     const html = ITEM_SECTIONS.map(Section => renderToStaticMarkup(createElement(Section, {
@@ -240,51 +239,6 @@ async function start(
   };
   return { runtime, server, call, calls, state };
 }
-
-test('item API distinguishes prepared closure from explicit acceptance and retains the old revise verdict', async () => {
-  const { runtime, server, call } = await start();
-  try {
-    const proposal = { title: 'Repair friction', goal: 'Preserve history while revalidating safely', rationale: 'Trial', acceptance: ['No duplicate dispatch'], size: 'small' as const };
-    const at = new Date().toISOString();
-    const item = await runtime.ledger.create('clippy', 'owner-change', proposal, { status: 'working', request: 'r-trial',
-      reason: 'review_changes_required', verdicts: [{ decision: 'revise', summary: 'Original dispatch races', findings: [] }] });
-    const merge = { url: 'https://github.com/example/repo/pull/100', repository: 'example/repo', baseBranch: 'main',
-      head: 'a'.repeat(40), mergeCommit: 'b'.repeat(40), mergedAt: at };
-    const candidate: NonNullable<WorkItem['requestClosureCandidates']>[number] = {
-      digest: 'd'.repeat(64), item: item.id, request: 'r-trial', owner: 'clippy', proposal, planDigest: 'original-plan',
-      requestDigest: 'e'.repeat(64), subjectDigest: 'f'.repeat(64), configurationDigest: '1'.repeat(64), historyDigest: '2'.repeat(64),
-      approvalDigest: '3'.repeat(64), planDocumentDigest: '4'.repeat(64),
-      directory: '/fixture/integrated', repository: 'example/repo', baseBranch: 'main', head: 'c'.repeat(40), tree: 'd'.repeat(40), base: 'b'.repeat(40),
-      historicalMerges: [merge], followUps: [{ ...merge, url: 'https://github.com/example/repo/pull/107', mergeCommit: 'c'.repeat(40) }],
-      originalFindings: [], verification: { observedAt: at, tree: 'd'.repeat(40), verifier: 'host-sandbox', checks: [] },
-      review: { reviewer: 'fixture/other-family', verdict: { decision: 'approve', summary: 'Follow-up fixes scoped findings', findings: [] }, resolutions: [] },
-      preparedBy: 'person', preparedAt: at,
-    };
-    await runtime.ledger.update(item.id, current => ({ ...current, requestClosureCandidates: [candidate] }));
-    const prepared = (await call('GET', `/api/items/${item.id}`)).body;
-    assert.equal(prepared.done, false);
-    assert.equal((prepared.item as WorkItem).requestAcceptance, undefined);
-    const receipt = { candidate, by: 'person', note: 'Original scoped goal met', acceptedAt: at };
-    await runtime.ledger.update(item.id, current => ({ ...current, status: 'landed', requestAcceptance: receipt }));
-    const accepted = (await call('GET', `/api/items/${item.id}`)).body;
-    assert.equal(accepted.done, true);
-    assert.equal(accepted.waiting, undefined);
-    assert.deepEqual((accepted.item as WorkItem).requestAcceptance, receipt);
-    assert.equal((accepted.item as WorkItem).verdicts[0]!.decision, 'revise');
-    assert.equal((accepted.item as WorkItem).reason, 'review_changes_required');
-    assert.match(String(accepted.text), /goal accepted by person/);
-    assert.match(String(accepted.text), /Review 1: revise/);
-    assert.match(String(accepted.text), /deployment not assessed/);
-    const section = ITEM_SECTIONS.find(component => component.name === 'RequestAcceptance')!;
-    const html = renderToStaticMarkup(createElement(section, { item: accepted.item as WorkItem }));
-    assert.match(html, /Original goal accepted/);
-    assert.match(html, /by person/);
-    assert.match(html, /pull\/107/);
-    assert.match(html, /earlier review verdicts remain unchanged/);
-  } finally {
-    server.close();
-  }
-});
 
 test('an instance create outside the owner\'s grant shows the exact instance and its violations in the inbox', async () => {
   const { runtime, server, call } = await start();
@@ -755,52 +709,6 @@ test('person recovery decisions resume the exact stage, retry failures and cance
   }
 });
 
-test('human session stop persists a pause, aborts children, rejects messages and explicitly resumes original approval', async () => {
-  const busySessions = new Set(['ses_work', 'ses_child']);
-  const stopped: string[] = [];
-  const { runtime, server, call, calls } = await start(api => {
-    api.listSessions = async directory => [
-      { id: 'ses_work', directory, title: 'Original work', time: { created: 1, updated: 1 } },
-      { id: 'ses_child', directory, parentID: 'ses_work', title: 'Implementer', time: { created: 1, updated: 1 } },
-    ];
-    api.status = async () => Object.fromEntries([...busySessions].map(id => [id, { type: 'busy' }]));
-    api.abort = async (_directory, id) => { stopped.push(id); busySessions.delete(id); };
-  });
-  try {
-    await runtime.notebook('clippy').ensure('# Charter\n');
-    const proposal = { title: 'Original', goal: 'Approved original goal', rationale: 'r', acceptance: ['a'], size: 'small' as const };
-    const item = await runtime.ledger.create('clippy', 'owner-change', proposal, {
-      status: 'working', session: { sessionID: 'ses_work', directory: '/desks/clippy' },
-      planDocument: { markdown: 'Carry out the original plan', digest: 'original' },
-      planApproval: { by: 'original-person', at: '2026-10-01T00:00:00Z' },
-    });
-    const outcome = await call('POST', '/api/owners/clippy/sessions/ses_work/abort', {});
-    assert.equal(outcome.status, 200, String(outcome.body.error));
-    assert.equal(outcome.body.outcome, 'paused');
-    assert.deepEqual(stopped, ['ses_child', 'ses_work']);
-    const paused = await runtime.ledger.get(item.id);
-    assert.equal(paused.status, 'paused');
-    assert.ok(paused.pauses[0]?.stoppedAt);
-    assert.equal((await call('POST', '/api/owners/clippy/sessions/ses_work/prompt', { text: 'Resume please' })).status, 409);
-    assert.equal(calls.some(entry => entry[0] === 'prompt'), false);
-    assert.equal((await runtime.ledger.get(item.id)).status, 'paused');
-    const snapshot = (await call('GET', '/api/state')).body as { owners: { id: string; running: number }[] };
-    assert.equal(snapshot.owners.find(owner => owner.id === 'clippy')?.running, 0);
-    const resumed = await call('POST', '/api/decide', { action: 'resume-item', id: item.id });
-    assert.equal(resumed.status, 200, String(resumed.body.error));
-    const persisted = await runtime.ledger.get(item.id);
-    assert.equal(persisted.status, 'working');
-    assert.deepEqual(persisted.planApproval, item.planApproval);
-    assert.deepEqual(persisted.proposal, item.proposal);
-    assert.equal(persisted.session?.sessionID, 'ses_work');
-    const repeated = await call('POST', '/api/decide', { action: 'resume-item', id: item.id });
-    assert.equal(repeated.status, 200);
-    assert.equal((await runtime.ledger.get(item.id)).humanNotes.filter(note => note.kind === 'resume').length, 1);
-  } finally {
-    server.close();
-  }
-});
-
 test('an owner\'s page lists its pending reminders, and the person cancels one with a note', async () => {
   const { runtime, server, call } = await start();
   try {
@@ -946,39 +854,11 @@ test('a provider failing authentication is in /api/state and the inbox with its 
   }
 });
 
-test('attention assignment route preserves Seen and exposes linked gated request without spoofed actor', async () => {
+test('synthetic revision IDs cannot be acknowledged or resolved through HTTP', async () => {
   const { runtime, server, call } = await start();
   try {
-    await runtime.notebook('bellonda').ensure('# Test');
-    await runtime.notebook('bellonda').journal({ kind: 'attention', note: 'Repair the check' });
-    const inbox = (await call('GET', '/api/state')).body.inbox as { id: string; kind: string }[];
-    const attention = inbox.find(entry => entry.kind === 'attention')!;
-    const assignment = { owner: 'clippy', repository: 'example/clippy', title: 'Fix check', goal: 'Correct check', acceptance: ['Regression passes'], by: 'spoofed' };
-    const first = await call('POST', '/api/decide', { action: 'assign-attention', id: attention.id, assignment });
-    assert.match(String(first.body.outcome), /pending-owner/);
-    await call('POST', '/api/decide', { action: 'assign-attention', id: attention.id, assignment });
-    const retried = await call('POST', '/api/decide', { action: 'retry-attention-assignment', id: attention.id });
-    assert.equal(retried.status, 200);
-    assert.equal(retried.body.outcome, 'pending-owner');
-    const requests = await runtime.requests.list();
-    assert.equal(requests.length, 1);
-    const request = requests[0];
-    assert.equal(request.ask.kind, 'work');
-    if (request.ask.kind === 'work') assert.notEqual(request.ask.operatorAssignment?.by, 'spoofed');
-    const current = (await call('GET', '/api/state')).body.inbox as { id: string; attentionStatus?: string; attentionAssignment?: { requestID: string } }[];
-    const entry = current.find(candidate => candidate.id === attention.id)!;
-    assert.equal(entry.attentionStatus, 'open');
-    assert.equal(entry.attentionAssignment?.requestID, request.id);
-  } finally { server.close(); }
-});
-
-
-test('synthetic revision IDs cannot be acknowledged, resolved or assigned through HTTP', async () => {
-  const { runtime, server, call } = await start();
-  try {
-    const assignment = { owner: 'clippy', repository: 'example/clippy', title: 'Fix', goal: 'Fix check', acceptance: ['Passes'] };
-    for (const action of ['acknowledge-attention', 'resolve-attention', 'assign-attention']) {
-      const rejected = await call('POST', '/api/decide', { action, id: 'plan-revision-w-fixture', reason: 'Fix it', assignment });
+    for (const action of ['acknowledge-attention', 'resolve-attention']) {
+      const rejected = await call('POST', '/api/decide', { action, id: 'plan-revision-w-fixture', reason: 'Fix it' });
       assert.notEqual(rejected.status, 200);
       assert.match(JSON.stringify(rejected.body), /attention_not_found/);
     }
