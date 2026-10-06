@@ -22,6 +22,16 @@ export async function requestInstance(runtime: Runtime, from: string, to: string
   return request;
 }
 
+/** Release selects an instance request opened from the caller's exact session; the delete gate is unchanged. */
+export async function releaseInstance(runtime: Runtime, owner: string, requestId: string, origin: ChatOrigin) {
+  return runtime.requests.update(requestId, request => {
+    const isSameSession = request.origin?.sessionID === origin.sessionID && request.origin.directory === origin.directory;
+    if (request.from !== owner || !isSameSession || request.ask.kind !== 'instance'
+      || request.status !== 'provisioned') throw new Error('instance_release_scope_mismatch');
+    return { ...request, status: request.leaseIncludesDelete ? 'delete-approved' : 'awaiting-delete-approval' };
+  });
+}
+
 /** An owner asks the owner that hosts one of its sites to publish it. */
 export async function requestPublish(runtime: Runtime, from: string, siteId: string, purpose: string) {
   const host = [...runtime.declarations.owners.values()].find(owner => owner.domain.kind === 'truenas' && owner.domain.sites.some(site => site.id === siteId));
@@ -272,8 +282,6 @@ type Step = (runtime: Runtime, request: ResourceRequest) => Promise<ResourceRequ
 /** What the runtime does for each request state it owns. States waiting for a person are absent. */
 export const REQUEST_STEPS: Partial<Record<ResourceRequest['status'], Step>> = {
   'work-running': trackDelegatedWork,
-  completed: trackDelegatedWork,
-  'work-paused': trackDelegatedWork,
   'pending-owner': (runtime, request) => decide(runtime, request.id),
   'create-approved': executeCreate,
   provisioned: async (runtime, request) => (request.followUpResult || request.followUp === 'none' ? request : runFollowUp(runtime, request)),
@@ -283,13 +291,11 @@ export const REQUEST_STEPS: Partial<Record<ResourceRequest['status'], Step>> = {
 export function requestCanRun(request: ResourceRequest) {
   if (request.retry && Date.parse(request.retry.nextAt) > Date.now()) return false;
   if (request.operation?.runner !== undefined && requestRunnerIsAlive(request.operation.runner)) return false;
-  if (request.status === 'completed') return Boolean(request.operation?.checkpoint?.operational
-    && !request.operation.checkpoint.operationalNoticeQueued);
   if (request.status === 'provisioned') return !request.followUpResult && request.followUp !== 'none';
   return Boolean(REQUEST_STEPS[request.status]);
 }
 
-const EFFECT_FREE = new Set<ResourceRequest['status']>(['pending-owner', 'work-running', 'work-paused']);
+const EFFECT_FREE = new Set<ResourceRequest['status']>(['pending-owner', 'work-running']);
 
 function requestFailure(request: ResourceRequest, error: unknown): ResourceRequest {
   const operation = { ...request.operation!, runner: undefined };
@@ -309,7 +315,7 @@ export async function processRequest(runtime: Runtime, id: string, onProgress: (
     const step = REQUEST_STEPS[request.status];
     if (!step || !requestCanRun(request)) return;
     const operation = { id: randomUUID(), stage: request.status, startedAt: new Date().toISOString(), runner: process.pid,
-      checkpoint: request.operation?.stage === request.status || request.operation?.checkpoint?.operational
+      checkpoint: request.operation?.stage === request.status
         ? request.operation?.checkpoint : request.ask.kind === 'instance' ? {
           instance: request.operation?.checkpoint?.instance,
         } : undefined };

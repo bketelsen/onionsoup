@@ -2,8 +2,7 @@ import { reconcileAppUpdate } from './app-updates.ts';
 import { reconcileInstance, reconcileDeletion } from './incus.ts';
 import { reconcilePublication } from './publish-site.ts';
 import { journalRequest } from './delegation.ts';
-import { queueOperationalReverification } from './operational-work.ts';
-import { isPaused, type WorkItem } from './ledger.ts';
+import type { WorkItem } from './ledger.ts';
 import { REQUEST_LIMITS, requireStatus, type ResourceRequest } from './requests.ts';
 import type { Runtime } from './runtime.ts';
 
@@ -34,9 +33,6 @@ const RECOVERY: Partial<Record<ResourceRequest['status'], Reconciler>> = {
       : { ...request, status: 'pending-owner' };
   },
   'work-running': recoverWorkProjection,
-  'work-paused': async (_runtime, request) => ({ ...request, status: 'work-paused' }),
-  completed: async (runtime, request) => request.operation?.checkpoint?.operational
-    ? recoverWorkProjection(runtime, request) : undefined,
   'create-approved': (runtime, request) => CREATE_RECOVERY[request.ask.kind](runtime, request),
   'delete-approved': async (runtime, request) => {
     if (!request.instance) return undefined;
@@ -47,19 +43,13 @@ const RECOVERY: Partial<Record<ResourceRequest['status'], Reconciler>> = {
 
 async function recoverWorkProjection(runtime: Runtime, request: ResourceRequest): Promise<ResourceRequest> {
   const item = request.workItem ? await runtime.ledger.get(request.workItem) : undefined;
-  const projected = workProjection(request, item);
-  if (projected.status === 'work-paused') return projected;
-  if (item && request.operation?.checkpoint?.operationalOrigin && !request.operation.checkpoint.operational) {
-    await queueOperationalReverification(runtime, request, item, 'operational_verification_interrupted');
-  }
-  return projected;
+  return workProjection(request, item);
 }
 
 function workProjection(request: ResourceRequest, item?: WorkItem): ResourceRequest {
   if (item && (item.request !== request.id || item.owner !== request.to)) {
     throw new Error('delegation_request_binding_mismatch');
   }
-  if (item && isPaused(item)) return { ...request, status: 'work-paused', reason: item.reason };
   return { ...request, status: 'work-running' };
 }
 
@@ -67,21 +57,9 @@ function recoveredRecord(current: ResourceRequest, original: ResourceRequest, re
   requireStatus(current, 'interrupted');
   if (current.operation?.id !== original.operation?.id) throw new Error('request_operation_changed');
   if (current.workItem && current.workItem !== reconciled.workItem) throw new Error('delegation_request_binding_mismatch');
-  const hasRetainedEvidence = current.operation?.checkpoint?.operational || current.operation?.checkpoint?.operationalOrigin
-    || (current.ask.kind === 'instance' && current.operation?.checkpoint?.instance && reconciled.instance);
+  const hasRetainedEvidence = current.ask.kind === 'instance' && current.operation?.checkpoint?.instance && reconciled.instance;
   return { ...reconciled, operation: hasRetainedEvidence ? { ...current.operation!, runner: undefined } : undefined,
     retry: undefined, reconcileAfter: undefined };
-}
-
-function commitRecovery(runtime: Runtime, request: ResourceRequest, reconciled: ResourceRequest) {
-  if (reconciled.ask.kind !== 'work' || !reconciled.workItem) {
-    return runtime.requests.update(request.id, current => recoveredRecord(current, request, reconciled));
-  }
-  return runtime.requests.updateGuarded(request.id, (current, commit) =>
-    runtime.ledger.inspectLocked(reconciled.workItem!, async item => {
-      const projected = workProjection({ ...reconciled, id: current.id, to: current.to }, item);
-      return commit(recoveredRecord(current, request, projected));
-    }));
 }
 
 async function scheduleRecheck(runtime: Runtime, request: ResourceRequest) {
@@ -103,7 +81,7 @@ export async function reconcileRequest(runtime: Runtime, id: string) {
     throw error;
   });
   if (!reconciled) return scheduleRecheck(runtime, request);
-  const updated = await commitRecovery(runtime, request, reconciled);
+  const updated = await runtime.requests.update(id, current => recoveredRecord(current, request, reconciled));
   await journalRequest(runtime, updated, 'request-recovered', updated.reason ?? updated.status);
   return updated;
 }

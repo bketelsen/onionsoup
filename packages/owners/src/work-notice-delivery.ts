@@ -14,8 +14,6 @@ import { ownerTranscriptTarget, routeOwnerNotice } from './owner-message-routing
 import { ownerChatAgent } from './owner-chat.ts';
 import { withRecordLock } from './record-lock.ts';
 import { MessageDeliveryBody, matchesMessageReceipt } from './message-receipt.ts';
-import { isPaused } from './ledger.ts';
-import { pausedSessionItem } from './work-pause.ts';
 
 export const WorkNoticeDelivery = z.object({
   noticeID: z.string(), messageID: z.string(), origin: ChatOrigin,
@@ -25,7 +23,7 @@ export const WorkNoticeDelivery = z.object({
 });
 export type WorkNoticeDelivery = z.infer<typeof WorkNoticeDelivery>;
 
-export async function workNoticeDeliveries(runtime: Runtime) {
+async function workNoticeDeliveries(runtime: Runtime) {
   const directory = join(runtime.stateDirectory, 'notices', 'delivery');
   const names = await readdir(directory).catch(error => {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
@@ -98,11 +96,6 @@ async function send(runtime: Runtime, client: Parameters<Plugin>[0]['client'], p
   let attempted = false;
   try {
     pass.check();
-    if (await pausedSessionItem(runtime, receipt.origin.sessionID)) throw new Error('work_item_paused');
-    if (receipt.notice?.workItem) {
-      const item = await runtime.ledger.get(receipt.notice.workItem);
-      if (item.owner === receipt.notice.owner && isPaused(item)) throw new Error('work_item_paused');
-    }
     await save(runtime, { ...receipt, status: 'prepared', reason: undefined });
     pass.check();
     attempted = true;

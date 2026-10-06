@@ -122,7 +122,6 @@ export const STATUS_LIMITS = { recentDays: 7, recentItems: 10 };
 
 /** Where a finished item ended up, in words an owner can repeat to the person. */
 function outcome(item: WorkItem) {
-  if (item.requestAcceptance) return `goal accepted by ${item.requestAcceptance.by}; verified commit ${item.requestAcceptance.candidate.head}; deployment not assessed`;
   if (item.status === 'landed') {
     if (item.publication) return `landed; PR ${item.publication.url} (${item.publication.state})`;
     if (item.rebaseOf) return `landed; updated ${item.rebaseOf.prUrl}`;
@@ -152,18 +151,7 @@ export function itemText(item: WorkItem) {
   if (item.plan) lines.push(`Plan: ${item.plan.summary}`, ...item.plan.steps.map((step, index) => `  ${index + 1}. ${step.description}`));
   if (item.planDocument) lines.push(`Plan (${item.planDocument.digest}):`, item.planDocument.markdown);
   if (item.planApproval) lines.push(`Plan approved by ${item.planApproval.by} at ${item.planApproval.at}`);
-  for (const pause of item.pauses) {
-    lines.push(`Intentional pause by ${pause.by} at ${pause.at}: ${pause.reason}; continue from ${pause.resumeStatus}`,
-      pause.stoppedAt ? `Stop confirmed at ${pause.stoppedAt}` : 'Stop not yet confirmed; claims remain held');
-    if (pause.resumedAt) lines.push(`Resumed by ${pause.resumedBy} at ${pause.resumedAt} (${pause.resumedAuthority})`);
-  }
   if (item.session) lines.push(`Working in session ${item.session.sessionID}`);
-  if (item.requestAcceptance) {
-    const receipt = item.requestAcceptance;
-    lines.push(`Goal accepted by ${receipt.by} at ${receipt.acceptedAt}: ${receipt.note}`,
-      `Closure evidence: ${receipt.candidate.digest}; independent review ${receipt.candidate.review.reviewer}: ${receipt.candidate.review.verdict.decision}`,
-      'Original reviews and historical merge observations are retained; acceptance does not establish deployment.');
-  }
   item.implementations.forEach((implementation, index) => lines.push(`Implementation ${index + 1}: ${implementation.report.summary}`, `  verify: ${implementation.verification.map(result => `${result.command.slice(0, 60)}=${result.exitCode}`).join(', ')}`));
   item.verdicts.forEach((verdict, index) => lines.push(`Review ${index + 1}: ${verdict.decision}: ${verdict.summary}`));
   lines.push(`Hires: ${item.hires.map(hire => `${hire.stage} ${hire.model} ${hire.outcome}${hire.error ? ` (${hire.error.slice(0, 120)})` : ''}`).join('; ') || 'none'}`);

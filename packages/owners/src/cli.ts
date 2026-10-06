@@ -13,9 +13,6 @@ import { approveCreate, approveDelete, denyRequest, processRequests, requestPubl
 import { DAEMON_LIMITS, daemon, drain, recordDutyRun, tick, type TickLog } from './daemon.ts';
 import { approvePush } from './rebase.ts';
 import { describeAsk, type ResourceRequest } from './requests.ts';
-import { observeExternalMerge, reconcileExternalPublication } from './external-publication.ts';
-import { prepareRequestClosure, acceptRequestClosure } from './request-closure.ts';
-import { completeAcceptedRequest } from './request-closure-completion.ts';
 import { proposeDeskChanges, resetDeskReviews } from './desk-changes.ts';
 import { shipEngine } from './ship.ts';
 import { deskState } from './desk.ts';
@@ -25,7 +22,6 @@ import { ensureDesk } from './workspace.ts';
 import { openWiki } from './wiki.ts';
 import { migrateNav } from './wiki-migrate.ts';
 import { advance, approvePlan, resumeItem, retryItem, cancelItem, revisePlan } from './work-recovery.ts';
-import { humanWorkActor, pauseItem } from './work-pause.ts';
 import { beginAdmission } from './deployment-admission.ts';
 
 const run = promisify(execFile);
@@ -45,7 +41,6 @@ const { values: options, positionals } = parseArgs({
     repository: { type: 'string' },
     item: { type: 'string' },
     draft: { type: 'boolean' },
-    'follow-up': { type: 'string', multiple: true },
   },
 });
 
@@ -62,10 +57,6 @@ function detail(item: WorkItem) {
   if (item.humanNotes.length) out.push('', 'Notes from people:', ...item.humanNotes.map(note => `  ${note.kind} by ${note.by}: ${note.note}`));
   if (item.planDocument) out.push('', `Plan (${item.planDocument.digest}):`, item.planDocument.markdown);
   if (item.planApproval) out.push(`Plan approved by ${item.planApproval.by} at ${item.planApproval.at}`);
-  for (const pause of item.pauses) {
-    out.push(`Paused by ${pause.by} at ${pause.at}: ${pause.reason}; continue from ${pause.resumeStatus}`);
-    if (pause.resumedAt) out.push(`Resumed by ${pause.resumedBy} at ${pause.resumedAt}`);
-  }
   if (item.session) out.push(`Working in session ${item.session.sessionID}`);
   if (item.planWorktree) out.push(`Plan worktree: ${item.planWorktree}`);
   item.implementations.forEach((implementation, index) => {
@@ -79,8 +70,6 @@ function detail(item: WorkItem) {
   if (item.branch) out.push('', `Branch: ${item.branch}  Worktree: ${item.worktree}`);
   if (item.landedCommit) out.push(`Landed: ${item.landedCommit}`);
   if (item.publication) out.push(`Published: ${item.publication.url}`);
-  if (item.requestAcceptance) out.push(`Goal accepted by ${item.requestAcceptance.by} at ${item.requestAcceptance.acceptedAt}: ${item.requestAcceptance.note}`,
-    `Closure evidence ${item.requestAcceptance.candidate.digest}; verified commit ${item.requestAcceptance.candidate.head}; deployment not assessed`);
   return out.join('\n');
 }
 
@@ -170,12 +159,9 @@ const COMMANDS: Record<string, Command> = {
     console.log(`${notebook.directory}\n${stdout}`);
   },
   async resume(runtime, [itemId]) {
-    const item = await resumeItem(runtime, required(itemId, 'work item'), humanWorkActor(), options.note);
+    const item = await resumeItem(runtime, required(itemId, 'work item'), userInfo().username, options.note);
     console.log(line(item));
     await continueIfFree(runtime, item);
-  },
-  async pause(runtime, [itemId]) {
-    console.log(line(await pauseItem(runtime, required(itemId, 'work item'), humanWorkActor(), required(options.reason, '--reason'))));
   },
   async retry(runtime, [itemId]) {
     const item = await retryItem(runtime, required(itemId, 'work item'), userInfo().username, options.note);
@@ -222,26 +208,6 @@ const COMMANDS: Record<string, Command> = {
     const title = required(options.note, '--note (title)');
     const result = await proposeDeskChanges(runtime, required(ownerId, 'owner'), { title, summary: options.reason ?? title, repository: options.repository, item: options.item, draft: options.draft });
     console.log(`${result.outcome}: ${result.summary}`);
-  },
-  async 'observe-merged-pr'(runtime, [ownerId, itemId, url]) {
-    const item = await observeExternalMerge(runtime, required(ownerId, 'owner'), required(itemId, 'item'), required(url, 'PR URL'), userInfo().username);
-    console.log(`${item.id}: historical merge observed ${url}; acceptance pending; request not completed; deployment not assessed`);
-  },
-  async 'prepare-request-closure'(runtime, [ownerId, itemId]) {
-    const candidate = await prepareRequestClosure(runtime, required(ownerId, 'owner'), required(itemId, 'item'),
-      required(options.directory, '--directory (clean integrated checkout)'), options['follow-up'] ?? [], userInfo().username);
-    console.log(JSON.stringify(candidate, null, 2));
-    console.log(`Review this evidence, then explicitly accept: owners accept-request ${ownerId} ${itemId} ${candidate.digest} --note "<acceptance rationale>"`);
-  },
-  async 'accept-request'(runtime, [ownerId, itemId, digest]) {
-    const item = await acceptRequestClosure(runtime, required(ownerId, 'owner'), required(itemId, 'item'),
-      required(digest, 'closure digest'), userInfo().username, required(options.note, '--note (acceptance rationale)'));
-    const request = await completeAcceptedRequest(runtime, item.id);
-    console.log(`${request.id}: ${request.status}; original goal explicitly accepted; closure ${item.requestAcceptance!.candidate.digest}; deployment not assessed`);
-  },
-  async 'reconcile-pr'(runtime, [ownerId, itemId, url]) {
-    const item = await reconcileExternalPublication(runtime, required(ownerId, 'owner'), required(itemId, 'item'), required(url, 'PR URL'), userInfo().username);
-    console.log(`${item.id}: ${item.publication!.state} ${item.publication!.url}; deployment not assessed`);
   },
   async 'desk-state'(runtime) {
     console.log(JSON.stringify(await deskState(runtime, { agent: options.agent, directory: options.directory, owner: options.owner })));
@@ -324,7 +290,7 @@ if (!command && commandName !== 'init') {
 /** Commands that only read, or only record a person's decision, never take the runtime lock. */
 const LOCK_FREE = [
   'distill', 'items', 'show', 'notebook', 'requests', 'approve', 'revise-plan',
-  'pause', 'resume', 'retry', 'cancel', 'desk', 'desk-state', 'retract', 'ask', 'request-publish', 'propose',
+  'resume', 'retry', 'cancel', 'desk', 'desk-state', 'retract', 'ask', 'request-publish', 'propose',
   'ship', 'approve-push', 'approve-create', 'approve-delete', 'deny-request',
   'desk-review-reset',
   'wiki',

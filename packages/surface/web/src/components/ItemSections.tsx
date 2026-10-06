@@ -55,17 +55,6 @@ function Notes({ item }: { item: WorkItem }) {
   );
 }
 
-function Pauses({ item }: { item: WorkItem }) {
-  if (!item.pauses.length) return null;
-  return <Section title="Intentional pauses">
-    {item.pauses.map(receipt => <div key={receipt.id} className="typography-meta">
-      <p>{receipt.by} {timeAgo(receipt.at)}: {receipt.reason}. Continue from {receipt.resumeStatus}.</p>
-      <p>{receipt.stoppedAt ? 'Stop confirmed.' : 'Stop not confirmed; runner and delivery claims remain held.'}</p>
-      {receipt.resumedAt && <p>Explicitly resumed by {receipt.resumedBy} {timeAgo(receipt.resumedAt)} ({receipt.resumedAuthority}).</p>}
-    </div>)}
-  </Section>;
-}
-
 function Publication({ item }: { item: WorkItem }) {
   const publication = item.deskPublication;
   if (!publication) return null;
@@ -131,32 +120,6 @@ function Hires({ item }: { item: WorkItem }) {
   );
 }
 
-function RequestAcceptance({ item }: { item: WorkItem }) {
-  const receipt = item.requestAcceptance;
-  if (!receipt) return null;
-  const candidate = receipt.candidate;
-  return (
-    <Section title="Original goal accepted">
-      <div className="typography-markdown flex flex-col gap-2 [overflow-wrap:anywhere]">
-        <p><Badge tone="success">accepted</Badge> by {receipt.by} {timeAgo(receipt.acceptedAt)}. {receipt.note}</p>
-        <p>{candidate.proposal.goal}</p>
-        <p>Verified commit <code>{candidate.head}</code>; {candidate.verification.checks.length} configured host checks.
-          Review by {candidate.review.reviewer}: {candidate.review.verdict.decision}.</p>
-        <ul className="list-disc pl-5">{candidate.followUps.map(merge => <li key={merge.url}>
-          <a className="text-primary hover:underline" href={merge.url} target="_blank" rel="noreferrer">{merge.url}</a>: merged {merge.mergeCommit}
-        </li>)}</ul>
-        <details><summary>Finding resolutions and audit digest</summary>
-          <p><code>{candidate.digest}</code></p>
-          <ul className="list-disc pl-5">{candidate.review.resolutions.map(resolution => <li key={resolution.finding}>
-            <code>{resolution.finding}</code>: {resolution.disposition}. {resolution.evidence}
-          </li>)}</ul>
-        </details>
-        <p>Historical merge observations and earlier review verdicts remain unchanged. This acceptance does not establish deployment.</p>
-      </div>
-    </Section>
-  );
-}
-
 /** A work item's page, in order: where the work runs, what was asked, the plan, then how it was published. */
 function RequestProgress({ requestText }: Parameters<ItemSection>[0]) {
   if (!requestText) return null;
@@ -164,5 +127,5 @@ function RequestProgress({ requestText }: Parameters<ItemSection>[0]) {
 }
 
 export const ITEM_SECTIONS: ItemSection[] = [
-  WorkSession, Proposal, Plan, Notes, Pauses, RequestProgress, RequestAcceptance, Publication, Verification, Reviews, Hires,
+  WorkSession, Proposal, Plan, Notes, RequestProgress, Publication, Verification, Reviews, Hires,
 ];

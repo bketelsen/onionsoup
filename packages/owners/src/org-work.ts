@@ -6,12 +6,11 @@ import { queueNotice, readNotice } from './notices.ts';
 import { latestOwnerMessageTarget, ownerMessageId } from './owner-messages.ts';
 import type { Runtime } from './runtime.ts';
 import { cancelItem } from './work-recovery.ts';
-import { managerWorkActor, resumePausedItem } from './work-pause.ts';
 
 /**
  * A manager fans work out to her direct reports with onionsoup_request_work and follows it with onionsoup_status.
- * On work she requested she may cancel it, leave the report a note in that work's own session, or resume it after an
- * intentional pause (under the report's approve-plans grant). Plan review is direct-request-plan-review.ts.
+ * On work she requested she may cancel it or leave the report a note in that work's own session. Plan review is
+ * direct-request-plan-review.ts.
  */
 export const SteerInvocation = z.object({ origin: ChatOrigin, messageID: z.string().min(1) });
 export type SteerInvocation = z.infer<typeof SteerInvocation>;
@@ -31,9 +30,7 @@ async function queueManagerNote(runtime: Runtime, managerId: string, item: WorkI
   }, notice.at);
 }
 
-const STEERS: Record<'resume' | 'cancel' | 'note', Steer> = {
-  resume: async (runtime, managerId, item, note) =>
-    (await resumePausedItem(runtime, item.id, await managerWorkActor(runtime, managerId, item), note)).status,
+const STEERS: Record<'cancel' | 'note', Steer> = {
   cancel: async (runtime, managerId, item, note) => (await cancelItem(runtime, item.id, `owner:${managerId}`, note)).status,
   note: async (runtime, managerId, item, note, invocation) => {
     await queueManagerNote(runtime, managerId, item, note, invocation);

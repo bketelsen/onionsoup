@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { ChatOrigin } from './chat-origin.ts';
 import { DirectRequestPlanReview } from './direct-request-plan-review-types.ts';
 import { validateDirectRequestPlanReview } from './direct-request-plan-review.ts';
-import { HumanNote, isPaused, type WorkItem } from './ledger.ts';
+import { HumanNote, type WorkItem } from './ledger.ts';
 import { NOTICE_PREFIX } from './notices.ts';
 import { OWNER_CHANGE_WORKFLOW } from './plan-work.ts';
 import { withRecordLock } from './record-lock.ts';
@@ -190,7 +190,6 @@ async function readyAfterBlock(runtime: Runtime, record: Revision, origin: ChatO
 }
 
 async function deliverOne(runtime: Runtime, record: Revision, client: PlanRevisionClient) {
-  if (isPaused(await runtime.ledger.get(record.item))) return;
   const prepared = await prepareDelivery(runtime, record, client);
   if (!prepared) return;
   const { item, agent, origin, context } = prepared;

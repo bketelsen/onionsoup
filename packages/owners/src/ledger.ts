@@ -5,13 +5,10 @@ import { z } from 'zod';
 import { withRecordLock } from './record-lock.ts';
 import { ImplementationReport, OwnerAnswers, Plan, ProposedWork, Verdict } from './artifacts.ts';
 import { ChatOrigin } from './chat-origin.ts';
-import { ReviewEvidence } from './desk-reviews.ts';
 import { RequestWorkEvidence } from './request-work-evidence.ts';
 import { DirectRequestPlanReview } from './direct-request-plan-review-types.ts';
 import { AssignmentRef } from './requests.ts';
-import { RequestAcceptance, RequestClosureCandidate } from './request-closure-types.ts';
 import { PlanWorktreeArchive } from './plan-worktree-archive.ts';
-export { RequestAcceptance, RequestClosureCandidate } from './request-closure-types.ts';
 
 export const HireRecord = z.object({
   stage: z.string(),
@@ -40,8 +37,6 @@ export const WorkStatus = z.enum([
   'awaiting-plan-approval',
   /** An approved owner plan whose execution session is doing the work. */
   'working',
-  'pausing',
-  'paused',
   'implementing',
   'reviewing',
   'landing',
@@ -62,32 +57,13 @@ export function isFinished(item: { status: WorkStatus }) {
 }
 
 export const HumanNote = z.object({
+  /** 'pause' is legacy: intentional pause was removed (2026-10); one cancelled item still records it. */
   kind: z.enum(['approval', 'plan-feedback', 'rejection', 'pause', 'resume', 'retry', 'cancellation', 'override']),
   by: z.string(),
   at: z.string(),
   note: z.string(),
 });
 export type HumanNote = z.infer<typeof HumanNote>;
-
-export const WorkPauseReceipt = z.object({
-  id: z.string(),
-  by: z.string(),
-  authority: z.enum(['human', 'standing-grant']),
-  at: z.string(),
-  reason: z.string(),
-  binding: z.string(),
-  resumeStatus: WorkStatus,
-  stoppedAt: z.string().optional(),
-  resumedAt: z.string().optional(),
-  resumedBy: z.string().optional(),
-  resumedAuthority: z.enum(['human', 'standing-grant']).optional(),
-  stopAttempt: z.enum(['submitted', 'uncertain', 'confirmed']).optional(),
-});
-export type WorkPauseReceipt = z.infer<typeof WorkPauseReceipt>;
-
-export function isPaused(item: { status: WorkStatus }) {
-  return item.status === 'pausing' || item.status === 'paused';
-}
 
 export const Publication = z.object({
   url: z.string(),
@@ -117,8 +93,11 @@ export type PlanWorktreeKept = z.infer<typeof PlanWorktreeKept>;
 
 const PullRequestTarget = z.object({ itemId: z.string(), branch: z.string(), prUrl: z.string(), previousHead: z.string() });
 
-/** A verified historical fact, never publication acceptance or permission to complete work. */
-export const ExternalPrObservation = z.object({
+/**
+ * Legacy: a merged PR the removed observe-merged-pr command recorded (2026-09). One cancelled item still carries it;
+ * it keeps parsing and saving unchanged, and nothing reads or writes it.
+ */
+const ExternalPrObservation = z.object({
   url: z.string().url(), repository: z.string(), baseBranch: z.string(), branch: z.string(),
   head: z.string(), tree: z.string(), mergeCommit: z.string(), mergedAt: z.string().datetime(),
   baseObserved: z.string(), by: z.string(), observedAt: z.string().datetime(),
@@ -126,7 +105,6 @@ export const ExternalPrObservation = z.object({
   /** Immutable snapshot of the existing host attempt; later reviews do not overwrite it. */
   followUpEvidence: RequestWorkEvidence.optional(),
 });
-export type ExternalPrObservation = z.infer<typeof ExternalPrObservation>;
 
 export const WorkItem = z.object({
   id: z.string(),
@@ -162,7 +140,6 @@ export const WorkItem = z.object({
   landedCommit: z.string().optional(),
   hires: z.array(HireRecord).default([]),
   humanNotes: z.array(HumanNote).default([]),
-  pauses: z.array(WorkPauseReceipt).default([]),
   publication: Publication.optional(),
   /** Set on a rebase work item: which landed item's PR it brings up to date. */
   rebaseOf: PullRequestTarget.extend({ mode: z.literal('update-base').optional() }).optional(),
@@ -175,13 +152,8 @@ export const WorkItem = z.object({
     reviewer: z.string(),
     publishRequest: z.string().optional(),
   }).optional(),
-  externalPublication: z.object({
-    by: z.string(), observedAt: z.string(), head: z.string(), base: z.string(),
-    mergeCommit: z.string().optional(), reviewer: z.string(), evidence: ReviewEvidence,
-  }).optional(),
+  /** Legacy, see ExternalPrObservation. */
   externalPrObservations: z.array(ExternalPrObservation).optional(),
-  requestClosureCandidates: z.array(RequestClosureCandidate).optional(),
-  requestAcceptance: RequestAcceptance.optional(),
   /** The chat the work was opened from, so the owner hears there how it went. */
   origin: ChatOrigin.optional(),
   /** Host-observed owner of the planning origin; a requester origin is not the item's owner. */
@@ -194,31 +166,10 @@ export const WorkItem = z.object({
   assignment: AssignmentRef.optional(),
   /** The pid working on a step right now; unset when the item is merely queued (approved, resumed). */
   activeRunner: z.number().optional(),
-  /** Distinguishes separate claims made by the same long-lived host process. */
-  runnerClaim: z.uuid().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
 export type WorkItem = z.infer<typeof WorkItem>;
-
-export function requireRunnerClaim(current: WorkItem, claimed: Pick<WorkItem, 'id' | 'activeRunner' | 'runnerClaim'>) {
-  if (current.id !== claimed.id || claimed.activeRunner === undefined
-    || current.activeRunner !== claimed.activeRunner || current.runnerClaim !== claimed.runnerClaim) {
-    throw new Error('work_item_runner_changed');
-  }
-}
-
-function requireSaveSnapshot(current: WorkItem, incoming: WorkItem) {
-  if (JSON.stringify(current.pauses) !== JSON.stringify(incoming.pauses)
-    || (isPaused(current) && incoming.status !== current.status)) throw new Error('work_item_pause_changed');
-  if (current.runnerClaim !== incoming.runnerClaim
-    || (current.activeRunner !== undefined && current.activeRunner !== incoming.activeRunner)) {
-    throw new Error('work_item_runner_changed');
-  }
-  if ((isPaused(current) || current.runnerClaim) && current.updatedAt !== incoming.updatedAt) {
-    throw new Error('work_item_changed');
-  }
-}
 
 function runnerIsAlive(pid: number) {
   try {
@@ -259,20 +210,7 @@ export class Ledger {
   }
 
   async save(item: WorkItem) {
-    return withRecordLock(`${this.path(item.id)}.lock`, async () => {
-      const incoming = WorkItem.parse(item);
-      const current = await this.get(item.id).catch(error => {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-        return undefined;
-      });
-      if (current) requireSaveSnapshot(current, incoming);
-      return this.write(incoming);
-    });
-  }
-
-  /** Cross-record commits acquire the request lock first, then retain this snapshot until the commit completes. */
-  async inspectLocked<T>(id: string, inspect: (current: WorkItem) => Promise<T>) {
-    return withRecordLock(`${this.path(id)}.lock`, async () => inspect(await this.get(id)));
+    return withRecordLock(`${this.path(item.id)}.lock`, () => this.write(WorkItem.parse(item)));
   }
 
   /** Read and mutate the latest record under a cross-process lock; never hold it across effects. */
@@ -305,13 +243,9 @@ export class Ledger {
   async markInterrupted() {
     const stranded = (await this.list()).filter(item => item.activeRunner !== undefined && !runnerIsAlive(item.activeRunner));
     for (const item of stranded) {
-      await this.update(item.id, current => {
-        if (current.activeRunner === undefined || runnerIsAlive(current.activeRunner)) return current;
-        if (isPaused(current)) return { ...current, activeRunner: undefined, runnerClaim: undefined };
-        return {
-          ...current, status: 'interrupted', resumeStatus: current.status, activeRunner: undefined, runnerClaim: undefined,
-          reason: `runtime stopped while ${current.status}`,
-        };
+      await this.update(item.id, current => current.activeRunner === undefined || runnerIsAlive(current.activeRunner) ? current : {
+        ...current, status: 'interrupted', resumeStatus: current.status, activeRunner: undefined,
+        reason: `runtime stopped while ${current.status}`,
       });
     }
     return stranded.length;

@@ -1,4 +1,3 @@
-import { recoverAttentionAssignments } from './attention-assignment.ts';
 import { recoverAskHandoffs } from './ask-handoffs.ts';
 import { canReconcileRequest, reconcileRequest } from './request-recovery.ts';
 import { readFile, writeFile } from 'node:fs/promises';
@@ -194,7 +193,7 @@ async function runRequests(runtime: Runtime, log: TickLog) {
     for (const owner of requestParticipants(runtime, request)) busyOwners.add(owner);
   }
   for (const request of pendingRequests) {
-    if (request.status === 'work-running' || request.status === 'work-paused') {
+    if (request.status === 'work-running') {
       try {
         await processRequest(runtime, request.id, log.request);
       } catch (error) {
@@ -263,11 +262,6 @@ async function tickAdmitted(runtime: Runtime, log: TickLog) {
     if (unreadable.length) log.error('publications', new Error(`pr_state_unreadable: ${unreadable.join(', ')}`));
   } catch (error) {
     log.error('publications', error);
-  }
-  try {
-    await recoverAttentionAssignments(runtime, log.error);
-  } catch (error) {
-    log.error('attention assignments', error);
   }
   try {
     await recoverAskHandoffs(runtime, log.error);

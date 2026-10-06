@@ -34,11 +34,8 @@ function historyPath(runtime: Runtime, ownerId: string, subject: string) {
   return join(runtime.stateDirectory, 'desk-reviews', `${ownerId}--${subject.replaceAll('/', '--')}.json`);
 }
 
-export async function deskReviewRounds(runtime: Runtime, ownerId: string, subject: string, strict = false) {
-  const text = await readFile(historyPath(runtime, ownerId, subject), 'utf8').catch(error => {
-    if (strict && (error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-    return undefined;
-  });
+export async function deskReviewRounds(runtime: Runtime, ownerId: string, subject: string) {
+  const text = await readFile(historyPath(runtime, ownerId, subject), 'utf8').catch(() => undefined);
   return text ? DeskReviewHistory.parse(JSON.parse(text)).rounds : [];
 }
 

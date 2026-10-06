@@ -214,23 +214,6 @@ CLI (`owners approve`) or by a manager stays `working` without a session, and th
 (every `PLUGIN_LIMITS.noticeMs`). The plugin holds the opencode client, so sessions open only while the surface runs;
 `openNeededSessions` in `owner-sessions.ts` retries a failed open on the next pass.
 
-**Intentional pause, not crash interruption.** A human Stop in a linked work conversation or a work item's
-Pause control first records `pausing` and an actor-bound receipt, fencing new dispatch. Host runners keep
-their claims until the admitted effect reaches its real checkpoint. The plugin stops the recorded execution
-tree and positively observes it idle before recording `paused`; unknown openings, children or stopping
-receipts remain `pausing`, never falsely settled. Delegated requests project `work-paused`, and paused work
-does not reserve an otherwise idle owner or reopen through daemon recovery, notices, reminders or peer messages.
-Only an exact host-recorded work session is stopped or fenced, never a shared desk/chat origin. Work without
-an execution session pauses without stopping its submitting conversation. A positively created but
-never-prompted opening retains its identity so a racing pause can settle. Explicit resume delivers its original
-stage workflow prompt through a durable notice; an uncertain introduction is reused, never blindly replayed.
-
-Explicit Resume restores the saved stage and unchanged goal, plan, approval and checkpoints without another
-plan approval. The host records who resumed and why; model prose or an actor name cannot supply authority.
-A configured direct manager may resume work she requested only under the report's applicable `approve-plans` grant.
-Messages remain queued while paused. Work execution sessions and observed children remain read-only until resume, so a
-continuation or a publication tool cannot accidentally restart deliberately stopped work.
-
 **The required review at the end.** `onionsoup_propose_changes` with an approved plan's item (status `working`)
 carries that item through the same host path as any desk change: verification in the sandbox, then a required
 review hired from the `review` freelancer outside the owner's family, then commit (on `owners/<item>`), push, PR,
@@ -241,8 +224,7 @@ round's findings for the person who merges, then folds in the approved plan. Wit
 (against its merge base, with its own review rounds) and committed; the desk and other plans are untouched, and an
 unfinished publication blocks only proposals from the same worktree. Plans approved before plan worktrees existed
 still propose from the desk. The item moves through `landing` to `landed`; completion of delegated repository work means
-its PR merged (or an exact accepted repository-closure receipt). Operational work uses its own host-observed
-checks and effect postconditions, never a fabricated PR. The worktree outlives the merge: the plan's session often keeps working there after its PR merges
+its PR merged. The worktree outlives the merge: the plan's session often keeps working there after its PR merges
 (a rollout run from the worktree), so neither the finish step, the publication refresh nor a cancellation removes it,
 and the item's session keeps its real directory. A plan is finished once it is `landed` with its PR merged or closed,
 or `cancelled`. The plugin's cleanup pass (`removeIdlePlanWorktrees` in `plan-worktrees.ts`, on the same
@@ -259,84 +241,11 @@ including a distinct plan-branch tip, get durable local `refs/onionsoup/archive/
 pushed or pruned. Session metadata is retired only after successful cleanup; a retained workspace remains usable.
 Each removal is journaled (`plan-worktree-removed`), and transcript identities remain history.
 
-**Operational completion without a PR.** `onionsoup_complete_work { item, action: "complete" }` completes an
-approved delegated operational goal from its host-proven execution session or original-work continuation.
-It requires unchanged original request, goal, plan and approval; a clean published source; configured sandbox
-checks; and one final review from a configured different model family against the actual original goal and
-host evidence. Existing resource requests are discovered from exact observed execution lineage, never a
-model-supplied list of resource IDs. Supported Incus effects require retained creation checkpoints, request-tagged
-managed identity, create/delete approvals, any required successful host follow-up and positively observed deletion
-across projects. Completing work does not create resources or bypass effect gates.
-
-The original `ResourceRequest.operation.checkpoint` stores the verified completion receipt before the ledger
-and request projections. Retries repair only those exact projections and queue one requester notification,
-using the fresh correctly owned continuation when its original workspace retired. The work lands without a
-publication and the request completes without the PR-specific human closure ritual. Repository changes,
-dirty/unpublished commits and existing publication evidence still require their normal publication lifecycle.
-Model reports alone, foreign identities, failed checks or unavailable postconditions never establish completion.
-
-`onionsoup_complete_work { item, action: "reverify" }` instead queues concrete owner re-verification in the original
-work context, retaining its goal and authority. Insufficient legacy records remain missing evidence; the owner
-must obtain real original-session resource/check receipts and supported postconditions. No transcript claim,
-fake merged PR, new human attention card or automatic replacement VM supplies that proof.
-
-**Draft publication and external PR recovery.** `onionsoup_propose_changes` accepts `draft: true`
+**Draft publication.** `onionsoup_propose_changes` accepts `draft: true`
 (`owners propose <owner> --draft --item <item> --note <title>` in the CLI). The saved publication
 mode survives retries; a conflicting retry is refused. Draft mode creates a draft PR, checks that
 GitHub still reports draft with auto-merge disabled, and suppresses grant-based merge and site
 follow-up, including resumed checkpoints. It does not grant merge authority or make a PR ready.
-
-A person can reconcile an already published PR with
-`owners reconcile-pr <owner> <item> <https://github.com/owner/repo/pull/number>`.
-This command only accepts an approved, working request item with its existing clean plan worktree.
-It binds the configured repository and base branch, the request and item, and the exact local/remote
-head. An open PR must be draft with auto-merge disabled; a merged PR must have a merge commit in
-the configured base history. Host verification runs afresh on that source, and the ordinary
-cross-family reviewer receives the original goal, acceptance criteria and tree-bound check evidence.
-For merged PRs, the review base precedes the merge so the change cannot disappear from the diff.
-Only after a second source and GitHub check does the command append implementation/review evidence
-and link the PR. It preserves original intent, plan, approvals and history. Repeating the same
-link does not duplicate evidence or publication. Existing request tracking observes merged state
-on its next pass; reconciliation never creates a PR, pushes, merges, publishes a site, or claims
-deployment. Closed-unmerged, mismatched, dirty, active or unapproved work is refused. There is no
-bulk backfill or owner tool that can self-attest an external review.
-
-To record only the historical fact of a merged PR, a person can instead use
-`owners observe-merged-pr <owner> <item> <url>`. It accepts an approved, idle, working request
-with a clean plan worktree at the exact PR head. Host metadata must match the configured repository
-and base, and the merge must be in that base history. Source, remote metadata, request and work item
-are checked again before recording. This command neither runs verification nor hires a reviewer.
-It appends an idempotent observation with the observed head/tree, merge/time, base, actor and plan
-binding. Matching current host attempt evidence is preserved as a separate snapshot, including
-revise findings that remain follow-up; historical reviews are never rewritten. Missing evidence
-is not approval, and mismatched evidence is refused. Request-scoped status distinguishes the fact
-from acceptance. Observation leaves publication, blockers, goal, plan and request completion
-unchanged and never creates follow-up work. A later review does not rewrite the observation;
-explicit acceptance still governs completion. There is no bulk historical import.
-
-**Closure after follow-up fixes.** `owners prepare-request-closure` verifies a separate clean checkout
-at the configured base tip, the original observed merges and the explicitly selected merged follow-up
-PRs. It binds the original request, goal, plan approval, review history, configured checks and exact
-integrated commit/tree. Host verification and a fresh cross-family review assess the original acceptance
-criteria and give every historical finding an explicit evidence-backed disposition: fixed, or outside
-the original approved scope. Review failure cannot be accepted. The new review has its own history;
-it never changes the old verdict, historical merge observation or request-scoped attempt evidence.
-
-Preparation produces a durable candidate, not completion. The person inspects it and runs
-`owners accept-request <owner> <item> <digest> --note <rationale>`. Acceptance rechecks freshness,
-scope, configuration, source and GitHub facts before committing under request then ledger locks.
-Verification and model execution happen outside those locks. A competing plan revision, cancellation,
-runner or changed request invalidates the candidate. Evidence has a 24-hour default lifetime, controlled
-by the repository’s optional `requestClosureEvidenceMaxAgeMs`; advancing the configured base also requires fresh preparation.
-
-The append-only acceptance receipt records the person, rationale, exact candidate and timestamp.
-It moves the work to landed without inventing a publication or replacing old findings. The linked
-request becomes completed from that receipt; if interrupted between those writes, the same acceptance
-command or normal delegated-work tracking repairs only the matching request projection. Identical retries
-preserve the receipt and completion timestamp; conflicting acceptance is refused. Coordinator and surface
-views distinguish current acceptance from historical revise evidence. This is a host CLI capability with
-the existing trusted-person boundary, not a model tool, persistent grant or general outcome system.
-See the [closure commands](../extending.md) for invocation and operational prerequisites.
 
 **Repairs on the desk.** The `maintain-prs` duty keeps published PRs mergeable and green. Failing CI on a new head
 commit hires the owner once for that commit to decide fix, flaky or person; no work item is opened. Its brief holds
@@ -606,8 +515,8 @@ Scope matching is an explicit reviewer assessment with a note, not deterministic
 
 **Steering.** A manager reads all her direct reports' work with `onionsoup_status`, whoever asked for it (her
 requests, a peer's, their own work). `onionsoup_steer` (`org-work.ts`) acts only on a report's work item whose request
-she sent: `cancel` cancels it (its request then fails, and only that request), `note` leaves the report a note, and
-`resume` resumes it after an intentional pause under the report's `approve-plans` grant. Every action takes a note and
+she sent: `cancel` cancels it (its request then fails, and only that request) and `note` leaves the report a note.
+Every action takes a note and
 is journaled (`steered`) to both; reading is oversight, steering is authority. A note is queued to the report's exact
 owned work session rather than only journaled, and deduplicates by host originating session/message identity, so a
 deliberate later repeat of the same words still reaches the report. The report continues the original request,
@@ -701,6 +610,10 @@ pipeline once with `pipeline_removed`. Opening owner sessions and posting notice
 it needs the surface running.
 Shipping refuses while any item has an active runner, so a ship must be retried after the named work finishes
 or is resolved. A manual daemon restart still interrupts active work.
+
+Intentional pause, non-PR operational completion, attention assignment, request closure/acceptance and external PR
+reconciliation were removed in 2026-10, unused. Stop work with cancel. The `pause` human-note kind, the `work-paused`
+request status and `externalPrObservations` on work items stay in their schemas only so old records parse.
 
 ### Operator
 
@@ -908,26 +821,6 @@ the implementer or reviewer loop can make or corroborate.
   new containers, so updates follow the upgrade job, not snapshots of the app's state.
 
 
-### Explicit attention assignment
-
-Attention **Seen** records acknowledgment and leaves the human action queue while retaining owner history;
-neither its note nor old acknowledged records start work.
-**Assign repository fix** is a separate human action selecting a declared capable repository owner, repository,
-title, outcome and acceptance criteria. The host validates that scope and persists the human author and source
-in `state/attention/assignments` before creating one deterministic regular work request. The request is attributed
-to the person through `operatorAssignment`; its from/to owner is the recipient, so it does not impersonate a manager.
-The receiver still accepts or declines, and ordinary plan/review/publication gates apply. No consultation hire is
-needed to submit this concrete request. The inbox displays its request status and linked work.
-
-Repeated identical submissions adopt the request without reopening completed/denied work; changed input conflicts.
-A daemon recovery pass handles only new explicit assignment sidecars, with current configuration checked before
-new request creation and existing identities adopted after a crash. It attempts at most 20 pending assignments
-per tick; each assignment stops after three routing failures or one invalid-scope failure. An explicit **Retry assignment** revalidates current scope and grants another bounded routing budget, adopting any existing request without restarting it. The original assignment author remains its provenance. There is no legacy backfill.
-Assignment does not acknowledge, resolve or cancel the attention entry, and resolving attention does not cancel
-its independently gated work request. This first version supports one immutable assignment per attention item;
-reassignment/generations remain follow-ups. Stop existing work through its normal controls.
-
-
 ### Durable plan revision delivery
 
 **Revise approach** retains the existing owner-plan ID, goal and approval gates. For inbox/manager revisions,
@@ -952,8 +845,7 @@ work. The latest revision outbox is retained per item; prior human feedback stay
 additive sidecar, with no old-notice backfill. Existing legacy work-notice delivery is otherwise unchanged.
 Direct-chat plan feedback already returns to the active caller and keeps its existing synchronous path.
 
-Revision blockers use a distinct informational inbox kind, so they cannot inherit attention assignment or Seen
-controls. Feedback also repairs an idempotent `plan-feedback` notebook entry after delivery; journal failure does
+Revision blockers use a distinct informational inbox kind, so they cannot inherit attention Seen controls. Feedback also repairs an idempotent `plan-feedback` notebook entry after delivery; journal failure does
 not prevent the prompt, and terminal records remain eligible for journal repair. Terminal delivery states cannot
 be overwritten by late concurrent transport results. Directory read failures are reported without preventing
 other notice systems from running.

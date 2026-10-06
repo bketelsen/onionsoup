@@ -5,7 +5,6 @@ import { createElement } from 'react';
 import { FrictionDetail } from '../web/src/components/FrictionView.tsx';
 import { OrgTree } from '../web/src/components/OrgView.tsx';
 import { InboxErrors } from '../web/src/components/InboxErrors.tsx';
-import { AttentionAssignment } from '../web/src/components/AttentionAssignment.tsx';
 import { OwnerBacklog } from '../web/src/components/OwnerBacklog.tsx';
 import { DecisionActions } from '../web/src/components/DecisionActions.tsx';
 import { WorkRecovery } from '../web/src/components/WorkRecovery.tsx';
@@ -222,8 +221,7 @@ test('an owner plan\'s page shows the plan, its approval, the session doing it, 
   });
   // The plan renders through the chat's Markdown, which needs a browser DOM to sanitize; the rest renders here.
   assert.deepEqual(ITEM_SECTIONS.map(section => section.name), [
-    'WorkSession', 'Proposal', 'Plan', 'Notes', 'Pauses', 'RequestProgress', 'RequestAcceptance',
-    'Publication', 'Verification', 'Reviews', 'Hires',
+    'WorkSession', 'Proposal', 'Plan', 'Notes', 'RequestProgress', 'Publication', 'Verification', 'Reviews', 'Hires',
   ]);
   const html = ITEM_SECTIONS.filter(Section => Section.name !== 'Plan').map(Section => renderToStaticMarkup(createElement(Section, { item }))).join('');
   assert.match(html, /Open the work session/);
@@ -334,18 +332,12 @@ test('the composer clears the home indicator, labels its buttons, and on a touch
   }
 });
 
-test('attention renders Seen separately from assignment and does not equate acceptance with resolution', () => {
+test('attention renders Seen, not Acknowledge', () => {
   const entry = { kind: 'attention' as const, id: 'a-fixture', owner: 'homelab', title: 'Fix check', detail: '', attentionStatus: 'open' };
   const actions = renderToStaticMarkup(createElement(DecisionActions, { entry, busy: false, text: '', withDelete: false,
     setWithDelete: () => undefined, decide: async () => undefined, permission: async () => undefined }));
   assert.match(actions, />Seen</);
   assert.doesNotMatch(actions, />Acknowledge</);
-  const assigned = renderToStaticMarkup(createElement(AttentionAssignment, { entry: { ...entry,
-    attentionAssignment: { by: 'Brian', owner: 'clippy', requestID: 'r-fixture', status: 'pending-owner' } },
-    busy: false, decide: async () => undefined }));
-  assert.match(assigned, /awaiting owner acceptance/);
-  assert.match(assigned, /remains unresolved/);
-  assert.match(assigned, /r-fixture/);
 });
 
 test('owner backlog and retained Seen history are informational, with no warning or assignment controls', () => {

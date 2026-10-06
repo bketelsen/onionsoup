@@ -5,23 +5,20 @@ import { Button } from './ui.tsx';
 
 const CANCELLABLE = new Set([
   'planning', 'awaiting-plan-approval', 'working', 'implementing', 'reviewing', 'landing',
-  'awaiting-push-approval', 'failed', 'interrupted', 'landed', 'paused', 'pausing',
+  'awaiting-push-approval', 'failed', 'interrupted', 'landed',
 ]);
 
 /** A recovery decision: what it sends, and what the text box means for it. */
 interface RecoveryAction { action: string; label: string; noteUse: string; isNoteRequired?: boolean }
 
 const RECOVERY: Record<string, RecoveryAction[]> = {
-  paused: [{ action: 'resume-item', label: 'Resume original work', noteUse: 'note for the resume' }],
   interrupted: [{ action: 'resume-item', label: 'Resume work', noteUse: 'note for the resume' }],
   failed: [{ action: 'retry-item', label: 'Retry failed stage', noteUse: 'note for the retry' }],
 };
 
 /** A retired pipeline's failed work cannot be retried: nothing runs it any more. */
 function recoveryActions(item: WorkItem) {
-  if (item.reason === 'pipeline_removed' || item.status === 'pausing') return [];
-  return RECOVERY[item.status] ?? (CANCELLABLE.has(item.status) && !['landed', 'failed'].includes(item.status)
-    ? [{ action: 'pause-item', label: 'Pause work', noteUse: 'reason to pause', isNoteRequired: true }] : []);
+  return item.reason === 'pipeline_removed' ? [] : RECOVERY[item.status] ?? [];
 }
 
 function placeholder(actions: readonly RecoveryAction[]) {
@@ -33,7 +30,7 @@ export function WorkRecovery({ item, onDone }: { item: WorkItem; onDone: () => v
   const [reason, setReason] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  if ((item.status === 'landed' && (item.publication || item.rebaseOf)) || !CANCELLABLE.has(item.status)) return null;
+  if (item.activeRunner || (item.status === 'landed' && (item.publication || item.rebaseOf)) || !CANCELLABLE.has(item.status)) return null;
   const actions = recoveryActions(item);
   const hasNote = Boolean(reason.trim());
   const decide = async (action: string) => {
@@ -50,11 +47,9 @@ export function WorkRecovery({ item, onDone }: { item: WorkItem; onDone: () => v
   };
   return <div className="rounded-lg border border-border p-3 flex flex-col gap-2">
     <div className="flex flex-wrap items-center gap-2">
-      {item.status === 'pausing' && <span className="typography-meta">Stopping; claims remain held until stop is confirmed.</span>}
       {actions.map(recovery => <Button key={recovery.action} disabled={busy || (recovery.isNoteRequired && !hasNote)}
         onClick={() => void decide(recovery.action)}>{recovery.label}</Button>)}
-      <Button variant="destructive" disabled={busy || !hasNote || !!item.activeRunner || item.status === 'pausing'}
-        onClick={() => void decide('cancel-item')}>Cancel work</Button>
+      <Button variant="destructive" disabled={busy || !hasNote} onClick={() => void decide('cancel-item')}>Cancel work</Button>
     </div>
     <input value={reason} onChange={event => setReason(event.target.value)} placeholder={placeholder(actions)}
       className="rounded-md border border-border bg-background px-2 py-1 pointer-coarse:min-h-11 typography-meta" />

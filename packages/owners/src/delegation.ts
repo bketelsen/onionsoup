@@ -1,14 +1,10 @@
-import { createHash } from 'node:crypto';
 import type { ChatOrigin } from './chat-origin.ts';
 import type { AttentionProvenance } from './journal-record.ts';
 import { ProposedWork } from './artifacts.ts';
 import { canChange, isDirectReport } from './declarations.ts';
-import { completeAcceptedRequest } from './request-closure-completion.ts';
-import { queueOperationalReverification, reconcileOperationalWork } from './operational-work.ts';
 import { OWNER_CHANGE_WORKFLOW } from './plan-work.ts';
-import { PublishDecision, requireStatus, type ResourceRequest, type WorkAsk, type OperatorAssignmentSource } from './requests.ts';
+import { PublishDecision, requireStatus, type ResourceRequest, type WorkAsk } from './requests.ts';
 import type { Runtime } from './runtime.ts';
-import { isPaused } from './ledger.ts';
 
 export async function journalRequest(
   runtime: Runtime, request: ResourceRequest, kind: string, note: string, provenance?: AttentionProvenance,
@@ -35,21 +31,6 @@ export async function requestWork(runtime: Runtime, from: string, to: string, pr
   return request;
 }
 
-export function operatorWorkRequestId(source: OperatorAssignmentSource) {
-  return `r-handoff-${createHash('sha256').update(JSON.stringify(['operator-assignment-v1', source.kind, source.id])).digest('hex')}`;
-}
-
-/** Caller persists explicit human intent first. Self-request avoids impersonating a manager or another owner. */
-export function openOperatorWorkRequest(runtime: Runtime, source: OperatorAssignmentSource, by: string,
-  to: string, proposal: ProposedWork) {
-  return runtime.requests.openIdentified(operatorWorkRequestId(source), to, to,
-    { kind: 'work', purpose: proposal.goal, proposal, operatorAssignment: { by, source } }, 'none', undefined, () => {
-      const receiver = runtime.owner(to);
-      if (!canChange(receiver)) throw new Error(`owner_cannot_change: ${to}`);
-      runtime.repositoryOwner(to, proposal.repository);
-    });
-}
-
 type Acceptance = (runtime: Runtime, request: ResourceRequest, ask: WorkAsk) => Promise<PublishDecision>;
 
 /** Who decides: work from the receiver's declared manager is accepted as assigned; a peer's is weighed by the receiver. */
@@ -60,12 +41,9 @@ const ACCEPTANCE: Record<'manager' | 'peer', Acceptance> = {
   peer: async (runtime, request, ask) => {
     const owner = runtime.owner(request.to);
     const notebook = runtime.notebook(owner.id);
-    const requester = ask.operatorAssignment
-      ? `The person ${ask.operatorAssignment.by} explicitly assigned this work from ${ask.operatorAssignment.source.kind} ${ask.operatorAssignment.source.id}.`
-      : `Owner ${request.from} requests this work in your declared domain.`;
     return (await runtime.hire(owner.id, {
       role: 'owner', model: owner.model, directory: owner.workspace, title: `${request.id}: decide work`,
-      brief: `${requester} Accept if appropriate, or decline with a reason. If you accept, you plan it yourself and the plan waits for approval like any other.\n${JSON.stringify(ask.proposal)}\n${await notebook.orientation()}`,
+      brief: `Owner ${request.from} requests this work in your declared domain. Accept if appropriate, or decline with a reason. If you accept, you plan it yourself and the plan waits for approval like any other.\n${JSON.stringify(ask.proposal)}\n${await notebook.orientation()}`,
       schema: PublishDecision,
     })).value;
   },
@@ -83,7 +61,7 @@ export async function decideWork(runtime: Runtime, request: ResourceRequest) {
   if (request.ask.kind !== 'work') throw new Error('not_a_work_request');
   const workItem = `w-request-${request.id}`;
   const existing = (await runtime.ledger.list()).find(item => item.id === workItem);
-  if (existing) return runtime.requests.save({ ...request, status: isPaused(existing) ? 'work-paused' : 'work-running', workItem });
+  if (existing) return runtime.requests.save({ ...request, status: 'work-running', workItem });
   const owner = runtime.owner(request.to);
   await runtime.notebook(owner.id).ensure(await runtime.text(`charters/${owner.id}.md`));
   const relation = isDirectReport(runtime.declarations, request.from, request.to) ? 'manager' : 'peer';
@@ -110,24 +88,6 @@ export async function decideWork(runtime: Runtime, request: ResourceRequest) {
 export async function trackDelegatedWork(runtime: Runtime, request: ResourceRequest) {
   if (!request.workItem) throw new Error('delegation_work_item_missing');
   const item = await runtime.ledger.get(request.workItem);
-  if (isPaused(item)) {
-    return request.status === 'work-paused' ? request
-      : runtime.requests.update(request.id, current =>
-        current.workItem !== item.id || !['work-running', 'work-paused'].includes(current.status) ? current
-          : { ...current, status: 'work-paused', reason: item.reason });
-  }
-  if (request.status === 'work-paused') {
-    request = await runtime.requests.update(request.id, current => current.status !== 'work-paused' ? current
-      : { ...current, status: 'work-running', reason: undefined });
-  }
-  const operational = await reconcileOperationalWork(runtime, request, item);
-  if (operational) return operational;
-  if (item.status === 'landed' && !item.publication && !item.rebaseOf
-    && !item.requestAcceptance && !item.externalPrObservations?.length && !item.deskPublication) {
-    await queueOperationalReverification(runtime, request, item, 'legacy_operational_host_evidence_missing');
-    return request;
-  }
-  if (item.requestAcceptance) return completeAcceptedRequest(runtime, item.id);
   const failed = new Set(['failed', 'rejected', 'cancelled']).has(item.status) || item.publication?.state === 'closed';
   const completed = item.publication?.state === 'merged' || (item.status === 'landed' && Boolean(item.rebaseOf));
   if (!failed && !completed) return request;

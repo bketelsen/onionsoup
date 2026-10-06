@@ -129,10 +129,7 @@ task is done and verified, end with onionsoup_propose_changes with item "${item.
 verifies, runs the one final required independent-family review of the whole diff, and opens the PR.
 Continue replies, retries and maintenance under the unchanged approved goal and existing applicable standing grants.
 Do not request another plan approval for the same scope; new scope and world effects retain their existing gates.`,
-    `For operational work with no repository changes, finish instead with onionsoup_complete_work item "${item.id}".
-Host code verifies configured checks and exact gated resource postconditions, then asks one independent-family reviewer
-to assess the ORIGINAL goal and evidence. Never manufacture a PR or create resources just to close a record.
-Use onionsoup_request_instance and onionsoup_release_instance for resource effects; existing create/delete gates remain.`,
+    'Use onionsoup_request_instance and onionsoup_release_instance for resource effects; existing create/delete gates remain.',
     conditions && `<conditions-of-approval>\n${conditions}\n</conditions-of-approval>`,
     `<approved-plan>\n${item.planDocument?.markdown ?? item.proposal.goal}\n</approved-plan>`,
   ].filter(Boolean).join('\n\n');

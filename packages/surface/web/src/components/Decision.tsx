@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { RiChat3Line } from '@remixicon/react';
 import { PlanApprovalCard } from '../chat/cards.tsx';
 import { QuestionCard } from '../chat/QuestionCard.tsx';
-import { AttentionAssignment } from './AttentionAssignment.tsx';
 import { DecisionActions } from './DecisionActions.tsx';
 import { api, navigate } from '../api.ts';
 import type { InboxEntry, OwnerSummary } from '../types.ts';
@@ -71,10 +70,7 @@ export function Decision({ entry, owner, onDone, compact }: { entry: InboxEntry;
           setWithDelete={setWithDelete} decide={decide} permission={permission} />
         {entry.sessionID && <Button variant="ghost" onClick={openChat}><RiChat3Line className="size-3.5" />Open chat</Button>}
       </div>
-      {entry.kind === 'attention' && <>
-        <div className="typography-meta text-muted-foreground">Seen removes this from your decision queue and keeps it in owner history; it does not start work. Assignment does not resolve this item.</div>
-        <AttentionAssignment entry={entry} busy={busy} decide={decide} />
-      </>}
+      {entry.kind === 'attention' && <div className="typography-meta text-muted-foreground">Seen removes this from your decision queue and keeps it in owner history; it does not start work.</div>}
       {NOTE_PLACEHOLDERS[entry.kind] && (
         <input value={text} onChange={event => setText(event.target.value)} disabled={busy} aria-label={NOTE_PLACEHOLDERS[entry.kind]} placeholder={NOTE_PLACEHOLDERS[entry.kind]}
           className="rounded-md border border-border bg-background px-2 py-1 pointer-coarse:min-h-11 typography-meta outline-none focus:border-interactive-border-focus" />

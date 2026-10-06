@@ -2,7 +2,7 @@ import type { ChatOrigin } from './chat-origin.ts';
 import { clipped } from './chat-context.ts';
 import { isDirectReport, repositoryNames } from './declarations.ts';
 import { itemText } from './desk.ts';
-import { isPaused, type WorkItem } from './ledger.ts';
+import type { WorkItem } from './ledger.ts';
 import { NOTICE_PREFIX } from './notices.ts';
 import { syncedChatPlace, createOpeningSession, promptOpeningSession, type OwnerSessionClient } from './owner-sessions.ts';
 import type { MaintenanceContext } from './maintenance-context.ts';
@@ -128,8 +128,6 @@ async function reminderItem(runtime: Runtime, reminder: Reminder) {
 export async function openReminderSession(runtime: Runtime, client: OwnerSessionClient, reminder: Reminder, context?: MaintenanceContext) {
   const owner = runtime.owner(reminder.owner);
   if (!owner.persona) return undefined;
-  const linked = await reminderItem(runtime, reminder);
-  if (linked && isPaused(linked)) return undefined;
   context?.check();
   const store = new SessionOpeningStore(runtime.stateDirectory);
   const reservation = await store.reserve({ entity: 'reminder', id: reminder.id, owner: reminder.owner, kind: 'reminder' });
@@ -148,7 +146,6 @@ export async function openReminderSession(runtime: Runtime, client: OwnerSession
     context?.check();
     if (!claimed) throw new Error('reminder_already_open');
     const item = await reminderItem(runtime, claimed);
-    if (item && isPaused(item)) throw new Error('work_item_paused');
     context?.check();
     await promptOpeningSession(store, reservation, client, session, owner.persona.name, `${reminderPrompt(claimed, item)}${note}`, context);
     await runtime.reminders.update(reminder.id, latest => {

@@ -1,5 +1,4 @@
 import { execFile } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
 import { promisify } from 'node:util';
 import { z } from 'zod';
 import { readFile, writeFile } from 'node:fs/promises';
@@ -8,8 +7,7 @@ import { ImplementationReport, Verdict } from './artifacts.ts';
 import { canChange, requireFreelancer } from './declarations.ts';
 import { tellOwner } from './plan-work.ts';
 import { pickModel } from './families.ts';
-import { isFinished, isPaused, type WorkItem, type WorkStatus } from './ledger.ts';
-import { settleItemPause, stoppedRunnerPause } from './work-pause.ts';
+import { isFinished, type WorkItem, type WorkStatus } from './ledger.ts';
 import type { Runtime } from './runtime.ts';
 import { REPOSITORY_REVIEW, REPOSITORY_WRITING } from './repository-writing.ts';
 import { createWorktree, diffAgainstBase, git, gitWithLiteralPathspecs, matchHead, verificationPassed, verify } from './workspace.ts';
@@ -268,8 +266,7 @@ export async function maintainPullRequests(runtime: Runtime, ownerId: string, op
   const notes = [...refreshed.changed, ...refreshed.unreadable.map(url => `${url} state unreadable`)];
   const pass: MaintenancePass = { notes, suppressed, refresh: options.refresh ?? false };
   const opened: WorkItem[] = [];
-  for (const item of items.filter(candidate => candidate.publication?.state === 'open'
-    && !candidate.repairOf && !isPaused(candidate))) {
+  for (const item of items.filter(candidate => candidate.publication?.state === 'open' && !candidate.repairOf)) {
     const hasRepair = items.some(candidate => candidate.repairOf?.itemId === item.id
       && !['failed', 'rejected', 'cancelled'].includes(candidate.status)
       && !candidate.publication);
@@ -576,7 +573,7 @@ export async function advanceRebase(runtime: Runtime, itemId: string, onProgress
     const expectedStatus = item.status;
     const current = await runtime.ledger.update(item.id, latest => {
       if (latest.status !== expectedStatus || latest.activeRunner) throw new Error('work_item_changed');
-      return { ...latest, resumeStatus: latest.status, activeRunner: process.pid, runnerClaim: randomUUID() };
+      return { ...latest, resumeStatus: latest.status, activeRunner: process.pid };
     });
     try {
       item = await step(runtime, current);
@@ -584,10 +581,7 @@ export async function advanceRebase(runtime: Runtime, itemId: string, onProgress
       const status = error instanceof Abandoned ? 'rejected' : 'failed';
       item = transition(current, status, error instanceof Error ? error.message.split('\n')[0] : String(error));
     }
-    const completed = item;
-    item = await runtime.ledger.update(item.id, latest =>
-      stoppedRunnerPause(latest, completed, current));
-    if (isPaused(item)) item = await settleItemPause(runtime, item.id);
+    item = await runtime.ledger.save({ ...item, activeRunner: undefined });
     onProgress(item);
     step = REBASE_STEPS[item.status];
   }

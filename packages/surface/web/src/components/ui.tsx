@@ -94,7 +94,6 @@ export function timeAgo(value: string | number | undefined) {
 
 type StatusTone = 'muted' | 'primary' | 'success' | 'error' | 'warning' | 'info';
 const STATUS_TONES: Record<string, StatusTone> = {
-  pausing: 'warning', paused: 'muted', 'work-paused': 'muted',
   landed: 'success', failed: 'error', rejected: 'error',
   planning: 'info', working: 'info', implementing: 'info', reviewing: 'info', landing: 'info',
 };
