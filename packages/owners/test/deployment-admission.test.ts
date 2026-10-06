@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -11,6 +12,18 @@ import {
 
 async function stateDirectory(): Promise<string> {
   return mkdtemp(join(tmpdir(), 'onionsoup-deployment-admission-'));
+}
+
+/** A lease file naming this process with a start time it never had: a dead holder. */
+async function deadLease(state: string, kind: string, extra: Record<string, unknown> = {}) {
+  const id = randomUUID();
+  await mkdir(join(state, 'deploy', 'leases'), { recursive: true });
+  await writeFile(join(state, 'deploy', 'leases', `${id}.json`), JSON.stringify({ id, kind, pid: process.pid, startTime: '0', ...extra }));
+  return id;
+}
+
+async function leaseKinds(state: string) {
+  return (await listAdmissions(state)).map(lease => `${lease.kind}:${lease.alive ? 'alive' : 'dead'}`).sort();
 }
 
 async function pending(state: string): Promise<{ status: string; targetBuildId: string }> {
@@ -218,4 +231,23 @@ test('malformed lease state refuses drain and admission instead of assuming zero
   await assert.rejects(beginAdmission(state, 'chat'), /deployment_invalid_lease/);
   await assert.rejects(beginDrain(state, 'next'), /deployment_invalid_lease/);
   assert.equal((await pending(state)).status, 'armed');
+});
+
+test('admission and drain prune dead leases of plain kinds and keep live leases and unknown kinds', async () => {
+  const state = await stateDirectory();
+  const maintenance = { instanceID: randomUUID(), operationID: randomUUID(), directory: '/chats' };
+  for (const kind of ['chat:ses_old', 'chat-message:ses_old', 'watcher:ses_old', 'surface:POST:/api/chat', 'cli-status',
+    'daemon-tick', 'plugin:operator-jobs', 'plugin:chat-reconciliation']) await deadLease(state, kind);
+  await deadLease(state, 'plugin:notices', { maintenance });
+  await deadLease(state, 'notice:msg_old');
+  await deadLease(state, 'child');
+  const live = await beginAdmission(state, 'chat:ses_live');
+  assert.deepEqual(await leaseKinds(state), ['chat:ses_live:alive', 'child:dead', 'notice:msg_old:dead']);
+  await deadLease(state, 'tool:bash');
+  await armDeployment(state, 'next');
+  const drained = await beginDrain(state, 'next');
+  assert.deepEqual(drained.map(lease => lease.kind).sort(), ['chat:ses_live', 'child', 'notice:msg_old']);
+  assert.equal((await readdir(join(state, 'deploy', 'leases'))).length, 3);
+  await live.release();
+  await releaseDrain(state, 'next', 'completed');
 });

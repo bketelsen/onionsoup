@@ -1,16 +1,15 @@
 import { tmpdir } from 'node:os';
 import assert from 'node:assert/strict';
-import { appendFile, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { appendFile, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import type { Plugin } from '@opencode-ai/plugin';
 import { askOwner } from '../src/ask.ts';
 import { recentActivityContext, recentChatDecisions, recentJournal } from '../src/chat-context.ts';
 import { OwnerDeclaration } from '../src/declarations.ts';
-import { exchangeClient } from '../src/exchange-client.ts';
-import { deliverExchangeNotices, ExchangeNotice, queueExchangeNotice, type ExchangeClient, type NoticeChat, type NoticeMessage } from '../src/exchange-notices.ts';
 import { NOTICE_PREFIX } from '../src/notices.ts';
 import type { HireRequest } from '../src/opencode.ts';
+import type { TranscriptMessage } from '../src/transcript-client.ts';
 import { withActiveHooks } from './active-hooks.ts';
 import { Runtime } from '../src/runtime.ts';
 
@@ -27,37 +26,8 @@ function journalPath(runtime: Runtime, date = new Date().toISOString().slice(0, 
   return join(runtime.notebook('homelab').directory, 'journal', `${date}.jsonl`);
 }
 
-function message(id: string, created: number, text: string, agent = 'Miles Teg'): NoticeMessage {
+function message(id: string, created: number, text: string, agent = 'Miles Teg'): TranscriptMessage {
   return { info: { id, role: 'user', agent, time: { created } }, parts: [{ type: 'text', text }] };
-}
-
-function transport() {
-  const sessions: NoticeChat[] = [];
-  const messages = new Map<string, NoticeMessage[]>();
-  const posted: { target: Parameters<ExchangeClient['post']>[0]; body: Parameters<ExchangeClient['post']>[1] }[] = [];
-  const state = { isIdle: true, failBefore: false, failAfter: false };
-  const client: ExchangeClient = {
-    sessions: async () => sessions,
-    messages: async target => messages.get(target.sessionID) ?? [],
-    idle: async () => state.isIdle,
-    async post(target, body) {
-      if (state.failBefore) throw new Error('transport_unavailable');
-      posted.push({ target, body });
-      messages.set(target.sessionID, [...messages.get(target.sessionID) ?? [], message(body.messageID, Date.now(), body.parts[0]!.text)]);
-      if (state.failAfter) throw new Error('acceptance_acknowledgement_lost');
-    },
-  };
-  function chat(id: string, personAt: number, updated = personAt, parentID?: string, agent?: string) {
-    sessions.push({ id, directory: '/test/owner-desk', time: { updated }, parentID });
-    messages.set(id, [message(`${id}-person`, personAt, 'hello', agent)]);
-  }
-  return { client, state, sessions, messages, posted, chat };
-}
-
-async function records(runtime: Runtime, status: 'pending' | 'delivered' | 'undeliverable') {
-  const directory = join(runtime.stateDirectory, 'notices', 'exchanges', status);
-  const files = (await readdir(directory).catch(() => [])).filter(file => file.endsWith('.json'));
-  return Promise.all(files.map(async file => ExchangeNotice.parse(JSON.parse(await readFile(join(directory, file), 'utf8')))));
 }
 
 test('recent activity includes autonomous work and fresh decisions, honors retractions, and ignores old or malformed records', async () => {
@@ -120,92 +90,20 @@ test('askOwner gives the answering hire undistilled person choices and durably r
   const answer = await askOwner(runtime, 'clippy', 'Miles Teg', 'Which server should we use?');
   assert.match(answer.answer.answer, /smaller server/);
   assert.doesNotMatch(await notebook.orientation(), /Use the smaller server/);
-  assert.deepEqual(await records(runtime, 'pending'), [], 'the answerer\'s chat is not woken with a copy');
   assert.ok((await recentJournal(runtime, 'homelab')).some(entry => entry.kind === 'answered' && entry.note?.includes('Which server should we use')));
   assert.ok((await recentJournal(runtime, 'clippy')).some(entry => entry.kind === 'asked'));
-});
-
-test('durable notices discover pre-feature person chats and choose latest person activity without waking a model', async () => {
-  const { runtime } = await fixture();
-  const fake = transport();
-  fake.chat('old', 10, 100);
-  fake.messages.get('old')!.push(message('old-runtime', 100, `${NOTICE_PREFIX} work finished`));
-  fake.chat('latest-person', 20, 20);
-  fake.chat('watcher', 200, 200, 'latest-person');
-  fake.chat('unrelated-agent', 300, 300, undefined, 'someone-else');
-  await queueExchangeNotice(runtime, 'homelab', 'Question and answer');
-  await deliverExchangeNotices(runtime, fake.client);
-  assert.equal(fake.posted.length, 1);
-  assert.equal(fake.posted[0]!.target.sessionID, 'latest-person');
-  assert.equal(fake.posted[0]!.body.noReply, true);
-  assert.equal(fake.posted[0]!.body.agent, 'Miles Teg');
-  assert.match(fake.posted[0]!.body.parts[0]!.text, /^\[onionsoup notice\]/);
-  assert.equal((await records(runtime, 'pending')).length, 0);
-  assert.equal((await records(runtime, 'delivered'))[0]!.target!.sessionID, 'latest-person');
-});
-
-test('notices wait for a real idle person chat, retry transport failures, and reconcile accepted posts after restart', async () => {
-  const { runtime, state } = await fixture();
-  const fake = transport();
-  const errors: unknown[] = [];
-  const deliver = () => deliverExchangeNotices(runtime, fake.client, (_id, error) => errors.push(error));
-  await queueExchangeNotice(runtime, 'homelab', 'A durable exchange');
-  await deliver();
-  assert.equal((await records(runtime, 'pending')).length, 1);
-  fake.chat('person', 1);
-  fake.state.isIdle = false;
-  await deliver();
-  assert.equal(fake.posted.length, 0);
-  fake.state.isIdle = true;
-  fake.state.failBefore = true;
-  await deliver();
-  assert.equal(errors.length, 1);
-  fake.state.failBefore = false;
-  fake.state.failAfter = true;
-  await deliver();
-  assert.equal(fake.posted.length, 1);
-  assert.equal((await records(runtime, 'pending')).length, 1);
-  fake.chat('newer-person', 2);
-  const reopened = await Runtime.open({ declarations, state });
-  await Promise.all([deliverExchangeNotices(reopened, fake.client), deliverExchangeNotices(runtime, fake.client)]);
-  assert.equal(fake.posted.length, 1);
-  assert.equal((await records(runtime, 'delivered')).length, 1);
-});
-
-test('notice excerpts stay bounded while durable records preserve the complete answer and evidence', async () => {
-  const { runtime } = await fixture();
-  runtime.declarations.owners.get('homelab')!.chatContext.noticeChars = 20;
-  const fake = transport();
-  fake.chat('person', 1);
-  const full = `Question\n${'long answer '.repeat(100)}\nObserved: full evidence`;
-  const notice = await queueExchangeNotice(runtime, 'homelab', full);
-  await deliverExchangeNotices(runtime, fake.client);
-  const displayed = fake.posted[0]!.body.parts[0]!.text;
-  assert.match(displayed, /Full exchange record:/);
-  assert.ok(displayed.includes(notice.id));
-  assert.doesNotMatch(displayed, /Observed: full evidence/);
-  assert.equal((await records(runtime, 'delivered'))[0]!.text, full);
-});
-
-test('production exchange adapter uses the synchronous noReply endpoint', async () => {
-  let sent: unknown;
-  const client = { session: { prompt: async (request: unknown) => { sent = request; return { data: {} }; } } };
-  await exchangeClient(client as unknown as Parameters<Plugin>[0]['client']).post({ sessionID: 'person', directory: '/desk' }, {
-    agent: 'Miles Teg', noReply: true, messageID: 'msg_stable', parts: [{ type: 'text', text: `${NOTICE_PREFIX} exchange` }],
-  });
-  assert.equal((sent as { body: { noReply: boolean } }).body.noReply, true);
 });
 
 test('plugin rereads recent activity on every system transform and its watcher never hires for runtime notices', async () => {
   const { runtime, notebook, state } = await fixture();
   let watcherCreates = 0;
-  const fake = transport();
-  fake.chat('person', 1);
+  const session = { id: 'person', directory: '/test/owner-desk', time: { updated: 1 } };
+  const transcript = [message('person-hello', 1, 'hello')];
   const client = { session: {
     status: async () => ({ data: {} }),
     children: async () => ({ data: [] }),
-    get: async ({ path }: { path: { id: string } }) => ({ data: fake.sessions.find(session => session.id === path.id) }),
-    messages: async () => ({ data: fake.messages.get('person') }),
+    get: async ({ path }: { path: { id: string } }) => ({ data: path.id === session.id ? session : undefined }),
+    messages: async () => ({ data: transcript }),
     create: async () => { watcherCreates += 1; throw new Error('watcher_must_not_wake'); },
   } };
   const originalSandbox = process.env.ONIONSOUP_SANDBOX;
@@ -214,8 +112,7 @@ test('plugin rereads recent activity on every system transform and its watcher n
   await hooks['chat.message']!({ sessionID: 'person', agent: 'Miles Teg' }, {} as never);
   await hooks.event!({ event: { type: 'session.idle', properties: { sessionID: 'person' } } });
   assert.equal(watcherCreates, 1, 'ordinary person messages reach the watcher hire seam');
-  await queueExchangeNotice(runtime, 'homelab', 'Question and answer from another owner');
-  await deliverExchangeNotices(runtime, fake.client);
+  transcript.push(message('runtime-notice', 2, `${NOTICE_PREFIX} work finished`));
   await notebook.journal({ kind: 'answered', note: 'An exchange outside this chat' });
   const first = { system: [] as string[] };
   await hooks['experimental.chat.system.transform']!({ sessionID: 'person' } as never, first);
@@ -225,42 +122,8 @@ test('plugin rereads recent activity on every system transform and its watcher n
   await hooks['experimental.chat.system.transform']!({ sessionID: 'person' } as never, next);
   assert.match(next.system.join('\n'), /New work finished between turns/);
   await hooks.event!({ event: { type: 'session.idle', properties: { sessionID: 'person' } } });
-  assert.equal(watcherCreates, 1, 'a delivered runtime notice must not hire the watcher');
+  assert.equal(watcherCreates, 1, 'a runtime notice must not hire the watcher');
   assert.ok(!(await recentJournal(runtime, 'homelab')).some(entry => entry.kind === 'chat-decision'));
-});
-
-test('unreadable structured-output hire sessions do not prevent delivery to a real person chat', async () => {
-  const { runtime } = await fixture();
-  const fake = transport();
-  fake.chat('person', 10);
-  fake.chat('structured-answer-hire', 20);
-  const original = fake.client.messages;
-  fake.client.messages = async target => {
-    if (target.sessionID === 'structured-answer-hire') throw new Error('BadRequest: Expected OutputFormatJsonSchema');
-    return original(target);
-  };
-  const errors: string[] = [];
-  await queueExchangeNotice(runtime, 'homelab', 'A new owner answer');
-  await deliverExchangeNotices(runtime, fake.client, id => errors.push(id));
-  assert.deepEqual(errors, ['session:structured-answer-hire']);
-  assert.equal(fake.posted[0]!.target.sessionID, 'person');
-  assert.equal((await records(runtime, 'delivered')).length, 1);
-});
-
-test('configured session search limits defer notices until a person chat is inside the lookup window', async () => {
-  const { runtime } = await fixture();
-  const policy = runtime.declarations.owners.get('homelab')!.chatContext;
-  policy.noticeSessions = 1;
-  const fake = transport();
-  fake.chat('person', 1);
-  fake.chat('another-agent', 2, 2, undefined, 'other');
-  await queueExchangeNotice(runtime, 'homelab', 'Bounded search');
-  await deliverExchangeNotices(runtime, fake.client);
-  assert.equal(fake.posted.length, 0);
-  assert.equal((await records(runtime, 'pending')).length, 1);
-  policy.noticeSessions = 2;
-  await deliverExchangeNotices(runtime, fake.client);
-  assert.equal(fake.posted[0]!.target.sessionID, 'person');
 });
 
 test('a later explicit decision can reaffirm a retracted statement without reviving its earlier quote', async () => {
@@ -271,26 +134,6 @@ test('a later explicit decision can reaffirm a retracted statement without reviv
   const decisions = await recentChatDecisions(runtime, 'homelab');
   assert.match(decisions, /I reaffirm option A now/);
   assert.doesNotMatch(decisions, /original choice/);
-});
-
-test('retired notices remain quarantined while new personless exchanges reach observation chat', async () => {
-  const { runtime } = await fixture();
-  const fake = transport();
-  runtime.declarations.owners.set('retired-owner', { ...runtime.declarations.owners.get('homelab')!, id: 'retired-owner' });
-  await queueExchangeNotice(runtime, 'retired-owner', 'No longer deliverable');
-  runtime.declarations.owners.delete('retired-owner');
-  await deliverExchangeNotices(runtime, fake.client);
-  assert.equal((await records(runtime, 'pending')).length, 0);
-  assert.equal((await records(runtime, 'undeliverable'))[0]!.undeliverableReason, 'owner_retired');
-  const clippy = runtime.declarations.owners.get('clippy')!;
-  runtime.declarations.owners.set('clippy', { ...clippy, persona: undefined });
-  fake.chat('observation-chat', Date.now(), Date.now(), undefined, 'onionsoup-owner-clippy');
-  await queueExchangeNotice(runtime, 'clippy', 'New observation exchange');
-  await deliverExchangeNotices(runtime, fake.client);
-  assert.equal((await records(runtime, 'undeliverable')).length, 1);
-  assert.equal(fake.posted.length, 1);
-  assert.equal(fake.posted[0].body.agent, 'onionsoup-owner-clippy');
-  assert.equal(fake.posted[0].body.noReply, true);
 });
 
 test('unreadable optional journal context is diagnosed without breaking a chat turn', async context => {
@@ -324,13 +167,3 @@ test('declared context defaults and age filtering apply within a current journal
   assert.doesNotMatch(activity, /too old|future timestamp/);
 });
 
-test('a stale plugin reloads unknown owner declarations before archiving their notices', async () => {
-  const { runtime } = await fixture();
-  const fake = transport();
-  fake.chat('person', 1);
-  await queueExchangeNotice(runtime, 'homelab', 'Owner declared after plugin startup');
-  runtime.declarations.owners.delete('homelab');
-  await deliverExchangeNotices(runtime, fake.client);
-  assert.equal((await records(runtime, 'undeliverable')).length, 0);
-  assert.equal((await records(runtime, 'delivered')).length, 1);
-});

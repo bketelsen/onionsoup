@@ -132,6 +132,7 @@ cause, and the fix is either applied through the normal gates or reported to the
 - **Killing processes:** kill by PID. `pkill -f` patterns match the shell running them.
 - **Restarting services:** arbitrary restarts can interrupt effects or cut off replies. The guarded deployment
   worker requires positive quiescence, restarts **both** owners and surface units, checks API/OpenCode/build
-  health and retains a verified rollback release. Unknown leases/effects keep the guard held; only supported
-  exact-receipt recovery may release them. Code rollback does not roll back state.
+  health and retains a verified rollback release. Live leases and unknown effects keep the guard held; a lease
+  whose process is gone never does, and new admissions delete dead chat/tool/surface/CLI/daemon/plugin leases
+  in `state/deploy/leases/`. Code rollback does not roll back state.
 - **Credentials:** never print values from env files (`truenas-mcp/.envrc`, `secrets/`).

@@ -1,5 +1,5 @@
 import type { Plugin } from '@opencode-ai/plugin';
-import { exchangeClient, EXCHANGE_TRANSPORT_LIMITS } from './exchange-client.ts';
+import { transcriptClient, TRANSCRIPT_TRANSPORT_LIMITS } from './transcript-client.ts';
 import type { PlanRevisionClient } from './plan-revision.ts';
 import { ownerTranscriptTarget, routeOwnerNotice } from './owner-message-routing.ts';
 import type { Runtime } from './runtime.ts';
@@ -8,8 +8,8 @@ import { ownerMessageId } from './owner-messages.ts';
 import { matchesMessageReceipt } from './message-receipt.ts';
 
 export function planRevisionClient(client: Parameters<Plugin>[0]['client'], routing?: { runtime: Runtime; pass: MaintenancePass }): PlanRevisionClient {
-  const read = exchangeClient(client);
-  const signal = () => AbortSignal.timeout(EXCHANGE_TRANSPORT_LIMITS.timeoutMs);
+  const read = transcriptClient(client);
+  const signal = () => AbortSignal.timeout(TRANSCRIPT_TRANSPORT_LIMITS.timeoutMs);
   const transcriptTarget = (origin: Parameters<PlanRevisionClient['exists']>[0]) =>
     routing ? ownerTranscriptTarget(routing.runtime, origin) : Promise.resolve(origin);
   return {

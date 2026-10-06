@@ -356,8 +356,7 @@ chatContext:
   maxChars: 8000
   entryChars: 2000
   scanBytes: 131072       # total recent journal bytes read per context refresh
-  noticeChars: 12000     # displayed exchange excerpt; full text stays on disk
-  noticeSessions: 30     # most recently updated nonchild sessions inspected
+  noticeSessions: 30     # continuation sessions followed when checking operational work
 ```
 
 Every chat system transform reads recent activity again. Owner answers also read recent person decisions,
@@ -365,15 +364,7 @@ including undistilled choices. Limits retain the newest eligible records; retrac
 cancel matching decisions. Increase the age or byte limit when a busy journal pushes relevant context out.
 
 An `onionsoup_ask` exchange is journaled for both owners (`asked`, `answered`) and shows in their recent activity;
-it is not posted into a chat. The plugin still drains exchange notices already in the durable queue every 15
-seconds. It selects the owner's latest person message among the inspected sessions, ignoring synthetic messages,
-runtime notices and other agents. Delivery uses `noReply`, so it adds transcript evidence without hiring an owner or watcher. Unreadable candidate sessions (including structured-output hires) are logged and skipped. Busy chats, failed
-session listings and missing person chats leave the notice queued. Exchanges survive plugin restarts; accepted posts use a stable
-message ID to avoid duplicates after acknowledgement loss. Full records are retained under
-`$ONIONSOUP_HOME/notices/exchanges/pending` or `delivered`, with absolute paths and their ID cited in the transcript. Owners without a persona do not queue new chat notices;
-legacy notices for personless or retired owners move to `undeliverable` with a reason. Discovery reloads
-configuration before treating an unknown owner as retired, so an older plugin cannot discard a new owner’s notice. If the owner's
-person chat is older than the configured session search window, raise `noticeSessions` or speak in that chat.
+it is not posted into a chat. Exchange notices left under `notices/exchanges` by older builds are not delivered.
 Restart the surface after installing plugin changes.
 
 For conversation in an owner's actual context, use `onionsoup_send { to, text, item?, session? }`, not
@@ -411,7 +402,7 @@ The surface's Pause control and Stop in a linked work conversation use the same 
 first records `pausing`; the upgraded plugin confirms the execution tree stopped before `paused`.
 Only exact host-recorded work sessions are stopped; a shared submitting desk conversation stays usable.
 With no execution session, the item pauses without aborting that conversation.
-Do not erase an active runner or uncertain SDK admission to force that transition. Read the item and its
+Do not erase an active runner or an uncertain delivery receipt to force that transition. Read the item and its
 latest pause receipt before treating it as settled. `owners resume <item> --note "Continue unchanged work"`
 or the surface's Resume control restores the exact saved stage and approved goal. This is an explicit human
 action, not an automatic restart or a new plan approval. A direct manager's `onionsoup_steer` resume needs

@@ -4,7 +4,6 @@ import { existsSync } from 'node:fs';
 import { access, mkdir, rm, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { processRequest } from '../src/brokering.ts';
-import { queueExchangeNotice, deliverExchangeNotices } from '../src/exchange-notices.ts';
 import { ownerMessageId, sendOwnerMessage, replyToOwnerMessage } from '../src/owner-messages.ts';
 import { pendingNotices, queueNotice } from '../src/notices.ts';
 import { steerReportItem } from '../src/org-work.ts';
@@ -81,22 +80,6 @@ test('actionable peers send and reply in their real contexts with durable identi
     recipient, 'msg_invalid'), /not_replyable/);
   await assert.rejects(sendOwnerMessage(context.runtime, 'odrade', { ...input, session: sender }, sender, 'msg_foreign'), /session_not_recipient/);
   await assert.rejects(sendOwnerMessage(context.runtime, 'homelab', { ...input, to: 'odrade' }, sender, 'msg_forged'), /sender_session_unproven/);
-});
-
-test('consultation exchange remains informational noReply and cannot wake an owner', async () => {
-  const context = await messageFixture();
-  const origin = await context.addSession('homelab', 'ses_consultation');
-  await queueExchangeNotice(context.runtime, 'homelab', 'Read-only consultation answer.', {
-    id: `msg_${'a'.repeat(32)}`, at: new Date().toISOString(), target: origin,
-  });
-  const posts: boolean[] = [];
-  await deliverExchangeNotices(context.runtime, {
-    sessions: async () => [], messages: async () => [], idle: async () => true,
-    post: async (_target, body) => { posts.push(body.noReply); },
-  }, fail);
-  assert.deepEqual(posts, [true]);
-  await context.deliver();
-  assert.equal(context.sends.length, 0);
 });
 
 test('retired worktree preserves history and reuses one correctly owned fresh continuation without probing or recreating it', async () => {

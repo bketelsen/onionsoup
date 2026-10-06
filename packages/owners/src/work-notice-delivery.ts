@@ -9,8 +9,7 @@ import { nextMessageId } from './plan-revision.ts';
 import { writeDurableFile } from './durable-file.ts';
 import { ChatOrigin } from './chat-origin.ts';
 import { MaintenanceEffectNotStarted } from './maintenance-context.ts';
-import { exchangeClient } from './exchange-client.ts';
-import type { NoticeMessage } from './exchange-notices.ts';
+import { transcriptClient, type TranscriptMessage } from './transcript-client.ts';
 import { ownerTranscriptTarget, routeOwnerNotice } from './owner-message-routing.ts';
 import { ownerChatAgent } from './owner-chat.ts';
 import { withRecordLock } from './record-lock.ts';
@@ -19,7 +18,7 @@ import { isPaused } from './ledger.ts';
 import { pausedSessionItem } from './work-pause.ts';
 
 export const WorkNoticeDelivery = z.object({
-  noticeID: z.string(), messageID: z.string(), origin: ChatOrigin, operationID: z.uuid(),
+  noticeID: z.string(), messageID: z.string(), origin: ChatOrigin,
   status: z.enum(['prepared', 'sent', 'uncertain', 'not-sent']),
   notice: WorkNotice.optional(),
   agent: MessageDeliveryBody.shape.agent.optional(), text: MessageDeliveryBody.shape.text.optional(), reason: z.string().optional(),
@@ -40,7 +39,7 @@ function save(runtime: Runtime, receipt: WorkNoticeDelivery) {
   return writeDurableFile(join(runtime.stateDirectory, 'notices', 'delivery', `${receipt.messageID}.json`), JSON.stringify(receipt));
 }
 
-function matches(message: NoticeMessage, receipt: WorkNoticeDelivery) {
+function matches(message: TranscriptMessage, receipt: WorkNoticeDelivery) {
   return !!receipt.agent && !!receipt.text
     && matchesMessageReceipt(message, receipt.messageID, { agent: receipt.agent, text: receipt.text });
 }
@@ -51,7 +50,7 @@ async function reconcile(runtime: Runtime, client: Parameters<Plugin>[0]['client
     return true;
   }
   const target = await ownerTranscriptTarget(runtime, receipt.origin);
-  const observed = (await exchangeClient(client).messages(target)).find(message => message.info.id === receipt.messageID);
+  const observed = (await transcriptClient(client).messages(target)).find(message => message.info.id === receipt.messageID);
   if (observed && !matches(observed, receipt)) throw new Error('work_notice_message_identity_conflict');
   if (observed) {
     await save(runtime, { ...receipt, status: 'sent', reason: undefined });
@@ -79,14 +78,14 @@ async function prepare(runtime: Runtime, client: Parameters<Plugin>[0]['client']
   const owner = runtime.declarations.owners.get(notice.owner);
   if (!owner?.persona) throw new Error('work_notice_recipient_unavailable');
   const routed = await routeOwnerNotice(runtime, client, pass, { ...notice, origin: previous?.origin ?? notice.origin });
-  const transport = exchangeClient(client);
+  const transport = transcriptClient(client);
   if (!await transport.idle(routed.origin)) return undefined;
   pass.check();
   const hasSameDestination = previous && JSON.stringify(previous.origin) === JSON.stringify(routed.origin);
   const receipt = hasSameDestination ? previous : WorkNoticeDelivery.parse({
     noticeID: notice.id, messageID: previous?.messageID
       ?? nextMessageId((await transport.messages(routed.origin)).map(message => message.info.id)),
-    origin: routed.origin, operationID: pass.record.operationID, status: 'not-sent',
+    origin: routed.origin, status: 'not-sent',
     agent: ownerChatAgent(owner), text: noticeText(notice, routed.context),
     notice,
   });

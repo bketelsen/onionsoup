@@ -3,8 +3,7 @@ import { stat } from 'node:fs/promises';
 import { z } from 'zod';
 import { chatDirectory, chatPath } from './chats.ts';
 import type { ChatOrigin } from './chat-origin.ts';
-import { exchangeClient } from './exchange-client.ts';
-import type { NoticeMessage } from './exchange-notices.ts';
+import { transcriptClient, type TranscriptMessage } from './transcript-client.ts';
 import { isPaused, type WorkItem } from './ledger.ts';
 import { pausedSessionItem } from './work-pause.ts';
 import type { MaintenancePass } from './plugin-maintenance.ts';
@@ -67,7 +66,7 @@ async function ownedTarget(runtime: Runtime, notice: WorkNotice, target: ChatOri
   if (!await isDirectory(target.directory)) return false;
   const session = await observedSession(client, target);
   if (!session || session.parentID) return false;
-  const messages = await exchangeClient(client).messages(target);
+  const messages = await transcriptClient(client).messages(target);
   if (!messages.some(message => message.info.agent === ownerChatAgent(runtime.owner(notice.owner)))) return false;
   await rememberObservedOwnerSession(runtime, notice.owner, session);
   return true;
@@ -105,7 +104,7 @@ async function targetForNotice(runtime: Runtime, notice: WorkNotice, client: Par
   return { target: historical, item, isUsable: false };
 }
 
-function transcriptContext(messages: NoticeMessage[]) {
+function transcriptContext(messages: TranscriptMessage[]) {
   const transcript = messages.flatMap(message => message.parts.filter(part => part.type === 'text' && !part.ignored)
     .map(part => `${message.info.role}: ${part.text ?? ''}`)).join('\n\n');
   return transcript.slice(-OWNER_CONTINUATION_LIMITS.historyChars);
@@ -117,7 +116,7 @@ async function historicalContext(runtime: Runtime, client: Parameters<Plugin>[0]
   if (!known) throw new Error('owner_message_history_identity_missing');
   // Query the retained transcript through a current declared directory, never instantiate the retired path.
   const readTarget = await ownerTranscriptTarget(runtime, target);
-  const transcript = transcriptContext(await exchangeClient(client).messages(readTarget));
+  const transcript = transcriptContext(await transcriptClient(client).messages(readTarget));
   return `Historical session ${target.sessionID} in ${target.directory} remains in history.\n`
     + `<previous-conversation>\n${transcript}\n</previous-conversation>`;
 }
