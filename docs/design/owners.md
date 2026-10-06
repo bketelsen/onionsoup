@@ -416,132 +416,13 @@ concurrent decisions are not lost to a timestamp cutoff. They are context, never
 
 An owner can use `onionsoup_friction` to capture unexpected engine behavior. The plugin attaches the chat origin,
 running checkout commit (marked dirty when the checkout has tracked changes) and observed model (or explicitly
-records them as unavailable), and only observed failed
-tool events, never raw arguments. Host-side records under `state/friction` are bounded and deduplicated by a
-versioned owner/tool/error-class signature; when no failure event was observed, prose-based matches are marked
-provisional. Each submission journals a short `friction` activity entry, and a new signature leaves one durable
-pending wake intent. The surface lists these reports and links to the first reporting chat. Capture itself never dispatches work. Optional `friction-triage.json` in the config directory declares
-`{ "version": 1, "owner": "maintainer-id", "repository": "org/repo", "enabledSince": "ISO timestamp", "intervalMs": 3600000 }`.
-The owner must own that repository. With no file, triage is disabled. A configured daemon considers only reports
-first seen on or after the cutoff, among the most recent 100 reports. It schedules at most one read-only
-investigation per interval (minimum one minute), after existing requests, due duties and runnable items, and while the maintainer has no reserved,
-runnable or running work. Admission and owner reservations keep it off deployment and existing worker paths.
+records them as unavailable), and only observed failed tool events, never raw arguments. Host code keeps one
+bounded report per versioned owner/tool/error-class signature under `state/friction/records` and counts repeats;
+when no failure event was observed, prose-based matches are marked provisional. Each submission journals a short
+`friction` activity entry. The surface's Friction rail lists the reports with their counts and links each to its
+first reporting chat; a person reads them and decides what to change. Capture never wakes an owner, dispatches
+work or opens a request.
 
-Before diagnosis the host collects a bounded incident bundle from declared roots and typed persisted records.
-It includes linked work and rebase siblings/rejections, request/effect checkpoints, host checks/review summaries,
-session identity/archive facts, owner schedules and duty timestamps, provider health, declared models/families,
-remote and credential **references**, maintenance/admission summaries, installed/configured build facts and
-safe local Git head/history/base/containment. No credentials, environment-file values, raw runs, transcripts or
-private tool output enter the bundle. Fixed host argv and configuration select paths and commands; reports
-and model output never do. Missing/unreadable facts have explicit reasons, and abbreviation is visible.
-The installed collector identity and configured deployment target are not live-service/plugin attestation;
-local source and Git history are explicitly not fetched.
-
-A sandboxed owner hire still has shell access denied. It receives the bundle before inspecting source and returns
-observed/inferred/unknown facts and either a bounded proposed fix, missing evidence, no action or positive closure.
-A versioned sidecar in
-`state/friction/investigations/<id>.json` holds the claim, result, session and cost. Unreadable wake/sidecar candidates are skipped with a diagnostic naming the report, so another valid report can proceed.
-The surface shows unavailable investigation status on a corrupt sidecar while preserving other reports. Original reports and pending wake
-files stay compatible; the sidecar is the processing status. Repeated discoveries adopt the saved result. A crashed
-claim becomes `blocked: friction_triage_delivery_uncertain`; inference failures stop without automatic paid retries.
-The cadence timestamp is durable before dispatch; a crash there may delay dispatch by one interval. The underlying
-hire has the existing timeout and structured-output fallback/resend behavior; this is a dispatch bound, not a dollar cap.
-
-The Friction list/detail shows processing status and the proposed fix with its evidence; no new inbox item is created.
-`owners friction-investigation <id>` reads the effective triage, revision, local freshness and current approval digest;
-`originalTriage` separately retains the original evidence. Stale or already-fixed results have no approval digest. `owners friction-triage <id>` explicitly investigates one
-selected eligible wake under the CLI runtime lock (it cannot run beside the daemon). This operator command bypasses
-the daemon cadence but cannot repeat a saved/uncertain investigation. Diagnosis never edits code, publishes issues
-or invents authority. Missing operational evidence remains owner incident follow-up in the desk and
-`onionsoup_status` (`friction=<id>` reads its bounded evidence), never a new person Attention card.
-
-Under the existing opt-in policy, eligible, current `propose-fix` diagnoses route automatically through the
-configured owner's normal work acceptance, planning and publication workflow. The request is typed
-`ownerFollowUp`, not a person assignment or fabricated manager approval. No new grant is supplied.
-`routeProposals: false` retains explicit manual routing. Routine promotion needs no person relaying facts;
-actual plan/effect gates and applicable standing grants remain unchanged.
-
-The person's **Request this fix** action promotes the displayed proposal, bound to its digest, into an ordinary
-human-attributed work request. `owners friction-promote <id> <digest>` does the same; the read command above supplies
-the digest. A durable intent in `state/friction/promotions` stores who requested it and the exact proposal before
-routing. The source friction ID determines one request identity. Repeated clicks, process restarts and lost replies
-adopt that request's current status; cancelled, declined and completed work never reopens. Receiver acceptance,
-plan approval, verification and effect gates remain intact. The Friction view links the responsible owner and work,
-and shows request status separately from verification that the original friction is fixed.
-
-An investigation records the source commit it read. Before promotion, and again before routing a saved intent, host
-code compares that commit with `HEAD` of the policy owner's clean local checkout. The comparison is local only: it
-never fetches, and the Friction view labels it "local checkout, not fetched". A different commit means the proposal
-needs revalidation, never that it is fixed. A dirty or unreadable checkout is `source_unavailable`:
-promotion refuses it without saving an intent, while a saved pending intent consumes a bounded routing attempt
-and retries on the normal recovery cadence without opening a request. A changed commit or proposal blocks a
-pending intent with `friction_source_stale` until revalidation and fresh approval. An existing request is never replaced.
-
-`owners friction-revalidate <id>` explicitly re-investigates a source-stale report.
-`owners friction-refresh <id>` also refreshes completed diagnoses at the same source commit when host evidence
-changes. The lowest-priority daemon worker uses the latter path under the same cadence/reservation rules.
-A write-once evidence-generation claim binds source and bundle digest; unchanged or previously attempted
-generations do not consume another model call. A failed hire or a dead runner leaves the claim `failed` or
-`uncertain`, and ordinary revalidation never replays it. Unknown transport/in-flight outcomes hold later
-generations, not just the identical digest. Host-returned terminal assistant errors or invalid deliverables
-stay failed history but allow one diagnosis for materially new incident facts, without a person reset.
-Routine duty/journal/session timestamps remain context but are excluded from refresh identity; actual
-schedules, linked conditions/status/check/effect identities, source/containment, provider health status and
-recurring captures can change it. A post-closure recurrence invalidates the effective closure, returns to
-owner backlog and becomes eligible again; original closure history remains.
-Resolved linked journal conditions are scanned since the capture under a shared byte/file budget, before
-the short context event tail. Routine events and day rollover never age a receipt out of that tail.
-An abbreviated scan is explicit, never evidence of resolution. Duplicate links are capture-generation-bound:
-a recurring duplicate after its primary closes returns to follow-up; a still-unresolved source can be relinked
-with an append-only host-only revision and no invented model findings or extra hire.
-Results are appended as write-once revisions under
-`state/friction/investigations/<id>/`, published atomically; the original investigation is never rewritten. The
-latest `revised` revision is the effective proposal, and its digest includes the revision number, so a revised
-proposal needs fresh approval. A blocked intent that never routed is archived as superseded history before the new
-approval routes; the report still has one request identity. Revision publication and the final effective-proposal,
-freshness and approval checks through request creation share a per-report kernel lock, across CLI, daemon and
-surface. Revalidation model execution stays outside that lock. A revision published first invalidates the old
-approval; a request created first remains the one durable request. This lock does not control external Git
-checkout changes; freshness remains a clean local snapshot, not an atomic remote-source guarantee.
-
-A person may authorize one additional attempt with
-`owners friction-revalidation-retry <id> <reference-commit> <failed-claim-token>`. Read the token from the saved
-failed claim returned by `friction-revalidate`; this command acknowledges that a generic failure does **not**
-prove the earlier hire made no inference. The command binds that token to the current clean reference commit,
-records that commit and the local person's username, and archives the exact failed claim bytes before replacing the claim under
-a lock. Repeating the same command returns its saved retry; a failed retry cannot gain another attempt. A crash
-between archive and replacement resumes only when the archive exactly matches the failed claim. Running,
-uncertain, malformed claims and existing revisions for the commit block new hires. A dead retry becomes uncertain.
-The retry is a human CLI operation under normal admission, with no model tool, daemon retry or backlog replay.
-Initial and retry launches check that an executable `opencode` resolves in the hire's PATH before consuming an
-attempt; this filesystem check does not prove the sandbox, provider or inference will succeed. Correct the calling
-process's PATH to the existing installation before retrying. Older binaries reject retry metadata as uncertain,
-preserving the fail-closed rollback boundary. Original reports, investigations and revisions are retained.
-
-An `already-fixed` answer needs a `fixedBy` commit contained in the reference history **and**
-`conditionEvidence` keys naming applicable positive host postconditions in the collected bundle.
-Supported conditions are linked original-goal host verification/acceptance, completed verified operational
-checkpoints or exact linked host condition-resolution receipts after the report. Mere source presence,
-source citations, model prose, request routing or a merged PR alone never retire friction.
-Unsupported initial closure becomes `needs-evidence`; unsupported revalidation is saved `blocked`
-(`friction_fixed_by_unknown`, `friction_fixed_by_unreachable`, `friction_operational_condition_unverified`)
-and does not replace the effective findings. An effective already-fixed result offers no
-**Request this fix**. The Friction view shows both commits, every revision including blocked ones, the original
-investigation, superseded intents, and any history that could not be read.
-
-Routing retries saved intents, at most three attempts per routing budget (up to 20 pending intents per
-tick), then stops with a visible reason. **Retry request routing**, or
-`owners friction-promotion-retry <id> <digest>`, explicitly resets an exhausted routing budget after rechecking the
-captured recipient's current repository scope. It never resets an existing request's execution or terminal status.
-Original reports and Attention Seen receipts are never rewritten or treated as work assignments.
-Disabling policy stops new discovery/routing; it does not cancel an already running read-only hire or
-an already-routed request. No policy is installed
-by an upgrade; choosing an activation-time cutoff preserves legacy pending wakes for separate approved backfill.
-For an authorized legacy diagnosis, `friction-refresh <id>` adds evidence/revision history without rewriting
-the original capture, paid claim or Attention decision. Exact duplicate symptoms with the same host-linked
-source incident are source-linked rather than diagnosed/routed twice. Repeated `owner_abandoned` rebases
-also require the same demonstrated original PR/head/rejection condition, not simply matching PR numbers.
-Different symptoms remain separate, and duplicate linkage is not a closure claim.
 The deterministic PR maintainer now honors a recorded `owner_abandoned` rejection for the exact original
 item/previous head, like an existing cancelled rebase. It does not repeatedly create the same unwanted update,
 close the remote PR, blacklist ordinary errors or suppress maintenance when the remote head changes.
@@ -1344,58 +1225,6 @@ or `origin`; it does not choose another owner's current chat. Once pinned, the o
 The ledger's human notes remain the authoritative correction history. Journal repair covers the current revision;
 if a later revision replaces an older record before journal repair succeeds, the older correction may remain only
 in the ledger. This deliberately adds neither a second historical outbox nor legacy feedback backfill.
-
-### Read-only continuity rollout preview
-
-`owners continuity-preview` reads bounded metadata directly and prints JSON. Unlike runtime readers that discover
-journal entries or repair indices, this command takes no admission/record locks, creates no state directories,
-refreshes no checkout, calls no model, and opens no request. It needs only `--state` and `--declarations` paths;
-it does not load provider credentials or owner model configuration. It has no apply, activate or replay option.
-
-The report includes configured/disabled/invalid friction policy and cutoff; the saved friction index's recent-100
-window, excluded reports and investigation candidates; cached acknowledged attention without assignment; routing
-states of handoffs, assignments and promotions; investigation states; and persisted admission/runner references.
-Candidates still require runtime authority, cadence, source and busy-owner checks. Acknowledgment never makes an
-item eligible for work. Routing status is distinct from the linked request's execution status. Admissions/runners
-are conservative references whose liveness is unknown here; the preview does not certify deployment safety or
-account for all live chats.
-
-Reads are limited to 200 directory entries per category and 1 MiB per file. A larger file or truncated category is
-reported, never interpreted as an empty queue. Attention coverage is its cached index and cutoff, with no transcript
-or journal scan. Friction counts describe indexed captures, not every file on disk. Malformed metadata and missing
-indices are named as unknown without echoing their contents; terminal symlink files, selected-root symlinks and named intermediate/queue-directory symlinks are refused before dependent reads. Files are opened nonblocking and must
-be regular files, so a FIFO or device cannot stall preview. Queue scope distinguishes present, absent and unavailable;
-an absent queue is not reported as a completed exhaustive scan, and the state root's availability is separate. Directories
-must be the operator-selected state/configuration trees. The snapshot is non-atomic. Ancestor checks are best-effort lstat/open checks and do not eliminate concurrent path-replacement (TOCTOU) races; inspect trusted operator-selected state trees, not attacker-controlled directories. Its stable selection digest uses code-unit ordering independent of locale and
-excludes sample time and identifies the displayed metadata selection only: it is neither consent nor a backfill
-manifest. Repeat it before reviewing any future explicit selection.
-
-Roll out in small observable steps:
-
-1. Review the preview's scope, unknowns and active-work references. Use existing deployment admission and live-chat
-   checks before any release; do not deploy or interrupt ongoing work on the strength of this report.
-2. Keep friction policy absent while validating an isolated fixture with bounded live inference. Confirm that one
-   report gives one investigation and that normal work still progresses. Provider fallback can use more than one
-   underlying session, so inspect actual cost rather than equating dispatch count with spend.
-3. With explicit operator approval, configure an activation-time cutoff and a conservative cadence for selected new
-   reports. Review the first investigation before choosing **Request this fix**. Verify receiver acceptance, ordinary
-   plan approval, and a concrete acceptance result; a routed request or merged PR alone is not proof friction ended.
-4. Review historical acknowledged items and pre-cutoff wakes individually. This preview does not backfill them.
-   No old note saying “fix this” becomes an assignment, and changing the cutoff is not a safe substitute for review.
-
-Stop new investigation admission if repeated uncertain claims, invalid source/scope, missing evidence, unexpected
-cost, duplicate work or slower existing work appears. Removing the optional friction policy stops future discovery;
-it does not abort the current read-only hire or cancel already requested work. Handle existing requests with their
-normal cancellation/recovery controls after reviewing active work. On rollback, retain additive sidecars and all
-ordinary requests/work records. Older binaries may ignore the new views, but existing requests can still execute;
-rolling back code is not cancellation. Never delete records to make a preview look clean.
-
-Measure usefulness through concrete comparison tasks: fewer repeated human decisions for the same goal; fewer
-facts Brian must relay between owners; fewer eligible obligations stalled across successive previews; and a progress
-answer that names current evidence, uncertainty, blockers and next action. Compare duplicate request identities,
-uncertain/blocked counts and observed inference cost alongside those user outcomes. The preview provides metadata
-counts, not automatic measurements of conversational burden or verified business outcomes.
-
 
 ### Durable owner conversation history
 

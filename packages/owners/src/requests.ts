@@ -80,7 +80,7 @@ export const UpdateAppAsk = z.object({
 });
 export type UpdateAppAsk = z.infer<typeof UpdateAppAsk>;
 
-export const OperatorAssignmentSource = z.object({ kind: z.enum(['attention', 'friction']), id: z.string().min(1) });
+export const OperatorAssignmentSource = z.object({ kind: z.literal('attention'), id: z.string().min(1) });
 export type OperatorAssignmentSource = z.infer<typeof OperatorAssignmentSource>;
 
 export const WorkAsk = z.object({
@@ -88,8 +88,6 @@ export const WorkAsk = z.object({
   /** Set when the work carries out an initiative's assignment. */
   assignment: AssignmentRef.optional(),
   operatorAssignment: z.object({ by: z.string().min(1), source: OperatorAssignmentSource }).optional(),
-  /** Host-created follow-up under declared friction policy; not a person assignment or plan approval. */
-  ownerFollowUp: z.object({ kind: z.literal('friction'), id: z.string(), digest: z.string() }).optional(),
 });
 export type WorkAsk = z.infer<typeof WorkAsk>;
 

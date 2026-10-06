@@ -186,30 +186,8 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
 
 ## Runtime
 
-- **Friction still cannot manufacture missing live evidence.** Opt-in triage collects bounded host incident
-  bundles before model diagnosis and routes applicable proposals into the configured owner's normal workflow,
-  without a manual promotion/relay ceremony. Missing operational facts stay owner incident follow-up; source,
-  installed collector manifest and configured release target do not attest a running service/plugin.
-  Provider health is recorded/reactive, not an active probe. Safe local history/containment is not remote freshness.
-  Same-source evidence refresh and authorized explicit legacy refresh retain original reports and revision history.
-  Positive applicable host conditions/version facts govern closure; model prose, source citations, a merged PR
-  or routing alone do not. Exact host-linked duplicate incidents source-link, not bulk-dismiss.
-  Unknown/in-flight outcome reconciliation and replay of the same paid generation remain unsupported.
-  Host-returned terminal analysis failures allow fresh incident generations under the configured cadence;
-  routine metadata churn does not trigger inference. Post-closure recurrence returns to owner follow-up.
-  Source freshness compares only with the clean local checkout (never fetched). A person can explicitly retry one `failed` source-revalidation claim once per reference commit
-  with `owners friction-revalidation-retry`; uncertain attempts still require inspection and cannot be replayed.
-  The recent-100 discovery window can miss older eligible reports after a burst; explicit ID investigation is available.
-  A blocked or uncertain investigation still needs inspection; new evidence never overrides its paid claim.
-  Workaround delivery must pin the saved origin, and publishing a draft GitHub issue must have its own
-  person approval gate. A missing failure event stays explicit and makes deduplication provisional. The opencode
-  plugin exposes a message ID but no invocation ID; identical submissions in one assistant message can share an
-  idempotency key. An interrupted pre-write submission blocks other reports of its signature until that submission
-  retries; there is no operator recovery control yet. Existing journal failures between append and acknowledgement
-   can replay a short entry on retry.
-  The friction index bounds record reads on routine surface polls, but old records, wake intents and submission
-  markers have no retention or pruning policy. A missing or corrupt index needs explicit repair rather than
-  silently discarding reports.
+- **Friction reports are capture only.** Nothing triages or routes them; a person reads the Friction view. Records
+  have no pruning, and an interrupted submission blocks its signature's later reports until that submission retries.
 
 - **Legacy desk PRs remain untracked.** PRs recorded only as `desk-change-opened` journal entries before
   ledger-backed desk publication are not backfilled. They need manual GitHub maintenance; approved request

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createElement } from 'react';
-import { FrictionDetail, requestFrictionFix } from '../web/src/components/FrictionView.tsx';
+import { FrictionDetail } from '../web/src/components/FrictionView.tsx';
 import { InitiativeView } from '../web/src/components/InitiativeView.tsx';
 import { OrgTree } from '../web/src/components/OrgView.tsx';
 import { InboxErrors } from '../web/src/components/InboxErrors.tsx';
@@ -89,151 +89,11 @@ test('friction details render persisted HTML as inert text and link to the saved
     summary: '<script>alert(1)</script>', expected: 'A reply', actual: '<img src=x onerror=alert(1)>',
     sessionID: 'ses_origin', count: 1, firstSeen: '2026-09-24', lastSeen: '2026-09-24',
     commit: 'unavailable', model: 'unavailable', failures: [], failureContext: 'unavailable', provisional: true };
-  record.triage = { state: 'investigated', updatedAt: '2026-09-24T00:00:00.000Z', investigation: {
-    disposition: 'propose-fix', observed: ['<script>unsafe</script>'], inferred: [], unknown: ['Freshness unknown'],
-    proposedWork: { title: 'Repair evidence', goal: 'Evidence available', rationale: 'Reviewer blocked',
-      repository: 'example/wiki', size: 'small', acceptance: ['Reviewer reads evidence'] },
-  } };
-  record.proposalDigest = 'a'.repeat(64);
   const html = renderToStaticMarkup(createElement(FrictionDetail, { record }));
-  assert.match(html, /Request this fix/);
-  assert.match(html, /Proposed fix: Repair evidence/);
-  assert.match(html, /no work has been dispatched/);
   assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
   assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/);
   assert.doesNotMatch(html, /<script>|<img/);
   assert.match(html, /Open originating chat/);
-  record.promotion = { owner: 'bellonda', by: 'Brian', at: '2026-09-24T00:00:00.000Z', digest: record.proposalDigest,
-    requestID: 'r-handoff-fixture', status: 'denied', workItem: 'w-fixture' };
-  const promoted = renderToStaticMarkup(createElement(FrictionDetail, { record }));
-  assert.doesNotMatch(promoted, /Request this fix|no work has been dispatched/);
-  assert.match(promoted, /View linked work/);
-  assert.match(promoted, /denied/);
-  record.promotion.status = 'blocked';
-  assert.match(renderToStaticMarkup(createElement(FrictionDetail, { record })), /Retry request routing/);
-});
-
-const FRICTION_ID = 'fr_012345678901234567890123';
-const OLD_COMMIT = 'a'.repeat(40);
-const NEW_COMMIT = 'b'.repeat(40);
-const LATEST_COMMIT = 'c'.repeat(40);
-const FRICTION_INVESTIGATION = {
-  disposition: 'propose-fix' as const, observed: ['src/old.ts:10'], inferred: [], unknown: [],
-  proposedWork: { title: 'Original fix', goal: 'Repair original', repository: 'example/wiki',
-    rationale: 'Observed failure', size: 'small' as const, acceptance: ['Original check'] },
-};
-const FRICTION_RECORD: FrictionRecord = {
-  version: 1, id: FRICTION_ID, owner: 'bellonda', summary: 'Failure', expected: 'A reply', actual: 'No reply',
-  sessionID: 'ses_origin', count: 1, firstSeen: '2026-09-24', lastSeen: '2026-09-24',
-  commit: OLD_COMMIT, model: 'unavailable', failures: [], failureContext: 'unavailable', provisional: false,
-  triage: { state: 'investigated', updatedAt: '2026-09-24T00:00:00.000Z', investigation: FRICTION_INVESTIGATION },
-  originalInvestigation: FRICTION_INVESTIGATION, effectiveRevision: 0, revisions: [],
-};
-
-const frictionHtml = (record: FrictionRecord) => renderToStaticMarkup(createElement(FrictionDetail, { record }));
-
-test('stale friction shows both local commits and a revalidation command without requesting a fix', () => {
-  const html = frictionHtml({ ...FRICTION_RECORD, freshness: {
-    investigatedCommit: OLD_COMMIT, referenceCommit: NEW_COMMIT, stale: true,
-    reason: 'source_stale', scope: 'local-checkout-not-fetched',
-  } });
-  assert.match(html, /Investigated at a{8} · local checkout b{8} \(not fetched\)/);
-  assert.match(html, /source.*stale/i);
-  assert.match(html, new RegExp(`Needs revalidation: owners friction-revalidate ${FRICTION_ID}`));
-  assert.doesNotMatch(html, /Request this fix/);
-});
-
-test('a revision at an older commit still needs revalidation when the local checkout advances again', () => {
-  const html = frictionHtml({ ...FRICTION_RECORD,
-    freshness: { investigatedCommit: NEW_COMMIT, referenceCommit: LATEST_COMMIT, stale: true,
-      reason: 'source_stale', scope: 'local-checkout-not-fetched' },
-    effectiveRevision: 1,
-    revisions: [{ version: 1, id: FRICTION_ID, revision: 1, previousCommit: OLD_COMMIT,
-      sourceCommit: NEW_COMMIT, reason: 'source_stale', state: 'revised', at: '2026-09-25T00:00:00.000Z',
-      investigation: FRICTION_INVESTIGATION }],
-  });
-  assert.match(html, /Investigated at b{8} · local checkout c{8} \(not fetched\)/);
-  assert.match(html, new RegExp(`Needs revalidation: owners friction-revalidate ${FRICTION_ID}`));
-  assert.doesNotMatch(html, /<button[^>]*>Request this fix<\/button>/);
-});
-
-test('a blocked revision at the current commit shows its reason instead of asking to revalidate again', () => {
-  const html = frictionHtml({ ...FRICTION_RECORD,
-    freshness: { investigatedCommit: OLD_COMMIT, referenceCommit: NEW_COMMIT, stale: true,
-      reason: 'source_stale', scope: 'local-checkout-not-fetched' },
-    revisions: [{ version: 1, id: FRICTION_ID, revision: 1, previousCommit: OLD_COMMIT,
-      sourceCommit: NEW_COMMIT, reason: 'source_stale', state: 'blocked', blockedReason: 'source changed during revalidation',
-      at: '2026-09-25T00:00:00.000Z', investigation: FRICTION_INVESTIGATION }],
-  });
-  assert.match(html, /Revision 1.*blocked.*source changed during revalidation/s);
-  assert.doesNotMatch(html, /Needs revalidation: owners friction-revalidate/);
-});
-
-test('closure details distinguish fixing source from host condition evidence without offering a request', () => {
-  const fixed = { disposition: 'already-fixed' as const, fixedBy: NEW_COMMIT,
-    observed: ['src/fix.ts:42 shows the changed path'], inferred: [], unknown: [] };
-  const html = frictionHtml({ ...FRICTION_RECORD, triage: { ...FRICTION_RECORD.triage!, investigation: fixed },
-    freshness: { investigatedCommit: NEW_COMMIT, referenceCommit: NEW_COMMIT, stale: false, scope: 'local-checkout-not-fetched' },
-    effectiveRevision: 1, revisions: [{ version: 1, id: FRICTION_ID, revision: 1, previousCommit: OLD_COMMIT,
-      sourceCommit: NEW_COMMIT, reason: 'source_stale', state: 'revised', at: '2026-09-25T00:00:00.000Z', investigation: fixed }],
-  });
-  assert.match(html, new RegExp(`Fixing source ${NEW_COMMIT}; host condition evidence: unverified`));
-  assert.match(html, /src\/fix.ts:42 shows the changed path/);
-  assert.match(html, /Original investigation/);
-  assert.match(html, /Original fix/);
-  assert.doesNotMatch(html, /Request this fix/);
-});
-
-test('revised proposal survives a blocked old promotion and posts the effective digest', async () => {
-  const revised = { ...FRICTION_INVESTIGATION, proposedWork: { ...FRICTION_INVESTIGATION.proposedWork, title: 'Revised fix' } };
-  const digest = 'c'.repeat(64);
-  const record: FrictionRecord = { ...FRICTION_RECORD, triage: { ...FRICTION_RECORD.triage!, investigation: revised },
-    freshness: { investigatedCommit: NEW_COMMIT, referenceCommit: NEW_COMMIT, stale: false, scope: 'local-checkout-not-fetched' },
-    revisions: [{ version: 1, id: FRICTION_ID, revision: 1, previousCommit: OLD_COMMIT, sourceCommit: NEW_COMMIT,
-      reason: 'source_stale', state: 'blocked', blockedReason: '<blocked>', at: '2026-09-25T00:00:00.000Z', investigation: revised },
-    { version: 1, id: FRICTION_ID, revision: 2, previousCommit: OLD_COMMIT, sourceCommit: NEW_COMMIT,
-      reason: 'source_stale', state: 'revised', at: '2026-09-26T00:00:00.000Z', investigation: revised }],
-    effectiveRevision: 2, proposalDigest: digest,
-    promotion: { owner: 'bellonda', by: 'Brian', at: '2026-09-24T00:00:00.000Z', digest: 'd'.repeat(64),
-      requestID: 'r-handoff-old', status: 'blocked', reason: 'friction_source_stale' },
-  };
-  const html = frictionHtml(record);
-  assert.match(html, /Revision 1.*b{8}.*blocked.*&lt;blocked&gt;/s);
-  assert.match(html, /Revision 2.*b{8}.*propose-fix/s);
-  assert.match(html, /Revised fix/);
-  assert.match(html, /Original fix/);
-  assert.match(html, /Request this fix/);
-  const previousFetch = globalThis.fetch;
-  let posted: { path: string; init?: RequestInit } | undefined;
-  globalThis.fetch = async (path, init) => {
-    posted = { path: String(path), init };
-    return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
-  };
-  try {
-    await requestFrictionFix(record);
-    assert.equal(posted?.path, '/api/decide');
-    assert.equal(posted?.init?.method, 'POST');
-    assert.deepEqual(JSON.parse(String(posted?.init?.body)),
-      { action: 'promote-friction', id: FRICTION_ID, proposalDigest: digest });
-  } finally {
-    globalThis.fetch = previousFetch;
-  }
-  const routed = frictionHtml({ ...record, promotion: { ...record.promotion!, status: 'pending-owner' } });
-  assert.doesNotMatch(routed, /Request this fix/);
-  assert.match(routed, /bellonda: awaiting owner acceptance/);
-  assert.match(routed, /r-handoff-old/);
-  const blockedCurrent = frictionHtml({ ...record, promotion: { ...record.promotion!, digest } });
-  assert.doesNotMatch(blockedCurrent, /Request this fix/);
-  assert.match(blockedCurrent, /Retry request routing/);
-});
-
-test('unreadable revision and promotion history warn beside the preserved investigation', () => {
-  const html = frictionHtml({ ...FRICTION_RECORD,
-    unreadable: ['friction_revisions_unreadable', 'friction_promotion_history_unreadable'] });
-  assert.match(html, /friction_revisions_unreadable/);
-  assert.match(html, /friction_promotion_history_unreadable/);
-  assert.match(html, /Original investigation.*Original fix/s);
-  assert.match(html, /role="alert"/);
 });
 
 function info(id: string, created: number, role: 'user' | 'assistant' = 'assistant') {

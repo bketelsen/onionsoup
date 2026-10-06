@@ -1,6 +1,4 @@
-import { recoverFrictionPromotions, routeConfiguredFrictionProposals } from './friction-promotion.ts';
 import { recoverAttentionAssignments } from './attention-assignment.ts';
-import { consumeFrictionWake, nextFrictionInvestigation } from './friction-work.ts';
 import { recoverAskHandoffs } from './ask-handoffs.ts';
 import { canReconcileRequest, reconcileRequest } from './request-recovery.ts';
 import { readFile, writeFile } from 'node:fs/promises';
@@ -90,12 +88,11 @@ const requestOwners = new Set<string>();
 
 const items = new Background(DAEMON_LIMITS.parallelItems);
 const duties = new Background(DAEMON_LIMITS.parallelDuties);
-const friction = new Background(1);
 const memories = new Background(DAEMON_LIMITS.parallelMemory);
 
 /** Wait for background work the ticks started. */
 export async function drain() {
-  await Promise.all([items.drain(), duties.drain(), memories.drain(), requests.drain(), friction.drain()]);
+  await Promise.all([items.drain(), duties.drain(), memories.drain(), requests.drain()]);
 }
 
 export interface TickLog {
@@ -190,7 +187,7 @@ export async function scheduleMemory(runtime: Runtime, log: TickLog, unavailable
 /** Requests sharing either owner serialize; different owners progress up to the configured cap. */
 async function runRequests(runtime: Runtime, log: TickLog) {
   const busyOwners = new Set([...items.keys(), ...duties.keys()].map(key => key.split('/')[0]));
-  for (const ownerId of [...memories.keys(), ...friction.keys()]) busyOwners.add(ownerId);
+  for (const ownerId of memories.keys()) busyOwners.add(ownerId);
   for (const item of await runtime.ledger.list()) {
     if (item.activeRunner !== undefined && requestRunnerIsAlive(item.activeRunner)) busyOwners.add(item.owner);
   }
@@ -229,36 +226,12 @@ async function runRequests(runtime: Runtime, log: TickLog) {
 }
 
 async function reservedRequestOwners(runtime: Runtime) {
-  const reserved = new Set([...requestOwners, ...friction.keys()]);
+  const reserved = new Set(requestOwners);
   for (const request of await runtime.requests.list()) {
     if (!request.operation?.runner || !requestRunnerIsAlive(request.operation.runner)) continue;
     for (const owner of requestParticipants(runtime, request)) reserved.add(owner);
   }
   return reserved;
-}
-
-/** Lowest-priority diagnosis; one bounded hire off the tick, proposals use normal owner work. */
-export async function scheduleFriction(runtime: Runtime, log: TickLog, reserved: ReadonlySet<string>) {
-  if (friction.size) return;
-  const selected = await nextFrictionInvestigation(runtime, (id, reason) => log.error(id, new Error(reason)));
-  if (!selected || reserved.has(selected.owner) || memories.has(selected.owner)) return;
-  const dutyState = await readDutyState(join(runtime.stateDirectory, 'duties.json'));
-  const hasDueDuty = runtime.owner(selected.owner).duties.some(duty => duty.every
-    && Date.now() - Date.parse(dutyState[`${selected.owner}/${duty.id}`] ?? '1970-01-01') >= spanMs(duty.every));
-  if (hasDueDuty) return;
-  const busy = [...items.keys(), ...duties.keys()].some(key => key.split('/')[0] === selected.owner);
-  if (busy) return;
-  const work = await runtime.ledger.list();
-  if (work.some(item => item.owner === selected.owner && (item.activeRunner || isRunnable(item)))) return;
-  await friction.start(selected.owner, async () => {
-    try {
-      const investigation = await consumeFrictionWake(runtime, selected);
-      if (investigation) log.duty(selected.owner, 'friction-triage',
-        `${investigation.id}: ${investigation.state}`);
-    } catch (error) {
-      log.error('friction triage', error);
-    }
-  }, runtime.stateDirectory, 'daemon-friction');
 }
 
 /**
@@ -306,12 +279,6 @@ async function tickAdmitted(runtime: Runtime, log: TickLog) {
     log.error('handoffs', error);
   }
   try {
-    await recoverFrictionPromotions(runtime, log.error);
-    await routeConfiguredFrictionProposals(runtime, log.error);
-  } catch (error) {
-    log.error('friction promotions', error);
-  }
-  try {
     await runtime.requests.markInterrupted();
     await runRequests(runtime, log);
   } catch (error) {
@@ -332,12 +299,6 @@ async function tickAdmitted(runtime: Runtime, log: TickLog) {
   await runDueDuties(runtime, log, reserved);
   const runnable = (await runtime.ledger.list()).filter(isRunnable);
   await advanceRunnable(runnable, runtime, log, reserved);
-  try {
-    await scheduleFriction(runtime, log, reserved);
-    reserved = new Set([...reserved, ...friction.keys()]);
-  } catch (error) {
-    log.error('friction triage', error);
-  }
   await scheduleMemory(runtime, log, reserved);
   try {
     for (const notice of await noticeWorkChanges(runtime, ownerId => chatDirectory(runtime, ownerId))) log.duty(notice.owner, 'notice', `${notice.workItem} ${notice.change}${notice.origin ? ' (to its chat)' : ''}`);

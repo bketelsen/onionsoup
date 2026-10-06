@@ -286,28 +286,9 @@ final independent-family publication review.
 `onionsoup_friction({ summary, expected, actual, evidence? })` captures unexpected engine behavior from an
 owner chat. The host adds the originating session, running engine checkout commit, observed model and bounded
 failed-tool context; it never stores raw tool arguments. Repeated safe error shapes share one report, while a
-missing failure event is marked provisional. Reports appear in the surface's Friction view; opt-in host-evidence triage and configured owner-workflow routing
-are available, while issue publication retains its separate person gate. `FRICTION_LIMITS` in `packages/owners/src/friction.ts` bounds prose, errors,
+missing failure event is marked provisional. Reports appear in the surface's Friction view for a person to read;
+nothing triages or routes them. `FRICTION_LIMITS` in `packages/owners/src/friction.ts` bounds prose, errors,
 session history, records and listings.
-
-An optional `friction-triage.json` in the person's configuration declares version 1, the triage owner/repository,
-`enabledSince` activation cutoff and `intervalMs` cadence. `routeProposals` defaults to true; false retains manual promotion.
-Before inference the host reads only declared paths, fixed read-only Git argv and typed persisted records;
-`FRICTION_EVIDENCE_LIMITS` bounds record/field/fact/byte/history collection and includes explicit missing/error
-reasons. Credential references are safe facts, credential values are never collected. The installed collector
-build/configured release target are not running-service attestations. Source and cached remote refs are not fetched.
-Routine proposals become typed owner follow-ups through normal acceptance/plan/publication gates; no person
-or manager approval is invented. Unknown operational conditions stay in owner status/desk follow-up, not Attention.
-
-`owners friction-refresh <id>` adds a same-source evidence generation to a completed diagnosis, including
-authorized legacy backfill. `owners friction-revalidate <id>` retains explicit source-stale revalidation.
-The daemon refreshes materially changed incident evidence under existing cadence limits; duty/journal/session
-timestamp churn does not wake a model. Unknown/in-flight outcomes hold recovery, while host-returned terminal
-analysis failures permit new incident generations without a human reset. No paid generation is blindly replayed.
-Post-closure recurrence returns to owner backlog. Original captures/revisions stay append-only.
-Closure requires positive applicable host condition
-keys and fixing-commit containment, not a citation, model statement or merged PR alone. Exact host-linked
-duplicate incidents source-link without dismissing an unresolved condition.
 
 `scripts/test.mjs` defaults to `DEFAULT_TEST_CONCURRENCY=4` in child Node argv.
 `ONIONSOUP_TEST_CONCURRENCY` or CLI `--test-concurrency=N` supplies a positive safe-integer override;

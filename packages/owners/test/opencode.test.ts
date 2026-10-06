@@ -49,13 +49,12 @@ function malformedReply() {
   };
 }
 
-test('runHire marks two actually returned malformed deliverables terminal', async () => {
+test('runHire resends once in the same session, then fails a malformed deliverable', async () => {
   const fixture = scriptedClient([malformedReply, malformedReply]);
   await assert.rejects(runHire(fixture.client, reviewRequest('fixture/malformed')), error => {
     assert.ok(error instanceof HireError);
     assert.match(error.message, /^deliverable_invalid:/);
     assert.equal(error.sessionID, 'ses_1');
-    assert.equal(error.outcome, 'returned-terminal');
     return true;
   });
   assert.deepEqual(fixture.sessionIDs, ['ses_1']);
@@ -63,7 +62,7 @@ test('runHire marks two actually returned malformed deliverables terminal', asyn
   assert.ok(fixture.prompts.every(prompt => prompt.sessionID === 'ses_1' && prompt.format === undefined));
 });
 
-test('runHire marks returned provider info.error terminal without inferring it from prose', async () => {
+test('runHire fails with the returned provider info.error and does not resend', async () => {
   const fixture = scriptedClient([() => ({
     data: { info: { role: 'assistant', error: {
       name: 'APIError', data: { message: 'upstream_down', statusCode: 503 },
@@ -71,7 +70,6 @@ test('runHire marks returned provider info.error terminal without inferring it f
   })]);
   await assert.rejects(runHire(fixture.client, reviewRequest('fixture/returned-provider-error')), error => {
     assert.ok(error instanceof HireError);
-    assert.equal(error.outcome, 'returned-terminal');
     assert.equal(error.sessionID, 'ses_1');
     assert.deepEqual(error.providerError, { name: 'APIError', message: 'upstream_down', statusCode: 503 });
     return true;
@@ -80,25 +78,24 @@ test('runHire marks returned provider info.error terminal without inferring it f
   assert.equal(fixture.prompts.length, 1);
 });
 
-test('a returned transport error without assistant info remains unknown even with terminal-looking error text', async () => {
+test('a returned transport error without assistant info fails as no_assistant_reply', async () => {
   const fixture = scriptedClient([() => ({ error: new Error('deliverable_invalid: connection lost') })]);
   await assert.rejects(runHire(fixture.client, reviewRequest('fixture/missing-assistant')), error => {
     assert.ok(error instanceof HireError);
     assert.match(error.message, /^no_assistant_reply:/);
     assert.equal(error.sessionID, 'ses_1');
-    assert.equal(error.outcome, 'unknown');
     assert.equal(error.providerError, undefined);
     return true;
   });
   assert.equal(fixture.prompts.length, 1);
 });
 
-test('runHire leaves a rejected transport promise unclassified rather than claiming a returned terminal reply', async () => {
+test('runHire rethrows a rejected transport promise unchanged', async () => {
   const transportError = new Error('deliverable_invalid: transport disconnected');
   const fixture = scriptedClient([() => { throw transportError; }]);
   await assert.rejects(runHire(fixture.client, reviewRequest('fixture/rejected-transport')), error => {
     assert.equal(error, transportError);
-    assert.equal(error instanceof HireError, false, 'no returned assistant evidence supplies a terminal outcome');
+    assert.equal(error instanceof HireError, false, 'a transport failure is not a hire error');
     return true;
   });
   assert.equal(fixture.prompts.length, 1);

@@ -41,9 +41,8 @@ export const FrictionRecord = z.object({
 }).strict();
 export type FrictionRecord = z.infer<typeof FrictionRecord>;
 
-export const Wake = z.object({ id: FrictionRecord.shape.id, at: z.string().datetime(), status: z.literal('pending') });
 const Submission = z.object({ id: FrictionRecord.shape.id, journaled: z.boolean(), baseline: z.number().int().nonnegative().optional() });
-export const FrictionIndex = z.record(FrictionRecord.shape.id, z.object({ lastSeen: z.string().datetime() }));
+const FrictionIndex = z.record(FrictionRecord.shape.id, z.object({ lastSeen: z.string().datetime() }));
 const exec = promisify(execFile);
 
 /** Never take paths, command lines, patch content or argument values from tool input. */
@@ -139,7 +138,7 @@ export async function engineCommit() {
 function paths(runtime: Runtime) {
   const root = join(runtime.stateDirectory, 'friction');
   return { root, lock: join(root, 'records.lock'), records: join(root, 'records'),
-    index: join(root, 'index.json'), submissions: join(root, 'submissions'), wakes: join(root, 'wakes'), pending: join(root, 'pending') };
+    index: join(root, 'index.json'), submissions: join(root, 'submissions'), pending: join(root, 'pending') };
 }
 
 async function save(path: string, value: unknown) {
@@ -196,7 +195,7 @@ async function recordIndex(location: ReturnType<typeof paths>) {
   return index;
 }
 
-/** Record, wake and submission are serialized; notebook I/O never holds the record lock. */
+/** Record and submission are serialized; notebook I/O never holds the record lock. */
 export async function reportFriction(runtime: Runtime, submission: FrictionSubmission) {
   if (!runtime.declarations.owners.has(submission.owner)) throw new Error('friction_unknown_owner');
   const input = FrictionInput.parse(submission.input);
@@ -244,11 +243,6 @@ export async function reportFriction(runtime: Runtime, submission: FrictionSubmi
     if (pendingID || !prior) await unlink(pendingPath).catch((error: NodeJS.ErrnoException) => {
       if (error.code !== 'ENOENT') throw error;
     });
-    // Repair an interrupted first submission without producing a second wake for an existing intent.
-    const wakePath = join(location.wakes, `${record.id}.json`);
-    if (!(await load(wakePath))) {
-      await save(wakePath, Wake.parse({ id: record.id, at: record.firstSeen, status: 'pending' }));
-    }
     return { record, submissionPath };
   });
   await withRecordLock(`${submissionPath}.lock`, async () => {

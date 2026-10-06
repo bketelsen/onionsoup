@@ -22,7 +22,7 @@ export const Attention = z.object({
 });
 export type Attention = z.infer<typeof Attention>;
 const Cursor = z.object({ offset: z.number(), line: z.number(), size: z.number(), complete: z.boolean() });
-export const AttentionIndex = z.object({
+const AttentionIndex = z.object({
   routingVersion: z.number().int().nonnegative().default(0),
   cutoff: z.string(),
   cursors: z.record(z.string(), Cursor),
