@@ -69,8 +69,9 @@ export async function syncPlanWorktree(runtime: Runtime, ownerId: string, itemId
 
 export type PlanWorktreeRemoval = 'removed' | 'absent' | PlanWorktreeKept;
 
+/** Changes or untracked files keep a worktree; ignored files (caches, a local .env) are removed with it. */
 async function isDirty(path: string) {
-  return Boolean((await git(path, ['status', '--porcelain', '--untracked-files=all', '--ignored'])).trim());
+  return Boolean((await git(path, ['status', '--porcelain'])).trim());
 }
 
 /** Preserve identity before removal, without retiring a directory that might still need to be kept. */
@@ -192,7 +193,7 @@ const keptNote = (why: string) => (path: string) => ({
 const REMOVAL_JOURNAL: Record<PlanWorktreeRemoval, RemovalJournal | undefined> = {
   removed: path => ({ kind: 'plan-worktree-removed', note: path }),
   absent: undefined,
-  'kept-uncommitted': keptNote('it has uncommitted changes or ignored local files'),
+  'kept-uncommitted': keptNote('it has uncommitted changes'),
   'kept-unpublished': keptNote('it has commits no remote branch holds'),
   failed: (path, detail) => ({ kind: 'attention', note: `plan worktree ${path} could not be removed: ${detail}` }),
 };

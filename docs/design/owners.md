@@ -246,7 +246,8 @@ or `cancelled`. The plugin's cleanup pass (`removeIdlePlanWorktrees` in `plan-wo
 asks opencode for the session's status and last update, and removes the worktree and its branch once the session is
 not busy (or retrying) and has not changed for `PLAN_WORKTREE_LIMITS.idleBeforeRemovalHours` (24); an item without
 a session, or whose session is gone, counts from the item's own last update. Busy children also retain the
-workspace. Dirty/untracked, ignored content or unreadable work stays with a concrete `planWorktreeKept` owner-maintenance reason,
+workspace. Dirty/untracked or unreadable work stays with a concrete `planWorktreeKept` owner-maintenance reason (ignored
+files such as caches or a local `.env` are removed with the worktree),
 never an implicit human decision. Clean terminal work uses the same merge-tree/squash containment check as desk
 sync against the configured base, not remote commit reachability or the item's "landed" label. Unique commits,
 including a distinct plan-branch tip, get durable local `refs/onionsoup/archive/plans/...` refs and

@@ -27,8 +27,8 @@ cause, and the fix is either applied through the normal gates or reported to the
   chat and direct changes. It outlives the merge (the session may still run a rollout from it): the plugin's cleanup
   pass removes it (and its branch) once the item is landed with its PR merged or closed, or cancelled, and its session
   has been idle (not busy, no update) for `PLAN_WORKTREE_LIMITS.idleBeforeRemovalHours` (24). Routine cleanup
-  archives unique commits under durable local Git refs before retiring clean workspaces. Dirty, ignored or
-  unreadable content remains owner maintenance with a specific reason, not a person cleanup card.
+  archives unique commits under durable local Git refs before retiring clean workspaces. Dirty or
+  unreadable content remains owner maintenance with a specific reason, not a person cleanup card; ignored files go.
   Retained conversations remain archived history; never recreate their removed directory or manually remove
   a kept worktree to silence a card. A plan approved before plan worktrees existed has
   no `planWorktree` and still works on the desk.

@@ -40,7 +40,7 @@ async function fixture(context: TestContext) {
   context.after(async () => { for (const controller of controllers) await controller.dispose(); });
   const maintenance = create();
   const errors: unknown[] = [];
-  const record = async (controller = maintenance, kind = 'plugin:notices') => MaintenanceOperation.parse(JSON.parse(
+  const record = async (controller = maintenance, kind = 'plugin:fixture') => MaintenanceOperation.parse(JSON.parse(
     await readFile(join(home, 'plugin-maintenance', controller.instanceID, `${kind.replaceAll(':', '-')}.json`), 'utf8')));
   return { home, callbacks, maintenance, create, errors, record,
     start: (operation: (pass: MaintenancePass) => Promise<unknown>, controller = maintenance) => {
@@ -48,7 +48,7 @@ async function fixture(context: TestContext) {
         callbacks.push(callback);
         return { unref() {} } as NodeJS.Timeout;
       }) as typeof setInterval;
-      try { controller.start('plugin:notices', 100, operation, error => errors.push(error)); }
+      try { controller.start('plugin:fixture', 100, operation, error => errors.push(error)); }
       finally { globalThis.setInterval = intervals; }
     } };
 }
@@ -346,4 +346,28 @@ test('a replacement instance releases only its own work and leaves uncertain and
   assert.deepEqual(retained, [legacy.id, uncertain.admission!.id].sort());
   assert.deepEqual(await setup.record(), uncertain);
   await legacy.release();
+});
+
+test('one instance per process runs a process-wide kind; the next takes over when it is disposed', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'plugin-maintenance-'));
+  const intervals = globalThis.setInterval;
+  const callbacks: Array<() => Promise<void>> = [];
+  const runs: string[] = [];
+  const first = new PluginMaintenance(home, '/first');
+  const second = new PluginMaintenance(home, '/second');
+  globalThis.setInterval = ((callback: () => Promise<void>) => {
+    callbacks.push(callback);
+    return { unref() {} } as NodeJS.Timeout;
+  }) as typeof setInterval;
+  try {
+    first.start('plugin:notices', 100, async () => { runs.push('first'); }, error => { throw error; }, false);
+    second.start('plugin:notices', 100, async () => { runs.push('second'); }, error => { throw error; }, false);
+  } finally { globalThis.setInterval = intervals; }
+  await callbacks[0]!();
+  await callbacks[1]!();
+  assert.deepEqual(runs, ['first']);
+  await first.dispose();
+  await callbacks[1]!();
+  assert.deepEqual(runs, ['first', 'second']);
+  await second.dispose();
 });

@@ -168,8 +168,8 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
   remain read-only.
 - **Unique terminal plan archives are local.** Routine cleanup retains commits not squash-contained in the
   configured base at named durable Git archive refs before retiring clean workspaces. It does not publish
-  those refs, reinterpret unique intent as accepted work or automatically prune them. Dirty/untracked,
-  ignored content and unreadable work remain preserved with an owner-maintenance reason; unsuccessful
+  those refs, reinterpret unique intent as accepted work or automatically prune them. Dirty/untracked
+  and unreadable work remain preserved with an owner-maintenance reason (ignored files are removed); unsuccessful
   cleanup does not retire the retained workspace's session metadata.
 - **Only the surface's opencode removes finished plans' worktrees.** The cleanup pass needs the session's activity,
   so it runs in the plugin; while the surface is down, finished plans keep their worktrees.
