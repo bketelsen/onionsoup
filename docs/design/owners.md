@@ -102,10 +102,13 @@ An owner is declared once (`owners/<id>.yaml`) and keeps one identity across ses
   Calendar chat briefings can use the [external systemd runner](../extending.md#calendar-briefings).
   Kinds: `survey` (look, update the notebook, and record suggestions in owner backlog, never implicit human
   decisions or work items), `maintain-prs` (deterministic), `request-instance`, `app-updates`.
-- **Conversation mode**: per-pattern `allow` / `ask` / `deny` rules for chats. Repository-changing owners
-  have local edit/development conveniences in their already-authorized workspace; explicit declared denies
-  override them, including for delegated descendants. Unlisted commands still ask. These conveniences are
-  not shell containment: chat bash remains an acknowledged unsandboxed gap.
+- **Conversation mode**: per-pattern `allow` / `ask` / `deny` rules for chats. Every chat gets a read-only floor
+  (`READ_ONLY_COMMANDS` in `bash-rules.ts`: files, git history and `git fetch`, GitHub reads including `gh api`
+  GETs; their write forms, such as `gh api -X PATCH`, ask). Repository-changing owners
+  have local edit/development conveniences in their already-authorized workspace; explicit declared rules
+  override both, including for delegated descendants, and a declared catch-all deny gets neither. Unlisted
+  commands still ask. These conveniences are not shell containment: chat bash remains an acknowledged
+  unsandboxed gap.
 - **Tools**: onionsoup tools, plus any MCP servers declared in `mcp:` (visible to that owner alone, with
   per-tool rules). The NAS owner gets truenas-mcp this way.
 - **Stewards**: an owner with `manages:` creates, changes and retires owners within its scope through a tool that
@@ -159,8 +162,10 @@ their `parentID`) never get the bootstrap.
 
 - `onionsoup-implementer`, shared by every owner: its model comes from the `implementation` freelancer; it edits
   and runs any command but committing, pushing, `gh` and `sudo` (`IMPLEMENTER_BASH`).
-- `onionsoup-reviewer-<owner-id>`, one per owner: read-only (no edits, read-only bash), with the first `review`
-  freelancer model outside the owner's family.
+- `onionsoup-reviewer-<owner-id>`, one per owner: read-only, with the first `review` freelancer model outside the
+  owner's family. It makes no edits, and its bash is `READ_ONLY_BASH`: the chats' read-only list (`cat`, `git
+  rev-parse`, `gh pr checks`, `gh api` GETs…) with every write form denied, since nobody can answer an ask. Owner
+  and reviewer hires use the same rules.
 
 An owner may implement and review tasks itself; implementer and task-review dispatch are independently optional.
 Missing task models do not block local work, but publication still requires its configured final independent-family

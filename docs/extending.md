@@ -126,7 +126,8 @@ mcp:
 ```
 
 Everything else follows the owner's `conversation:` rules: `allow`, `ask` (approve in the chat) or `deny`.
-Owners get a read-only baseline (`READ_ONLY_CHAT_BASH` in `chat-permissions.ts`) and repository-changing owners
+Owners get a read-only baseline (`READ_ONLY_COMMANDS` in `bash-rules.ts`, shared with reviewers and hires, where its
+asks become denies; it includes `gh api` reads, and its write forms ask) and repository-changing owners
 get local edit/development conveniences. Explicit declared denies override these, including execution sessions
 and descendants; scratch/skills conveniences are not new authority. Chat bash is still unsandboxed.
 Implementer and task-review models are optional; local execution/review retains host verification and the one

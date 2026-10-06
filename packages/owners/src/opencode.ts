@@ -5,6 +5,7 @@ import { createOpencodeClient } from '@opencode-ai/sdk/v2/client';
 import { Agent } from 'undici';
 import { z } from 'zod';
 import type { ModelRef } from './declarations.ts';
+import { READ_ONLY_COMMANDS, unattended } from './bash-rules.ts';
 import { AssistantError, providerErrorOf, type ProviderError } from './provider-health.ts';
 import { maskKeyLike } from './secret-shapes.ts';
 import { opencodeProviders, redactApiKeys, type DeclaredProviders } from './providers.ts';
@@ -52,15 +53,14 @@ function log(message: string) {
  */
 export type Role = 'owner' | 'implementer' | 'reviewer';
 
+/**
+ * Owner and reviewer hires, and reviewer subagents: the read-only list owner chats use, with its write forms (such as
+ * `gh api -X POST`) denied, since nobody can answer an ask here. Without it, reviewers could not run `cat`, `head` or
+ * `gh pr checks`, and reported CI states they had guessed. Go's readers (and `go test`) are left from Go reviews.
+ */
 export const READ_ONLY_BASH: Record<string, 'allow' | 'deny'> = {
   '*': 'deny',
-  'ls*': 'allow',
-  'grep *': 'allow',
-  'rg *': 'allow',
-  'git log*': 'allow',
-  'git show*': 'allow',
-  'git diff*': 'allow',
-  'git status*': 'allow',
+  ...unattended(READ_ONLY_COMMANDS),
   'go doc*': 'allow',
   'go vet*': 'allow',
   'go test*': 'allow',

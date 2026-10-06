@@ -1,48 +1,14 @@
+import { READ_ONLY_COMMANDS } from './bash-rules.ts';
 import { SKILLS_DIRECTORY } from './owner-agents.ts';
 
 /**
- * Read-only commands every owner may run in chat without asking the person. Before this, each owner had its own
- * allowlist and owners asked the person ~700 times in a few days, mostly for `grep -n`, `sed -n` and `git log`. Only
- * commands that cannot write are here (no `gh api`, `echo` or interpreters), and the few flags that make a reader
- * write are sent back to asking. Bash rules are a convenience, not a boundary (AGENTS rule 3): this removes prompts,
- * it does not grant anything the sandbox or the person's gates would otherwise stop.
+ * Read-only commands every owner may run in chat without asking the person: the list reviewers and hires share
+ * (files, git history, GitHub reads including `gh api` GETs), whose write forms ask, plus waiting on a CI run, which
+ * the person can stop. Before a shared baseline, each owner had its own allowlist and owners asked the person ~700
+ * times in a few days, mostly for `grep -n`, `sed -n` and `git log`. Bash rules are a convenience, not a boundary
+ * (AGENTS rule 3): chat bash is unsandboxed, so this removes prompts; it grants nothing the person's gates would stop.
  */
-export const READ_ONLY_CHAT_BASH: Record<string, 'allow' | 'ask'> = {
-  'grep *': 'allow',
-  'rg *': 'allow',
-  'sed -n *': 'allow',
-  'sed * -i*': 'ask',
-  'sed -n -i*': 'ask',
-  'cat *': 'allow',
-  'head *': 'allow',
-  'tail *': 'allow',
-  'wc *': 'allow',
-  'ls': 'allow',
-  'ls *': 'allow',
-  'jq *': 'allow',
-  'find *': 'allow',
-  'find * -delete*': 'ask',
-  'find * -exec*': 'ask',
-  'find * -execdir*': 'ask',
-  'git status*': 'allow',
-  'git log*': 'allow',
-  'git diff*': 'allow',
-  'git show*': 'allow',
-  'git branch': 'allow',
-  'git branch -a*': 'allow',
-  'git branch -r*': 'allow',
-  'git branch --list*': 'allow',
-  'git rev-parse*': 'allow',
-  'git ls-files*': 'allow',
-  'gh pr view*': 'allow',
-  'gh pr list*': 'allow',
-  'gh pr checks*': 'allow',
-  'gh pr diff*': 'allow',
-  'gh issue view*': 'allow',
-  'gh issue list*': 'allow',
-  'gh run view*': 'allow',
-  'gh run list*': 'allow',
-};
+export const READ_ONLY_CHAT_BASH: Record<string, 'allow' | 'ask'> = { ...READ_ONLY_COMMANDS, 'gh run watch*': 'allow' };
 
 /**
  * Routine development in an already-authorized repository workspace. These rules reduce prompts, not authority:
@@ -71,8 +37,10 @@ export const LOCAL_DEVELOPMENT_BASH: Record<string, 'allow'> = {
 };
 
 /**
- * Last match wins in opencode. Declared rules follow every convenience rule, including configured verification.
- * A declared catch-all deny gets no convenience exceptions; its explicitly configured exceptions still apply.
+ * Last match wins in opencode. The order is the owner's catch-all, then the conveniences (the read-only floor, local
+ * development, configured verification) minus any pattern the owner declared, then the owner's declared rules: a
+ * declared `deny` or `ask` beats a convenience allow, and a declared `allow` beats a write form's ask. A declared
+ * catch-all deny gets no conveniences at all; its explicitly configured exceptions still apply.
  */
 export function chatBash(ownerBash: Record<string, string>, verify: readonly string[], canDevelop = false) {
   const { '*': catchAll = 'ask', ...specific } = ownerBash;
