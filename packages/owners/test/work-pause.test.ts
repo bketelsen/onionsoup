@@ -14,7 +14,6 @@ import { SessionOpeningStore } from '../src/session-opening-store.ts';
 import { rememberSession } from '../src/session-history.ts';
 import { advanceDeskPublication } from '../src/desk-changes.ts';
 import { requestProgress } from '../src/request-status.ts';
-import { assignmentState } from '../src/org-work.ts';
 import { reconcileRequest } from '../src/request-recovery.ts';
 import { submitPlan } from '../src/plan-work.ts';
 
@@ -267,7 +266,7 @@ test('delegated projections remain paused even after external merge; only config
     planApproval: { by: 'human', at: '2026-10-01T00:00:00Z' },
   });
   await runtime.requests.update(request.id, current => ({ ...current, status: 'work-running', workItem: item.id }));
-  await pauseItem(runtime, item.id, humanWorkActor(), 'Defer this initiative');
+  await pauseItem(runtime, item.id, humanWorkActor(), 'Defer this request');
   await runtime.ledger.update(item.id, current => ({
     ...current, publication: { url: 'https://github.com/example/clippy/pull/1', branch: 'original', by: 'runtime', at: '', state: 'merged' },
   }));
@@ -275,9 +274,6 @@ test('delegated projections remain paused even after external merge; only config
   const paused = await runtime.ledger.get(item.id);
   assert.equal(projected.status, 'work-paused');
   assert.equal(requestProgress(projected, paused).workStatus, 'paused');
-  assert.equal(assignmentState({
-    id: 'assignment', to: item.owner, proposal, after: [], request: request.id,
-  }, projected, paused), 'paused');
   await assert.rejects(managerWorkActor(runtime, 'bellonda', paused), /grant_required/);
   const actor = await managerWorkActor(runtime, 'odrade', paused);
   const declared = runtime.owner('clippy');

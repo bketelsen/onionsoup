@@ -7,8 +7,8 @@ import { ImplementationReport, OwnerAnswers, Plan, ProposedWork, Verdict } from 
 import { ChatOrigin } from './chat-origin.ts';
 import { ReviewEvidence } from './desk-reviews.ts';
 import { RequestWorkEvidence } from './request-work-evidence.ts';
-import { AssignmentRef } from './initiatives.ts';
 import { DirectRequestPlanReview } from './direct-request-plan-review-types.ts';
+import { AssignmentRef } from './requests.ts';
 import { RequestAcceptance, RequestClosureCandidate } from './request-closure-types.ts';
 import { PlanWorktreeArchive } from './plan-worktree-archive.ts';
 export { RequestAcceptance, RequestClosureCandidate } from './request-closure-types.ts';
@@ -190,7 +190,7 @@ export const WorkItem = z.object({
   session: ChatOrigin.optional(),
   /** The request another owner opened for this work, when it was delegated. */
   request: z.string().optional(),
-  /** Set on work a manager assigned through an initiative. */
+  /** Legacy, see AssignmentRef in requests.ts. */
   assignment: AssignmentRef.optional(),
   /** The pid working on a step right now; unset when the item is merely queued (approved, resumed). */
   activeRunner: z.number().optional(),

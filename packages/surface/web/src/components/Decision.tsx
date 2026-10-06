@@ -12,7 +12,7 @@ import { Badge, Button, cx, OwnerIcon, timeAgo } from './ui.tsx';
 const KIND_LABELS: Record<InboxEntry['kind'], string> = {
   plan: 'Plan to approve', push: 'Force-push to approve', create: 'Create request', delete: 'Delete request',
   'plan-revision-blocked': 'Revision delivery blocked',
-  attention: 'Human decision', 'request-recovery': 'Request interrupted', initiative: 'Initiative to approve',
+  attention: 'Human decision', 'request-recovery': 'Request interrupted',
   permission: 'Permission', question: 'Question', 'provider-auth': 'Model provider',
 };
 
@@ -22,7 +22,6 @@ const NOTE_PLACEHOLDERS: Partial<Record<InboxEntry['kind'], string>> = {
   push: 'Reason (required to decline force-push)',
   attention: 'Reason or observed outcome',
   'request-recovery': 'Reason or observed outcome',
-  initiative: 'Note (sent with approval, required to send back or cancel)',
 };
 
 /** One thing waiting on the person, with the decision next to its context. */

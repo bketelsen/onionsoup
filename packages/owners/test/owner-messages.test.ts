@@ -7,10 +7,7 @@ import { processRequest } from '../src/brokering.ts';
 import { queueExchangeNotice, deliverExchangeNotices } from '../src/exchange-notices.ts';
 import { ownerMessageId, sendOwnerMessage, replyToOwnerMessage } from '../src/owner-messages.ts';
 import { pendingNotices, queueNotice } from '../src/notices.ts';
-import {
-  approveInitiative, draftInitiative, queueResolvedEscalations, raiseToManager,
-  resolveEscalation, steerReportItem, submitInitiative, superviseInitiatives,
-} from '../src/org-work.ts';
+import { steerReportItem } from '../src/org-work.ts';
 import { submitPlan } from '../src/plan-work.ts';
 import { Runtime } from '../src/runtime.ts';
 import { rememberedSession, rememberSession, itemSessionHistory } from '../src/session-history.ts';
@@ -29,78 +26,20 @@ const proposal = { title: 'Original Lucilla request', goal: 'Complete option A',
   acceptance: ['Original request resumes'], size: 'small' as const };
 const fail = (_id: string, error: unknown) => { throw error; };
 
-async function assignedFixture() {
+/** Work the manager requested from her report, accepted and planning in the report's own session. */
+async function requestedFixture() {
   const context = await messageFixture();
   const manager = await context.addSession('odrade', 'ses_odrade');
   const planner = await context.addSession('clippy', 'ses_lucilla');
-  const drafted = await draftInitiative(context.runtime, 'odrade', {
-    title: 'Lucilla manager resolution', goal: proposal.goal, rationale: proposal.rationale,
-    assignments: [{ id: 'lucilla', to: 'clippy', proposal, after: [] }],
-  }, manager);
-  await submitInitiative(context.runtime, 'odrade', drafted.id);
-  await approveInitiative(context.runtime, drafted.id, 'person');
-  await superviseInitiatives(context.runtime, { onError: fail });
-  const request = (await context.runtime.requests.list())[0];
+  const request = await requestWork(context.runtime, 'odrade', 'clippy', proposal, manager);
   await processRequest(context.runtime, request.id);
   const item = await context.runtime.ledger.update((await context.runtime.requests.get(request.id)).workItem!,
     current => ({ ...current, origin: planner, originOwner: 'clippy' }));
-  const escalation = await raiseToManager(context.runtime, 'clippy', {
-    kind: 'blocked', note: 'Which option clears this blocker?', item: item.id,
-  });
-  return { ...context, manager, planner, initiative: drafted, request, item, escalation };
+  return { ...context, manager, planner, request, item };
 }
 
-test('Lucilla resolution reaches the ORIGINAL planning transcript and resumes without replacement, cancellation or a new gate', async () => {
-  const context = await assignedFixture();
-  const { runtime, item, initiative, escalation } = context;
-  await resolveEscalation(runtime, 'odrade', initiative.id, escalation.id, 'Use option A; the blocker is cleared.');
-  context.busy.add(context.planner.sessionID);
-  await context.deliver();
-  assert.equal(context.sends.filter(send => send.path.id === context.planner.sessionID).length, 0);
-  assert.equal((await runtime.ledger.get(item.id)).status, 'planning');
-  context.busy.clear();
-  context.onPrompt(async prompt => {
-    if (prompt.path.id !== context.planner.sessionID) return;
-    assert.match(prompt.body.parts[0].text, /Use option A/);
-    assert.equal(prompt.body.noReply, undefined);
-    await submitPlan(runtime, 'clippy', { ...proposal, plan: 'Carry out option A', item: item.id }, context.planner);
-  });
-  await context.deliver();
-  const resumed = await runtime.ledger.get(item.id);
-  assert.equal(resumed.status, 'awaiting-plan-approval', 'the existing eventual effect gate is preserved');
-  assert.equal(resumed.request, context.request.id);
-  assert.equal(resumed.planDocument?.markdown, 'Carry out option A');
-  assert.equal((await runtime.requests.list()).length, 1);
-  assert.equal((await runtime.ledger.list()).length, 1);
-  assert.equal(context.creates(), 0);
-  assert.equal((await runtime.initiatives.get(initiative.id)).escalations[0].resolution?.note, 'Use option A; the blocker is cleared.');
-  const reopened = await Runtime.open({ declarations: 'packages/owners/test/fixtures/owners', state: runtime.stateDirectory });
-  await resolveEscalation(reopened, 'odrade', initiative.id, escalation.id, 'Use option A; the blocker is cleared.');
-  await queueResolvedEscalations(reopened, fail);
-  await context.deliver(reopened);
-  assert.equal(context.sends.filter(send => send.path.id === context.planner.sessionID).length, 1);
-  assert.equal((await pendingNotices(reopened)).filter(notice => notice.change === 'manager-ruling').length, 0);
-  assert.equal((await context.receipts()).filter(receipt => receipt.origin.sessionID === context.planner.sessionID)[0].status, 'sent');
-  await assert.rejects(resolveEscalation(reopened, 'odrade', initiative.id, escalation.id, 'Change the recorded ruling'), /resolution_conflict/);
-});
-
-test('resolution retry repairs the crash between the persisted resolution and its missing delivery intent', async () => {
-  const context = await assignedFixture();
-  await context.runtime.initiatives.update(context.initiative.id, current => ({
-    ...current, escalations: current.escalations.map(escalation => ({
-      ...escalation, resolution: { by: 'owner:odrade', at: new Date().toISOString(), note: 'Option A' },
-    })),
-  }));
-  const reopened = await Runtime.open({ declarations: 'packages/owners/test/fixtures/owners', state: context.runtime.stateDirectory });
-  await queueResolvedEscalations(reopened, fail);
-  await queueResolvedEscalations(reopened, fail);
-  assert.equal((await pendingNotices(reopened)).filter(notice => notice.change === 'manager-ruling').length, 1);
-  await context.deliver(reopened);
-  assert.equal(context.sends.filter(send => send.path.id === context.planner.sessionID).length, 1);
-});
-
 test('manager note retries deduplicate by invocation while a deliberate same-text repeat reaches the exact execution session', async () => {
-  const context = await assignedFixture();
+  const context = await requestedFixture();
   const execution = await context.addSession('clippy', 'ses_execution');
   await context.runtime.ledger.update(context.item.id, current => ({ ...current, session: execution }));
   const firstInvocation = { origin: context.manager, messageID: 'msg_first_note' };
@@ -245,7 +184,7 @@ test('direct-request review of a report returns to the requester in a fresh owne
   const context = await messageFixture();
   const retired = await context.addSession('odrade', 'ses_old_manager', join(context.root, 'removed-manager'), true);
   const planner = await context.addSession('clippy', 'ses_report');
-  const request = await requestWork(context.runtime, 'odrade', 'clippy', proposal, undefined, retired);
+  const request = await requestWork(context.runtime, 'odrade', 'clippy', proposal, retired);
   await processRequest(context.runtime, request.id);
   const itemID = (await context.runtime.requests.get(request.id)).workItem!;
   await submitPlan(context.runtime, 'clippy', { ...proposal, plan: 'Option A', item: itemID }, planner);
@@ -360,7 +299,7 @@ test('a positively not-sent notice reroutes with the SAME message ID after its w
 });
 
 test('a retired execution session falls back to its proven live planning origin', async () => {
-  const context = await assignedFixture();
+  const context = await requestedFixture();
   const retired = await context.addSession('clippy', 'ses_execution_retired', join(context.root, 'removed-execution'), true);
   await context.runtime.ledger.update(context.item.id, current => ({ ...current, session: retired }));
   await steerReportItem(context.runtime, 'odrade', context.item.id, 'note', 'Continue with option A.');

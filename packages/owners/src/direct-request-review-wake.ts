@@ -140,7 +140,7 @@ async function deliver(runtime: Runtime, pending: Wake, client: PlanRevisionClie
 export async function deliverDirectRequestReviews(runtime: Runtime, client: PlanRevisionClient,
   onError: (request: string, error: unknown) => void) {
   const requests = (await runtime.requests.list()).filter(request => request.ask.kind === 'work'
-    && !request.ask.assignment && request.workItem && request.status === 'work-running').sort((left, right) => left.id.localeCompare(right.id));
+    && request.workItem && request.status === 'work-running').sort((left, right) => left.id.localeCompare(right.id));
   const boundary = requests.findIndex(request => request.id > (SCAN_AFTER.get(runtime.stateDirectory) ?? ''));
   const start = boundary < 0 ? 0 : boundary;
   const ordered = [...requests.slice(start), ...requests.slice(0, start)];

@@ -4,4 +4,4 @@ export { startWikiSync, serveWiki } from './wiki-site.ts';
 export { ordered, SettingsStore, type SurfaceSettings } from './settings.ts';
 export { SurfaceState, Decision, type ChatSnapshot, type InboxEntry, type OwnerSummary } from './state.ts';
 export { OwnerActivity } from './activity.ts';
-export type { InitiativeSummary, OrgEntry, PublicAssignment, PublicInitiative } from './initiative-public.ts';
+export type { OrgEntry } from './org-public.ts';

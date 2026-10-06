@@ -96,7 +96,7 @@ export function Rail({ state, route, onReorder }: { state?: SurfaceState; route:
           {!!state?.frictionCount && <span className="ml-auto rounded-full bg-primary text-primary-foreground px-1.5 typography-micro font-semibold">{state.frictionCount}</span>}
         </button>
         <button onClick={() => navigate('org')}
-          className={cx(ROW, 'typography-ui-label', route[0] === 'org' || route[0] === 'initiative' ? 'bg-interactive-active text-foreground' : 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground')}>
+          className={cx(ROW, 'typography-ui-label', route[0] === 'org' ? 'bg-interactive-active text-foreground' : 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground')}>
           <RiOrganizationChart className="size-4" />Org
         </button>
         {state?.operator && <OperatorEntry operator={state.operator} isActive={active === state.operator.id} />}

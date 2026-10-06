@@ -6,7 +6,6 @@ import { canChange, isDirectReport } from './declarations.ts';
 import { completeAcceptedRequest } from './request-closure-completion.ts';
 import { queueOperationalReverification, reconcileOperationalWork } from './operational-work.ts';
 import { OWNER_CHANGE_WORKFLOW } from './plan-work.ts';
-import type { AssignmentRef } from './initiatives.ts';
 import { PublishDecision, requireStatus, type ResourceRequest, type WorkAsk, type OperatorAssignmentSource } from './requests.ts';
 import type { Runtime } from './runtime.ts';
 import { isPaused } from './ledger.ts';
@@ -26,12 +25,12 @@ export async function journalRequest(
 }
 
 /** Delegation chooses an existing receiver that changes its own repository; it never grants new authority. */
-export async function requestWork(runtime: Runtime, from: string, to: string, proposal: ProposedWork, assignment?: AssignmentRef, origin?: ChatOrigin) {
+export async function requestWork(runtime: Runtime, from: string, to: string, proposal: ProposedWork, origin?: ChatOrigin) {
   runtime.owner(from);
   const receiver = runtime.owner(to);
   if (!canChange(receiver)) throw new Error(`owner_cannot_change: ${to} does not change its repository itself`);
   runtime.repositoryOwner(to, proposal.repository);
-  const request = await runtime.requests.open(from, to, { kind: 'work', purpose: proposal.goal, proposal, assignment }, 'none', origin);
+  const request = await runtime.requests.open(from, to, { kind: 'work', purpose: proposal.goal, proposal }, 'none', origin);
   await journalRequest(runtime, request, 'request-opened', proposal.title);
   return request;
 }
@@ -56,7 +55,7 @@ type Acceptance = (runtime: Runtime, request: ResourceRequest, ask: WorkAsk) => 
 /** Who decides: work from the receiver's declared manager is accepted as assigned; a peer's is weighed by the receiver. */
 const ACCEPTANCE: Record<'manager' | 'peer', Acceptance> = {
   manager: async (_runtime, request) => ({
-    decision: 'accept', reply: `assigned by ${request.from}, ${request.to}'s manager; accepted automatically (push back with onionsoup_raise)`,
+    decision: 'accept', reply: `assigned by ${request.from}, ${request.to}'s manager; accepted automatically (push back with onionsoup_send)`,
   }),
   peer: async (runtime, request, ask) => {
     const owner = runtime.owner(request.to);
@@ -101,7 +100,7 @@ export async function decideWork(runtime: Runtime, request: ResourceRequest) {
   // Deterministic identity closes the crash window between ledger creation and saving the request link. The owner
   // plans it in a session the plugin opens for it; its plan is approved in the inbox or under a manager's grant.
   await runtime.ledger.create(owner.id, OWNER_CHANGE_WORKFLOW, request.ask.proposal, {
-    id: workItem, status: 'planning', request: request.id, assignment: request.ask.assignment,
+    id: workItem, status: 'planning', request: request.id,
   });
   const accepted = await runtime.requests.save({ ...request, status: 'work-running', workItem, publishDecision: decision });
   await journalRequest(runtime, accepted, 'request-accepted', `${decision.reply}; linked work ${workItem}`);

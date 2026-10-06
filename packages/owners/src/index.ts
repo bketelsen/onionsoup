@@ -27,13 +27,6 @@ export { AttentionProvenance } from './journal-record.ts';
 export { requestWork } from './delegation.ts';
 export { completeOperationalWork, reverifyOperationalWork, reconcileOperationalWork, releaseOperationalInstance } from './operational-work.ts';
 export { requestProgressDetail } from './request-status.ts';
-export { AssignmentRef, AssignmentState, Assignment, Initiative, InitiativeDraft, InitiativeStatus, INITIATIVE_LIMITS } from './initiatives.ts';
-export {
-  draftInitiative, submitInitiative, approveInitiative, reviseInitiative, cancelInitiative, initiativeView, initiativeViews,
-  assignmentState, planUnderReview,
-  type AssignmentView, type InitiativeView,
-} from './org-work.ts';
-export { initiativeText, initiativesText } from './desk.ts';
 export { planGrantFor } from './declarations.ts';
 export { recoverRequest, reconcileRequest } from './request-recovery.ts';
 export { listFriction, frictionDetail, reportFriction, type FrictionRecord, type FrictionSubmission } from './friction.ts';

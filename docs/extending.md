@@ -302,7 +302,7 @@ Authority comes only from your configuration:
 - `domain.incus.remotes[].allow` decides where instances may be created and deleted.
 - `grants:` are standing approvals: `{ to: <owner>, action: publish-site | update-app | merge | ship | approve-plans, target: <name or "*"> }`.
   Without a grant, the runtime asks you.
-- `reportsTo: <owner>` puts an owner under a manager (see [Managers and initiatives](#managers-and-initiatives)).
+- `reportsTo: <owner>` puts an owner under a manager (see [Managers](#managers)).
 - `manages: { owners: [<glob>, ...] }` makes an owner a steward: with its `onionsoup_owners` tool it creates,
   changes and retires owners whose domain (repository or org name) matches, with your approval for each write. It
   can never write `grants`, `deploy`, `incus`, `mcp` or `manages`, nor change itself.
@@ -312,10 +312,10 @@ Authority comes only from your configuration:
   exact verified release, atomic pointer switch, **both** units restarted and verified rollback.
 - Destructive actions, plan approval and creates/deletes always stop for you unless a grant says otherwise.
 
-## Managers and initiatives
+## Managers
 
-A manager is any owner others report to. Declare the line on each report, and give the report a `maintain-prs`
-duty so its merges are recorded (an initiative is complete only when its work has merged):
+A manager is any owner others report to. Declare the line on each report; a `maintain-prs` duty lets the report
+keep the PRs its manager's requests produce mergeable:
 
 ```yaml
 # owners/murbella.yaml
@@ -324,25 +324,23 @@ reportsTo: odrade
 duties:
   - { id: prs, kind: maintain-prs, every: 15m, instructions: "Keep published PRs mergeable." }
 grants:
-  # Optional: Odrade approves Murbella's plans for Odrade's initiatives; every use is journaled.
+  # Optional: Odrade approves Murbella's plans for work Odrade requested; every use is journaled.
   - { to: odrade, action: approve-plans, target: frostyard/snosi }
 ```
 
-The manager then plans cross-repository change in chat with `onionsoup_initiative`: a title, goal, rationale and
-assignments such as `{ id: core-doc, to: taraza, proposal: {...} }` and `{ id: snosi, to: murbella, after: [core-doc],
-proposal: {...} }`. You approve the breakdown once (the surface inbox, or `npm run owners -- approve-initiative <id>`;
-`revise-initiative <id> --note` and `cancel-initiative <id> --reason` send it back or stop it), and `owners
-initiatives` / `owners initiative <id>` read them. The daemon dispatches each assignment when its dependencies have
-merged; the report accepts it automatically, plans it in a session of its own, and can push back with
-`onionsoup_raise`. With an `approve-plans` grant the manager is woken in the initiative's chat to approve or send back
-each plan (`onionsoup_steer`); without one, every plan waits for you in the inbox. `INITIATIVE_LIMITS`
-(`maxAssignments`, `maxOpenPerManager`) and `SUPERVISION_LIMITS.revisionsPerItem` bound the work. A steward may put owners
-in its scope under itself, but only you set any other reporting line or grant.
+The manager fans cross-repository change out in chat: one `onionsoup_request_work` per report and repository, in
+the order the change needs. Each report accepts its manager's request automatically, plans it in a session of its
+own, and pushes back with `onionsoup_send` when the work is wrong, unclear or blocked. The manager follows the work
+with `onionsoup_status` (`request=<id>` for one request), talks to a report with `onionsoup_send` / `onionsoup_reply`,
+and with `onionsoup_steer` cancels a request's work, leaves the report a note on it, or resumes it after an
+intentional pause. A steward may put owners in its scope under itself, but only you set any other reporting line or
+grant.
 
-For direct work requests the manager personally sent, the same applicable grant enables
-`onionsoup_review_request_plan`. Read `onionsoup_status request=<id>` first, then supply its exact `request`, `item`
-and `digest`, a `decision` (`approve`, `revise`, `needs-human`), `scope` (`matched`, `needs-human`) and factual `note`.
-Approve requires matched scope. Unresolved scope remains pending for the person; approval is never inferred from
+With an `approve-plans` grant, the manager reviews the plans of work she sent with
+`onionsoup_review_request_plan`; without one, every plan waits for you in the inbox. Read
+`onionsoup_status request=<id>` first, then supply its exact `request`, `item` and `digest`, a `decision`
+(`approve`, `revise`, `needs-human`), `scope` (`matched`, `needs-human`) and factual `note`. Approve requires matched
+scope. Unresolved scope remains pending for the person; approval is never inferred from
 request acceptance or an earlier conversational promise. A separate durable review
 continuation wakes the requester in the original chat. The status tool reports missing authority or delivery
 blockers, and human approval remains available in the inbox. These operations add no grants or merge authority.
@@ -534,7 +532,7 @@ a host-observed session `{ sessionID, directory }`. `onionsoup_reply { message, 
 notice ID at the recorded sender address. These tools are available to persona owners, not subagents or
 observation-only identities. Delivery waits for idle, preserves sender/content and reconciles exact transcript
 receipts on restart. A retired workspace routes to one fresh declared-workspace continuation with retained
-history; it is never recreated. Manager notes and escalation resolutions use this same queue. Conversation
+history; it is never recreated. Manager notes use this same queue. Conversation
 does not grant new repository, model, credential or destructive authority, and existing effect gates still apply.
 
 ## What needs engine code
@@ -567,7 +565,7 @@ Do not erase an active runner or uncertain SDK admission to force that transitio
 latest pause receipt before treating it as settled. `owners resume <item> --note "Continue unchanged work"`
 or the surface's Resume control restores the exact saved stage and approved goal. This is an explicit human
 action, not an automatic restart or a new plan approval. A direct manager's `onionsoup_steer` resume needs
-its existing applicable `approve-plans` grant and assigned scope.
+its existing applicable `approve-plans` grant and work she requested.
 
 Persona owners with a declared `maintain-prs` duty can call `onionsoup_update_prs` without repository or head
 arguments. The same periodic selector covers `BEHIND` and conflicting PRs. Clean base updates retain the old

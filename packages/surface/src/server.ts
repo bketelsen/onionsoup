@@ -27,10 +27,6 @@ const FRICTION_HTTP_STATUS: Record<string, number> = {
   friction_invalid_id: 400, friction_not_found: 404, friction_invalid_record: 422,
 };
 
-const INITIATIVE_HTTP_STATUS: Record<string, number> = {
-  initiative_invalid_id: 400, initiative_not_found: 404,
-};
-
 const WORK_LIFECYCLE_HTTP_STATUS: Record<string, number> = {
   work_item_paused: 409, work_not_paused: 409, work_not_pausable: 409, work_pause_binding_changed: 409,
   work_pause_stop_unconfirmed: 409, work_pause_session_unavailable: 409, work_lifecycle_human_required: 403,
@@ -160,8 +156,6 @@ export function surfaceServer(state: SurfaceState, options: { webRoot: string; b
     route('GET', '/api/friction', async () => codedRoute(FRICTION_HTTP_STATUS, () => state.friction())),
     route('GET', '/api/friction/:id', async params => codedRoute(FRICTION_HTTP_STATUS, () => state.frictionRecord(params.id!))),
     route('GET', '/api/org', async () => state.org()),
-    route('GET', '/api/initiatives', async () => state.initiatives()),
-    route('GET', '/api/initiatives/:id', async params => codedRoute(INITIATIVE_HTTP_STATUS, () => state.initiative(params.id!))),
     route('GET', '/api/settings', async () => state.settings.read()),
     route('PUT', '/api/settings/owner-order', async (_params, body) => {
       const order = (await body()).order;

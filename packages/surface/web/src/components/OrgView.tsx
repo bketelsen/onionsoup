@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, navigate, useEvents } from '../api.ts';
-import type { InitiativeSummary, OrgEntry } from '../types.ts';
-import { Badge, Empty, OwnerIcon, Section, statusTone, timeAgo } from './ui.tsx';
+import type { OrgEntry } from '../types.ts';
+import { Empty, OwnerIcon, Section } from './ui.tsx';
 
 function OrgNode({ entry, entries }: { entry: OrgEntry; entries: OrgEntry[] }) {
   const reports = entries.filter(candidate => candidate.manager === entry.id);
@@ -27,26 +27,12 @@ export function OrgTree({ entries }: { entries: OrgEntry[] }) {
   return <ul className="flex flex-col gap-1">{roots.map(entry => <OrgNode key={entry.id} entry={entry} entries={entries} />)}</ul>;
 }
 
-function InitiativeRow({ initiative }: { initiative: InitiativeSummary }) {
-  return (
-    <button className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-border bg-card px-3 py-2 text-left hover:bg-interactive-hover" onClick={() => navigate('initiative', initiative.id)}>
-      <Badge tone={statusTone(initiative.status)}>{initiative.status}</Badge>
-      <span className="typography-ui-label flex-1 truncate max-lg:basis-full max-lg:order-first max-lg:whitespace-normal">{initiative.title}</span>
-      <span className="typography-meta text-muted-foreground">{initiative.owner} · {initiative.merged}/{initiative.total} merged</span>
-      {initiative.openEscalations > 0 && <Badge tone="warning">{initiative.openEscalations} escalated</Badge>}
-      <span className="typography-meta text-muted-foreground">{timeAgo(initiative.updatedAt)}</span>
-    </button>
-  );
-}
-
-/** Who reports to whom, and the initiatives managers run through their reports. */
+/** Who reports to whom. */
 export function OrgView() {
   const [org, setOrg] = useState<OrgEntry[]>();
-  const [initiatives, setInitiatives] = useState<InitiativeSummary[]>([]);
   const [error, setError] = useState('');
-  const load = () => Promise.all([api<OrgEntry[]>('/api/org'), api<InitiativeSummary[]>('/api/initiatives')]).then(([entries, list]) => {
+  const load = () => api<OrgEntry[]>('/api/org').then(entries => {
     setOrg(entries);
-    setInitiatives(list);
     setError('');
   }, failure => setError(String(failure.message ?? failure)));
   useEffect(() => { void load(); }, []);
@@ -57,10 +43,6 @@ export function OrgView() {
         <h1 className="typography-h text-xl font-semibold">Org</h1>
         {error && <div className="typography-meta text-status-error">{error}</div>}
         <Section title="Reporting lines">{org ? <OrgTree entries={org} /> : <Empty>Loading…</Empty>}</Section>
-        <Section title="Initiatives">
-          {initiatives.length ? [...initiatives].reverse().map(initiative => <InitiativeRow key={initiative.id} initiative={initiative} />)
-            : <Empty>No initiatives yet. A manager drafts one in chat and submits it for your approval.</Empty>}
-        </Section>
       </div>
     </div>
   );

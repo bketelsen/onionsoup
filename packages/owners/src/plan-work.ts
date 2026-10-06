@@ -31,9 +31,9 @@ export function planDocument(markdown: string): PlanDocument {
   return { markdown, digest: createHash('sha256').update(markdown).digest('hex').slice(0, 16) };
 }
 
-/** Work another owner asked for (or a manager assigned) has no chat of the person's: its plan goes to the inbox. */
+/** Work another owner asked for (its manager included) has no chat of the person's: its plan goes to the inbox. */
 export function isDelegated(item: WorkItem) {
-  return Boolean(item.request || item.assignment);
+  return Boolean(item.request);
 }
 
 const RESUBMITTABLE = new Set<WorkStatus>(['planning', 'awaiting-plan-approval']);
@@ -140,16 +140,15 @@ Use onionsoup_request_instance and onionsoup_release_instance for resource effec
 
 /** The first message of the session where an owner plans work another owner asked for, with nobody in the chat. */
 export function planningPrompt(item: WorkItem) {
-  const who = item.assignment ? `Your manager assigned this work (initiative ${item.assignment.initiative}, assignment ${item.assignment.assignment})` : 'Another owner asked for this work';
   return [
-    `${NOTICE_PREFIX} ${who}${item.request ? ` in request ${item.request}` : ''}; you accepted it as ${item.id}. Nobody is in this chat.`,
+    `${NOTICE_PREFIX} Another owner asked for this work${item.request ? ` in request ${item.request}` : ''}; you accepted it as ${item.id}. Nobody is in this chat.`,
     `This is the accepted work handoff, distinct from an earlier consultation or status query.
 Follow the requested goal and acceptance below. A read-only/status-only instruction for that earlier interaction
 does not prohibit this gated planning step; it also grants no permission to bypass plan approval or effect gates.`,
     `Brainstorm it alone with the brainstorming skill (record the assumptions you make), write the plan with the
 writing-plans skill, and submit it with onionsoup_submit_plan with item "${item.id}"${repositoryLine(item)}. The plan is
 approved in the person's inbox, or by your manager under a standing grant; an approved plan starts its own session.
-If the work is wrong or you cannot do it, say so${item.assignment ? ' with onionsoup_raise' : ''} instead of planning something else.`,
+If the work is wrong or you cannot do it, tell the owner who asked with onionsoup_send instead of planning something else.`,
     `<requested-work>\nTitle: ${item.proposal.title}\nGoal: ${item.proposal.goal}\nWhy: ${item.proposal.rationale}\nAcceptance:\n${item.proposal.acceptance.map(entry => `- ${entry}`).join('\n')}\n</requested-work>`,
   ].join('\n\n');
 }

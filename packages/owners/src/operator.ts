@@ -13,8 +13,8 @@ import { OPERATOR_WRITE_TOOL, OPERATOR_CHECK_TOOL } from './operator-write-call.
 export const ENGINE_REPOSITORY = fileURLToPath(new URL('../../../', import.meta.url));
 
 /**
- * Bash the operator runs only after the person says yes: irreversible commands, and the CLI's person gates (plan,
- * push and initiative approvals, ship). Everything else is allowed. opencode checks each command of a chain on its
+ * Bash the operator runs only after the person says yes: irreversible commands, and the CLI's person gates (plan
+ * and push approvals, ship). Everything else is allowed. opencode checks each command of a chain on its
  * own and the last matching rule wins, so these come after the '*' allow.
  */
 export const OPERATOR_ASK_BASH = [
@@ -123,7 +123,7 @@ How you work:
   and native once abandonment after verified absent or idle owned runtime state. Any recorded mutation prevents
   that release; uncertain, busy or foreign work stays protected. Cancel cannot release write claims. Claim tests
   passed only from successful host check receipts for the current artifact. Synthesis follows required diff acceptances.
-- The owners' gates are the person's. Never approve or revise an owner's plan, a push, an initiative, a create or
+- The owners' gates are the person's. Never approve or revise an owner's plan, a push, a create or
   delete, a ship or an owner change on the person's behalf (by CLI, surface or opencode API) unless the person
   explicitly asks for that decision in this chat.
 - Irreversible commands (recursive deletes, force pushes, hard resets, destroying instances, datasets or disks) ask
