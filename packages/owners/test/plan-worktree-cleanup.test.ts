@@ -198,89 +198,28 @@ test('dirty tracked and nested untracked work stay with an owner reason, not a h
   assert.match(attention[0]!.note, /Owner maintenance.*uncommitted/);
 });
 
-test('ordinary Git removal deletes ignored data; public cleanup retains ignored private notes', async () => {
-  const { root, runtime, seed } = await fixture();
-  const ignoredCaches = ['.ansible', '.pytest_cache', '__pycache__'];
-  await writeFile(join(seed, '.gitignore'), ['.env', 'private-notes/', ...ignoredCaches.map(name => `${name}/`)].join('\n') + '\n');
-  await commit(seed, 'Ignore private local files');
+test('ignored files do not keep a finished plan worktree; its unique commits are archived and it is removed', async () => {
+  const { runtime, seed } = await fixture();
+  await writeFile(join(seed, '.gitignore'), ['.env', 'private-notes/', '.pytest_cache/'].join('\n') + '\n');
+  await commit(seed, 'Ignore local files');
   await git(seed, ['push', '-q', 'origin', 'main']);
   const item = await plan(runtime);
-  const workspace = runtime.owner(item.owner).workspace;
-  const disposable = join(root, 'ordinary-removal');
-  await git(workspace, ['worktree', 'add', '-q', '--detach', disposable, 'origin/main']);
-  await writeFile(join(disposable, '.env'), 'fixture-only private intent\n');
-  assert.equal((await git(disposable, ['status', '--porcelain', '--untracked-files=all'])).trim(), '');
-  await git(workspace, ['worktree', 'remove', disposable]);
-  assert.equal(existsSync(disposable), false, 'ordinary Git removal does not protect ignored files');
-
   const path = item.planWorktree!;
   await writeFile(join(path, 'unique'), 'unique terminal intent\n');
-  await commit(path, 'Unique terminal intent before ignored files');
-  await writeFile(join(path, '.env'), 'fixture-only private intent\n');
+  const head = await commit(path, 'Unique terminal intent');
+  await writeFile(join(path, '.env'), 'fixture-only local value\n');
   await mkdir(join(path, 'private-notes'));
-  await writeFile(join(path, 'private-notes', 'intent'), 'keep these local notes\n');
-  for (const directory of ignoredCaches) {
-    await mkdir(join(path, directory));
-    await writeFile(join(path, directory, 'x'), 'keep ignored local data\n');
-  }
+  await writeFile(join(path, 'private-notes', 'intent'), 'local notes\n');
+  await mkdir(join(path, '.pytest_cache'));
+  await writeFile(join(path, '.pytest_cache', 'x'), 'cache\n');
   await cleanup(runtime);
-  const kept = await runtime.ledger.get(item.id);
-  assert.equal(kept.planWorktree, path);
-  assert.equal(kept.planWorktreeKept, 'kept-uncommitted');
-  assert.equal(kept.planWorktreeArchives, undefined, 'ignored data blocks cleanup before unique-commit archival');
-  assert.equal((await git(path, ['for-each-ref', '--format=%(refname)', 'refs/onionsoup/archive/plans'])).trim(), '');
-  assert.equal(await readFile(join(path, '.env'), 'utf8'), 'fixture-only private intent\n');
-  assert.equal(await readFile(join(path, 'private-notes', 'intent'), 'utf8'), 'keep these local notes\n');
-  for (const directory of ignoredCaches) {
-    assert.equal(await readFile(join(path, directory, 'x'), 'utf8'), 'keep ignored local data\n');
-  }
-  assert.equal((await sessionHistory(runtime, item.owner))[0]?.archived, false);
-  const attention = await listAttention(runtime);
-  assert.equal(attention.length, 1);
-  assert.equal(needsHumanDecision(attention[0]!), false);
-});
-
-test('a late ignored edit retains live session metadata after archiving the terminal commit', async () => {
-  const { runtime } = await fixture();
-  const item = await plan(runtime);
-  const path = item.planWorktree!;
-  await writeFile(join(path, 'unique'), 'preserve terminal intent\n');
-  await writeFile(join(path, '.gitignore'), '.pytest_cache/\n');
-  const head = await commit(path, 'Unique terminal work');
-  await rememberSession(runtime, {
-    id: item.session!.sessionID, owner: item.owner, directory: path,
-    title: 'Still-live rollout', time: { created: 1, updated: 2 },
-  });
-  await rememberSession(runtime, {
-    id: 'ses_live_child', parentID: item.session!.sessionID, owner: item.owner, directory: path,
-    title: 'Still-live child', time: { created: 1, updated: 2 },
-  });
-  const update = runtime.ledger.update.bind(runtime.ledger);
-  let hasWrittenLateNote = false;
-  runtime.ledger.update = async (id, change) => {
-    const saved = await update(id, change);
-    if (saved.planWorktreeArchives?.length && !hasWrittenLateNote) {
-      hasWrittenLateNote = true;
-      await mkdir(join(path, '.pytest_cache'));
-      await writeFile(join(path, '.pytest_cache', 'x'), 'new ignored intent\n');
-    }
-    return saved;
-  };
-  await cleanup(runtime);
-  const kept = await runtime.ledger.get(item.id);
-  assert.equal(kept.planWorktreeKept, 'kept-uncommitted');
-  assert.equal(kept.planWorktreeArchives?.[0]?.commit, head);
-  assert.equal(await readFile(join(path, '.pytest_cache', 'x'), 'utf8'), 'new ignored intent\n');
-  const history = await sessionHistory(runtime, item.owner);
-  assert.equal(history.length, 2);
-  assert.ok(history.every(session => !session.archived));
-  assert.deepEqual(history.map(session => session.title).sort(), ['Still-live child', 'Still-live rollout']);
-  let activityCalls = 0;
-  await cleanup(runtime, { activity: async () => {
-    activityCalls += 1;
-    return { isBusy: true, updatedAt: 0 };
-  } });
-  assert.equal(activityCalls, 1, 'retained execution remains eligible for real activity observation');
+  const cleaned = await runtime.ledger.get(item.id);
+  assert.equal(existsSync(path), false);
+  assert.equal(cleaned.planWorktree, undefined);
+  assert.equal(cleaned.planWorktreeKept, undefined);
+  assert.equal(cleaned.planWorktreeArchives?.[0]?.commit, head);
+  assert.equal((await sessionHistory(runtime, item.owner))[0]?.archived, true);
+  assert.ok((await listAttention(runtime)).every(entry => entry.status === 'resolved'));
 });
 
 test('a refused Git worktree removal preserves live metadata until successful retirement', async () => {

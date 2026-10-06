@@ -114,6 +114,13 @@ export class MaintenancePass implements MaintenanceContext {
   }
 }
 
+/**
+ * Kinds that do the same process-wide work in every OpenCode instance (every call names its directory). One
+ * OpenCode process hosts an instance per directory, each loading this plugin; only one of them runs these.
+ */
+const PROCESS_WIDE_KINDS = new Set(['plugin:notices', 'plugin:operator-jobs']);
+const processHolders = new Map<string, string>();
+
 interface Slot {
   timer: ReturnType<typeof setInterval>;
   running?: Promise<void>;
@@ -132,12 +139,20 @@ export class PluginMaintenance {
   start(kind: string, intervalMs: number, operation: (pass: MaintenancePass) => Promise<unknown>,
     onError: (error: unknown) => void, admitted = true) {
     const slot: Slot = { timer: setInterval(() => {
-      if (this.stopped || slot.running) return Promise.resolve();
+      if (this.stopped || slot.running || !this.holds(kind)) return Promise.resolve();
       slot.running = this.tick(slot, kind, operation, admitted).catch(onError).finally(() => { slot.running = undefined; });
       return slot.running;
     }, intervalMs) };
     slot.timer.unref?.();
     this.slots.push(slot);
+  }
+
+  /** The first live instance to tick a process-wide kind runs it until it is disposed. */
+  private holds(kind: string) {
+    if (!PROCESS_WIDE_KINDS.has(kind)) return true;
+    const holder = processHolders.get(kind) ?? this.instanceID;
+    processHolders.set(kind, holder);
+    return holder === this.instanceID;
   }
 
   private async tick(slot: Slot, kind: string, operation: (pass: MaintenancePass) => Promise<unknown>, admitted: boolean) {
@@ -197,6 +212,7 @@ export class PluginMaintenance {
         new Promise<void>(resolve => { timer = setTimeout(resolve, this.limits.disposeMs); }),
       ]);
     } finally { clearTimeout(timer); }
+    for (const [kind, holder] of processHolders) if (holder === this.instanceID) processHolders.delete(kind);
     // Only positive settled proof permits a cleanup retry. Unknown and still-running calls remain admitted.
     for (const slot of this.slots) if (slot.cleanup) void slot.cleanup().catch(() => undefined);
   }

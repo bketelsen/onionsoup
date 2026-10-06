@@ -8,7 +8,9 @@ import { beginAdmission, memoryStatus, requestDistill, maintenanceQuarantineStat
 import { readDeploymentView } from './deployment-view.ts';
 import { serveWiki } from './wiki-site.ts';
 
-export const SURFACE_LIMITS = { pollMs: 3_000, reloadMs: 15_000, bodyBytes: 1024 * 1024, heartbeatMs: 25_000 };
+export const SURFACE_LIMITS = {
+  pollMs: 3_000, reloadMs: 15_000, autoAnswerSweepMs: 30_000, bodyBytes: 1024 * 1024, heartbeatMs: 25_000,
+};
 
 const TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
@@ -345,6 +347,7 @@ export function surfaceServer(state: SurfaceState, options: { webRoot: string; b
     }, signal);
     let last = '';
     let lastReload = Date.now();
+    let lastSweep = 0;
     const poll = setInterval(() => {
       void (async () => {
         if ((await maintenanceQuarantineStatus(state.runtime.stateDirectory)).state !== 'absent') return;
@@ -352,8 +355,11 @@ export function surfaceServer(state: SurfaceState, options: { webRoot: string; b
           lastReload = Date.now();
           await state.runtime.reloadDeclarations().catch(() => undefined);
         }
-        // Catch prompts whose event was missed (a reconnect, a restart).
-        await admitted('surface:auto-answer:poll', () => state.autoAnswerAll()).catch(() => undefined);
+        // Catch prompts whose event was missed (a reconnect, a restart); the event above answers the rest at once.
+        if (Date.now() - lastSweep > SURFACE_LIMITS.autoAnswerSweepMs) {
+          lastSweep = Date.now();
+          await admitted('surface:auto-answer:poll', () => state.autoAnswerAll()).catch(() => undefined);
+        }
         const fingerprint = await state.fingerprint().catch(() => last);
         if (fingerprint !== last) {
           if (last) broadcast('onionsoup', { reason: 'engine' });
