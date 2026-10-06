@@ -334,7 +334,9 @@ the existing trusted-person boundary, not a model tool, persistent grant or gene
 See the [closure commands](../extending.md) for invocation and operational prerequisites.
 
 **Repairs on the desk.** The `maintain-prs` duty keeps published PRs mergeable and green. Failing CI on a new head
-commit hires the owner once for that commit to decide fix, flaky or person; no work item is opened. `fix` wakes the
+commit hires the owner once for that commit to decide fix, flaky or person; no work item is opened. Its brief holds
+the failed steps' logs, read with `gh run view --repo` for the repository each check link names (the daemon runs
+outside any checkout), or `logs_unavailable` with gh's reason. `fix` wakes the
 owner with a notice in the session or chat the PR came from. `onionsoup_checkout_pr { item }` puts a clean desk on
 the PR's head, and `onionsoup_propose_changes` with that item reviews the fix against the PR head and pushes it with
 `--force-with-lease` onto the same PR, refusing if the head moved; no new PR is opened.
@@ -348,6 +350,10 @@ it needs no model hire or new destructive-action approval. A changed head or sou
 a real merge conflict falls back to the existing owner conflict-resolution path.
 An owner can invoke `onionsoup_update_prs` to run its declared `maintain-prs` duty and advance the resulting
 updates now. The tool selects no arbitrary repository or head and grants no new maintenance authority.
+GitHub reports `BEHIND` only when branch protection requires up-to-date branches, so the duty leaves a stale but
+mergeable PR alone. `onionsoup_update_prs { refresh: true }` also treats a mergeable PR whose head lacks the base
+tip (read from the owner's fetched checkout) as behind, and takes the same `update-base` path; the periodic duty
+never refreshes.
 
 A conflicting PR gets a `rebase` work item. A clean replay that passes verification needs no
 model. A conflict hires the owner (sandboxed, with its notebook) to decide whether and how it is resolved; it

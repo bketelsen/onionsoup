@@ -56,9 +56,11 @@ function scriptHires(runtime: Runtime, answer: (request: HireRequest<unknown>) =
   });
 }
 
-/** What the fake gh recorded: PRs created, the body of the last one, and how often a PR's state alone was read. */
+/** What the fake gh recorded: PRs created, the body of the last one, how often a PR's state alone was read, and run log reads. */
 async function githubState(root: string) {
-  return JSON.parse(await readFile(join(root, 'github.json'), 'utf8')) as { created: number; body?: string; state: string; stateViews?: number };
+  return JSON.parse(await readFile(join(root, 'github.json'), 'utf8')) as {
+    created: number; body?: string; state: string; stateViews?: number; runViews?: string[][];
+  };
 }
 
 async function fakeGithub(root: string, remote: string, operation: () => Promise<void>) {
@@ -80,7 +82,15 @@ const handlers = {
     if (args[args.indexOf('--json') + 1] === 'isDraft,autoMergeRequest') { console.log(JSON.stringify({ isDraft: !!state.draft, autoMergeRequest: state.autoMergeRequest || null })); return; }
     if (args[args.indexOf('--json') + 1] === 'state') { state.stateViews = (state.stateViews || 0) + 1; console.log(JSON.stringify({ state: state.state })); return; }
     const branch = state.branch || 'original'; const headRefOid = cp.execFileSync('git', ['-C', remote, 'rev-parse', branch]).toString().trim(); console.log(JSON.stringify({ url, state: state.state, mergeable: state.mergeable || 'MERGEABLE', mergeStateStatus: state.mergeStateStatus || 'CLEAN', headRefOid })); },
-  checks() { console.log(JSON.stringify(state.failing === false ? [] : [{ name: 'test', bucket: 'fail', link: '' }])); },
+  checks() { console.log(JSON.stringify(state.failing === false ? [] : state.checks || [{ name: 'test', bucket: 'fail', link: '' }])); },
+  run() {
+    state.runViews = [...(state.runViews || []), args];
+    fs.writeFileSync(path, JSON.stringify(state));
+    if (!args.includes('--repo')) { console.error('failed to determine base repo: no git remotes found'); process.exit(1); }
+    const log = (state.runLogs || {})[args[2]];
+    if (log === undefined) { console.error('HTTP 404: Not Found'); process.exit(1); }
+    console.log(log);
+  },
   list() { console.log(JSON.stringify(state.created ? [{ url, state: state.state }] : [])); },
   create() {
     if (state.holdCreate) {
@@ -100,7 +110,7 @@ const handlers = {
   },
   merge() { state.state = 'MERGED'; },
 };
-handlers[args[0] === 'api' ? 'api' : args[1]]();
+handlers[{ api: 'api', run: 'run' }[args[0]] || args[1]]();
 fs.writeFileSync(path, JSON.stringify(state));
 `, { mode: 0o755 });
   const previous = process.env.PATH;
@@ -544,6 +554,40 @@ test('a PR whose owner cannot change its repository has its CI fix raised for th
   const kinds = await journalKinds(runtime, 'clippy');
   assert.equal(kinds.filter(kind => kind === 'attention').length, 1);
   assert.equal(JSON.parse(await readFile(join(runtime.stateDirectory, 'ci-triage-clippy.json'), 'utf8'))['https://github.com/example/clippy/pull/1'], head);
+});
+
+test('CI triage reads failed logs from the repository each check link names, and says why a log is missing', async () => {
+  const { runtime, root, remote } = await fixture();
+  await git(remote, ['branch', 'original', 'main']);
+  const head = (await git(remote, ['rev-parse', 'original'])).trim();
+  await runtime.ledger.create('clippy', 'desk-publication', proposal, {
+    status: 'landed', branch: 'original', landedCommit: head,
+    publication: { url: 'https://github.com/example/clippy/pull/1', branch: 'original', by: 'person', at: '', state: 'open' },
+  });
+  const briefs: string[] = [];
+  scriptHires(runtime, async request => {
+    briefs.push(request.brief);
+    return { decision: 'flaky', reason: 'Runner timeout' };
+  });
+  await fakeGithub(root, remote, async () => {
+    await writeFile(join(root, 'github.json'), JSON.stringify({
+      ...await githubState(root),
+      checks: [
+        { name: 'test', bucket: 'fail', link: 'https://github.com/example/clippy/actions/runs/4242/job/7' },
+        { name: 'lint', bucket: 'fail', link: 'https://github.com/example/clippy/actions/runs/4242/job/8' },
+        { name: 'build', bucket: 'fail', link: 'https://github.com/example/clippy/actions/runs/404/job/9' },
+      ],
+      runLogs: { 4242: 'TestFeature failed: expected 2, got 3' },
+    }));
+    await maintainPullRequests(runtime, 'clippy');
+  });
+  assert.deepEqual((await githubState(root)).runViews, [
+    ['run', 'view', '4242', '--repo', 'example/clippy', '--log-failed'],
+    ['run', 'view', '404', '--repo', 'example/clippy', '--log-failed'],
+  ]);
+  assert.equal(briefs.length, 1);
+  assert.match(briefs[0]!, /run 4242:\nTestFeature failed: expected 2, got 3/);
+  assert.match(briefs[0]!, /run 404:\nlogs_unavailable: HTTP 404: Not Found/);
 });
 
 test('a completed rebase cannot be cancelled and a repair notice names the original PR', async () => {
