@@ -148,7 +148,10 @@ existing seven host-bus exclusions are unchanged.
 
 Authority comes only from your configuration:
 
-- `domain.incus.remotes[].allow` decides where instances may be created and deleted.
+- `domain.incus.remotes[].allow` decides where instances may be created and deleted. `images` and `namePrefix`
+  are the owner's grant for throwaway instances. An instance outside them (say a long-running one you ask for by
+  name) is not refused: its create approval in your inbox names each violation, and approving it covers that exact
+  instance. Only prefixed instances are ever deleted.
 - `grants:` are standing approvals: `{ to: <owner>, action: publish-site | update-app | merge | ship | approve-plans, target: <name or "*"> }`.
   Without a grant, the runtime asks you.
 - `reportsTo: <owner>` puts an owner under a manager (see [Managers](#managers)).

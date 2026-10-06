@@ -5,7 +5,8 @@ import { readFile, readdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { OwnerDeclaration } from './declarations.ts';
 import { isFinished, type WorkItem } from './ledger.ts';
-import { describeAsk, type ResourceRequest } from './requests.ts';
+import { decidedInstance } from './incus.ts';
+import { describeAsk, type ResourceAsk, type ResourceRequest } from './requests.ts';
 import { pendingReminders, REMINDER_JOURNAL_KINDS, REMINDER_LIMITS, reminderSummary, type Reminder } from './reminders.ts';
 import { WIKI_JOURNAL_KINDS } from './wiki.ts';
 import type { Runtime } from './runtime.ts';
@@ -48,6 +49,20 @@ function pickOwner(runtime: Runtime, query: DeskQuery) {
 
 export interface DeskQuery { agent?: string; directory?: string; owner?: string }
 
+const CREATE_SUBJECTS: Partial<Record<ResourceAsk['kind'], (runtime: Runtime, request: ResourceRequest) => string | undefined>> = {
+  instance: (runtime, request) => {
+    if (!request.decision) return undefined;
+    const instance = decidedInstance(runtime.incusOwner(request.to), request.decision);
+    return `create ${instance.remote}:${instance.name} from ${instance.image}`;
+  },
+};
+
+/** What a person approves at the create gate: the exact effect, and the owner's grant rules it is outside of. */
+export function createApproval(runtime: Runtime, request: ResourceRequest) {
+  const subject = CREATE_SUBJECTS[request.ask.kind]?.(runtime, request) ?? describeAsk(request.ask);
+  return { title: `${request.from} asks: ${subject}`, detail: [request.ask.purpose, request.reason].filter(Boolean).join('\n') };
+}
+
 /** Everything Bellonda's Desk (or any owner's) shows, in one read-only snapshot. */
 export async function deskState(runtime: Runtime, query: DeskQuery) {
   const owners = [...runtime.declarations.owners.values()].filter(owner => owner.persona).map(owner => ({ id: owner.id, name: owner.persona!.name, title: owner.persona!.title }));
@@ -77,8 +92,7 @@ export async function deskState(runtime: Runtime, query: DeskQuery) {
     ...items.filter(item => item.status === 'awaiting-plan-approval').map(item => ({ kind: 'plan', id: item.id, title: item.proposal.title, detail: item.plan?.summary ?? item.proposal.goal })),
     ...items.filter(item => item.status === 'awaiting-push-approval').map(item => ({ kind: 'push', id: item.id, title: item.proposal.title, detail: item.rebaseOf?.prUrl ?? '' })),
     ...requests.filter(request => request.status === 'awaiting-create-approval').map(request => ({
-      kind: 'create', id: request.id, detail: request.ask.purpose,
-      title: request.ask.kind === 'instance' ? `Create ${request.decision?.remote}:${request.decision?.nameSuffix} (${request.decision?.image})` : describeAsk(request.ask),
+      kind: 'create', id: request.id, ...createApproval(runtime, request),
     })),
     ...requests.filter(request => request.status === 'awaiting-delete-approval').map(request => ({ kind: 'delete', id: request.id, title: `Delete ${request.instance?.remote}:${request.instance?.name}`, detail: request.followUpResult?.summary ?? '' })),
   ];

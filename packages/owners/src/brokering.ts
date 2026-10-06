@@ -8,7 +8,7 @@ import { publishDecisionBrief, requestDecisionBrief } from './briefs.ts';
 import { updateApp } from './app-updates.ts';
 import { publishSite } from './publish-site.ts';
 import { rosterText } from './roster.ts';
-import { checkCreate, createInstance, deleteInstance, INCUS_LIMITS } from './incus.ts';
+import { checkApprovedCreate, checkCreate, createInstance, decidedInstance, deleteInstance, grantViolations, INCUS_LIMITS } from './incus.ts';
 import { refreshWorkspace } from './owner.ts';
 import { describeAsk, REQUEST_LIMITS, requestRunnerIsAlive, OwnerDecision, PublishDecision, requireStatus, type ResourceAsk, type ResourceRequest } from './requests.ts';
 import type { Runtime } from './runtime.ts';
@@ -29,7 +29,7 @@ export async function requestPublish(runtime: Runtime, from: string, siteId: str
   return requestInstance(runtime, from, host.id, { kind: 'publish-site', site: siteId, purpose }, 'none');
 }
 
-/** A standing grant in the receiving owner's declaration counts as the person's approval. */
+/** A standing grant in the receiving owner's declaration counts as the person's approval, never for what is outside it. */
 function grantFor(runtime: Runtime, request: ResourceRequest) {
   const receiver = runtime.owner(request.to);
   const targets: Record<ResourceRequest['ask']['kind'], string> = {
@@ -42,11 +42,12 @@ function grantFor(runtime: Runtime, request: ResourceRequest) {
   return receiver.grants.find(grant => grant.to === request.from && grant.action === request.ask.kind && (grant.target === target || grant.target === '*'));
 }
 
-async function approvedOrAwaiting(runtime: Runtime, request: ResourceRequest, summary: string) {
-  const grant = grantFor(runtime, request);
+/** `outsideGrant` names the owner's grant rules the request breaks; it becomes the reason the person reads. */
+async function approvedOrAwaiting(runtime: Runtime, request: ResourceRequest, summary: string, outsideGrant?: string) {
+  const grant = outsideGrant ? undefined : grantFor(runtime, request);
   if (!grant) {
-    await journalRequest(runtime, request, 'request-accepted', `${summary}; awaiting a person's approval`);
-    return { ...request, status: 'awaiting-create-approval' as const };
+    await journalRequest(runtime, request, 'request-accepted', [summary, outsideGrant, 'awaiting a person\'s approval'].filter(Boolean).join('; '));
+    return { ...request, status: 'awaiting-create-approval' as const, reason: outsideGrant };
   }
   const by = `standing grant in ${request.to}'s declaration (${grant.action} ${grant.target} for ${grant.to})`;
   await journalRequest(runtime, request, 'request-accepted', `${summary}; approved by ${by}`);
@@ -92,14 +93,18 @@ async function decideInstance(runtime: Runtime, request: ResourceRequest) {
     await journalRequest(runtime, request, 'request-declined', decision.reply);
     return runtime.requests.save({ ...request, status: 'declined', decision, reason: decision.reply });
   }
+  const instance = decidedInstance(owner, decision);
   try {
-    await checkCreate(owner, runtime.managed, { remote: decision.remote, image: decision.image, nameSuffix: decision.nameSuffix });
+    await checkCreate(owner, runtime.managed, instance);
   } catch (error) {
     const reason = `runtime refused the owner's plan: ${error instanceof Error ? error.message : error}`;
     await journalRequest(runtime, request, 'request-refused', reason);
     return runtime.requests.save({ ...request, status: 'declined', decision, reason });
   }
-  return runtime.requests.save(await approvedOrAwaiting(runtime, { ...request, decision }, `${decision.image} on ${decision.remote}`));
+  const violations = grantViolations(owner, instance);
+  const outsideGrant = violations.length > 0 ? `outside ${owner.id}'s grant: ${violations.join('; ')}` : undefined;
+  const summary = `${instance.remote}:${instance.name} from ${instance.image}`;
+  return runtime.requests.save(await approvedOrAwaiting(runtime, { ...request, decision }, summary, outsideGrant));
 }
 
 const DECIDERS: Record<ResourceAsk['kind'], Step> = {
@@ -217,12 +222,13 @@ async function executeCreate(runtime: Runtime, request: ResourceRequest) {
 
 async function executeInstance(runtime: Runtime, request: ResourceRequest) {
   const owner = runtime.incusOwner(request.to);
-  const decision = request.decision!;
+  const spec = decidedInstance(owner, request.decision!);
   try {
-    const name = await checkCreate(owner, runtime.managed, decision);
-    request.operation!.checkpoint = { instance: { remote: decision.remote, name, image: decision.image } };
+    await checkApprovedCreate(owner, runtime.managed, spec, request.approvals);
+    request.operation!.checkpoint = { instance: spec };
     await runtime.requests.checkpoint(request.id, request.operation!.checkpoint);
-    const instance = await createInstance(runtime.incus, owner, runtime.managed, { remote: decision.remote, image: decision.image, nameSuffix: decision.nameSuffix }, { id: request.id, requestedBy: request.from });
+    const instance = await createInstance(runtime.incus, owner, runtime.managed, spec,
+      { id: request.id, requestedBy: request.from, approvals: request.approvals });
     await journalRequest(runtime, request, 'instance-created', `${instance.remote}:${instance.name}`);
     return runtime.requests.save({ ...request, status: 'provisioned', instance });
   } catch (error) {

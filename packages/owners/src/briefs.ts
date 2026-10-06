@@ -126,10 +126,12 @@ export function requestDecisionBrief(request: ResourceRequest, notebook: string,
       `Expected duration: ${(request.ask as InstanceAsk).expectedMinutes} minutes`,
     ].join('\n')),
     block('notebook', notebook),
-    `Decide as the owner of this domain. Accept only if the purpose is legitimate, a remote you may create on is
-healthy and has capacity, and the image is one your domain allows (SNAPSHOT.md lists the create policy). Choose
-the remote, the image and a short name suffix that says what it is for. A person approves every create and
-delete after you; the runtime also re-checks your choice. Decline with a reason if anything is off.`,
+    `Decide as the owner of this domain. Accept only if the purpose is legitimate and a remote you may create on is
+healthy and has capacity. Choose the remote, the image and a short name suffix that says what it is for; keep to
+the images your domain allows (SNAPSHOT.md lists the create policy). When the purpose needs another image or an
+exact name, choose that image or set name: the request then waits for the person to approve that exact instance,
+and onionsoup never deletes an instance without the prefix. A person approves every create and delete after you;
+the runtime also re-checks your choice. Decline with a reason if anything is off.`,
   ].join('\n\n');
 }
 

@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import {
   listChildAbandonments, abandonedChildMessages,
-  planRevisionStatus, approveCreate, approveDelete, approvePlan, approvePush, chatDirectory, denyRequest, deskState, describeAsk,
+  planRevisionStatus, approveCreate, approveDelete, approvePlan, approvePush, chatDirectory, createApproval, denyRequest, deskState, describeAsk,
   domainSummary, itemText, revisePlan, resumeItem, retryItem, cancelItem, memoryFingerprint, type ResourceRequest, type Runtime,
   ownerChatAgent, AttentionAssignmentInput, assignAttention, retryAttentionAssignment, attentionAssignmentView, attentionAssignmentTargets, type AttentionAssignmentView,
   listAttention, needsHumanDecision, changeAttention, humanAttentionActor, recoverRequest, reconcileRequest,
@@ -250,7 +250,7 @@ export class SurfaceState {
       })),
       ...items.filter(waitsInInbox).map(planEntry),
       ...items.filter(awaitsPush).map(pushEntry),
-      ...requests.filter(request => request.status === 'awaiting-create-approval').map(request => ({ kind: 'create' as const, id: request.id, owner: request.to, title: `${request.from} asks: ${describeAsk(request.ask)}`, detail: request.ask.purpose, at: request.updatedAt })),
+      ...requests.filter(request => request.status === 'awaiting-create-approval').map(request => ({ kind: 'create' as const, id: request.id, owner: request.to, ...createApproval(this.runtime, request), at: request.updatedAt })),
       ...requests.filter(request => request.status === 'awaiting-delete-approval').map(request => ({ kind: 'delete' as const, id: request.id, owner: request.to, title: `Delete ${request.instance?.remote}:${request.instance?.name}`, detail: request.followUpResult?.summary ?? '', at: request.updatedAt })),
     ];
     const chats = await this.chatInbox();

@@ -69,7 +69,7 @@ export type IncusPermission = z.infer<typeof IncusPermission>;
 export const IncusDomain = z.object({
   kind: z.literal('incus'),
   remotes: z.array(z.object({ name: z.string(), host: z.string(), allow: z.array(IncusPermission).min(1) })).min(1),
-  /** Images an approved create may use; anything else is refused before a person is asked. */
+  /** Images an owner creates from within its grant; any other image waits for the person to approve that exact instance. */
   images: z.array(z.string()).min(1),
   namePrefix: z.string().default('onionsoup-'),
   maxManagedInstances: z.number().int().positive().default(3),
