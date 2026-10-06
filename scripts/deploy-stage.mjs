@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { access, mkdtemp, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -18,7 +18,7 @@ export const HOST_BUS_TESTS = [
 ];
 // NODE_OPTIONS splits unquoted spaces; quote the whole value so the filter cannot become just ^a.
 export const STAGE_TEST_OPTIONS = `--test-skip-pattern=${JSON.stringify(`^(?:${HOST_BUS_TESTS.join('|')})$`)}`;
-// Nested check runners have no host bus; retain their enforced caps through the outer stage cgroup.
+// Nested sandboxes have no host bus; they prove this outer stage cgroup's caps instead (cgroup-budget.ts).
 export const STAGE_LIMITS = { memoryMax: '6G', tasksMax: 512 };
 const STAGE_ENV = {
   HOME: PRIVATE_HOME,
@@ -53,18 +53,7 @@ async function existingReadOnly(source, target = source) {
   }
 }
 
-async function stageGoRuntime(root) {
-  if (!root) return [];
-  if (!isAbsolute(root) || resolve(root) !== root || await realpath(root) !== root) {
-    throw new Error('stage_go_root_invalid');
-  }
-  if (!(await stat(root)).isDirectory() || !(await stat(join(root, 'bin/go'))).isFile()) {
-    throw new Error('stage_go_root_invalid');
-  }
-  return ['--ro-bind', root, '/opt/go', '--setenv', 'ONIONSOUP_HOST_GO_ROOT', '/opt/go'];
-}
-
-async function stageArguments(command, args, location, privateFiles, skipHostBusTest, goRoot) {
+async function stageArguments(command, args, location, privateFiles, skipHostBusTest) {
   if (!isAbsolute(location) || resolve(location) !== location) throw new Error('stage_absolute_location_required');
   const physicalLocation = await realpath(location);
   if (physicalLocation !== location) throw new Error('stage_symlink_location_forbidden');
@@ -75,8 +64,6 @@ async function stageArguments(command, args, location, privateFiles, skipHostBus
     ...(await existingReadOnly('/etc/ssl/certs')),
     ...(await existingReadOnly('/etc/pki/tls/certs')),
   ];
-  // Project runtimes resolve installed shared libraries without executing host tools.
-  const libraryCache = await existingReadOnly('/etc/ld.so.cache');
   const networkFiles = (await Promise.all([
     '/etc/resolv.conf', '/etc/hosts', '/etc/nsswitch.conf', '/etc/gai.conf',
   ].map(path => existingReadOnly(path)))).flat();
@@ -87,10 +74,10 @@ async function stageArguments(command, args, location, privateFiles, skipHostBus
     '--symlink', 'usr/lib64', '/lib64',
     '--dir', '/opt', '--ro-bind', nodeRoot, '/opt/node',
     '--dir', '/etc', '--dir', '/etc/ssl', '--dir', '/etc/pki', '--dir', '/etc/pki/tls',
-    ...certificates, ...networkFiles, ...libraryCache,
+    ...certificates, ...networkFiles,
     '--ro-bind', privateFiles.passwd, '/etc/passwd',
     '--ro-bind', privateFiles.gitconfig, '/etc/stage-gitconfig',
-    // Read-only cgroup metadata lets nested fixed helpers prove this scope's cap without a host bus.
+    // Read-only cgroup metadata lets nested sandboxes prove this scope's cap without a host bus.
     '--dir', '/sys', '--dir', '/sys/fs', '--ro-bind', '/sys/fs/cgroup', '/sys/fs/cgroup',
     '--dev', '/dev', '--proc', '/proc', '--tmpfs', '/tmp',
     '--dir', '/home', '--tmpfs', PRIVATE_HOME,
@@ -98,7 +85,6 @@ async function stageArguments(command, args, location, privateFiles, skipHostBus
     '--unshare-pid', '--unshare-ipc', '--unshare-uts',
     '--die-with-parent', '--new-session', '--clearenv',
     ...Object.entries(STAGE_ENV).flatMap(([key, value]) => ['--setenv', key, value]),
-    ...await stageGoRuntime(goRoot),
     ...(skipHostBusTest ? ['--setenv', 'NODE_OPTIONS', STAGE_TEST_OPTIONS] : []),
     '--chdir', location, '--',
     command === 'npm' ? '/opt/node/bin/npm' : command,
@@ -120,7 +106,7 @@ export async function runStageCommand(command, args, location, hostEnvironment =
     await writeFile(privateFiles.passwd, `stage:x:${process.getuid()}:${process.getgid()}:Stage:/home/stage:/bin/sh\n`, { mode: 0o600 });
     await writeFile(privateFiles.gitconfig, '[user]\n\tname = Onionsoup Stage Test\n\temail = stage-test@onionsoup.invalid\n', { mode: 0o600 });
     const skipHostBusTest = command === 'npm' && args[0] === 'run' && args[1] === 'verify';
-    const sandboxArgs = await stageArguments(command, args, location, privateFiles, skipHostBusTest, hostEnvironment.ONIONSOUP_HOST_GO_ROOT);
+    const sandboxArgs = await stageArguments(command, args, location, privateFiles, skipHostBusTest);
     const runnerEnvironment = {
       PATH: '/usr/bin:/bin',
       XDG_RUNTIME_DIR: hostEnvironment.XDG_RUNTIME_DIR,

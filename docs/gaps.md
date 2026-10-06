@@ -71,29 +71,6 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
   API, but a prompt injection can still do anything the person's account and the CLI can. Its journal has no view in
   the surface yet: read
   `state/notebooks/operator/journal/*.jsonl`.
-- **Operator writes and checks require exact approved scope.** Durable jobs support read-only investigations and
-  named-file edits/creation in clean Git worktrees, with separate human decisions for exact paths/check commands and
-  the completed diff. Checks support `node --test` with literal test paths and `go test` / `go vet` with local package paths.
-  Go requires a host-selected toolchain and self-contained module; no CGO, host caches or dependency downloads.
-  Project argv can run installed host-selected tools, Make recipes and repository scripts in a writable disposable
-  copy, with no network, credentials, live worktree, dependency cache or real Git metadata. Tools and shared libraries
-  are snapshotted and hashed. Missing tools/dependencies must be provided separately; mise cannot download them.
-  Internal instruction aliases are preserved; unsafe links and edits through symlinks are refused.
-  Each Go check deliberately snapshots
-  its runtime again; copy-on-write is used when available, but unsupported filesystems incur a bounded full copy. Checks cannot modify, delete, commit or push the live repository. Whole-workspace conflicts
-  are refused; accepted edits remain uncommitted. Combined previews verify disjoint accepted edits from one repository/base with already approved checks; application to one exact clean sibling integration worktree uses a separate native once approval, durable exclusive claims and per-file stopped-process recovery; committing and publishing remain separate user-directed work. Partial/foreign applications stay reserved, and interrupted staging without saved identity cannot be automatically recovered. Managed claims do not exclude unrelated editors. Prepared combined checks with unknown termination are never replayed. New attempts save exact execution/admission provenance and use an explicit-permit guard. A supported recovery action imports a saved host outcome or, after positive stopped proof and native one-time approval, releases a reservation as unverified. Two unresolved attempts still block both slots when processes may be running, identities are foreign/unreadable, the boot/PID domain changed, or old records lack durable provenance. Missing evidence is not permission to clear or replay a receipt. Another runtime conservatively reports a worker it does not own as uncertain; recovery-preview supplies the actual observation. An uncertain prepared mutation keeps its reservation and has no
-  replay or recovery path in this slice, including failures after intent is recorded but before the writer starts.
-  Completed unaccepted write children can now be revised in their same session and original scope, with archived
-  evidence and fresh checks/acceptance. Accepted work, started dependents and exhausted check budgets remain outside
-  that bounded revision path.
-  Zero-mutation write children can use explicit human recovery only after verified absent or idle owned runtime
-  state. An offline runtime cannot establish that proof, even for a never-launched child with a session ID.
-  Read-only children retain their existing bounded observation and human abandonment path. Unknown parent wakes
-  are not replayed. The fixed file writer and approved check runner are sandboxed; the parent operator remains trusted
-  and unsandboxed. The first scope click remains required; only exact retries of the approved job reuse approval.
-  Removing that click needs a structured-intake authority decision, not natural-language interpretation or a blanket grant.
-  The surface supplies the fixed writer's trusted Node runtime. Externally launched OpenCode must receive that
-  host runtime explicitly or scoped writes fail closed.
 - **Plan approvals in chat do not survive a restart.** A plan approval pending in a chat is lost if the surface restarts (the
   permission prompt lives in its opencode); the item stays `awaiting-plan-approval` and the owner resubmits it with
   `item`.

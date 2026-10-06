@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import type { Plugin } from '@opencode-ai/plugin';
 import { AdmissionRecord, beginAdmission, type AdmissionLease } from './deployment-admission.ts';
-import { writeHandoffFile } from './operator-handoff-file.ts';
+import { writeDurableFile } from './durable-file.ts';
 import { MaintenanceEffectNotStarted, MaintenanceUncertainError, type MaintenanceContext } from './maintenance-context.ts';
 
 export const PLUGIN_MAINTENANCE_LIMITS = { budgetMs: 20_000, disposeMs: 1_000, effectTimeoutMs: 10_000 };
@@ -34,7 +34,7 @@ export class MaintenancePass implements MaintenanceContext {
 
   save() {
     const snapshot = JSON.stringify(MaintenanceOperation.parse(this.record), null, 2);
-    this.writing = this.writing.catch(() => undefined).then(() => writeHandoffFile(this.path, snapshot));
+    this.writing = this.writing.catch(() => undefined).then(() => writeDurableFile(this.path, snapshot));
     return this.writing;
   }
 
@@ -115,7 +115,7 @@ export class MaintenancePass implements MaintenanceContext {
  * Kinds that do the same process-wide work in every OpenCode instance (every call names its directory). One
  * OpenCode process hosts an instance per directory, each loading this plugin; only one of them runs these.
  */
-const PROCESS_WIDE_KINDS = new Set(['plugin:notices', 'plugin:operator-jobs']);
+const PROCESS_WIDE_KINDS = new Set(['plugin:notices']);
 const processHolders = new Map<string, string>();
 
 interface Slot {
@@ -157,7 +157,7 @@ export class PluginMaintenance {
     if (this.stopped) return;
     if (slot.pass?.record.status === 'uncertain') {
       const previous = slot.pass.record;
-      await writeHandoffFile(join(this.home, 'plugin-maintenance', this.instanceID, 'uncertain', `${previous.operationID}.json`),
+      await writeDurableFile(join(this.home, 'plugin-maintenance', this.instanceID, 'uncertain', `${previous.operationID}.json`),
         JSON.stringify(MaintenanceOperation.parse(previous), null, 2));
     }
     const operationID = randomUUID();

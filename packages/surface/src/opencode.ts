@@ -105,7 +105,7 @@ async function startServer() {
   const password = randomBytes(24).toString('base64url');
   const { OPENCODE_SERVER_PASSWORD: _password, OPENCODE_SERVER_USERNAME: _username, ...inherited } = process.env;
   const child: ChildProcess = spawn('opencode', ['serve', '--hostname', '127.0.0.1', '--port', String(port)], {
-    env: { ...inherited, ONIONSOUP_HOST_NODE: process.execPath, OPENCODE_SERVER_USERNAME: 'opencode', OPENCODE_SERVER_PASSWORD: password },
+    env: { ...inherited, OPENCODE_SERVER_USERNAME: 'opencode', OPENCODE_SERVER_PASSWORD: password },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   const url = await new Promise<string>((resolve, reject) => {

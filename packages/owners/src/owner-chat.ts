@@ -1,5 +1,4 @@
 import type { OwnerDeclaration, OperatorDeclaration, Persona } from './declarations.ts';
-import { OPERATOR_INVESTIGATOR } from './operator-jobs-types.ts';
 
 /** Existing persona agent names are stable; the observation fallback is keyed by durable owner ID. */
 export function ownerChatAgent(owner: OwnerDeclaration) {
@@ -32,9 +31,6 @@ Explain missing evidence and who could provide it. Runtime status may be stale; 
 
 /** Only new fallback identities are checked here; preserve validation of existing persona declarations. */
 export function checkOwnerChatNames(owners: ReadonlyMap<string, OwnerDeclaration>, operator?: OperatorDeclaration) {
-  if (operator?.name.toLowerCase() === OPERATOR_INVESTIGATOR || [...owners.values()].some(owner => owner.persona?.name.toLowerCase() === OPERATOR_INVESTIGATOR)) {
-    throw new Error('operator_investigator_agent_reserved');
-  }
   const names = new Set(['onionsoup-watcher', 'onionsoup-implementer', ...[...owners.keys()].map(id => `onionsoup-reviewer-${id}`),
     ...[...owners.values()].flatMap(owner => owner.persona ? [owner.persona.name.toLowerCase()] : [])]);
   if (operator) names.add(operator.name.toLowerCase());

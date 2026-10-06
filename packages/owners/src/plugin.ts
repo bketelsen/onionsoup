@@ -53,24 +53,9 @@ import {
   BOOTSTRAP_MARKER, bootstrapText, NO_OPERATOR_SKILLS, OPERATOR_SKILLS_DIRECTORY, registerSkills, SKILLS_DIRECTORY, subagents, subagentsText,
   taskPermission,
 } from './owner-agents.ts';
-import { ENGINE_REPOSITORY, operatorAgent, operatorInvestigatorAgent } from './operator.ts';
-import { OperatorJobs } from './operator-jobs.ts';
-import { OperatorSupervisor } from './operator-supervisor.ts';
-import { operatorSupervisorClient } from './operator-supervisor-client.ts';
-import { OPERATOR_INVESTIGATOR } from './operator-jobs-types.ts';
-import { OPERATOR_JOB_TOOL, operatorJobTool } from './operator-job-tools.ts';
-import { OperatorApplications } from './operator-application-host.ts';
-import { OperatorHandoffs } from './operator-handoff-host.ts';
-import { checkOperatorChildMessage, checkOperatorChildTool } from './operator-child-scope.ts';
-import { rememberOperatorChildren } from './operator-job-history.ts';
-import { deliverOperatorJobWakes } from './operator-job-wake.ts';
-import { OperatorRecoveryPermissions } from './operator-recovery-permission.ts';
-import { OperatorWritePermissions } from './operator-write-permission.ts';
-import { OperatorWrites } from './operator-write-host.ts';
-import { OPERATOR_WRITE_TOOL, OPERATOR_CHECK_TOOL, OperatorWriteCalls, OperatorCheckCalls } from './operator-write-call.ts';
-import { operatorFileTool, operatorCheckTool } from './operator-write-tool.ts';
+import { ENGINE_REPOSITORY, operatorAgent } from './operator.ts';
 import {
-  commitOperatorMemory, editsUnder, ensureOperatorMemory, isMemoryNudge, MEMORY_NUDGE_TEXT, memoryIndexBlock, memorySignature, OperatorActivityLog,
+  commitOperatorMemory, editsUnder, ensureOperatorMemory, MEMORY_NUDGE_TEXT, memoryIndexBlock, memorySignature, OperatorActivityLog,
   operatorMemoryDirectory,
 } from './operator-memory.ts';
 import { bashAction } from './bash-rules.ts';
@@ -365,18 +350,6 @@ const server: Plugin = async (input, options) => {
   const owners = [...runtime.declarations.owners.values()];
   const personaOwners = owners.filter(owner => owner.persona);
   const operator = runtime.declarations.operator;
-  const operatorJobs = operator ? new OperatorJobs(runtime.stateDirectory, operator.directory, operator.name) : undefined;
-  const operatorRecoveryPermissions = new OperatorRecoveryPermissions();
-  const operatorWritePermissions = new OperatorWritePermissions();
-  const operatorWriteCalls = new OperatorWriteCalls();
-  const operatorCheckCalls = new OperatorCheckCalls();
-  const operatorCalls = new Map<string, { prepare(input: { sessionID: string; callID: string }, args: Record<string, unknown>): void }>([[OPERATOR_WRITE_TOOL, operatorWriteCalls], [OPERATOR_CHECK_TOOL, operatorCheckCalls]]);
-  const operatorClient = operator ? operatorSupervisorClient(input.client) : undefined;
-  const operatorWrites = operatorJobs && operatorClient ? new OperatorWrites(operatorJobs, operatorClient, operatorWritePermissions) : undefined;
-  const operatorHandoffs = operatorJobs && operatorClient && operatorWrites
-    ? new OperatorHandoffs(operatorJobs, operatorClient, operatorWrites) : undefined;
-  const operatorApplications = operatorHandoffs ? new OperatorApplications(operatorHandoffs, operatorWritePermissions) : undefined;
-  const operatorSupervisor = operatorJobs && operatorClient ? new OperatorSupervisor(operatorJobs, operatorClient, undefined, operatorWrites) : undefined;
   // The operator journals what it does, like an owner, to a notebook of its own (never distilled) that also holds its
   // memory: files it keeps itself, committed here when its chat goes idle.
   const operatorNotebook = runtime.notebook(OPERATOR_ID);
@@ -1213,19 +1186,6 @@ const server: Plugin = async (input, options) => {
   maintenance.start('plugin:notices', PLUGIN_LIMITS.noticeMs, deliverNotices,
     error => console.warn('notice_delivery_failed', error));
 
-  async function maintainOperatorJobs(pass: MaintenancePass) {
-    await initializeRuntime();
-    if (!operatorJobs) return;
-    const client = pass.client(input.client);
-    const supervisor = new OperatorSupervisor(operatorJobs, operatorSupervisorClient(client), undefined, operatorWrites);
-    await pass.phase('applications', async () => operatorApplications?.reconcile(pass.signal));
-    await pass.phase('supervisor', () => supervisor.tick(pass.signal));
-    await pass.phase('job-wakes', () => deliverOperatorJobWakes(operatorJobs, planRevisionClient(client),
-      (id, error) => console.warn('operator_job_wake_failed', id, error)));
-    await pass.phase('child-history', () => rememberOperatorChildren(runtime, operatorJobs, client));
-  }
-  if (operator) maintenance.start('plugin:operator-jobs', PLUGIN_LIMITS.noticeMs, maintainOperatorJobs,
-    error => console.warn('operator_maintenance_failed', error));
   // Chat/tool admissions are already held by this instance's maps; do not globally serialize different directories.
   maintenance.start('plugin:chat-reconciliation', PLUGIN_LIMITS.noticeMs,
     pass => pass.phase('chat-reconciliation', () => reconcileChats(pass)),
@@ -1248,7 +1208,6 @@ const server: Plugin = async (input, options) => {
     async 'tool.execute.before'(input, output) {
       await initializeRuntime();
       await refreshDeclarations();
-      if (operatorJobs) await checkOperatorChildTool(operatorJobs, input.sessionID, input.tool, output.args);
       if (await readChildAbandonment(runtime.stateDirectory, input.sessionID)) throw new Error('child_session_abandoned: preserved history is read-only');
       await assertWorkSessionRunning(input.sessionID);
       const key = `${input.sessionID}:${input.callID}`;
@@ -1269,7 +1228,6 @@ const server: Plugin = async (input, options) => {
         if (lease) toolLeases.set(key, lease);
         await prepareToolArguments(input, output);
         await requireOwnerToolNotDenied(input.sessionID, input.tool, output.args);
-        if (operatorWrites) operatorCalls.get(input.tool)?.prepare(input, output.args);
         tracked.ready = true;
       } catch (error) {
         await clearTrackedTool(key, tracked);
@@ -1334,9 +1292,7 @@ const server: Plugin = async (input, options) => {
       Object.assign(agents, subagents(runtime.declarations, personaOwners));
       if (operator) {
         agents[operator.name] = operatorAgent(operator, { config: runtime.declarations.root, home: dirname(runtime.stateDirectory), memory: memoryDirectory });
-        agents[OPERATOR_INVESTIGATOR] = operatorInvestigatorAgent(operator);
       }
-      hiddenFromEveryone[OPERATOR_JOB_TOOL] = 'deny';
       registerSkills(config as Parameters<typeof registerSkills>[0], operator ? [SKILLS_DIRECTORY, OPERATOR_SKILLS_DIRECTORY] : [SKILLS_DIRECTORY]);
       addDeclaredProviders(config, runtime.declarations.providers);
       const current = config.permission;
@@ -1360,7 +1316,6 @@ const server: Plugin = async (input, options) => {
         await initializeRuntime();
         await assertWorkSessionRunning(message.sessionID);
         const messageID = message.messageID ?? output.message?.id;
-        if (operatorJobs) await checkOperatorChildMessage(operatorJobs, message.agent, message.sessionID, messageID);
         if (isExchangeNoticeDeliveryAttempt(runtime.stateDirectory, messageID, output.parts ?? [])) {
           const session = await input.client.session.get({ path: { id: message.sessionID } }).catch(() => undefined);
           if (session?.data?.directory && !session.error && !session.data.parentID
@@ -1421,8 +1376,6 @@ const server: Plugin = async (input, options) => {
       if (typed.type === 'session.status' && ['busy', 'retry'].includes(typed.properties.status?.type)) {
         markKnownAncestryActive(String(typed.properties.sessionID));
       }
-      operatorRecoveryPermissions.event(event);
-      operatorWritePermissions.event(event);
       frictionEvents.observe(event);
       await observeProvider(event).catch(error => console.warn('provider_health_failed', error instanceof Error ? error.message : String(error)));
       if (isIdle) {
@@ -1458,13 +1411,6 @@ const server: Plugin = async (input, options) => {
     },
 
     tool: {
-      ...(operatorJobs && operatorSupervisor ? { [OPERATOR_JOB_TOOL]: operatorJobTool(operatorJobs, operatorSupervisor, input.client, agent => {
-        if (agent === operator!.name) return;
-        if (ownerOfAgent(agent)) requireOwner(agent);
-        throw new Error('operator_job_operator_only');
-      }, operatorRecoveryPermissions, operatorWrites, operatorHandoffs, operatorApplications) } : {}),
-      ...(operatorWrites ? { [OPERATOR_WRITE_TOOL]: operatorFileTool(operatorWrites, operatorWriteCalls),
-        [OPERATOR_CHECK_TOOL]: operatorCheckTool(operatorWrites, operatorCheckCalls) } : {}),
       onionsoup_friction: tool({
         description: 'Report unexpected onionsoup engine behavior with expected/actual and reproducible evidence. Host code adds observed failures and origin; repeats are counted. Do not include secrets.',
         args: {

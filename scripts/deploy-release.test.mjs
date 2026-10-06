@@ -95,11 +95,6 @@ test('candidate stage hides host credentials and prevents runtime writes while i
     assert.equal(process.env.XDG_DATA_HOME, '/home/stage/.local/share');
     assert.equal(process.env.XDG_STATE_HOME, '/home/stage/.local/state');
     assert.equal(process.env.NPM_CONFIG_USERCONFIG, '/dev/null');
-    if (process.env.ONIONSOUP_HOST_GO_ROOT) {
-      assert.equal(process.env.ONIONSOUP_HOST_GO_ROOT, '/opt/go');
-      assert.equal(existsSync('/opt/go/bin/go'), true);
-      assert.throws(() => writeFileSync('/opt/go/operator-stage-probe', 'no'), { code: 'EROFS' });
-    }
     assert.equal(process.env.GIT_AUTHOR_NAME, undefined);
     assert.equal(process.env.GIT_AUTHOR_EMAIL, undefined);
     assert.equal(process.env.GIT_COMMITTER_NAME, undefined);
@@ -114,7 +109,7 @@ test('candidate stage hides host credentials and prevents runtime writes while i
     assert.equal(process.env.FAKE_CREDENTIAL, undefined);
     for (const key of Object.keys(process.env)) {
       assert.equal(key.startsWith('OPENCODE_'), false, key);
-      assert.equal(key.startsWith('ONIONSOUP_') && key !== 'ONIONSOUP_HOST_GO_ROOT', false, key);
+      assert.equal(key.startsWith('ONIONSOUP_'), false, key);
       assert.equal(key.startsWith('NPM_CONFIG_') && key !== 'NPM_CONFIG_USERCONFIG' && key !== 'NPM_CONFIG_CACHE', false, key);
     }
     for (const path of ['.ssh/id_ed25519', '.npmrc', '.local/share/opencode/auth.json']) {
@@ -1043,17 +1038,4 @@ test('bootstrap retains old-worker-compatible checkpoint when old health is unce
     /bootstrap_old_health_unverified_gate_held/);
   assert.equal(JSON.parse(await readFile(join(options.state, 'deploy', 'pending.json'))).status, 'draining');
   assert.ok(existsSync(join(options.state, 'deploy', 'rollback.json')));
-});
-
-test('stage refuses a noncanonical host-selected Go root before executing a check', async () => {
-  const scratch = await mkdtemp(join(tmpdir(), 'onionsoup-stage-go-root-'));
-  try {
-    await mkdir(join(scratch, 'runtime', 'bin'), { recursive: true });
-    await writeFile(join(scratch, 'runtime', 'bin', 'go'), 'fixture not executed');
-    await symlink(join(scratch, 'runtime'), join(scratch, 'linked'));
-    for (const root of ['relative/go', join(scratch, 'linked'), join(scratch, 'missing')]) {
-      await assert.rejects(runStageCommand('node', ['--version'], scratch,
-        { ...process.env, ONIONSOUP_HOST_GO_ROOT: root }));
-    }
-  } finally { await rm(scratch, { recursive: true, force: true }); }
 });

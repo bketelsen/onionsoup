@@ -22,38 +22,12 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.25.8'
-          cache: false
-      - name: Select the isolated check toolchain
-        run: |
-          go_root="$(realpath "$(go env GOROOT)")"
-          sudo chmod -R go-w "$go_root"
-          echo "ONIONSOUP_HOST_GO_ROOT=$go_root" >> "$GITHUB_ENV"
       - name: Prepare Git and the real Linux sandbox
         run: |
           git config --global user.name 'Onionsoup CI'
           git config --global user.email 'onionsoup-ci@example.invalid'
-          # setup-node's shared tool cache may be group-writable. Keep the writer's host gate strict.
-          node_binary="$(node -p 'process.execPath')"
-          stat --format='%a %n' "$node_binary"
-          sudo chmod go-w "$node_binary"
-          stat --format='%a %n' "$node_binary"
           sudo apt-get update -qq
-          sudo apt-get install -y bubblewrap build-essential meson ninja-build pkg-config libcap-dev
-          # Ubuntu 22.04's bwrap lacks descriptor binds. Test the same pinned release as the host
-          # instead of weakening scoped writes to pathname mounts or skipping their real tests.
-          curl --fail --location --silent --show-error \
-            https://codeload.github.com/containers/bubblewrap/tar.gz/2a76602a8c71f36c1527cf9fc3417d9149822e0c \
-            -o "$RUNNER_TEMP/bubblewrap.tar.gz"
-          echo "d1383cdc691a335f531564c6d0a1e06165932a4bb9e62a42f952eb0286995431  $RUNNER_TEMP/bubblewrap.tar.gz" | sha256sum --check
-          tar -xzf "$RUNNER_TEMP/bubblewrap.tar.gz" -C "$RUNNER_TEMP"
-          meson setup "$RUNNER_TEMP/bubblewrap-build" "$RUNNER_TEMP/bubblewrap-2a76602a8c71f36c1527cf9fc3417d9149822e0c" \
-            -Dman=disabled -Dbash_completion=disabled -Dzsh_completion=disabled -Dtests=false
-          meson compile -C "$RUNNER_TEMP/bubblewrap-build"
-          sudo install -m 0755 "$RUNNER_TEMP/bubblewrap-build/bwrap" /usr/bin/bwrap
-          /usr/bin/bwrap --version
+          sudo apt-get install -y bubblewrap
           sudo loginctl enable-linger "$USER"
           sudo systemctl start "user@$(id -u).service"
           echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> "$GITHUB_ENV"

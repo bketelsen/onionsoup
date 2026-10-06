@@ -58,7 +58,3 @@ export { isRetiredSession, workSessionDirectories } from './session-directories.
 export { PlanWorktreeArchive } from './plan-worktree-archive.ts';
 
 export { readChildAbandonment, listChildAbandonments, abandonedChildMessages, ChildAbandonment } from './child-recovery.ts';
-
-export { OPERATOR_RECOVERY_PERMISSION, OPERATOR_WRITE_PERMISSION } from './operator-jobs-types.ts';
-
-export { OperatorTaskCheck, OperatorCheckRecord } from './operator-check-types.ts';

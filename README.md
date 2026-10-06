@@ -63,9 +63,7 @@ owners approve-push <item> | request-publish <owner> <site> | desk <owner> | not
 
 ## Develop
 
-`npm run verify` builds, checks package boundaries and docs, typechecks and runs the tests.
-Real Go check integration tests require an installed Go 1.25+ toolchain selected by `ONIONSOUP_HOST_GO_ROOT` (its canonical absolute root);
-CI pins Go 1.25.8. Conventions for
+`npm run verify` builds, checks package boundaries and docs, typechecks and runs the tests. Conventions for
 people and agents working on the code are in [AGENTS.md](AGENTS.md).
 
 ## License
