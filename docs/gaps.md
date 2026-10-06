@@ -151,8 +151,11 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
   delegate one request at a time, and the receiver may decline.
 - **Waking a manager needs the surface running.** Manager notices are posted by the plugin in the surface's
   opencode; with the surface down they stay queued. Retired initiative chats route to a fresh manager-owned
-  continuation with retained history where available, not a guessed latest human chat. Tool lists are built when the plugin starts, so a
-  `reportsTo` change shows new tools only after a surface restart (engine checks apply at once).
+  continuation with retained history where available, not a guessed latest human chat.
+- **Some configuration still needs a surface restart.** The plugin re-reads the configuration every
+  `PLUGIN_LIMITS.declarationsMs` (15 s) before tools and turns, so charters, rosters, reporting lines, grants and
+  repositories apply to live chats at once. A new owner, its MCP servers, chat permission rules and the tool list a
+  `reportsTo` change brings are opencode agent definitions, built when the plugin starts: those need a restart.
 - **Owner sessions need the surface running.** The plugin opens the sessions that plan delegated work and carry out
   approved plans, so a plan approved from the inbox or the CLI waits for a running surface before any work starts.
 - **Plans approved before plan worktrees still share the desk.** A plan item already `working` when plan worktrees

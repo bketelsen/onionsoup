@@ -34,9 +34,6 @@ test('configured owner prompts carry repository writing guidance alongside each 
     assert.match(owner.prompt!, /onionsoup_friction \(report reproducible engine\s+behavior/);
     assert.match(owner.prompt!, /onionsoup_request_work \(ask another\s+owner/);
   }
-  assert.match(config.agent!.Odrade!.prompt!, /<org>\nYour direct reports: Bellonda/);
-  assert.match(config.agent!.Bellonda!.prompt!, /<org>\nYour manager: Odrade/);
-  assert.doesNotMatch(config.agent!['Miles Teg']!.prompt!, /<org>/);
   assert.match(config.agent!.Odrade!.prompt!, /draft an initiative with onionsoup_initiative/);
   assert.doesNotMatch(config.agent!.Bellonda!.prompt!, /onionsoup_initiative/);
   const permissions = (name: string) => config.agent![name]!.permission as Record<string, string>;

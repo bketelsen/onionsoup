@@ -103,8 +103,11 @@ test('the operator loads the operating skills, and owners and their subagents ca
 });
 
 test('owners cannot reach the operator, and the operator cannot use owner tools', async () => {
-  const { hooks, agents } = await operatorHooks();
-  const roster = /<roster>([\s\S]*?)<\/roster>/.exec(agents['Miles Teg']!.prompt!)![1]!;
+  const { hooks } = await operatorHooks();
+  await hooks['chat.message']!({ sessionID: 'ses_teg', agent: 'Miles Teg' } as never, {} as never);
+  const turn = { system: [] as string[] };
+  await hooks['experimental.chat.system.transform']!({ sessionID: 'ses_teg' } as never, turn);
+  const roster = /<roster>([\s\S]*?)<\/roster>/.exec(turn.system.join('\n'))![1]!;
   assert.doesNotMatch(roster, /operator/i);
   const context = (agent: string) => ({
     agent, sessionID: 'ses_1', messageID: 'msg_1', directory: '/tmp', worktree: '/tmp', abort: new AbortController().signal, metadata: () => {}, ask: async () => {},
