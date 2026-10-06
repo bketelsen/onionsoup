@@ -11,12 +11,26 @@ Read [docs/design/owners.md](docs/design/owners.md) first, then [docs/gaps.md](d
 1. **Authority comes from configuration, never from model or chat input.** Repositories, hosts, credentials,
    models and grants are declared in the person's config directory; a request picks among declared things.
 2. **Effects happen in host code, behind gates.** Plan approval, creates/deletes and destructive actions wait for
-   a person unless a standing grant in configuration says otherwise, and every use of a grant is journaled.
+   a person unless a standing grant in configuration says otherwise, and every use of a grant is journaled. These
+   are the gates; do not add more.
 3. **The sandbox is the boundary.** Model-driven processes and verification run in bwrap with a read-only root
    inside a memory-capped systemd scope. Bash allowlists are a convenience, never a security boundary.
 4. **Freelancer and subagent claims are not evidence.** Host code runs verification; the required review comes from
    another model family.
 5. **Deterministic first.** Periodic checks are host code; they wake a model (the owner) only when needed.
+
+## Changing onionsoup
+
+Agents have grown this engine faster than Brian can use it: in eight days, 47 unattended PRs added states, receipts
+and approvals until owners could no longer finish ordinary work. Every agent that changes the engine follows these.
+
+1. **Friction is fixed by removing a step.** Do not add statuses, approval steps, receipts, leases, quarantines,
+   recovery records or "uncertain" states unless Brian asked for that specific one. When work gets stuck, delete the
+   step, or the code, that stuck it. A sandbox, not another gate, is what makes freedom safe.
+2. **The engine shrinks by default.** Prefer deleting a subsystem to repairing it. A PR that grows the engine names,
+   in its body, the request of Brian's that it answers.
+3. **Agents do not merge onionsoup.** Open the PR and stop; it merges when Brian says so. No merge-when-green
+   autopilot on this repository, and no agent-run trials whose findings come back as more PRs.
 
 ## Layout
 
