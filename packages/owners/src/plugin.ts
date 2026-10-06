@@ -8,7 +8,6 @@ import { deliveredExchangeNoticeProof, deliverExchangeNotices } from './exchange
 import { consumeExchangeNoticeDelivery, isExchangeNoticeDeliveryAttempt } from './exchange-notice-delivery.ts';
 import { exchangeClient } from './exchange-client.ts';
 import { listAttention, changeAttention, ownerAttentionActor } from './attention.ts';
-import { frictionBacklog, ownerFrictionDetail } from './friction-work.ts';
 import { requestProgressDetail, requestProgressSummary } from './request-status.ts';
 import { deliverPlanRevisions, planRevisionStatus } from './plan-revision.ts';
 import { DirectRequestPlanReviewInput, reviewDirectRequestPlan } from './direct-request-plan-review.ts';
@@ -1555,7 +1554,7 @@ const server: Plugin = async (input, options) => {
       ...(operatorWrites ? { [OPERATOR_WRITE_TOOL]: operatorFileTool(operatorWrites, operatorWriteCalls),
         [OPERATOR_CHECK_TOOL]: operatorCheckTool(operatorWrites, operatorCheckCalls) } : {}),
       onionsoup_friction: tool({
-        description: 'Report unexpected onionsoup engine behavior with expected/actual and reproducible evidence. Host code adds observed failures and origin; repeats are counted, not re-triaged. Do not include secrets.',
+        description: 'Report unexpected onionsoup engine behavior with expected/actual and reproducible evidence. Host code adds observed failures and origin; repeats are counted. Do not include secrets.',
         args: {
           summary: tool.schema.string().min(1).max(800), expected: tool.schema.string().min(1).max(800),
           actual: tool.schema.string().min(1).max(800), evidence: tool.schema.string().max(800).optional(),
@@ -1574,7 +1573,7 @@ const server: Plugin = async (input, options) => {
             }
             throw error;
           });
-          return `Recorded ${record.id} (${record.count} report${record.count === 1 ? '' : 's'}). Failure events: ${record.failureContext}. Triage and issue publication are separate gates.`;
+          return `Recorded ${record.id} (${record.count} report${record.count === 1 ? '' : 's'}). Failure events: ${record.failureContext}. A person reads friction reports.`;
         },
       }),
       onionsoup_send: tool({
@@ -1728,14 +1727,12 @@ const server: Plugin = async (input, options) => {
         args: {
           item: tool.schema.string().optional().describe('A work item id, e.g. w-20260923-31a48a'),
           request: tool.schema.string().optional().describe('A visible request ID for complete linked progress and blocker details'),
-          friction: tool.schema.string().optional().describe('Your report or configured triage incident ID for bounded host-collected evidence'),
           offset: tool.schema.number().int().nonnegative().optional().describe('Next cross-owner progress page offset shown by status'),
         },
         async execute(args, context) {
           const owner = requireObservationOwner(context.agent);
-          if (args.friction) return JSON.stringify(await ownerFrictionDetail(runtime, owner.id, args.friction));
           if (args.request) return requestProgressDetail(runtime, owner.id, args.request);
-          if (!args.item) return `${await workSummary(owner.id, args.offset)}\n\nOwner friction backlog:\n${JSON.stringify(await frictionBacklog(runtime, owner.id))}`;
+          if (!args.item) return workSummary(owner.id, args.offset);
           const item = await runtime.ledger.get(args.item).catch(() => undefined);
           const isVisible = item && (item.owner === owner.id || isDirectReport(runtime.declarations, owner.id, item.owner));
           if (!item || !isVisible) return `No work item ${args.item} of yours or your reports'. Your status:\n\n${await workSummary(owner.id)}`;

@@ -5,7 +5,6 @@ import { z } from 'zod';
 import { WorkItem, isFinished } from './ledger.ts';
 import { Handoff } from './ask-handoffs.ts';
 import { Assignment } from './attention-assignment.ts';
-import { Promotion } from './friction-promotion.ts';
 import { ResourceRequest } from './requests.ts';
 import { Initiative } from './initiatives.ts';
 import { Reminder } from './reminders.ts';
@@ -33,7 +32,7 @@ const RequestProgressBaseline = z.object({ version: z.literal(1), observedAt: z.
  * OpenCode transcripts must independently match the encompassing recovery proof. */
 export const MAINTENANCE_RELEASE_STORES = ['items', 'requests', 'initiatives', 'reminders', 'session-openings',
   'plan-revisions', 'direct-request-review-wakes', 'notices', 'operator-jobs', 'operator-job-wakes',
-  'operator-applications', 'operator-handoffs', 'handoffs', 'attention/assignments', 'friction/promotions'] as const;
+  'operator-applications', 'operator-handoffs', 'handoffs', 'attention/assignments'] as const;
 export const MAINTENANCE_RELEASE_INVENTORY_LIMITS = { entries: 100_000, bytes: 128 * 1024 * 1024 };
 export interface MaintenanceInventoryEntry { path: string; type: 'absent' | 'directory' | 'file'; digest: string }
 export interface MaintenanceInventoryDecision {
@@ -232,11 +231,6 @@ function classifyRouting(files: Map<string, string>) {
     const assignment = Assignment.parse(parsed(files, path));
     boundPath(path, `attention/assignments/${hash(assignment.attention)}.json`);
     decisions.push(decision(path, assignment.status !== 'pending', 'attention_assignment_routing_unresolved'));
-  }
-  for (const path of jsonFiles(files, 'friction/promotions')) {
-    const promotion = Promotion.parse(parsed(files, path));
-    boundPath(path, `friction/promotions/${promotion.id}.json`);
-    decisions.push(decision(path, promotion.state !== 'pending', 'friction_promotion_routing_unresolved'));
   }
   return decisions;
 }

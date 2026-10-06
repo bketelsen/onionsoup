@@ -1,7 +1,5 @@
 import { execFile } from 'node:child_process';
-import { dirname, join, relative, resolve, delimiter } from 'node:path';
-import { access, stat } from 'node:fs/promises';
-import { constants } from 'node:fs';
+import { dirname, join, relative } from 'node:path';
 import { promisify } from 'node:util';
 import { createOpencodeClient } from '@opencode-ai/sdk/v2/client';
 import { Agent } from 'undici';
@@ -14,20 +12,6 @@ import { jsonFromText, jsonInstruction, replyText } from './json-reply.ts';
 import { freePort, spawnSandboxed, stopSandboxed } from './sandbox.ts';
 
 const run = promisify(execFile);
-
-/** Resolve the same PATH used by the sandbox without executing OpenCode or making an inference. */
-export async function preflightHireExecutable(directory: string, searchPath = process.env.PATH ?? '/usr/bin:/bin') {
-  for (const entry of searchPath.split(delimiter)) {
-    const candidate = resolve(directory, entry, 'opencode');
-    try {
-      await access(candidate, constants.X_OK);
-      if ((await stat(candidate)).isFile()) return;
-    } catch (error) {
-      if (!['ENOENT', 'ENOTDIR', 'EACCES'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error;
-    }
-  }
-  throw new Error('hire_executable_unavailable');
-}
 
 export const HIRE_LIMITS = { heartbeatMs: 30_000, timeoutMs: 20 * 60_000, serverStartMs: 30_000, permissionPollMs: 2_000, serverOutputChars: 500 };
 
@@ -345,8 +329,7 @@ export async function runHire<T>(client: HireSessionClient, request: HireRequest
       const second = await prompt(`${resendInstruction(parsed.error)}${jsonInstruction(schema)}`);
       cost += second.info.cost ?? 0;
       parsed = parseDeliverable(request.schema, second.deliverable);
-      if (!parsed.success) throw new HireError(`deliverable_invalid: ${parsed.error.message.slice(0, 500)}`,
-        sessionID, second.deliverable ?? first.deliverable, undefined, 'returned-terminal');
+      if (!parsed.success) throw new HireError(`deliverable_invalid: ${parsed.error.message.slice(0, 500)}`, sessionID, second.deliverable ?? first.deliverable);
     }
     return { value: parsed.data, sessionID, cost, startedAt, finishedAt: new Date().toISOString() };
   } finally {
@@ -357,8 +340,7 @@ export async function runHire<T>(client: HireSessionClient, request: HireRequest
 }
 
 export class HireError extends Error {
-  constructor(message: string, readonly sessionID: string, readonly deliverable?: unknown,
-    readonly providerError?: ProviderError, readonly outcome: 'returned-terminal' | 'unknown' = 'unknown') {
+  constructor(message: string, readonly sessionID: string, readonly deliverable?: unknown, readonly providerError?: ProviderError) {
     super(message);
   }
 }
@@ -367,8 +349,7 @@ export class HireError extends Error {
 function assistantFailure(error: AssistantError, sessionID: string) {
   const providerError = providerErrorOf(error);
   const message = maskKeyLike(`${error.name ?? 'error'}: ${providerError.message}`.trim());
-  return new HireError(message, sessionID, undefined,
-    { ...providerError, message: maskKeyLike(providerError.message) }, 'returned-terminal');
+  return new HireError(message, sessionID, undefined, { ...providerError, message: maskKeyLike(providerError.message) });
 }
 
 /**

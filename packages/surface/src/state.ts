@@ -5,11 +5,9 @@ import {
   listChildAbandonments, abandonedChildMessages, OPERATOR_RECOVERY_PERMISSION, OPERATOR_WRITE_PERMISSION,
   planRevisionStatus, approveCreate, approveDelete, approvePlan, approvePush, chatDirectory, denyRequest, deskState, describeAsk,
   domainSummary, itemText, revisePlan, resumeItem, retryItem, cancelItem, memoryFingerprint, type ResourceRequest, type Runtime,
-  promoteFriction, retryFrictionPromotion, frictionPromotionView, frictionPromotionHistory,
-  frictionFreshness, readRevisions, effectiveTriage, FrictionProposalDigest,
   ownerChatAgent, AttentionAssignmentInput, assignAttention, retryAttentionAssignment, attentionAssignmentView, attentionAssignmentTargets, type AttentionAssignmentView,
   listAttention, needsHumanDecision, changeAttention, humanAttentionActor, recoverRequest, reconcileRequest,
-  listFriction, frictionDetail, readFrictionTriage, type FrictionRecord,
+  listFriction, frictionDetail, type FrictionRecord,
   approveInitiative, reviseInitiative, cancelInitiative, initiativeViews, managerOf, planGrantFor, cancelReminder,
   type AssignmentView, type Initiative, type InitiativeView, type WorkItem,
   isDelegated, isFinished, OWNER_CHANGE_WORKFLOW, PLAN_APPROVAL_PERMISSION, OPERATOR_ID, operatorChatDirectory, WIKI_DELETE_PERMISSION,
@@ -23,7 +21,7 @@ import { planApprovalOf, type PlanApprovalRequest } from './plan-approval-reques
 import { operatorWriteApprovalOf, type OperatorWriteApproval } from './operator-write-approval.ts';
 import { readSessionMessages, readSessionsTitled, readArchivedSessionMessages } from './hire-store.ts';
 import { ordered, SettingsStore } from './settings.ts';
-import { publicFrictionDigest, type PublicFrictionRecord } from './friction-public.ts';
+import type { PublicFrictionRecord } from './friction-public.ts';
 import type { InitiativeSummary, OrgEntry, PublicAssignment, PublicInitiative } from './initiative-public.ts';
 import { InboxReadError } from './inbox-errors.ts';
 import type { ChildRecoveryNotice } from './child-recovery-public.ts';
@@ -81,7 +79,6 @@ export const Decision = z.object({
   reason: z.string().optional(),
   withDelete: z.boolean().optional(),
   assignment: AttentionAssignmentInput.optional(),
-  proposalDigest: FrictionProposalDigest.optional(),
 });
 export type Decision = z.infer<typeof Decision>;
 
@@ -225,7 +222,6 @@ export class SurfaceState {
     readonly hireSessions: (prefix: string) => { id: string; title: string; directory: string; time: { created: number; updated: number } }[] = prefix => readSessionsTitled(prefix),
     readonly archivedMessages: (sessionID: string, directory: string) => unknown[] = readArchivedSessionMessages,
     readonly workspaceExists: (directory: string) => boolean = existsSync,
-    private readonly snapshotSource?: (workspace: string) => Promise<string>,
   ) {
     this.settings = new SettingsStore(settingsFile);
   }
@@ -529,49 +525,17 @@ export class SurfaceState {
   }
 
   /** Public view excludes the saved directory, which is only for host-side notice delivery. */
-  private async publicFriction(record: FrictionRecord, snapshots: Map<string, Promise<string>>): Promise<PublicFrictionRecord> {
+  private publicFriction(record: FrictionRecord): PublicFrictionRecord {
     const { origin, ...fields } = record;
-    const base = { ...fields, sessionID: origin.sessionID };
-    let saved;
-    try {
-      saved = await readFrictionTriage(this.runtime, record.id);
-    } catch {
-      return { ...base, triageError: 'friction_triage_unreadable' };
-    }
-    const unreadable: NonNullable<PublicFrictionRecord['unreadable']> = [];
-    const revisions = await readRevisions(this.runtime, record.id).catch(() => {
-      unreadable.push('friction_revisions_unreadable');
-      return undefined;
-    });
-    const effective = saved && revisions
-      ? await effectiveTriage(this.runtime, record.id, saved, revisions).catch(() => undefined) : undefined;
-    // If the effective read failed despite readable revisions, the investigation cannot be trusted.
-    if (!effective && saved && revisions) return { ...base, triageError: 'friction_triage_unreadable' };
-    const freshness = effective && revisions
-      ? await frictionFreshness(this.runtime, record.id, snapshots, effective, this.snapshotSource).catch(() => undefined) : undefined;
-    const promotion = await frictionPromotionView(this.runtime, record.id).catch(() => undefined);
-    const promotionHistory = await frictionPromotionHistory(this.runtime, record.id).catch(() => {
-      unreadable.push('friction_promotion_history_unreadable');
-      return undefined;
-    });
-    const shown = effective?.triage ?? saved;
-    const triage = shown ? { state: shown.state, updatedAt: shown.updatedAt,
-      reason: shown.reason, investigation: shown.investigation, bundle: shown.bundle, duplicateOf: shown.duplicateOf } : undefined;
-    const latestRevised = revisions?.filter(revision => revision.state === 'revised').at(-1)?.revision ?? 0;
-    const isConsistent = revisions && latestRevised === (effective?.revision ?? 0);
-    const proposalDigest = isConsistent ? publicFrictionDigest(effective, freshness) : undefined;
-    return { ...base, triage, originalInvestigation: saved?.investigation,
-      effectiveRevision: effective?.revision ?? 0, freshness, revisions, promotionHistory,
-      ...(unreadable.length ? { unreadable } : {}), ...(proposalDigest ? { proposalDigest } : {}), promotion };
+    return { ...fields, sessionID: origin.sessionID };
   }
 
   async friction() {
-    const snapshots = new Map<string, Promise<string>>();
-    return Promise.all((await listFriction(this.runtime)).map(record => this.publicFriction(record, snapshots)));
+    return (await listFriction(this.runtime)).map(record => this.publicFriction(record));
   }
 
   async frictionRecord(id: string) {
-    return this.publicFriction(await frictionDetail(this.runtime, id), new Map());
+    return this.publicFriction(await frictionDetail(this.runtime, id));
   }
 
   /** The owner session carrying out an item's plan, and the subagent sessions it started. */
@@ -631,14 +595,6 @@ export class SurfaceState {
       'retry-request': async () => (await recoverRequest(this.runtime, decision.id, 'retry', by, required(reason, 'reason'))).status,
       'cancel-request': async () => (await recoverRequest(this.runtime, decision.id, 'cancel', by, required(reason, 'reason'))).status,
       'retry-attention-assignment': async () => (await retryAttentionAssignment(this.runtime, decision.id, by)).status,
-      'retry-friction-promotion': async () => {
-        const request = await retryFrictionPromotion(this.runtime, decision.id, required(decision.proposalDigest, 'proposal digest'), by);
-        return `${request.id}: ${request.status}`;
-      },
-      'promote-friction': async () => {
-        const request = await promoteFriction(this.runtime, decision.id, required(decision.proposalDigest, 'proposal digest'), by);
-        return `${request.id}: ${request.status}`;
-      },
       'assign-attention': async () => {
         if (!decision.assignment) throw new Error('attention_assignment_required');
         const request = await assignAttention(this.runtime, decision.id, decision.assignment, by);
@@ -737,9 +693,7 @@ export class SurfaceState {
       (await this.runtime.initiatives.list()).map(initiative => [initiative.id, initiative.status, initiative.updatedAt]),
       await memoryFingerprint(this.runtime),
       await listAttention(this.runtime),
-      (await this.friction()).map(entry => [entry.id, entry.count, entry.lastSeen, entry.triage?.updatedAt,
-        entry.triage?.state, entry.triageError, entry.promotion, entry.proposalDigest, entry.freshness,
-        entry.revisions, entry.effectiveRevision, entry.promotionHistory, entry.unreadable]),
+      (await listFriction(this.runtime)).map(entry => [entry.id, entry.count, entry.lastSeen]),
       (await this.runtime.providerHealth.list()).map(record => [record.provider, record.status, record.failures]),
     ]);
   }

@@ -53,7 +53,7 @@ test('re-emitted errored parts replace the same call instead of evicting distinc
   assert.deepEqual(events.context('session').failures.map(failure => failure.tool), ['one', 'two', 'three', 'four', 'five']);
 });
 
-test('two runtimes deduplicate by failure shape and keep first occurrence with one wake', async () => {
+test('two runtimes deduplicate by failure shape and keep first occurrence', async () => {
   const { runtime, state } = await fixture();
   const other = await Runtime.open({ declarations, state });
   const first = await reportFriction(runtime, submission());
@@ -63,7 +63,6 @@ test('two runtimes deduplicate by failure shape and keep first occurrence with o
   assert.equal(second.count, 2);
   assert.equal(second.firstSeen, first.firstSeen);
   assert.deepEqual(second.origin, first.origin);
-  assert.equal((await readdir(join(state, 'friction', 'wakes'))).filter(file => file.endsWith('.json')).length, 1);
   assert.equal((await listFriction(runtime)).length, 1);
   assert.equal((await frictionDetail(runtime, first.id)).count, 2);
   assert.equal((await recentJournal(runtime, 'homelab')).filter(entry => entry.kind === 'friction').length, 2);
@@ -105,14 +104,14 @@ test('a blocked or failed notebook commit cannot hold up friction reads or rejec
 });
 
 test('unknown error shapes retain a safe discriminator and do not merge distinct failures', async () => {
-  const { runtime, state } = await fixture();
+  const { runtime } = await fixture();
   const first = await reportFriction(runtime, { ...submission(), failures: [{ tool: 'bash', input: 'SECRET COMMAND', error: 'daemon refused job 387 /secret/one' }] });
   const repeat = await reportFriction(runtime, { ...submission('homelab', 'repeat'), failures: [{ tool: 'bash', input: 'OTHER SECRET', error: 'daemon refused job 499 /secret/two' }] });
   const different = await reportFriction(runtime, { ...submission('homelab', 'different'), failures: [{ tool: 'bash', input: 'SECRET', error: 'compiler rejected syntax 127 /other/path' }] });
   assert.equal(first.id, repeat.id);
   assert.notEqual(first.id, different.id);
-  assert.equal((await readdir(join(state, 'friction', 'wakes'))).filter(file => file.endsWith('.json')).length, 2);
   const records = await listFriction(runtime);
+  assert.equal(records.length, 2);
   assert.doesNotMatch(JSON.stringify(records), /SECRET|\/secret\//);
   // Generated timestamps and IDs can coincidentally contain these numbers. Check the sanitized failures.
   assert.doesNotMatch(JSON.stringify(records.flatMap(record => record.failures)), /387|499|127/);

@@ -24,7 +24,7 @@ export const OPERATOR_ASK_BASH = [
   'incus delete*', 'incus * delete*',
   '*zfs destroy*', '*zpool destroy*', '*mkfs*', 'dd *', 'sudo dd *',
   'kubectl delete*',
-  '*owners* approve*', '*owners* ship*', '*owners* friction-promot*',
+  '*owners* approve*', '*owners* ship*',
 ] as const;
 
 export function operatorBash(operator: OperatorDeclaration): Record<string, string> {

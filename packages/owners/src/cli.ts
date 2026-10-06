@@ -1,6 +1,4 @@
 import { isMaintenanceQuarantineError } from './maintenance-quarantine.ts';
-import { continuityPreview } from './continuity-preview.ts';
-import { promoteFriction, retryFrictionPromotion, frictionInvestigationView } from './friction-promotion.ts';
 import { execFile } from 'node:child_process';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -11,8 +9,6 @@ import type { WorkItem } from './ledger.ts';
 import { wake } from './owner.ts';
 import { requestDistill } from './memory.ts';
 import { Runtime } from './runtime.ts';
-import { investigateFriction, refreshFriction } from './friction-work.ts';
-import { revalidateFriction, retryFrictionRevalidation } from './friction-revalidation.ts';
 import { askOwner, formatAnswer } from './ask.ts';
 import { approveCreate, approveDelete, denyRequest, processRequests, requestPublish } from './brokering.ts';
 import { DAEMON_LIMITS, daemon, drain, recordDutyRun, tick, type TickLog } from './daemon.ts';
@@ -134,36 +130,6 @@ const WIKI_COMMANDS: Record<string, Command> = {
 };
 
 const COMMANDS: Record<string, Command> = {
-  async 'friction-triage'(runtime, [id]) {
-    console.log(JSON.stringify(await investigateFriction(runtime, required(id, 'friction id')), null, 2));
-  },
-  async 'friction-refresh'(runtime, [id]) {
-    console.log(JSON.stringify(await refreshFriction(runtime, required(id, 'friction id')), null, 2));
-  },
-  async 'friction-revalidate'(runtime, [id]) {
-    console.log(JSON.stringify(await revalidateFriction(runtime, required(id, 'friction id')), null, 2));
-  },
-  async 'friction-revalidation-retry'(runtime, [id, referenceCommit, failedToken]) {
-    const approval = {
-      referenceCommit: required(referenceCommit, 'reference commit'),
-      failedToken: required(failedToken, 'failed claim token'),
-      authorizedBy: userInfo().username,
-    };
-    const retried = await retryFrictionRevalidation(runtime, required(id, 'friction id'), approval);
-    console.log(JSON.stringify(retried, null, 2));
-  },
-  async 'friction-investigation'(runtime, [id]) {
-    const selected = required(id, 'friction id');
-    console.log(JSON.stringify(await frictionInvestigationView(runtime, selected), null, 2));
-  },
-  async 'friction-promotion-retry'(runtime, [id, digest]) {
-    const request = await retryFrictionPromotion(runtime, required(id, 'friction id'), required(digest, 'proposal digest'), userInfo().username);
-    console.log(`${request.id}: ${request.status}`);
-  },
-  async 'friction-promote'(runtime, [id, digest]) {
-    const request = await promoteFriction(runtime, required(id, 'friction id'), required(digest, 'proposal digest'), userInfo().username);
-    console.log(`${request.id}: ${request.status}`);
-  },
   async wake(runtime, [ownerId, dutyId = 'survey']) {
     console.log(`waking ${ownerId} for ${dutyId} (${runtime.owner(required(ownerId, 'owner')).model})`);
     const result = await wake(runtime, required(ownerId, 'owner'), dutyId);
@@ -371,8 +337,8 @@ function required(value: string | undefined, name: string) {
 
 const [commandName, ...args] = positionals;
 const command = COMMANDS[commandName ?? ''];
-if (!command && !['init', 'continuity-preview'].includes(commandName ?? '')) {
-  console.error(`usage: owners <${[...Object.keys(COMMANDS), 'continuity-preview'].join('|')}> …`);
+if (!command && commandName !== 'init') {
+  console.error(`usage: owners <${Object.keys(COMMANDS).join('|')}> …`);
   process.exit(2);
 }
 /** Commands that only read, or only record a person's decision, never take the runtime lock. */
@@ -381,17 +347,15 @@ const LOCK_FREE = [
   'pause', 'resume', 'retry', 'cancel', 'desk', 'desk-state', 'retract', 'ask', 'request-publish', 'propose',
   'ship', 'approve-push', 'approve-create', 'approve-delete', 'deny-request',
   'desk-review-reset', 'initiatives', 'initiative', 'approve-initiative', 'revise-initiative', 'cancel-initiative',
-  'wiki', 'friction-investigation', 'friction-promote', 'friction-promotion-retry',
+  'wiki',
 ];
 try {
   // A daemon may restart while the deployment gate is held. Runtime.open only ensures the existing state
   // directory and reads declarations; daemon startup and every tick take their own admissions.
   // All other commands still acquire before Runtime.open, including direct CLI effects.
-  const lease = ['daemon', 'continuity-preview'].includes(commandName ?? '') ? undefined : await beginAdmission(options.state!, `cli-${commandName}`);
+  const lease = commandName === 'daemon' ? undefined : await beginAdmission(options.state!, `cli-${commandName}`);
   try {
-    if (commandName === 'continuity-preview') {
-      console.log(JSON.stringify(await continuityPreview({ declarations: options.declarations!, state: options.state! }), null, 2));
-    } else if (commandName === 'init') {
+    if (commandName === 'init') {
       await initConfig(options.declarations!);
     } else {
       const runtime = await Runtime.open({ declarations: options.declarations!, state: options.state! });

@@ -62,17 +62,7 @@ cause, and the fix is either applied through the normal gates or reported to the
   provider: the authorized person fixes credentials (`opencode auth login`, or the key reference in
   `providers.yaml`), then confirms a successful call on a declared model. Never delete health evidence
   or print envfile/key values to make the banner disappear.
-- **Friction:** configured triage collects a bounded host incident bundle before diagnosis: linked
-  ledger/request/effect/session/check/maintenance facts, local Git/history/containment, build identities,
-  schedules and declared model/provider/remote/credential references. It never reads credential values,
-  arbitrary model-selected paths or raw tool output. `owners friction-investigation <id>` reads the
-  evidence and reasons; `owners friction-refresh <id>` collects a new evidence generation for a completed
-  diagnosis, including at the same source commit. Unchanged or uncertain paid attempts are not repeated.
-  Eligible proposals route to the configured owner's normal plan/publication workflow without a person
-  relaying evidence or promoting every report (`routeProposals: false` retains manual routing).
-  Missing operational proof stays owner incident follow-up in status/desk, not Attention.
-  Duplicate reports source-link the same demonstrated host incident; neither a model claim nor a merged
-  PR/source change alone retires a report. Closure needs positive applicable host condition/version facts.
+- **Friction:** reports are deduplicated in `state/friction/records` and listed in the Friction rail; nothing triages them.
 - **Attention:** Seen is a host-bound person action. Owners can freely acknowledge/resolve/reopen typed
   housekeeping, but cannot hide `ci_person`, `desk_review_exhausted` or ambiguous legacy human choices.
 - **Wiki:** optional, declared in `wiki.yaml` in the config directory (`repository`, `branch`, `pagesDirectory`,

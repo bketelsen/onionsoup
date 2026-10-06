@@ -11,7 +11,7 @@ import { withRecordLock } from './record-lock.ts';
 
 const Hash = z.string().regex(/^[a-f0-9]{64}$/);
 const Build = z.string().regex(/^[a-f0-9]{40}$/);
-export const RuntimeReleaseManifest = z.object({ buildId: Build, capabilities: z.object({
+const RuntimeReleaseManifest =z.object({ buildId: Build, capabilities: z.object({
   legacyMaintenanceQuarantine: z.literal(1), legacyMaintenanceRelease: z.literal(1).optional(),
 }).strict().optional() }).strict();
 const LegacyAdmission = AdmissionRecord.omit({ maintenance: true }).strict();

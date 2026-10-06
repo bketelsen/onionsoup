@@ -472,7 +472,7 @@ No reminder is fired, cancelled or rescheduled by the preview. Finished worktree
 with an old `kept-*` result: current cleanup eligibility needs separate proof. A pending operator wake
 without a message identity is an unsubmitted actionable continuation, not proof of delivery or duplication.
 This inventory addresses replay of the two selected legacy plugin maintenance producers. Ordinary
-daemon duties, friction investigations and memory work resume under their existing gates after release;
+daemon duties and memory work resume under their existing gates after release;
 the inventory does not declare those unrelated workflows completed or grant them new authority.
 
 An eligible preview binds current processes, authenticated endpoint, all-project session/transcript
