@@ -31,10 +31,9 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
   Revision is distinct from cancellation, not a new goal-management layer.
 
 - **Cross-owner progress is recorded state, not omniscience.** Request participants and the receiving owner's
-  direct manager can read linked progress without relaying it through the person. Origin-pinned updates are
-  informational and do not wake a model. Missing origins stay pull-only; there is no historical backfill.
-  Request-scoped host proposal attempts expose bounded test/review evidence, with stale and superseded labels.
-  External/manual work has no such evidence until a supported host proposal or reconciliation runs; between-tick transitions can be missed.
+  direct manager can read linked progress without relaying it through the person; nothing posts it into their
+  chats. Request-scoped host proposal attempts expose bounded test/review evidence, with stale and superseded labels.
+  External/manual work has no such evidence until a supported host proposal or reconciliation runs.
   Status does not independently check live services or prove deployment.
 
 - **Legacy operational reports may lack host evidence.** Non-PR completion now uses configured checks,
@@ -50,8 +49,8 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
 
 - **Uncertain direct-request review wakes need exact receipts.** A requester who is the receiving owner's manager
   can review under its existing applicable `approve-plans` grant. A separate durable continuation wakes that
-  requester; informational notices remain inert. A retired requester workspace now routes to a fresh requester-owned
-  continuation, never the report's workspace. Missing persona blocks delivery; the human inbox remains available.
+  requester. A retired requester workspace now routes to a fresh requester-owned continuation, never the report's
+  workspace. Missing persona blocks delivery; the human inbox remains available.
   Pre-send prerequisites retry; an uncertain attempted send is reconciled by its exact saved body/message receipt
   and never blindly repeated. Legacy ID-only receipts remain unverified. Scope matching is an explicit reviewer assessment, not a host inference from prose. Unresolved
   scope stays at the human gate. Peer reviewers and blanket coordinator authority remain unsupported.

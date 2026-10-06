@@ -661,10 +661,11 @@ test('desk PR CI failures wake the owner once per observed head', async () => {
   });
 });
 
-test('desk PR merges and closes notify the original chat and remain visible in owner work', async context => {
+test('a closed desk PR notifies the original chat, a merged one is journaled only, and both stay visible', async context => {
   const { noticeWorkChanges, pendingNotices } = await import('../src/notices.ts');
   const { deskState } = await import('@onionsoup/owners');
-  for (const terminal of ['MERGED', 'CLOSED']) {
+  const wakesChat = { MERGED: false, CLOSED: true };
+  for (const [terminal, isQueued] of Object.entries(wakesChat)) {
     await context.test(terminal, async () => {
       const { runtime, root, remote } = await fixture();
       const desk = await ensureDesk(runtime.repositoryOwner('clippy'), runtime.desksRoot);
@@ -690,9 +691,9 @@ test('desk PR merges and closes notify the original chat and remain visible in o
         const raised = await noticeWorkChanges(runtime, fallbackDirectory);
         const notice = raised.find(entry => entry.workItem === source!.id)!;
         assert.equal(notice.change, `pr-${terminal.toLowerCase()}`);
-        assert.deepEqual(notice.origin, origin);
-        assert.ok((await pendingNotices(runtime)).some(entry => entry.id === notice.id));
-        assert.deepEqual(await noticeWorkChanges(runtime, fallbackDirectory), [], 'terminal notice is queued once');
+        assert.deepEqual(notice.origin, isQueued ? origin : undefined);
+        assert.equal((await pendingNotices(runtime)).some(entry => entry.id === notice.id), isQueued);
+        assert.deepEqual(await noticeWorkChanges(runtime, fallbackDirectory), [], 'terminal change is raised once');
       });
     });
   }
@@ -712,7 +713,7 @@ test('an old open desk PR remains in owner status text with its PR URL', async (
   assert.doesNotMatch(text, /Finished in the last/);
 });
 
-test('a desk PR merged under its grant between ticks queues a merge notice for the proposing chat', async () => {
+test('a desk PR merged under its grant between ticks is journaled without waking the proposing chat', async () => {
   const { noticeWorkChanges, pendingNotices } = await import('../src/notices.ts');
   const { runtime, root, remote } = await fixture();
   const owner = runtime.declarations.owners.get('clippy')!;
@@ -731,9 +732,10 @@ test('a desk PR merged under its grant between ticks queues a merge notice for t
     const notices = await noticeWorkChanges(runtime, fallbackDirectory);
     assert.equal(notices.length, 1);
     assert.equal(notices[0]!.change, 'pr-merged');
-    assert.deepEqual(notices[0]!.origin, origin);
+    assert.equal(notices[0]!.origin, undefined);
     assert.match(notices[0]!.text, /was merged/);
-    assert.equal((await pendingNotices(runtime))[0]!.change, 'pr-merged');
+    assert.deepEqual(await pendingNotices(runtime), []);
+    assert.ok((await journalKinds(runtime, 'clippy')).includes('work-status'));
     assert.deepEqual(await noticeWorkChanges(runtime, fallbackDirectory), []);
   });
 });
@@ -895,7 +897,7 @@ test('a desk review that approves over a blocker sends the change back', async (
   assert.deepEqual((await deskReviewRounds(runtime, 'clippy', 'example/clippy')).map(round => round.findings[0]?.issue), ['a wrong claim']);
 });
 
-test('a merged PR is recorded on the next tick, and its request and notice follow on that tick', async () => {
+test('a merged PR is recorded on the next tick, and its request follows on that tick without waking the session', async () => {
   const { tick, drain } = await import('../src/daemon.ts');
   const { requestWork } = await import('../src/delegation.ts');
   const { noticeWorkChanges, pendingNotices } = await import('../src/notices.ts');
@@ -923,7 +925,7 @@ test('a merged PR is recorded on the next tick, and its request and notice follo
   assert.equal((await runtime.ledger.get(item.id)).publication?.state, 'merged');
   assert.equal((await runtime.requests.get(request.id)).status, 'completed');
   const merged = (await pendingNotices(runtime)).find(notice => notice.workItem === item.id && notice.change === 'pr-merged');
-  assert.deepEqual(merged?.origin, session, 'the session carrying out the plan hears it');
+  assert.equal(merged, undefined, 'the person merged it; the session carrying out the plan is not woken');
   assert.deepEqual(errors, []);
 });
 
@@ -1560,7 +1562,7 @@ test('first external reconciliation refuses an unreachable merge without changin
 });
 
 test('delegated host checks and review become request-scoped interim evidence without waking or publishing', async () => {
-  const { requestProgressDetail, noticeRequestProgress } = await import('../src/request-status.ts');
+  const { requestProgressDetail } = await import('../src/request-status.ts');
   const { readRequestWorkEvidence } = await import('../src/request-work-evidence.ts');
   const { agentConfig } = await import('../src/opencode.ts');
   const { runtime } = await fixture();
@@ -1569,8 +1571,6 @@ test('delegated host checks and review become request-scoped interim evidence wi
   const item = await runtime.ledger.create('clippy', 'owner-change', proposal, { status: 'working', request: request.id,
     planDocument: { markdown: 'Approved method', digest: 'original-plan' } });
   await runtime.requests.update(request.id, current => ({ ...current, status: 'work-running', workItem: item.id }));
-  const fail = (_id: string, error: unknown): never => { throw error; };
-  await noticeRequestProgress(runtime, fail);
   const owner = runtime.declarations.owners.get('clippy')!;
   if (owner.domain.kind === 'git-repository') owner.domain.verify = [['sh', '-c', 'echo private-test-output; true']];
   const desk = await ensureDesk(runtime.repositoryOwner('clippy'), runtime.desksRoot);
@@ -1588,8 +1588,6 @@ test('delegated host checks and review become request-scoped interim evidence wi
     assert.ok(hire.brief.includes(JSON.stringify(evidence)), 'requester and reviewer see the same host evidence');
     assert.ok(hire.brief.includes(proposal.acceptance[0]!));
     assert.doesNotMatch(status, /private-test-output/);
-    assert.equal(await noticeRequestProgress(runtime, fail), 1);
-    assert.equal(await noticeRequestProgress(runtime, fail), 0);
     const agents = agentConfig(desk.path, runtime.toolsDirectory, undefined).agent;
     assert.deepEqual(agents['onionsoup-reviewer']!.permission.read, agents['onionsoup-implementer']!.permission.read);
     return revise('A required live prerequisite is missing');
@@ -1601,8 +1599,6 @@ test('delegated host checks and review become request-scoped interim evidence wi
   assert.match(status, /\[blocker\].*required live prerequisite/);
   assert.match(status, /current workspace, deployment and goal completion are unknown/);
   assert.equal(await requestProgressDetail(runtime, 'moneo', request.id), 'No visible request with that ID.');
-  assert.equal(await noticeRequestProgress(runtime, fail), 1);
-  assert.equal(await noticeRequestProgress(runtime, fail), 0);
   assert.equal(reviews, 1);
   assert.equal((await runtime.requests.list()).length, 1);
   assert.equal((await runtime.ledger.get(item.id)).publication, undefined);
@@ -1665,7 +1661,7 @@ test('evidence storage failure cannot replace the original reviewer error', asyn
 });
 
 test('fresh external reconciliation exposes interim host evidence to Odrade and final merged progress without duplicate review', async () => {
-  const { requestProgressDetail, noticeRequestProgress } = await import('../src/request-status.ts');
+  const { requestProgressDetail } = await import('../src/request-status.ts');
   const { readRequestWorkEvidence } = await import('../src/request-work-evidence.ts');
   const { trackDelegatedWork } = await import('../src/delegation.ts');
   const { runtime, root, remote, desk, head, item, request, external } = await externalFixture();
@@ -1678,8 +1674,6 @@ test('fresh external reconciliation exposes interim host evidence to Odrade and 
   external.draft = false;
   external.merge_commit_sha = head;
   runtime.repositoryOwner('clippy').domain.verify.push(['sh', '-c', 'test -f external']);
-  const fail = (_id: string, error: unknown): never => { throw error; };
-  await noticeRequestProgress(runtime, fail);
   let reviews = 0;
   scriptHires(runtime, async hired => {
     reviews++;
@@ -1689,7 +1683,6 @@ test('fresh external reconciliation exposes interim host evidence to Odrade and 
     assert.match(status, /no completed review/);
     const evidence = (await readRequestWorkEvidence(runtime, item)).verification!;
     assert.ok(hired.brief.includes(JSON.stringify(evidence)));
-    assert.equal(await noticeRequestProgress(runtime, fail), 1);
     return verdict;
   });
   await fakeGithub(root, remote, async () => {
@@ -1700,8 +1693,6 @@ test('fresh external reconciliation exposes interim host evidence to Odrade and 
     assert.match(status, /request completed/);
     assert.match(status, /Review by .*: approve/);
     assert.match(status, /merged \(recorded; deployment unknown\)/);
-    assert.equal(await noticeRequestProgress(runtime, fail), 1);
-    assert.equal(await noticeRequestProgress(runtime, fail), 0);
     await reconcileExternalPublication(runtime, 'clippy', item.id, external.html_url, 'person');
     assert.equal(reviews, 1);
     assert.equal((await runtime.requests.list()).length, 1);
@@ -1871,22 +1862,4 @@ test('merged observation refuses metadata changes during observation and lifecyc
     assert.equal((await runtime.ledger.get(item.id)).externalPrObservations!.length, 1);
     assert.equal((await runtime.ledger.get(item.id)).status, 'cancelled');
   });
-});
-
-test('historical observation status addition preserves pre-observation fingerprints without backlog notices', async () => {
-  const { createHash } = await import('node:crypto');
-  const { noticeRequestProgress, requestProgress } = await import('../src/request-status.ts');
-  const { runtime, item, request } = await externalFixture();
-  const currentRequest = await runtime.requests.update(request.id, current => ({ ...current,
-    origin: { sessionID: 'request-origin', directory: '/fixture/origin' } }));
-  const progress = requestProgress(currentRequest, item);
-  const { observedAt: _observedAt, lastRecordedAt: _lastRecordedAt, stale: _stale,
-    hostEvidence: _hostEvidence, hostEvidenceState: _hostEvidenceState, historicalMerge: _historicalMerge, ...legacy } = progress;
-  const fingerprint = createHash('sha256').update(JSON.stringify(legacy)).digest('hex');
-  const directory = join(runtime.stateDirectory, 'notices', 'request-progress');
-  await mkdir(directory, { recursive: true });
-  await writeFile(join(directory, 'baseline.json'), JSON.stringify({ version: 1,
-    observedAt: new Date().toISOString(), fingerprints: { [request.id]: fingerprint } }));
-  assert.equal(await noticeRequestProgress(runtime, (_id, error) => { throw error; }), 0);
-  assert.equal(await noticeRequestProgress(runtime, (_id, error) => { throw error; }), 0);
 });
