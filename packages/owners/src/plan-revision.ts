@@ -14,7 +14,7 @@ import type { Runtime } from './runtime.ts';
 import { MessageDeliveryBody } from './message-receipt.ts';
 
 export const PLAN_REVISION_LIMITS = { perPass: 20, textChars: 8_000 };
-export const Revision = z.object({
+const Revision = z.object({
   id: z.string(), messageID: z.string().optional(), item: z.string(), owner: z.string(), expected: z.string(), plan: z.string(),
   feedback: z.string(), note: HumanNote, origin: ChatOrigin.optional(),
   context: z.string().optional(), delivery: MessageDeliveryBody.optional(),

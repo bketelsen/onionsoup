@@ -41,7 +41,7 @@ and restarts **both** `onionsoup-owners.service` and `onionsoup-surface.service`
 must load the plugin through the stable release pointer. Check both services, authenticated OpenCode health,
 surface behavior and the reported build ID; an active systemd process alone is not readiness or plugin attestation.
 
-Do not clear locks, admissions, notices or drain/quarantine records to make rollout proceed. Unknown effects
+Do not clear locks, admissions, notices or drain records to make rollout proceed. Unknown effects
 stay held; use only the documented exact-receipt recovery procedure when applicable.
 Rollback switches to the retained verified release, restarts both units and verifies it. Failed rollback
 keeps the guard held. A code-pointer rollback does not roll back state or configuration; preserve their backups
