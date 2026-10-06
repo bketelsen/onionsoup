@@ -17,9 +17,9 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
   Host-bound person Seen remains valid for legacy entries; owners cannot acknowledge/resolve/reopen human
   decisions or unknown provenance. Typed owner-housekeeping remains freely actionable.
 
-- **Unclassified legacy attention still needs interpretation.** New survey suggestions, maintenance and manager
-  escalations carry host routing evidence and stay in owner backlog. Original host journal envelopes can identify
-  older worktree, delegation and escalation cards for non-destructive reconciliation. Missing source records and
+- **Unclassified legacy attention still needs interpretation.** New survey suggestions and maintenance carry host
+  routing evidence and stay in owner backlog. Original host journal envelopes can identify older worktree and
+  delegation cards for non-destructive reconciliation. Missing source records and
   ambiguous attention-mode survey prose remain conservative human choices; no model-text classifier or bulk
   dismissal resolves them. Backlog visibility does not itself schedule owner work or grant new authority.
 
@@ -130,15 +130,12 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
 - **No budgets.** Per-owner cost caps and wake-rate limits are designed but not enforced, and cost is only tracked
   for providers that report it (Copilot); ChatGPT OAuth reports $0.
 
-- **Repository initiative chains can stall on the person's merge.** A repository assignment completes when its PR merges
-  or its exact repository closure is accepted; verified operational assignments need no PR. Repository steps
-  waits wherever a PR waits to be merged (the initiative view says so), unless the report holds a `merge` grant for
-  its repository.
-- **No initiatives between peers.** Only a manager plans across owners, through its direct reports; peers still
-  delegate one request at a time, and the receiver may decline.
-- **Waking a manager needs the surface running.** Manager notices are posted by the plugin in the surface's
-  opencode; with the surface down they stay queued. Retired initiative chats route to a fresh manager-owned
-  continuation with retained history where available, not a guessed latest human chat.
+- **A manager sequences cross-repository work by hand.** She sends one request per report and sends the next when the
+  one it depends on has merged; nothing dispatches in order for her. Peers delegate one request at a time, and the
+  receiver may decline.
+- **Waking a manager needs the surface running.** Plan-review wakes and her reports' messages are posted by the
+  plugin in the surface's opencode; with the surface down they stay queued. Retired requester chats route to a fresh
+  manager-owned continuation with retained history where available, not a guessed latest human chat.
 - **Some configuration still needs a surface restart.** The plugin re-reads the configuration every
   `PLUGIN_LIMITS.declarationsMs` (15 s) before tools and turns, so charters, rosters, reporting lines, grants and
   repositories apply to live chats at once. A new owner, its MCP servers, chat permission rules and the tool list a

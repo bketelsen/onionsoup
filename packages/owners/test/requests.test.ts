@@ -504,11 +504,10 @@ test('a journal failure after a persisted owner decision does not reopen that de
   assert.equal(hires, 1);
 });
 
-test('work from a declared manager is accepted without a hire, carries its assignment, and reserves only the report', async () => {
+test('work from a declared manager is accepted without a hire and reserves only the report', async () => {
   const runtime = await setup();
   forbidHires(runtime);
-  const assignment = { initiative: 'i-20260924-abcdef', assignment: 'a1' };
-  const request = await requestWork(runtime, 'odrade', 'clippy', proposal, assignment);
+  const request = await requestWork(runtime, 'odrade', 'clippy', proposal);
   assert.deepEqual([...requestParticipants(runtime, request)], ['clippy']);
   const peer = await requestWork(runtime, 'homelab', 'clippy', proposal);
   assert.deepEqual([...requestParticipants(runtime, peer)].sort(), ['clippy', 'homelab']);
@@ -517,7 +516,6 @@ test('work from a declared manager is accepted without a hire, carries its assig
   assert.equal(accepted.status, 'work-running');
   assert.match(accepted.publishDecision!.reply, /odrade, clippy's manager; accepted automatically/);
   const item = await runtime.ledger.get(accepted.workItem!);
-  assert.deepEqual(item.assignment, assignment);
   assert.equal(item.status, 'planning');
   for (const owner of ['odrade', 'clippy']) {
     assert.ok((await journalOf(runtime, owner)).some(entry => entry.kind === 'request-accepted' && entry.note?.includes('accepted automatically')));
@@ -526,23 +524,19 @@ test('work from a declared manager is accepted without a hire, carries its assig
   assert.equal((await runtime.requests.get(peer.id)).status, 'pending-owner', 'a peer request still needs the receiver to decide');
 });
 
-test('a manager hears how assigned work went in the chat its initiative was drafted in', async () => {
+test('work a removed initiative assigned still reads and saves its legacy assignment, and only its owner hears about it', async () => {
   const runtime = await setup();
   forbidHires(runtime);
-  const origin = { sessionID: 'ses_odrade', directory: '/evidence/odrade' };
-  const initiative = await runtime.initiatives.open('odrade', { title: 'Org change', goal: 'g', rationale: 'r', assignments: [] }, origin);
-  const item = await runtime.ledger.create('clippy', 'change', proposal, { assignment: { initiative: initiative.id, assignment: 'a1' } });
+  const assignment = { initiative: 'i-20260924-abcdef', assignment: 'a1' };
+  const origin = { sessionID: 'ses_clippy', directory: '/desks/clippy' };
+  const item = await runtime.ledger.create('clippy', 'change', proposal, { assignment, origin });
   const chatDirectory = async (ownerId: string) => `/desks/${ownerId}`;
   assert.deepEqual(await noticeWorkChanges(runtime, chatDirectory), []);
   await runtime.ledger.save({ ...item, status: 'failed', reason: 'verification_failed' });
+  assert.deepEqual((await runtime.ledger.get(item.id)).assignment, assignment);
   const raised = await noticeWorkChanges(runtime, chatDirectory);
-  assert.deepEqual(raised.map(notice => notice.owner).sort(), ['clippy', 'odrade']);
-  const pending = await pendingNotices(runtime);
-  assert.equal(pending.length, 1, 'the report has no chat for this work; only the manager is woken');
-  assert.ok(pending[0]?.id.startsWith(`${item.id}-failed-manager-`));
-  assert.deepEqual(pending[0]?.origin, origin);
-  assert.ok(pending[0]!.text.includes(`clippy's work ${item.id} "Repair domain" (assignment a1 of initiative ${initiative.id}) failed: verification_failed`));
-  assert.ok((await journalOf(runtime, 'odrade')).some(entry => entry.kind === 'work-status' && entry.workItem === item.id && entry.outcome === 'failed'));
+  assert.deepEqual(raised.map(notice => notice.owner), ['clippy']);
+  assert.deepEqual((await pendingNotices(runtime)).map(notice => notice.origin), [origin]);
 });
 
 test('a merged PR is journaled without waking the chat; a failure still wakes it', async () => {

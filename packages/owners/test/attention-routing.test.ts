@@ -7,7 +7,6 @@ import { test } from 'node:test';
 import { changeAttention, listAttention, humanAttentionActor } from '../src/attention.ts';
 import { needsHumanDecision } from '../src/attention-routing.ts';
 import { deskState } from '../src/desk.ts';
-import { raiseToManager, resolveEscalation } from '../src/org-work.ts';
 import { wake } from '../src/owner.ts';
 import { Runtime } from '../src/runtime.ts';
 import { git } from '../src/workspace.ts';
@@ -93,27 +92,18 @@ test('legacy index migration preserves Seen and unpublished commits, resolves on
   assert.deepEqual(await listAttention(reopened), resolved);
 });
 
-test('manager escalations are owner follow-up and both typed and exact legacy journal cards clear from their resolution', async () => {
+test('escalations on removed initiatives still parse and clear as owner follow-up; their old prose stays a human choice', async () => {
   const runtime = await fixture();
-  await runtime.initiatives.open('odrade', {
-    title: 'Earlier unrelated initiative', goal: 'Other work', rationale: 'Fixture', assignments: [],
-  });
-  const initiative = await runtime.initiatives.open('odrade', {
-    title: 'Checks', goal: 'Useful checks', rationale: 'Gap',
-    assignments: [{ id: 'checks', to: 'clippy', proposal, after: [] }],
-  });
-  const escalation = await raiseToManager(runtime, 'clippy', { initiative: initiative.id, assignment: 'checks', kind: 'question', note: 'Which checks?' });
   const notebook = runtime.notebook('odrade');
-  await notebook.journal({ kind: 'attention', note: `clippy escalated (question) on ${initiative.id}/checks: Which checks?` });
-  await notebook.journal({ kind: 'attention', note: `Unrelated report mentions ${initiative.id}: Which checks?` });
-  let entries = await listAttention(runtime);
-  assert.equal(entries.filter(entry => entry.provenance?.kind === 'escalation').length, 2);
+  await notebook.journal({ kind: 'attention', note: 'clippy escalated (question) on i-20260924-abcdef/checks: Which checks?',
+    provenance: { kind: 'escalation', initiative: 'i-20260924-abcdef', escalation: 'e-12345678' } });
+  await notebook.journal({ kind: 'attention', note: 'clippy escalated (question) on i-20260924-abcdef/checks: Which tests?' });
+  const entries = await listAttention(runtime);
+  const typed = entries.filter(entry => entry.provenance?.kind === 'escalation');
+  assert.equal(typed.length, 1);
+  assert.equal(typed[0].status, 'resolved');
+  assert.equal(typed[0].resolution?.code, 'initiatives_removed');
   assert.equal(entries.filter(needsHumanDecision).length, 1, 'unclassified prose is not suppressed');
-  await resolveEscalation(runtime, 'odrade', initiative.id, escalation.id, 'Use the existing suite');
-  entries = await listAttention(runtime);
-  assert.ok(entries.filter(entry => entry.provenance?.kind === 'escalation')
-    .every(entry => entry.status === 'resolved' && entry.resolution?.code === 'escalation_resolved'));
-  assert.equal(entries.filter(needsHumanDecision).length, 1);
 });
 
 test('legacy delegation cancellation clears both participant cards, not an unrelated failed request or authority discrepancy', async () => {
@@ -125,25 +115,6 @@ test('legacy delegation cancellation clears both participant cards, not an unrel
     kind: 'attention', note: `${request.id} (homelab → clippy): ${item.id}: failed: original`,
   });
 
-  test('ambiguous legacy escalations do not borrow a different escalation resolution', async () => {
-    const runtime = await fixture();
-    const initiative = await runtime.initiatives.open('odrade', {
-      title: 'Checks', goal: 'Useful checks', rationale: 'Gap',
-      assignments: [{ id: 'checks', to: 'clippy', proposal, after: [] }],
-    });
-    const at = new Date().toISOString();
-    const escalation = { kind: 'question' as const, from: 'clippy', assignment: 'checks', note: 'Which checks?', at };
-    await runtime.initiatives.update(initiative.id, current => ({ ...current, escalations: [
-      { ...escalation, id: 'e-first', resolution: { by: 'owner:odrade', at, note: 'Answered earlier' } },
-      { ...escalation, id: 'e-second' },
-    ] }));
-    await runtime.notebook('odrade').journal({ kind: 'attention',
-      note: `clippy escalated (question) on ${initiative.id}/checks: Which checks?` });
-    const [entry] = await listAttention(runtime);
-    assert.equal(entry.status, 'open');
-    assert.equal(entry.provenance, undefined);
-    assert.equal(needsHumanDecision(entry), true);
-  });
   await runtime.notebook('homelab').journal({ kind: 'attention', note: 'Charter and configuration disagree; the person must choose authority' });
   const other = await runtime.requests.open('homelab', 'clippy', { kind: 'work', purpose: proposal.goal, proposal }, 'none');
   await runtime.requests.save({ ...other, status: 'completed' });

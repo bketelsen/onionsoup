@@ -8,8 +8,7 @@ import {
   ownerChatAgent, AttentionAssignmentInput, assignAttention, retryAttentionAssignment, attentionAssignmentView, attentionAssignmentTargets, type AttentionAssignmentView,
   listAttention, needsHumanDecision, changeAttention, humanAttentionActor, recoverRequest, reconcileRequest,
   listFriction, frictionDetail, type FrictionRecord,
-  approveInitiative, reviseInitiative, cancelInitiative, initiativeViews, managerOf, planGrantFor, cancelReminder,
-  type AssignmentView, type Initiative, type InitiativeView, type WorkItem,
+  managerOf, cancelReminder, type WorkItem,
   isDelegated, isFinished, OWNER_CHANGE_WORKFLOW, PLAN_APPROVAL_PERMISSION, OPERATOR_ID, operatorChatDirectory, WIKI_DELETE_PERMISSION,
   providerHealthViews, type ProviderHealthView, type OwnerDeclaration,
   workSessionDirectories,
@@ -22,7 +21,7 @@ import { operatorWriteApprovalOf, type OperatorWriteApproval } from './operator-
 import { readSessionMessages, readSessionsTitled, readArchivedSessionMessages } from './hire-store.ts';
 import { ordered, SettingsStore } from './settings.ts';
 import type { PublicFrictionRecord } from './friction-public.ts';
-import type { InitiativeSummary, OrgEntry, PublicAssignment, PublicInitiative } from './initiative-public.ts';
+import type { OrgEntry } from './org-public.ts';
 import { InboxReadError } from './inbox-errors.ts';
 import type { ChildRecoveryNotice } from './child-recovery-public.ts';
 import type { ItemSession } from './item-session-public.ts';
@@ -67,6 +66,10 @@ function awaitsPush(item: WorkItem) {
   return item.status === 'awaiting-push-approval';
 }
 
+function planEntry(item: WorkItem): InboxEntry {
+  return { kind: 'plan', id: item.id, owner: item.owner, title: item.proposal.title, detail: item.proposal.goal, at: item.updatedAt };
+}
+
 function pushEntry(item: WorkItem): InboxEntry {
   return { kind: 'push', id: item.id, owner: item.owner, title: item.proposal.title, detail: item.rebaseOf?.prUrl ?? '', at: item.updatedAt };
 }
@@ -83,7 +86,7 @@ export const Decision = z.object({
 export type Decision = z.infer<typeof Decision>;
 
 export interface InboxEntry {
-  kind: 'plan' | 'push' | 'create' | 'delete' | 'permission' | 'question' | 'request-recovery' | 'attention' | 'initiative' | 'provider-auth' | 'plan-revision-blocked';
+  kind: 'plan' | 'push' | 'create' | 'delete' | 'permission' | 'question' | 'request-recovery' | 'attention' | 'provider-auth' | 'plan-revision-blocked';
   id: string;
   owner: string;
   title: string;
@@ -167,46 +170,6 @@ function runtimeWorkOf(items: readonly WorkItem[], ownerId: string): RuntimeWork
     .map(item => ({ id: item.id, title: item.proposal.title, status: item.status }));
 }
 
-/** How deep an assignment sits in its initiative's dependency order: 0 needs nothing first. */
-function dependencyDepths(assignments: readonly AssignmentView[]) {
-  const byId = new Map(assignments.map(assignment => [assignment.id, assignment]));
-  const depths = new Map<string, number>();
-  const depth = (id: string, path: readonly string[]): number => {
-    const known = depths.get(id);
-    if (known !== undefined) return known;
-    // A draft may still hold a cycle; submission refuses it, so draw it flat rather than recurse forever.
-    const after = (byId.get(id)?.after ?? []).filter(dependency => !path.includes(dependency));
-    const value = after.length ? 1 + Math.max(...after.map(dependency => depth(dependency, [...path, id]))) : 0;
-    depths.set(id, value);
-    return value;
-  };
-  return new Map(assignments.map(assignment => [assignment.id, depth(assignment.id, [])]));
-}
-
-function publicAssignment(assignment: AssignmentView, depth: number): PublicAssignment {
-  const { item } = assignment;
-  return {
-    id: assignment.id, to: assignment.to, title: assignment.proposal.title, after: assignment.after, depth, state: assignment.state,
-    request: assignment.request,
-    item: item && { id: item.id, status: item.status, url: item.publication?.url, prState: item.publication?.state },
-  };
-}
-
-function publicInitiative(view: InitiativeView): PublicInitiative {
-  const { origin: _origin, assignments, ...fields } = view;
-  const depths = dependencyDepths(assignments);
-  const shown = assignments.map(assignment => publicAssignment(assignment, depths.get(assignment.id) ?? 0));
-  return { ...fields, assignments: shown.sort((left, right) => left.depth - right.depth) };
-}
-
-function initiativeSummary(view: InitiativeView): InitiativeSummary {
-  return {
-    id: view.id, owner: view.owner, title: view.title, status: view.status, revision: view.revision,
-    merged: view.assignments.filter(assignment => assignment.state === 'completed').length, total: view.assignments.length,
-    openEscalations: view.escalations.filter(escalation => !escalation.resolution).length, updatedAt: view.updatedAt,
-  };
-}
-
 export class SurfaceState {
   private readonly directories = new Map<string, string>();
 
@@ -269,7 +232,6 @@ export class SurfaceState {
     const requests = await this.runtime.requests.list();
     const attention = await listAttention(this.runtime);
     const revisions = await Promise.all(items.map(async item => ({ item, delivery: await planRevisionStatus(this.runtime, item.id) })));
-    const initiatives = await this.runtime.initiatives.list();
     const providerHealth = await providerHealthViews(this.runtime);
     const entries: InboxEntry[] = [
       ...revisions.filter(({ delivery }) => delivery?.status === 'blocked').map(({ item, delivery }) => ({
@@ -288,8 +250,7 @@ export class SurfaceState {
         kind: 'request-recovery' as const, id: request.id, owner: request.to, title: describeAsk(request.ask),
         detail: requestRecoveryDetail(request), at: request.updatedAt,
       })),
-      ...initiatives.filter(initiative => initiative.status === 'awaiting-approval').map(initiative => this.initiativeEntry(initiative)),
-      ...items.filter(waitsInInbox).map(item => this.planEntry(item, initiatives)),
+      ...items.filter(waitsInInbox).map(planEntry),
       ...items.filter(awaitsPush).map(pushEntry),
       ...requests.filter(request => request.status === 'awaiting-create-approval').map(request => ({ kind: 'create' as const, id: request.id, owner: request.to, title: `${request.from} asks: ${describeAsk(request.ask)}`, detail: request.ask.purpose, at: request.updatedAt })),
       ...requests.filter(request => request.status === 'awaiting-delete-approval').map(request => ({ kind: 'delete' as const, id: request.id, owner: request.to, title: `Delete ${request.instance?.remote}:${request.instance?.name}`, detail: request.followUpResult?.summary ?? '', at: request.updatedAt })),
@@ -421,52 +382,12 @@ export class SurfaceState {
     return { sessions, status };
   }
 
-  private nameOf(ownerId: string) {
-    return this.runtime.declarations.owners.get(ownerId)?.persona?.name ?? ownerId;
-  }
-
-  private initiativeEntry(initiative: Initiative): InboxEntry {
-    const reports = [...new Set(initiative.assignments.map(assignment => assignment.to))].join(', ');
-    return {
-      kind: 'initiative', id: initiative.id, owner: initiative.owner, title: `Initiative: ${initiative.title}`,
-      detail: `${initiative.assignments.length} assignments to ${reports}. ${initiative.goal}`, at: initiative.updatedAt,
-    };
-  }
-
-  /** The manager holding this plan's approve-plans grant, when her review comes before the person's. */
-  private planReviewer(item: WorkItem, initiatives: readonly Initiative[]) {
-    const initiative = initiatives.find(candidate => candidate.id === item.assignment?.initiative && candidate.status === 'approved');
-    if (!initiative) return undefined;
-    const owner = this.runtime.declarations.owners.get(item.owner);
-    const repository = this.runtime.repositoryFor(item).domain.name;
-    return owner && planGrantFor(owner, initiative.owner, repository) ? this.nameOf(initiative.owner) : undefined;
-  }
-
-  private planEntry(item: WorkItem, initiatives: readonly Initiative[]): InboxEntry {
-    const reviewer = this.planReviewer(item, initiatives);
-    const summary = item.proposal.goal;
-    return {
-      kind: 'plan', id: item.id, owner: item.owner, title: item.proposal.title, at: item.updatedAt,
-      detail: reviewer ? `${reviewer} reviews under standing grant. ${summary}` : summary,
-    };
-  }
-
   /** Every owner with its manager, for the org chart. */
   org(): OrgEntry[] {
     return [...this.runtime.declarations.owners.values()].map(owner => ({
       id: owner.id, name: owner.persona?.name ?? owner.id, title: owner.persona?.title ?? 'Observation-only chat', icon: owner.persona?.icon ?? 'briefcase',
       domain: domainSummary(owner), manager: managerOf(this.runtime.declarations, owner.id)?.id,
     }));
-  }
-
-  async initiatives() {
-    return (await initiativeViews(this.runtime)).map(initiativeSummary);
-  }
-
-  async initiative(initiativeId: string) {
-    const view = (await initiativeViews(this.runtime)).find(candidate => candidate.id === initiativeId);
-    if (!view) throw new Error(`initiative_not_found: ${initiativeId}`);
-    return publicInitiative(view);
   }
 
   async owners(snapshot?: ChatSnapshot): Promise<OwnerSummary[]> {
@@ -515,9 +436,8 @@ export class SurfaceState {
   /** A work item, with the decision it waits on in the inbox's terms, so its page can take it with the same card. */
   async item(itemId: string) {
     const item = await this.runtime.ledger.get(itemId);
-    const initiatives = await this.runtime.initiatives.list();
     const decisions: [(candidate: WorkItem) => boolean, (candidate: WorkItem) => InboxEntry][] = [
-      [waitsInInbox, candidate => this.planEntry(candidate, initiatives)], [awaitsPush, pushEntry],
+      [waitsInInbox, planEntry], [awaitsPush, pushEntry],
     ];
     const waiting = decisions.find(([applies]) => applies(item))?.[1](item);
     const requestText = item.request ? await requestProgressDetail(this.runtime, item.owner, item.request) : undefined;
@@ -602,9 +522,6 @@ export class SurfaceState {
       },
       'acknowledge-attention': async () => (await changeAttention(this.runtime, decision.id, 'acknowledged', humanAttentionActor(), required(reason, 'reason'))).status,
       'resolve-attention': async () => (await changeAttention(this.runtime, decision.id, 'resolved', humanAttentionActor(), required(reason, 'reason'))).status,
-      'approve-initiative': async () => (await approveInitiative(this.runtime, decision.id, by, decision.note)).status,
-      'revise-initiative': async () => (await reviseInitiative(this.runtime, decision.id, by, required(decision.note, 'note'))).status,
-      'cancel-initiative': async () => (await cancelInitiative(this.runtime, decision.id, by, required(reason, 'reason'))).status,
       'cancel-reminder': async () => (await cancelReminder(this.runtime, decision.id, by, reason ?? '')).status,
     };
     const action = actions[decision.action];
@@ -690,7 +607,6 @@ export class SurfaceState {
     return JSON.stringify([
       items.map(item => [item.id, item.status, item.updatedAt, item.activeRunner]),
       requests.map(request => [request.id, request.status, request.updatedAt]),
-      (await this.runtime.initiatives.list()).map(initiative => [initiative.id, initiative.status, initiative.updatedAt]),
       await memoryFingerprint(this.runtime),
       await listAttention(this.runtime),
       (await listFriction(this.runtime)).map(entry => [entry.id, entry.count, entry.lastSeen]),

@@ -72,7 +72,7 @@ export async function sessionHistory(runtime: Runtime, owner: string) {
 
 /** Explicit ledger references survive worktree deletion; no title-based owner inference. */
 export function itemSessionHistory(item: WorkItem): SessionHistory[] {
-  const ownsOrigin = item.originOwner === item.owner || (!item.originOwner && !item.request && !item.assignment);
+  const ownsOrigin = item.originOwner === item.owner || (!item.originOwner && !item.request);
   const targets = [ownsOrigin ? item.origin : undefined, item.session].filter(target => target !== undefined);
   return [...new Map(targets.map(target => [target.sessionID, {
     id: target.sessionID, directory: target.directory, owner: item.owner, item: item.id,

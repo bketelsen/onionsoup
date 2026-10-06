@@ -12,12 +12,12 @@ cause, and the fix is either applied through the normal gates or reported to the
 
 - **Engine:** the immutable release selected by the configured stable `current` pointer, run as the user
   unit `onionsoup-owners.service`, which ticks every 60s:
-  re-read the configuration, refresh the state of open PRs, process requests, supervise initiatives, run due
+  re-read the configuration, refresh the state of open PRs, process requests, run due
   duties, advance runnable work items (publications and rebases), raise work notices (a merged PR is only
   journaled; landed, failed, rejected and closed-PR changes wake the owner). Duties, requests and work
   items run in the background, so the tick itself stays short; `owners tick` waits for what it started.
 - **Config:** `~/.config/onionsoup` (`ONIONSOUP_CONFIG`).
-- **State:** `~/.local/share/onionsoup` (`ONIONSOUP_HOME`). It holds `state/` (ledger, requests, initiatives,
+- **State:** `~/.local/share/onionsoup` (`ONIONSOUP_HOME`). It holds `state/` (ledger, requests,
   reminders, locks, ci-triage, ship), `desks/<owner>`, `plans/<owner>/<item>`, `checkouts/`, `evidence/<owner>`
   and `tools/`.
 - **Plan worktrees:** each approved plan (`owner-change` in `working`) has its own git worktree at
@@ -33,9 +33,8 @@ cause, and the fix is either applied through the normal gates or reported to the
   Retained conversations remain archived history; never recreate their removed directory or manually remove
   a kept worktree to silence a card. A plan approved before plan worktrees existed has
   no `planWorktree` and still works on the desk.
-- **Initiatives:** `state/initiatives/<id>.json`, a manager's assignments to its reports. Read them with
-  `npm run owners -- initiatives` and `npm run owners -- initiative <id>`; assignment state there is derived from
-  the linked request and item. Only an `approved` initiative whose approval names its current `revision` dispatches.
+- **Managers:** a manager's work for its reports is ordinary requests (`npm run owners -- requests`), one per report;
+  `state/initiatives/` is left over from removed initiatives and nothing reads it.
 - **Reminders:** `state/reminders/<id>.json` (`m-YYYYMMDD-xxxxxx`), one-off wake-ups owners set with
   `onionsoup_remind`: `pending` until `dueAt`, then `fired` with the `session` it opened (the plugin's notice timer
   opens it, so the surface must run), or `cancelled` with who and why. A pending reminder past its `dueAt` means the
@@ -47,8 +46,6 @@ cause, and the fix is either applied through the normal gates or reported to the
   `npm run owners -- desk-review-reset <owner> [repository] [--item <plan>]` clears it.
   This is only the final publication review budget, not a per-task review/reset ceremony. Local implementation
   and local task review are permitted; delegate only when useful.
-  A step that seems stuck is usually waiting on the person to merge the previous PR, on a plan approval, or on an
-  open escalation from the report.
 - **Operator:** optional, declared in `operator.yaml` in the config directory; the surface shows its chat at the top
   of the rail, in its own directory (default `~/projects`). It is not an owner: no owner notebook, duties or work
   items. Its commands and edits are journaled to `state/notebooks/operator/journal/*.jsonl`; read them when asked what

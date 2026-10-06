@@ -5,7 +5,6 @@ import { ItemView } from './components/ItemView.tsx';
 import { OwnerView } from './components/OwnerView.tsx';
 import { Rail } from './components/Rail.tsx';
 import { FrictionView } from './components/FrictionView.tsx';
-import { InitiativePage } from './components/InitiativeView.tsx';
 import { OrgView } from './components/OrgView.tsx';
 import { InboxErrors } from './components/InboxErrors.tsx';
 import { ProviderHealthBanner } from './components/ProviderHealthBanner.tsx';
@@ -43,7 +42,6 @@ const PAGES: Record<string, PageView> = {
   item: { hasSubject: hasId, render: ({ route }) => <ItemView itemId={route[1]!} /> },
   friction: { title: 'Friction', render: ({ route }) => <FrictionView recordId={route[1]} /> },
   org: { title: 'Org', render: () => <OrgView /> },
-  initiative: { title: 'Initiative', hasSubject: hasId, render: ({ route }) => <InitiativePage initiativeId={route[1]!} /> },
   owner: {
     hasSubject: (_route, owner) => Boolean(owner),
     render: ({ route, state, owner, refresh }) => <OwnerView key={owner!.id} owner={owner!} inbox={state?.inbox ?? []} sessionId={route[2] === 'chat' ? route[3] : undefined} refresh={refresh} />,

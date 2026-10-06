@@ -5,7 +5,6 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import { ProposedWork } from './artifacts.ts';
 import { ChatOrigin } from './chat-origin.ts';
-import { AssignmentRef } from './initiatives.ts';
 import { OperationalCompletion } from './operational-work-types.ts';
 
 export const REQUEST_LIMITS = { decisionAttempts: 3, retryBaseMs: 60_000, retryMaxMs: 15 * 60_000, reconcileMs: 5 * 60_000 };
@@ -83,9 +82,15 @@ export type UpdateAppAsk = z.infer<typeof UpdateAppAsk>;
 export const OperatorAssignmentSource = z.object({ kind: z.literal('attention'), id: z.string().min(1) });
 export type OperatorAssignmentSource = z.infer<typeof OperatorAssignmentSource>;
 
+/**
+ * Legacy: the initiative assignment a request or work item carried out. Initiatives were removed (2026-10); records
+ * that still name one keep parsing and saving unchanged, and nothing reads or writes it.
+ */
+export const AssignmentRef = z.object({ initiative: z.string(), assignment: z.string() });
+
 export const WorkAsk = z.object({
   kind: z.literal('work'), purpose: z.string(), proposal: ProposedWork,
-  /** Set when the work carries out an initiative's assignment. */
+  /** Legacy, see AssignmentRef. */
   assignment: AssignmentRef.optional(),
   operatorAssignment: z.object({ by: z.string().min(1), source: OperatorAssignmentSource }).optional(),
 });

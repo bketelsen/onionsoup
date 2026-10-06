@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-/** A chat that work or an initiative was opened from, so the runtime can tell its owner there how it went. */
+/** A chat that work was opened from, so the runtime can tell its owner there how it went. */
 export function chatOriginShape<StringSchema>(string: () => StringSchema) {
   return { sessionID: string(), directory: string() };
 }

@@ -23,7 +23,7 @@ async function setup(context: TestContext, hasOrigin = true) {
   await cp('packages/owners/test/fixtures/owners', declarations, { recursive: true });
   const runtime = await Runtime.open({ declarations, state: join(root, 'state') });
   for (const owner of ['odrade', 'clippy']) await runtime.notebook(owner).ensure('# Fixture');
-  const request = await requestWork(runtime, 'odrade', 'clippy', proposal, undefined, hasOrigin ? origin : undefined);
+  const request = await requestWork(runtime, 'odrade', 'clippy', proposal, hasOrigin ? origin : undefined);
   await processRequest(runtime, request.id);
   const accepted = await runtime.requests.get(request.id);
   const item = await submitPlan(runtime, 'clippy', { item: accepted.workItem!, title: proposal.title,

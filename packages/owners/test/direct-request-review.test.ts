@@ -35,7 +35,7 @@ async function setup(context: TestContext, plan = matchedPlan) {
   const runtime = await Runtime.open({ declarations, state: join(root, 'state') });
   for (const owner of ['odrade', 'lucilla']) await runtime.notebook(owner).ensure('# Synthetic test charter');
   runtime.hire = async () => { throw new Error('unexpected_model_execution'); };
-  const request = await requestWork(runtime, 'odrade', 'lucilla', proposal, undefined, origin);
+  const request = await requestWork(runtime, 'odrade', 'lucilla', proposal, origin);
   await processRequest(runtime, request.id);
   const accepted = await runtime.requests.get(request.id);
   const item = await submitPlan(runtime, 'lucilla', {
@@ -84,7 +84,6 @@ test('direct requester uses only its existing grant, preserves both goals and re
   const review = await getDirectRequestReview(runtime, request.id);
   assert.equal(review.reviewer, 'odrade');
   assert.equal(review.repository, proposal.repository);
-  assert.equal(review.item.assignment, undefined, 'the real regression is a direct request, not an initiative');
   assert.notEqual(review.item.proposal.goal, request.ask.kind === 'work' && request.ask.proposal.goal);
   const input = await approval(runtime, request.id);
   const approved = await reviewDirectRequestPlan(runtime, 'odrade', input);
@@ -158,7 +157,7 @@ test('an unrelated repository grant and a different reviewer cannot authorize th
 
 test('review rejects another request or item and a stale digest without changing either request', async context => {
   const { runtime, request, item } = await setup(context);
-  const other = await requestWork(runtime, 'odrade', 'lucilla', { ...proposal, title: 'A different task' }, undefined, origin);
+  const other = await requestWork(runtime, 'odrade', 'lucilla', { ...proposal, title: 'A different task' }, origin);
   await processRequest(runtime, other.id);
   const input = await approval(runtime, request.id);
   await assert.rejects(reviewDirectRequestPlan(runtime, 'odrade', { ...input, request: other.id }), /direct_plan_review_binding_mismatch/);

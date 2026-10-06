@@ -34,12 +34,12 @@ test('configured owner prompts carry repository writing guidance alongside each 
     assert.match(owner.prompt!, /onionsoup_friction \(report reproducible engine\s+behavior/);
     assert.match(owner.prompt!, /onionsoup_request_work \(ask another\s+owner/);
   }
-  assert.match(config.agent!.Odrade!.prompt!, /draft an initiative with onionsoup_initiative/);
-  assert.doesNotMatch(config.agent!.Bellonda!.prompt!, /onionsoup_initiative/);
+  assert.match(config.agent!.Odrade!.prompt!, /Fan work out with onionsoup_request_work/);
+  assert.doesNotMatch(config.agent!.Bellonda!.prompt!, /Fan work out/);
   const permissions = (name: string) => config.agent![name]!.permission as Record<string, string>;
-  assert.equal((config.permission as Record<string, string>).onionsoup_initiative, 'deny', 'hidden from everyone');
-  assert.equal(permissions('Odrade').onionsoup_initiative, 'allow', 'shown to owners with direct reports');
-  assert.equal(permissions('Bellonda').onionsoup_initiative, undefined);
+  assert.equal((config.permission as Record<string, string>).onionsoup_steer, 'deny', 'hidden from everyone');
+  assert.equal(permissions('Odrade').onionsoup_steer, 'allow', 'shown to owners with direct reports');
+  assert.equal(permissions('Bellonda').onionsoup_steer, undefined);
   assert.match(config.agent!.Bellonda!.prompt!, /Exact\./, 'the persona remains available for conversation');
   const milesTeg = config.agent!['Miles Teg']!.prompt!;
   assert.match(milesTeg, /Skills drive how you work/);
@@ -50,13 +50,13 @@ test('configured owner prompts carry repository writing guidance alongside each 
   assert.doesNotMatch(milesTeg, /freelancer|onionsoup_open_work/);
   assert.doesNotMatch(config.agent!.Moneo!.prompt!, /onionsoup_submit_plan/, 'an owner that only observes is not told to plan changes');
   assert.match(config.agent!.Moneo!.prompt!, /You do not change your domain yourself/);
-  assert.match(config.agent!.Odrade!.prompt!, /initiative plans wake you here/);
   assert.match(config.agent!.Odrade!.prompt!, /onionsoup_review_request_plan with the exact request\/item\/digest/);
   assert.match(config.agent!.Odrade!.prompt!, /use needs-human for unresolved scope/);
   assert.equal((config.permission as Record<string, string>).onionsoup_review_request_plan, 'deny');
   assert.equal(permissions('Odrade').onionsoup_review_request_plan, 'allow');
   assert.equal(permissions('Bellonda').onionsoup_review_request_plan, undefined);
-  assert.match(config.agent!.Bellonda!.prompt!, /Work it assigns opens a session where you plan it alone/);
+  assert.match(config.agent!.Bellonda!.prompt!, /Work it requests is accepted for you and opens a session where you plan it alone/);
+  assert.match(config.agent!.Bellonda!.prompt!, /tell your manager with onionsoup_send/);
 });
 
 test('the host review brief applies the same rule and says which severities send a change back', () => {

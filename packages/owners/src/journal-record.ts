@@ -10,6 +10,7 @@ export const AttentionProvenance = z.discriminatedUnion('kind', [
     kind: z.literal('request-operation'), request: z.string(),
     operation: z.literal('update-app'), phase: z.literal('execution'),
   }),
+  /** Legacy: a report's escalation on a removed initiative; kept so old journals and attention entries still parse. */
   z.object({ kind: z.literal('escalation'), initiative: z.string(), escalation: z.string() }),
   z.object({ kind: z.literal('maintenance'), code: z.string().min(1), workItem: z.string().optional() }),
   z.object({ kind: z.literal('human-decision'), code: z.string().min(1), workItem: z.string().optional() }),

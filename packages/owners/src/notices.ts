@@ -25,7 +25,6 @@ export const WorkNotice = z.object({
   id: z.string(),
   owner: z.string(),
   workItem: z.string().optional(),
-  initiative: z.string().optional(),
   change: z.string(),
   text: z.string(),
   origin: ChatOrigin.optional(),
@@ -77,40 +76,6 @@ export function describeChange(item: WorkItem, previous: string | undefined): De
   return undefined;
 }
 
-const MANAGER_TEXT: Record<string, (item: WorkItem) => string> = {
-  landed: item => `landed and is published as ${item.publication?.url ?? item.branch}`,
-  failed: item => `failed: ${item.reason ?? 'no reason recorded'}`,
-  rejected: item => `had its plan rejected by the person: ${item.reason ?? 'no reason given'}`,
-  'pr-merged': item => `was merged (${item.publication?.url})`,
-  'pr-closed': item => `had its PR closed without merging (${item.publication?.url})`,
-};
-
-/** The same change, told to the manager whose initiative the work carries out. */
-export function describeForManager(item: WorkItem, previous: string | undefined): Described | undefined {
-  const described = describeChange(item, previous);
-  if (!described || !item.assignment) return undefined;
-  const { initiative, assignment } = item.assignment;
-  const what = MANAGER_TEXT[described.change]?.(item) ?? described.change;
-  const work = `${item.owner}'s work ${item.id} "${item.proposal.title}" (assignment ${assignment} of initiative ${initiative})`;
-  const next = `See the initiative with onionsoup_initiative show ${initiative}; decide whether anything needs you or the person, and say so.`;
-  return { change: described.change, text: `${work} ${what}. ${next}` };
-}
-
-/** Who hears about a change: the item's owner, and for assigned work also the manager, in the initiative's chat. */
-const AUDIENCES = {
-  owner: { describe: describeChange, suffix: '' },
-  manager: { describe: describeForManager, suffix: '-manager' },
-} satisfies Record<string, { describe: (item: WorkItem, previous: string | undefined) => Described | undefined; suffix: string }>;
-
-interface Audience { role: keyof typeof AUDIENCES; owner: string; origin: () => Promise<ChatOrigin | undefined> }
-
-async function audiencesOf(runtime: Runtime, item: WorkItem, chatDirectory: (ownerId: string) => Promise<string>): Promise<Audience[]> {
-  const owner: Audience = { role: 'owner', owner: item.owner, origin: () => originOf(runtime, item, chatDirectory) };
-  const initiative = item.assignment ? await runtime.initiatives.get(item.assignment.initiative).catch(() => undefined) : undefined;
-  if (!initiative) return [owner];
-  return [owner, { role: 'manager', owner: initiative.owner, origin: async () => initiative.origin }];
-}
-
 /** Queue a notice for the plugin to post; written whole, so a reader never sees half a file. */
 export async function queueNotice(runtime: Runtime, notice: WorkNotice) {
   const parsed = WorkNotice.parse(notice);
@@ -146,16 +111,16 @@ export async function readNotice(runtime: Runtime, id: string) {
   return undefined;
 }
 
-async function raiseNotice(runtime: Runtime, item: WorkItem, previous: string | undefined, audience: Audience) {
-  const { describe, suffix } = AUDIENCES[audience.role];
-  const described = describe(item, previous);
+async function raiseNotice(runtime: Runtime, item: WorkItem, previous: string | undefined,
+  chatDirectory: (ownerId: string) => Promise<string>) {
+  const described = describeChange(item, previous);
   if (!described) return undefined;
   const notice: WorkNotice = {
-    id: `${item.id}-${described.change}${suffix}-${createHash('sha256').update(item.updatedAt).digest('hex').slice(0, 12)}`,
-    owner: audience.owner, workItem: item.id, change: described.change, text: described.text,
-    origin: WAKES_OWNER.has(described.change) ? await audience.origin() : undefined, at: new Date().toISOString(),
+    id: `${item.id}-${described.change}-${createHash('sha256').update(item.updatedAt).digest('hex').slice(0, 12)}`,
+    owner: item.owner, workItem: item.id, change: described.change, text: described.text,
+    origin: WAKES_OWNER.has(described.change) ? await originOf(runtime, item, chatDirectory) : undefined, at: new Date().toISOString(),
   };
-  const notebook = runtime.notebook(audience.owner);
+  const notebook = runtime.notebook(item.owner);
   await notebook.journal({ kind: 'work-status', workItem: item.id, outcome: described.change, note: described.text.slice(0, 500) });
   await notebook.commit(`journal ${item.id} ${described.change}`).catch(() => undefined);
   if (notice.origin) await queueNotice(runtime, notice);
@@ -200,10 +165,8 @@ export async function noticeWorkChanges(runtime: Runtime, chatDirectory: (ownerI
   if (seen) {
     for (const item of items) {
       if (seen[item.id] === next[item.id]) continue;
-      for (const audience of await audiencesOf(runtime, item, chatDirectory)) {
-        const notice = await raiseNotice(runtime, item, seen[item.id], audience);
-        if (notice) raised.push(notice);
-      }
+      const notice = await raiseNotice(runtime, item, seen[item.id], chatDirectory);
+      if (notice) raised.push(notice);
     }
   }
   await writeFile(`${paths.seen}.tmp`, JSON.stringify(next, null, 2) + '\n');

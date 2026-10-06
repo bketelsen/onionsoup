@@ -124,7 +124,7 @@ test('accepted assignment retains its original goal through feedback, revision, 
   const { approvePlan, revisePlan, resumeItem, cancelItem } = await import('../src/work-recovery.ts');
   const runtime = await setup();
   for (const owner of ['odrade', 'clippy']) await runtime.notebook(owner).ensure('# Fixture');
-  const request = await requestWork(runtime, 'odrade', 'clippy', proposal, undefined, origin);
+  const request = await requestWork(runtime, 'odrade', 'clippy', proposal, origin);
   const accepted = await decideWork(runtime, request);
   const item = await runtime.ledger.get(accepted.workItem!);
   assert.match(planningPrompt(item), /accepted work handoff, distinct from an earlier consultation or status query/);
