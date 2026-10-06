@@ -11,7 +11,7 @@ import type { Runtime } from './runtime.ts';
 import { MessageDeliveryBody } from './message-receipt.ts';
 
 export const DIRECT_REVIEW_WAKE_LIMITS = { perPass: 20 };
-export const Wake = z.object({
+const Wake = z.object({
   request: z.string(), item: z.string(), reviewer: z.string(), digest: z.string(), origin: ChatOrigin.optional(),
   status: z.enum(['pending', 'sending', 'delivered', 'blocked', 'superseded']),
   reason: z.string().optional(), messageID: z.string().optional(),

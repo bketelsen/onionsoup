@@ -1,4 +1,3 @@
-import { isMaintenanceQuarantineError } from './maintenance-quarantine.ts';
 import { execFile } from 'node:child_process';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -303,7 +302,7 @@ const COMMANDS: Record<string, Command> = {
         try {
           lease = await beginAdmission(runtime.stateDirectory, 'cli-daemon-shutdown');
         } catch (error) {
-          if (!(error instanceof Error && error.message === 'deployment_draining') && !isMaintenanceQuarantineError(error)) throw error;
+          if (!(error instanceof Error && error.message === 'deployment_draining')) throw error;
         }
         try {
           const stranded = lease ? await runtime.ledger.markInterrupted() : 0;

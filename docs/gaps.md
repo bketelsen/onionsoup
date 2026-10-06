@@ -121,19 +121,7 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
   and new records bind maintenance to instance/operation identity. This cannot identify the unfinished
   operation behind an older live-PID lease. Age, idle chats and a stopped lock helper do not prove its
   effect completed. Guarded rollout continues to refuse those leases. Unknown new session openings or
-  notice sends retain their exact claims and receipts without replay. Explicit legacy interruption can
-  restore diagnostic-only services under a durable quarantine; it does not resolve unknown effects or
-  itself resume ordinary chats, dispatch or OpenCode. The separate release command can resume only after
-  fresh replay-safety inventory, authenticated observation and exact operational approval. Unbound legacy
-  openings, pending effects and stale notice cursors still block it; missing evidence is never fabricated.
-  Terminal request operations without runners are retained as history. Future reminders have a release
-  deadline, not a fabricated fired receipt. Tracking requests, cleanup candidates (even ones previously
-  kept), and unsubmitted operator wakes still block; this classification does not supply their missing proof.
-  An uncertain observation startup or unconfirmed instance disposal remains held for investigation.
-  A crash between pending completion and the release receipt also remains quarantined; the exact saved
-  release digest is required to resume. The pending badge alone is not proof that admission is open.
-  The [separate legacy recovery procedure](deployment.md#legacy-maintenance-recovery-plan) describes the
-  required proof and operational decision rather than authorizing a restart or clearing records.
+  notice sends retain their exact claims and receipts without replay; recovery is not implemented.
 - **snosi builds run only in CI.** mkosi needs root, so Murbella verifies with snosi's static checks and relies on
   GitHub Actions for builds (CI failures wake her). Local builds would need a privileged build VM on minideb,
   requested from Miles Teg like the smoke-test instances.

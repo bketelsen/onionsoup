@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { assertMaintenanceAllowed } from './maintenance-quarantine.ts';
 import { join } from 'node:path';
 import { z } from 'zod';
 import type { Plugin } from '@opencode-ai/plugin';
@@ -29,7 +28,7 @@ export class MaintenancePass implements MaintenanceContext {
   private writing: Promise<void> = Promise.resolve();
   private readonly pending = new Set<Promise<unknown>>();
   constructor(readonly path: string, readonly record: Operation,
-    readonly limits = PLUGIN_MAINTENANCE_LIMITS, readonly home?: string) {}
+    readonly limits = PLUGIN_MAINTENANCE_LIMITS) {}
 
   check() { this.signal.throwIfAborted(); }
 
@@ -48,7 +47,6 @@ export class MaintenancePass implements MaintenanceContext {
 
   async phase<T>(name: string, operation: () => Promise<T>): Promise<T> {
     this.check();
-    if (this.home) await assertMaintenanceAllowed(this.home);
     this.record.phase = name;
     await this.save();
     this.check();
@@ -60,7 +58,6 @@ export class MaintenancePass implements MaintenanceContext {
     const call: Operation['calls'][number] = { id: randomUUID(), method, effect, status: 'pending' };
     let invoked = false;
     try {
-      if (this.home) await assertMaintenanceAllowed(this.home);
       this.check();
       this.record.calls.push(call);
       await this.save();
@@ -156,7 +153,6 @@ export class PluginMaintenance {
   }
 
   private async tick(slot: Slot, kind: string, operation: (pass: MaintenancePass) => Promise<unknown>, admitted: boolean) {
-    await assertMaintenanceAllowed(this.home);
     if (slot.cleanup) await slot.cleanup();
     if (this.stopped) return;
     if (slot.pass?.record.status === 'uncertain') {
@@ -171,7 +167,7 @@ export class PluginMaintenance {
     const record = MaintenanceOperation.parse({ version: 1, ...metadata, kind, admission: lease,
       startedAt: new Date().toISOString(), status: 'running', phase: 'admitted', calls: [] });
     const path = join(this.home, 'plugin-maintenance', this.instanceID, `${kind.replaceAll(':', '-')}.json`);
-    const pass = new MaintenancePass(path, record, this.limits, this.home);
+    const pass = new MaintenancePass(path, record, this.limits);
     slot.pass = pass;
     if (this.stopped) pass.stop();
     const deadline = setTimeout(() => pass.stop(), this.limits.budgetMs);

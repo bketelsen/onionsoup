@@ -1,5 +1,3 @@
-import { maintenanceQuarantineStatus, acknowledgeMaintenanceQuarantine, maintenanceRuntimeBuildId, assertMaintenanceAllowed, maintenanceReleaseRuntimeState } from './maintenance-quarantine.ts';
-import { acknowledgeMaintenanceRelease } from './maintenance-release-state.ts';
 import { failedToolInTranscript, type TrackedToolCall } from './tool-completion.ts';
 import { isAbandonedChild, readChildAbandonment } from './child-recovery.ts';
 import { ownerChatAgent, ownerChatVoice, observationChatPermission, observationChatPrompt } from './owner-chat.ts';
@@ -372,31 +370,9 @@ async function commitQuietly(notebook: Notebook, message: string, paths?: readon
   await notebook.commit(message, paths).catch(() => undefined);
 }
 
-/** MCP startup itself can launch a host process, before a tool execution hook. */
-function disableMaintenanceMcp(config: Config) {
-  for (const [name, server] of Object.entries(config.mcp ?? {})) {
-    config.mcp![name] = { ...server, enabled: false };
-  }
-}
-
 const server: Plugin = async (input, options) => {
   if (process.env.ONIONSOUP_SANDBOX === '1') return {};
   const runtime = await Runtime.open({ declarations: String(options?.declarations ?? configDirectory()), state: String(options?.state ?? stateDirectory()) });
-  const quarantine = await maintenanceQuarantineStatus(runtime.stateDirectory);
-  const releaseState = await maintenanceReleaseRuntimeState(runtime.stateDirectory).catch(() => undefined);
-  if (quarantine.state !== 'absent' && releaseState?.phase !== 'observation') {
-    await acknowledgeMaintenanceQuarantine(runtime.stateDirectory, await maintenanceRuntimeBuildId(), 'plugin')
-      .catch(error => console.warn('maintenance_quarantine_ack_failed', error instanceof Error ? error.message : String(error)));
-    return {
-      async config(config) { disableMaintenanceMcp(config); },
-      async 'chat.message'() { throw new Error('maintenance_quarantined'); },
-      async 'tool.execute.before'(event) {
-        if (event.tool !== 'onionsoup_status') throw new Error('maintenance_quarantined');
-      },
-      tool: { onionsoup_status: tool({ description: 'Read maintenance quarantine status; work and chats are paused.', args: {},
-        execute: async () => JSON.stringify(await maintenanceQuarantineStatus(runtime.stateDirectory)) }) },
-    };
-  }
   const owners = [...runtime.declarations.owners.values()];
   const personaOwners = owners.filter(owner => owner.persona);
   const operator = runtime.declarations.operator;
@@ -433,10 +409,8 @@ const server: Plugin = async (input, options) => {
   }
   async function initializeRuntime() {
     if (disposed) throw new Error('plugin_instance_disposed');
-    await assertMaintenanceAllowed(runtime.stateDirectory);
-    if (disposed) throw new Error('plugin_instance_disposed');
     initializing ??= (async () => {
-      // Initialization writes are deferred until observation has become an approved release.
+      // Owners can be chatted with before their first duty ever runs, so their notebooks must exist.
       for (const owner of owners) {
         const charter = await runtime.text(`charters/${owner.id}.md`).catch(() => `# Charter: ${owner.id}\n`);
         await runtime.notebook(owner.id).ensure(charter).catch(() => undefined);
@@ -445,17 +419,10 @@ const server: Plugin = async (input, options) => {
         await operatorNotebook.ensureJournal().then(() => ensureOperatorMemory(operatorNotebook))
           .catch(error => console.warn('operator_memory_unavailable', error instanceof Error ? error.message : String(error)));
       }
-      if (releaseState?.phase === 'observation') {
-        await acknowledgeMaintenanceRelease(runtime.stateDirectory, releaseState.observation, 'plugin', 'released');
-      }
     })();
     await initializing;
   }
-  if (releaseState?.phase === 'observation') {
-    await acknowledgeMaintenanceRelease(runtime.stateDirectory, releaseState.observation, 'plugin', 'observation');
-  } else {
-    await initializeRuntime();
-  }
+  await initializeRuntime();
   const operatorActivity = new OperatorActivityLog();
   const parentOf = async (id: string) => (await input.client.session.get({ path: { id } })).data?.parentID;
   const sessions = new SessionOwners<OwnerDeclaration>(parentOf);
@@ -1367,11 +1334,6 @@ const server: Plugin = async (input, options) => {
     'shell.env': hideHostCredentials,
     async config(config) {
       if (disposed) throw new Error('plugin_instance_disposed');
-      if ((await maintenanceQuarantineStatus(runtime.stateDirectory)).state !== 'absent') {
-        // Loading an enabled MCP server may launch a host process before any tool hook runs.
-        disableMaintenanceMcp(config);
-        return;
-      }
       const agents = (config.agent ??= {}) as Record<string, unknown>;
       const servers = (config.mcp ??= {}) as Record<string, unknown>;
       const hiddenFromEveryone: Record<string, string> = {};
@@ -1437,7 +1399,7 @@ const server: Plugin = async (input, options) => {
     },
 
     async 'chat.message'(message, output) {
-      // Fence concurrent idle proofs before quarantine or ancestry reads can yield.
+      // Fence concurrent idle proofs before ancestry reads can yield.
       const pending = Symbol(message.sessionID);
       pendingAncestry.add(pending);
       markChatActive(message.sessionID);
@@ -1507,8 +1469,6 @@ const server: Plugin = async (input, options) => {
       if (typed.type === 'session.status' && ['busy', 'retry'].includes(typed.properties.status?.type)) {
         markKnownAncestryActive(String(typed.properties.sessionID));
       }
-      // Event-time epochs must precede asynchronous quarantine inspection.
-      if ((await maintenanceQuarantineStatus(runtime.stateDirectory)).state !== 'absent') return;
       operatorRecoveryPermissions.event(event);
       operatorWritePermissions.event(event);
       frictionEvents.observe(event);

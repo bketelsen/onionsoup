@@ -677,22 +677,6 @@ each instance/kind in `state/plugin-maintenance/` records its phase, pending or 
 settled/released status. Uncertain passes are archived before a later pass runs; their admissions remain
 held, while exact domain claims prevent replay and unrelated maintenance can continue. This is
 maintenance evidence, not proof that a chat or child completed.
-Legacy admissions without operation identity have a separate exact-digest interruption procedure.
-It preserves their unknown outcomes and original records, verifies the original process groups stopped,
-and starts only a target that acknowledges the durable quarantine before effects. In that mode the
-daemon and surface serve diagnostics; OpenCode, chats, dispatch and mutations remain disabled.
-Attempt records prevent uncertain stop/start replay. Failed activation never restarts an older build
-that cannot enforce quarantine. The ordinary deploy worker refuses the held checkpoint. A separate
-operator-only release command inventories replay candidates and requires fresh exact-digest approval.
-It starts OpenCode in observation mode, keeping execution, MCP servers, notebook initialization and
-wiki synchronization blocked. Inert terminal request history can retain its operation and checkpoints
-when no runner remains; this does not attest the historical outcome. Existing single-use-protected
-continuations also qualify. Future reminders qualify only before their due time, bound into the proof
-and checked again at release commit. Interrupted operations, tracking requests, finished-worktree cleanup
-candidates and unsubmitted actionable wakes still require separate evidence. After authenticated quiet proof,
-the host disposes restricted instances once and commits release before normal instances can load.
-Original outcomes remain unknown in immutable archives; no lease, transcript or domain status is cleared.
-See [legacy recovery](../deployment.md#legacy-maintenance-recovery-plan).
 Successful late effect receipts may be saved, but stopped passes cannot start another SDK effect or phase.
 An already-started host placement or stash/restore transaction finishes under its held admission.
 
