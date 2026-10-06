@@ -100,6 +100,10 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
 - **snosi builds run only in CI.** mkosi needs root, so Murbella verifies with snosi's static checks and relies on
   GitHub Actions for builds (CI failures wake her). Local builds would need a privileged build VM on minideb,
   requested from Miles Teg like the smoke-test instances.
+- **Instance requests carry only an image and a name.** The person can approve an instance outside an owner's grant,
+  but `incus launch` gets no VM flag, profile, network, user or SSH keys, so a VM on a routed bridge with someone's
+  keys is still finished by hand. Every created instance also counts toward `maxManagedInstances`, long-running
+  ones included.
 - **Autonomous runs cannot use owner MCP tools.** Declared `mcp:` servers are available in chats only; duties and
   hires in the sandbox do not get them (the NAS owner's snapshot and updates use host code instead).
 - **No budgets.** Per-owner cost caps and wake-rate limits are designed but not enforced, and cost is only tracked

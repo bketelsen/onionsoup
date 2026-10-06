@@ -1585,7 +1585,7 @@ const server: Plugin = async (input, options) => {
         },
       }),
       onionsoup_request_instance: tool({
-        description: 'Request an instance from a declared Incus owner. Host code binds this request to this actual owner session. Creation waits for owner decision and person approval; never create VMs with shell commands to bypass the gate.',
+        description: 'Request an instance from a declared Incus owner. Host code binds this request to this actual owner session. Creation waits for owner decision and person approval; never create VMs with shell commands to bypass the gate. State any exact name in purpose: an image or name outside the owner\'s grant waits for the person to approve that exact instance.',
         args: {
           owner: tool.schema.string(), image: tool.schema.string(), purpose: tool.schema.string(),
           expectedMinutes: tool.schema.number().int().positive(),

@@ -29,7 +29,8 @@ export function requestRunnerIsAlive(pid: number) {
  *
  * People only record decisions; the runtime acts on them, so approvals never race the daemon.
  * A create approval may also approve the matching delete (a lease), so a throwaway instance
- * cleans itself up on release without a second prompt.
+ * cleans itself up on release without a second prompt. An owner may decide on an instance outside
+ * its grant (another image, an unprefixed name); the person's create approval covers that exact one.
  */
 export const RequestStatus = z.enum([
   'pending-owner',
@@ -121,6 +122,8 @@ export const OwnerDecision = z.object({
   remote: z.string().describe('The remote to create on, when accepting'),
   image: z.string().describe('The image to use, when accepting; may differ from the ask if you have a reason'),
   nameSuffix: z.string().describe('Lowercase letters, digits and dashes; the runtime adds the onionsoup- prefix'),
+  name: z.string().optional().describe('Only when the request needs an exact name: the full instance name, used instead of '
+    + 'the prefix and nameSuffix. A name without the prefix is outside your grant: the person approves that exact instance'),
 });
 export type OwnerDecision = z.infer<typeof OwnerDecision>;
 

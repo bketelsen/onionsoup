@@ -286,6 +286,24 @@ test('item API distinguishes prepared closure from explicit acceptance and retai
   }
 });
 
+test('an instance create outside the owner\'s grant shows the exact instance and its violations in the inbox', async () => {
+  const { runtime, server, call } = await start();
+  try {
+    const ask = { kind: 'instance' as const, image: 'images:ubuntu/26.04', purpose: 'long-running instance for bjk, call it dish', expectedMinutes: 60 };
+    const opened = await runtime.requests.open('clippy', 'homelab', ask, 'none');
+    const reason = 'outside homelab\'s grant: image images:ubuntu/26.04 is not on its image list; name dish lacks the onionsoup- prefix';
+    await runtime.requests.save({ ...opened, status: 'awaiting-create-approval', reason, decision: {
+      decision: 'accept', reply: 'ok', remote: 'minideb', image: 'images:ubuntu/26.04', nameSuffix: 'dish', name: 'dish' } });
+    const inbox = (await call('GET', '/api/state')).body.inbox as { kind: string; id: string; title: string; detail: string }[];
+    const entry = inbox.find(candidate => candidate.id === opened.id)!;
+    assert.equal(entry.kind, 'create');
+    assert.equal(entry.title, 'clippy asks: create minideb:dish from images:ubuntu/26.04');
+    assert.equal(entry.detail, `${ask.purpose}\n${reason}`);
+  } finally {
+    server.close();
+  }
+});
+
 test('the surface lists owners with what waits on the person, and chat permissions land in the inbox', async () => {
   const { runtime, server, call } = await start();
   try {

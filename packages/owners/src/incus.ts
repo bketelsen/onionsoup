@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { z } from 'zod';
 import type { IncusOwner, IncusPermission } from './declarations.ts';
+import type { OwnerDecision, ResourceRequest } from './requests.ts';
 
 const run = promisify(execFile);
 
@@ -100,7 +101,8 @@ function snapshotMarkdown(takenAt: string, remotes: readonly RemoteSnapshot[], o
     }
     lines.push('');
   }
-  lines.push(`Create policy: images ${owner.domain.images.join(', ')}; prefix \`${owner.domain.namePrefix}\`; at most ${owner.domain.maxManagedInstances} managed instances.`);
+  lines.push(`Create policy: images ${owner.domain.images.join(', ')}; prefix \`${owner.domain.namePrefix}\`; at most ${owner.domain.maxManagedInstances} managed instances.`,
+    'Another image or an unprefixed name is outside this grant: the person approves that exact instance. Only prefixed instances are ever deleted.');
   return lines.join('\n') + '\n';
 }
 
@@ -167,27 +169,57 @@ function requirePermission(owner: IncusOwner, remote: string, permission: IncusP
 export interface CreateSpec {
   remote: string;
   image: string;
-  nameSuffix: string;
+  name: string;
 }
 
-/** Everything a create must satisfy, checked before a person is ever asked. */
+/** Incus instance names: lowercase letters, digits and dashes, starting with a letter and not ending in a dash. */
+const INSTANCE_NAME = /^[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+
+/** The instance an owner decided on: its exact name when it gave one, else the domain's prefix and its suffix. */
+export function decidedInstance(owner: IncusOwner, decision: OwnerDecision): CreateSpec {
+  return { remote: decision.remote, image: decision.image, name: decision.name ?? `${owner.domain.namePrefix}${decision.nameSuffix}` };
+}
+
+/** What no approval waives: the remote allows creates, the name is valid, and the owner is under its instance cap. */
 export async function checkCreate(owner: IncusOwner, managed: ManagedInstances, spec: CreateSpec) {
   requirePermission(owner, spec.remote, 'create');
-  if (!owner.domain.images.includes(spec.image)) throw new Error(`image_not_allowed: ${spec.image}`);
-  if (!/^[a-z0-9][a-z0-9-]{0,30}$/.test(spec.nameSuffix)) throw new Error(`bad_instance_name: ${spec.nameSuffix}`);
+  if (!INSTANCE_NAME.test(spec.name)) throw new Error(`bad_instance_name: ${spec.name}`);
   if ((await managed.list(owner.id)).length >= owner.domain.maxManagedInstances) throw new Error('managed_instance_limit_reached');
-  return `${owner.domain.namePrefix}${spec.nameSuffix}`;
+}
+
+/** The owner's grant rules a create is outside of; only the person's approval of that exact create covers them. */
+export function grantViolations(owner: IncusOwner, spec: CreateSpec) {
+  const rules = [
+    { isBroken: !owner.domain.images.includes(spec.image), violation: `image ${spec.image} is not on its image list` },
+    { isBroken: !spec.name.startsWith(owner.domain.namePrefix), violation: `name ${spec.name} lacks the ${owner.domain.namePrefix} prefix` },
+  ];
+  return rules.filter(rule => rule.isBroken).map(rule => rule.violation);
+}
+
+/**
+ * Everything an approved create must satisfy. No standing grant approves an instance, so a create approval on the
+ * request is the person's, given after the inbox showed them the exact instance and its grant violations.
+ */
+export async function checkApprovedCreate(owner: IncusOwner, managed: ManagedInstances, spec: CreateSpec, approvals: ResourceRequest['approvals']) {
+  await checkCreate(owner, managed, spec);
+  const violations = grantViolations(owner, spec);
+  const hasPersonApproval = approvals.some(approval => approval.step === 'create');
+  if (violations.length > 0 && !hasPersonApproval) throw new Error(`outside_grant_without_approval: ${violations.join('; ')}`);
 }
 
 /** Host code only, after a person approved it. */
-export async function createInstance(client: IncusClient, owner: IncusOwner, managed: ManagedInstances, spec: CreateSpec, request: { id: string; requestedBy: string }) {
-  const name = await checkCreate(owner, managed, spec);
-  await client.run(['launch', spec.image, `${spec.remote}:${name}`, '-c', `user.onionsoup.request=${request.id}`], INCUS_LIMITS.launchTimeoutMs);
-  await managed.add(owner.id, { remote: spec.remote, name, image: spec.image, requestId: request.id, requestedBy: request.requestedBy, createdAt: new Date().toISOString() });
-  return { remote: spec.remote, name };
+export async function createInstance(client: IncusClient, owner: IncusOwner, managed: ManagedInstances, spec: CreateSpec,
+  request: { id: string; requestedBy: string; approvals: ResourceRequest['approvals'] }) {
+  await checkApprovedCreate(owner, managed, spec, request.approvals);
+  await client.run(['launch', spec.image, `${spec.remote}:${spec.name}`, '-c', `user.onionsoup.request=${request.id}`], INCUS_LIMITS.launchTimeoutMs);
+  await managed.add(owner.id, { remote: spec.remote, name: spec.name, image: spec.image, requestId: request.id, requestedBy: request.requestedBy, createdAt: new Date().toISOString() });
+  return { remote: spec.remote, name: spec.name };
 }
 
-/** Host code only, after a person approved it; refuses anything onionsoup did not create. */
+/**
+ * Host code only, after a person approved it; refuses anything onionsoup did not create, and any unprefixed
+ * instance even when onionsoup created it with the person's approval.
+ */
 export async function deleteInstance(client: IncusClient, owner: IncusOwner, managed: ManagedInstances, remote: string, name: string,
   request?: { id: string; from: string }) {
   requirePermission(owner, remote, 'delete');

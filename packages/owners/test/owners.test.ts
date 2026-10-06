@@ -157,9 +157,9 @@ test('survey context says when landed work is not yet on the base branch', async
   assert.match(text, /Clipboard note \[w-2\]: plan rejected by a person: busywork/);
 });
 
-async function incusRuntime() {
+async function incusRuntime(declarations = 'packages/owners/test/fixtures/owners') {
   const { Runtime } = await import('@onionsoup/owners');
-  const runtime = await Runtime.open({ declarations: 'packages/owners/test/fixtures/owners', state: await mkdtemp(join(tmpdir(), 'owners-incus-')) });
+  const runtime = await Runtime.open({ declarations, state: await mkdtemp(join(tmpdir(), 'owners-incus-')) });
   const calls: string[][] = [];
   const instances = new Map<string, { name: string; type: string; status: string; config: Record<string, string> }>();
   runtime.incus = { run: async args => {
@@ -211,15 +211,84 @@ test('without a lease the release waits for a delete approval', async () => {
 });
 
 test('create and delete guards hold regardless of what an owner decides', async () => {
-  const { checkCreate, deleteInstance } = await import('../src/incus.ts');
+  const { createInstance, deleteInstance } = await import('../src/incus.ts');
   const { runtime, calls } = await incusRuntime();
   const owner = runtime.incusOwner('homelab');
-  await assert.rejects(checkCreate(owner, runtime.managed, { remote: 'selfie', image: 'images:debian/13', nameSuffix: 'x' }), /remote_forbids_create: selfie/);
-  await assert.rejects(checkCreate(owner, runtime.managed, { remote: 'minideb', image: 'images:alpine/edge', nameSuffix: 'x' }), /image_not_allowed/);
-  await assert.rejects(checkCreate(owner, runtime.managed, { remote: 'minideb', image: 'images:debian/13', nameSuffix: 'Bad Name' }), /bad_instance_name/);
+  type CreateRequest = Parameters<typeof createInstance>[4];
+  const unapproved: CreateRequest = { id: 'r-guard', requestedBy: 'clippy', approvals: [] };
+  const approved: CreateRequest = { ...unapproved, approvals: [{ step: 'create', by: 'bjk', at: new Date().toISOString() }] };
+  const create = (spec: { remote: string; image: string; name: string }, request = unapproved) =>
+    createInstance(runtime.incus, owner, runtime.managed, spec, request);
+  await assert.rejects(create({ remote: 'selfie', image: 'images:debian/13', name: 'onionsoup-x' }, approved), /remote_forbids_create: selfie/);
+  await assert.rejects(create({ remote: 'minideb', image: 'images:alpine/edge', name: 'onionsoup-x' }),
+    /outside_grant_without_approval: image images:alpine\/edge is not on its image list/);
+  await assert.rejects(create({ remote: 'minideb', image: 'images:debian/13', name: 'dish' }),
+    /outside_grant_without_approval: name dish lacks the onionsoup- prefix/);
+  await assert.rejects(create({ remote: 'minideb', image: 'images:debian/13', name: 'onionsoup-Bad Name' }, approved), /bad_instance_name/);
   await assert.rejects(deleteInstance(runtime.incus, owner, runtime.managed, 'minideb', 'onionsoup-not-mine'), /not_managed_by_onionsoup/);
   await assert.rejects(deleteInstance(runtime.incus, owner, runtime.managed, 'selfie', 'bobsled'), /remote_forbids_delete: selfie/);
+  for (const name of ['onionsoup-a', 'onionsoup-b', 'onionsoup-c']) {
+    await runtime.managed.add('homelab', { remote: 'minideb', name, image: 'images:debian/13', requestId: name, requestedBy: 'clippy', createdAt: '' });
+  }
+  await assert.rejects(create({ remote: 'minideb', image: 'images:ubuntu/26.04', name: 'dish' }, approved), /managed_instance_limit_reached/,
+    'the person\'s approval does not lift the instance cap');
   assert.deepEqual(calls, []);
+});
+
+/** The test fixtures plus Teg, whose whole domain is incus, so deciding a request refreshes only incus evidence. */
+async function configWithIncusOwner() {
+  const { cp, writeFile } = await import('node:fs/promises');
+  const config = await mkdtemp(join(tmpdir(), 'owners-incus-config-'));
+  await cp('packages/owners/test/fixtures/owners', config, { recursive: true });
+  await writeFile(join(config, 'owners', 'teg.yaml'), [
+    'id: teg',
+    'domain:',
+    '  kind: incus',
+    '  remotes: [{ name: minideb, host: 192.0.2.20, allow: [observe, create, delete] }]',
+    '  images: ["images:debian/13"]',
+    'model: openai/gpt-5.6-sol',
+    'duties: []',
+  ].join('\n') + '\n');
+  await writeFile(join(config, 'charters', 'teg.md'), '# Charter\n');
+  return config;
+}
+
+test('an instance outside the owner\'s grant waits for the person, whose approval creates exactly it and never deletes it', async () => {
+  const { approveCreate, approveDelete, decide, processRequests, requestInstance } = await import('../src/brokering.ts');
+  const { createApproval } = await import('../src/desk.ts');
+  const { runtime, calls } = await incusRuntime(await configWithIncusOwner());
+  await runtime.notebook('teg').ensure('# Charter\n');
+  const decision = { decision: 'accept', reply: 'Long-running, as asked', remote: 'minideb', image: 'images:ubuntu/26.04', nameSuffix: 'dish', name: 'dish' };
+  runtime.hire = async (_owner, request) => ({ value: request.schema.parse(decision), sessionID: 'scripted', cost: 0,
+    startedAt: new Date().toISOString(), finishedAt: new Date().toISOString() });
+  const ask = { kind: 'instance' as const, image: 'images:ubuntu/26.04', purpose: 'long-running instance for bjk, call it dish', expectedMinutes: 60 };
+  const opened = await requestInstance(runtime, 'teg', 'teg', ask, 'none');
+  const decided = await decide(runtime, opened.id);
+  assert.equal(decided.status, 'awaiting-create-approval');
+  assert.equal(decided.reason, 'outside teg\'s grant: image images:ubuntu/26.04 is not on its image list; name dish lacks the onionsoup- prefix');
+  assert.deepEqual(createApproval(runtime, decided), {
+    title: 'teg asks: create minideb:dish from images:ubuntu/26.04',
+    detail: `${ask.purpose}\n${decided.reason}`,
+  });
+  await processRequests(runtime);
+  assert.equal((await runtime.requests.get(opened.id)).status, 'awaiting-create-approval', 'nothing happens without the person');
+  assert.ok(!calls.some(call => call[0] === 'launch'));
+
+  await approveCreate(runtime, opened.id, 'bjk', true);
+  await processRequests(runtime);
+  const provisioned = await runtime.requests.get(opened.id);
+  assert.equal(provisioned.status, 'provisioned');
+  assert.deepEqual(provisioned.instance, { remote: 'minideb', name: 'dish' });
+  assert.deepEqual(calls.filter(call => call[0] === 'launch').map(call => call.slice(0, 3)), [['launch', 'images:ubuntu/26.04', 'minideb:dish']]);
+
+  await runtime.requests.save({ ...provisioned, status: 'awaiting-delete-approval' });
+  await approveDelete(runtime, opened.id, 'bjk');
+  await processRequests(runtime);
+  const kept = await runtime.requests.get(opened.id);
+  assert.equal(kept.status, 'interrupted');
+  assert.match(kept.reason ?? '', /not_managed_by_onionsoup: minideb:dish/);
+  assert.ok(!calls.some(call => call[0] === 'delete'), 'onionsoup never deletes an unprefixed instance');
+  assert.deepEqual((await runtime.managed.list('teg')).map(entry => entry.name), ['dish']);
 });
 
 test('a publish request from an owner that is not the site source is refused before anyone is asked', async () => {

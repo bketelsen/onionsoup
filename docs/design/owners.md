@@ -523,7 +523,7 @@ Request kinds:
 | Request | From → to | After the receiving owner accepts |
 | --- | --- | --- |
 | `work` | any → repository owner with a persona | receiver accepts or declines (work from its manager is accepted automatically); accepted work becomes an `owner-change` item in `planning`, which the owner plans alone in a session the plugin opens (`Request <id>: <title>`); its plan waits in the person's inbox or for the manager's `approve-plans` grant, and the request tracks the linked work through merge or failure |
-| `instance` | any → incus owner | person approves create (optionally the delete too), runtime creates, follow-up runs, delete |
+| `instance` | any → incus owner | person approves create (optionally the delete too), runtime creates, follow-up runs, delete; an image off the owner's `images` list or a name without its `namePrefix` is outside its grant but not refused: the inbox names each violation and the person's create approval covers that exact instance (remote permission and instance cap still apply), and onionsoup never deletes an unprefixed instance |
 | `publish-site` | site source → NAS owner | grant or person, then build · stage · swap · restart app · verify byte for byte · roll back on failure |
 | `update-app` | NAS owner → itself | grant or person, then upgrade the catalog or pull and redeploy images; follow the specific TrueNAS job to success |
 

@@ -5,7 +5,7 @@ import type { ChatOrigin } from './chat-origin.ts';
 import { requireFreelancer } from './declarations.ts';
 import { requestScopedVerification } from './desk-changes.ts';
 import { pickModel } from './families.ts';
-import { reconcileDeletion } from './incus.ts';
+import { decidedInstance, reconcileDeletion } from './incus.ts';
 import type { WorkItem } from './ledger.ts';
 import { ownerMessageId } from './owner-messages.ts';
 import { queueNotice } from './notices.ts';
@@ -98,7 +98,7 @@ async function instanceEffect(runtime: Runtime, resource: ResourceRequest): Prom
     ?? (resource.leaseIncludesDelete ? createApproval : undefined);
   if (resource.ask.kind !== 'instance' || !expected || !resource.instance || !decision || !createApproval || !deleteApproval
     || expected.remote !== decision.remote || expected.image !== decision.image
-    || expected.name !== `${owner.domain.namePrefix}${decision.nameSuffix}`
+    || expected.name !== decidedInstance(owner, decision).name
     || resource.instance.remote !== expected.remote || resource.instance.name !== expected.name
     || decision.decision !== 'accept') {
     throw new Error('operational_instance_provenance_missing');
