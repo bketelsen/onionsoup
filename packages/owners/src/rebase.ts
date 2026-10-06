@@ -60,7 +60,7 @@ export interface PublicationRefresh { changed: string[]; unreadable: string[] }
 
 /**
  * Record merges and closes of every open publication (CI repairs too, which share their PR), with one state read each
- * and no wait for mergeability. The daemon runs it every tick, so delegated requests, initiatives and merge notices
+ * and no wait for mergeability. The daemon runs it every tick, so delegated requests and merge notices
  * react within a minute instead of waiting for the next maintain-prs duty. Only the state is written.
  */
 export async function refreshPublications(runtime: Runtime, ownerId?: string): Promise<PublicationRefresh> {

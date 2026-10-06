@@ -8,7 +8,6 @@ import { Ledger, type HireRecord, type WorkItem } from './ledger.ts';
 import { ssh, withTruenas } from './truenas.ts';
 import { Notebook } from './notebook.ts';
 import { Requests } from './requests.ts';
-import { Initiatives } from './initiatives.ts';
 import { Reminders } from './reminders.ts';
 import { Freelancers, HireError, sandboxedHire, preflightHireExecutable, type ConnectHire, type HireRequest } from './opencode.ts';
 import { ProviderHealthStore, providerOf, recordProviderFailure, recordProviderSuccess, type ProviderError } from './provider-health.ts';
@@ -48,7 +47,6 @@ export class Runtime {
   readonly toolsDirectory: string;
   readonly managed: ManagedInstances;
   readonly requests: Requests;
-  readonly initiatives: Initiatives;
   readonly reminders: Reminders;
   readonly providerHealth: ProviderHealthStore;
   /** Replaceable so tests script a hire's opencode instead of starting a sandbox. */
@@ -71,7 +69,6 @@ export class Runtime {
     this.toolsDirectory = join(stateDirectory, '..', 'tools');
     this.managed = new ManagedInstances(join(stateDirectory, 'managed'));
     this.requests = new Requests(join(stateDirectory, 'requests'));
-    this.initiatives = new Initiatives(join(stateDirectory, 'initiatives'));
     this.reminders = new Reminders(join(stateDirectory, 'reminders'));
     this.providerHealth = new ProviderHealthStore(join(stateDirectory, 'provider-health'));
   }

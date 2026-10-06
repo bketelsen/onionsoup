@@ -33,13 +33,8 @@ import { checkoutPullRequest, proposeDeskChanges } from './desk-changes.ts';
 import { deskSyncText, syncOwnerDesk } from './desk-sync.ts';
 import { configuredPrMaintenanceDuty, updateOwnerPullRequests } from './owner-pr-maintenance.ts';
 import { removeIdlePlanWorktrees, syncPlanWorktree } from './plan-worktrees.ts';
-import { initiativeSection, initiativesText, initiativeText, itemText, reminderSection, reportsWorkText, statusText } from './desk.ts';
-import { parseInitiativeDraft } from './initiatives.ts';
-import {
-  cancelAssignment, draftInitiative, initiativeView, initiativeViews, raiseToManager, resolveEscalation, STEER_ACTIONS,
-  steerReportItem, submitInitiative, updateInitiative,
-  queueResolvedEscalations,
-} from './org-work.ts';
+import { itemText, reminderSection, reportsWorkText, statusText } from './desk.ts';
+import { STEER_ACTIONS, steerReportItem } from './org-work.ts';
 import { OWNER_MESSAGE_LIMITS, ownerMessageShape, ownerReplyShape, sendOwnerMessage, replyToOwnerMessage } from './owner-messages.ts';
 import { ObservedOwnerSession, rememberObservedOwnerSession } from './owner-message-routing.ts';
 import { chatOriginShape, type ChatOrigin } from './chat-origin.ts';
@@ -166,23 +161,21 @@ function orgBlock(org: string) {
 }
 
 const MANAGER_GUIDE = `
-- You manage direct reports. For cross-repository change, draft an initiative with onionsoup_initiative (assignments to
-  your reports, ordered with after), agree it with the person, then submit it. The person approves the breakdown once;
-  the runtime then sends each assignment to its report as its dependencies merge, and you hear here how each piece goes.
-  Where a report granted you approve-plans, initiative plans wake you here: read them with onionsoup_status and
-  approve or send back with onionsoup_steer. For direct requests you personally sent to a report, an applicable grant
-  permits onionsoup_review_request_plan with the exact request/item/digest from onionsoup_status request. A separate
+- You manage direct reports. Fan work out with onionsoup_request_work, one request per report (they accept it
+  automatically), and follow it with onionsoup_status: it shows all your reports' work, and request=<id> each request's
+  progress. Talk to a report in its work session with onionsoup_send and answer it with onionsoup_reply. On work you
+  requested, onionsoup_steer cancels it or leaves the report a note, or resumes it after an intentional pause.
+  Where a report granted you approve-plans, its plans for your requests are yours to review:
+  onionsoup_review_request_plan with the exact request/item/digest from onionsoup_status request. A separate
   actionable continuation requests that review. Compare the original scope and every plan assumption;
   use needs-human for unresolved scope, never promise approval before checking eligibility.
-  Missing grants or missing origin chats leave approval with the person. onionsoup_status shows all your reports' work, assigned
-  or not; onionsoup_steer also cancels the work or leaves the report a note on work your initiatives assigned.
-  Reports push back with escalations; resolve them with your ruling (onionsoup_initiative resolve-escalation).
-  Notes and resolutions reach the report's actual work session; a busy report receives them when idle.`;
+  Missing grants or missing origin chats leave approval with the person.
+  Notes reach the report's actual work session; a busy report receives them when idle.`;
 
 const REPORT_GUIDE = `
-- You have a manager. Work it assigns opens a session where you plan it alone and submit the plan; your manager (under
-  your grant) or the person approves it, and it then runs like any plan. If an assignment is wrong, unclear or blocked,
-  push back with onionsoup_raise instead of quietly doing something else; your manager is woken to answer.`;
+- You have a manager. Work it requests is accepted for you and opens a session where you plan it alone and submit the
+  plan; your manager (under your grant) or the person approves it, and it then runs like any plan. If that work is
+  wrong, unclear or blocked, tell your manager with onionsoup_send instead of quietly doing something else.`;
 
 function isManagerOwner(runtime: Runtime, owner: OwnerDeclaration) {
   return directReports(runtime.declarations, owner.id).length > 0;
@@ -303,18 +296,14 @@ function conversationPermission(owner: OwnerDeclaration, verify: readonly string
 }
 
 const STEWARD_TOOL = 'onionsoup_owners';
-const INITIATIVE_TOOL = 'onionsoup_initiative';
 const STEER_TOOL = 'onionsoup_steer';
 const REQUEST_REVIEW_TOOL = 'onionsoup_review_request_plan';
-const RAISE_TOOL = 'onionsoup_raise';
 
 /** Tools only some owners see: hidden from every agent, then allowed for the owners each predicate admits. */
 const RESTRICTED_TOOLS: Record<string, (runtime: Runtime, owner: OwnerDeclaration) => boolean> = {
   [STEWARD_TOOL]: (_runtime, owner) => Boolean(owner.manages),
-  [INITIATIVE_TOOL]: isManagerOwner,
   [STEER_TOOL]: isManagerOwner,
   [REQUEST_REVIEW_TOOL]: isManagerOwner,
-  [RAISE_TOOL]: hasManagerOwner,
   onionsoup_complete_work: (_runtime, owner) => canChange(owner),
   onionsoup_update_prs: (_runtime, owner) => Boolean(configuredPrMaintenanceDuty(owner)),
 };
@@ -1048,7 +1037,6 @@ const server: Plugin = async (input, options) => {
   async function workSummary(ownerId: string, offset = 0) {
     const allItems = await runtime.ledger.list();
     const items = allItems.filter(item => item.owner === ownerId);
-    const initiatives = initiativeSection(await initiativeViews(runtime), ownerId);
     const reports = reportsWorkText(allItems, directReports(runtime.declarations, ownerId).map(report => report.id));
     const reminders = reminderSection(await runtime.reminders.list(), ownerId);
     const revisionRows = await Promise.all(allItems.filter(item => item.owner === ownerId
@@ -1056,7 +1044,7 @@ const server: Plugin = async (input, options) => {
       const delivery = await planRevisionStatus(runtime, item.id);
       return delivery?.status === 'blocked' ? `Revision delivery blocked for ${item.id}: ${delivery.reason}` : '';
     }));
-    return [statusText(items, []), await requestProgressSummary(runtime, ownerId, new Date(), offset), initiatives, reports, reminders, revisionRows.filter(Boolean).join('\n')].filter(Boolean).join('\n\n');
+    return [statusText(items, []), await requestProgressSummary(runtime, ownerId, new Date(), offset), reports, reminders, revisionRows.filter(Boolean).join('\n')].filter(Boolean).join('\n\n');
   }
 
   /** Quotes already noted as decisions in this chat, by the owner or an earlier watch. */
@@ -1183,40 +1171,6 @@ const server: Plugin = async (input, options) => {
     else await recordProviderSuccess(runtime, info.providerID);
   }
 
-  interface InitiativeArgs { id?: string; initiative?: unknown; assignment?: string; escalation?: string; note?: string }
-  type InitiativeAction = (managerId: string, args: InitiativeArgs, origin: ChatOrigin) => Promise<string>;
-
-  async function ownInitiativeView(managerId: string, initiativeId: string) {
-    const view = await initiativeView(runtime, initiativeId);
-    if (view.owner !== managerId) throw new Error(`not_your_initiative: ${initiativeId} belongs to ${view.owner}`);
-    return view;
-  }
-
-  const initiativeActions: Record<string, InitiativeAction> = {
-    draft: async (managerId, args, origin) => {
-      const drafted = await draftInitiative(runtime, managerId, parseInitiativeDraft(args.initiative), origin);
-      return `Drafted ${drafted.id}. Show the person the breakdown, then submit it for their approval.\n\n${initiativeText(await ownInitiativeView(managerId, drafted.id))}`;
-    },
-    update: async (managerId, args) => {
-      const updated = await updateInitiative(runtime, managerId, required(args.id, 'id'), parseInitiativeDraft(args.initiative));
-      return `Updated ${updated.id}: revision ${updated.revision}, ${updated.status}.`;
-    },
-    submit: async (managerId, args) => {
-      const submitted = await submitInitiative(runtime, managerId, required(args.id, 'id'));
-      return `Submitted ${submitted.id}; it waits for the person's approval (surface inbox, or owners approve-initiative).`;
-    },
-    show: async (managerId, args) => initiativeText(await ownInitiativeView(managerId, required(args.id, 'id'))),
-    list: async managerId => initiativesText((await initiativeViews(runtime)).filter(view => view.owner === managerId)),
-    'cancel-assignment': async (managerId, args) => {
-      await cancelAssignment(runtime, managerId, required(args.id, 'id'), required(args.assignment, 'assignment'), required(args.note, 'note'));
-      return `Cancelled ${args.assignment} of ${args.id}.`;
-    },
-    'resolve-escalation': async (managerId, args) => {
-      const escalation = await resolveEscalation(runtime, managerId, required(args.id, 'id'), required(args.escalation, 'escalation'), required(args.note, 'note'));
-      return `Resolved ${escalation.id}; your ruling is queued to ${escalation.from}'s original work session (when idle).`;
-    },
-  };
-
   interface RemindArgs { after?: string; at?: string; prompt?: string; item?: string; id?: string; reason?: string }
   type RemindAction = (ownerId: string, args: RemindArgs, origin: ChatOrigin) => Promise<string>;
 
@@ -1281,8 +1235,6 @@ const server: Plugin = async (input, options) => {
       (id, error) => console.warn('plan_revision_delivery_failed', id, error)));
     await pass.phase('direct-reviews', () => deliverDirectRequestReviews(runtime, planRevisionClient(client, { runtime, pass }),
       (id, error) => console.warn('direct_review_wake_failed', id, error)));
-    await pass.phase('resolution-notices', () => queueResolvedEscalations(runtime,
-      (id, error) => console.warn('escalation_resolution_delivery_failed', id, error)));
     await pass.phase('work-notices', () => deliverWorkNotices(runtime, client, pass));
     await pass.phase('exchange-notices', () => deliverExchangeNotices(runtime, exchangeClient(client)));
     await pass.phase('owner-sessions', () => openNeededSessions(runtime, sessions,
@@ -1415,7 +1367,7 @@ const server: Plugin = async (input, options) => {
           permission,
         };
       }
-      // Restricted tools (owner management, initiatives) are shown only to the owners they are for.
+      // Restricted tools (owner management, manager tools) are shown only to the owners they are for.
       for (const name of Object.keys(RESTRICTED_TOOLS)) hiddenFromEveryone[name] = 'deny';
       // Owner tool servers are denied to every agent; each owner's own rules re-allow its servers (last match wins).
       Object.assign(agents, subagents(runtime.declarations, personaOwners));
@@ -1621,30 +1573,7 @@ const server: Plugin = async (input, options) => {
           const sender = requireOwner(context.agent);
           const receiver = resolveOwner(args.owner);
           const proposal = ProposedWork.parse(args);
-          return JSON.stringify(await requestWork(runtime, sender.id, receiver.id, proposal, undefined, { sessionID: context.sessionID, directory: context.directory }));
-        },
-      }),
-      [INITIATIVE_TOOL]: tool({
-        description: 'For managers: plan cross-repository work as an initiative of assignments to your direct reports. "draft" takes the initiative (title, goal, rationale, and assignments, each with an id, the report\'s owner id as to, a proposal, and after: ids whose work must merge first); "update" replaces the draft of initiative id (an edit after submission needs the person again); "submit" asks the person to approve it; "show" and "list" read yours; "cancel-assignment" drops one assignment (and its open work) with a note; "resolve-escalation" settles a report\'s escalation with a note. After approval the runtime sends each assignment to its report as its dependencies merge.',
-        args: {
-          action: tool.schema.enum(['draft', 'update', 'submit', 'show', 'list', 'cancel-assignment', 'resolve-escalation']),
-          id: tool.schema.string().optional().describe('The initiative id, e.g. i-20260924-1a2b3c'),
-          initiative: tool.schema.object({
-            title: tool.schema.string(), goal: tool.schema.string(), rationale: tool.schema.string(),
-            assignments: tool.schema.array(tool.schema.object({
-              id: tool.schema.string().describe('Short, lowercase, e.g. core-doc'),
-              to: tool.schema.string().describe('The report\'s owner id'),
-              after: tool.schema.array(tool.schema.string()).optional().describe('Assignment ids whose work must merge first'),
-              proposal: tool.schema.object(proposalArgs()),
-            })),
-          }).optional().describe('For draft and update: the whole initiative'),
-          assignment: tool.schema.string().optional().describe('For cancel-assignment: the assignment id'),
-          escalation: tool.schema.string().optional().describe('For resolve-escalation: the escalation id, e.g. e-1a2b3c4d'),
-          note: tool.schema.string().optional().describe('For cancel-assignment: why; for resolve-escalation: how it was settled'),
-        },
-        async execute(args, context) {
-          const manager = requireOwner(context.agent);
-          return initiativeActions[args.action](manager.id, args, { sessionID: context.sessionID, directory: context.directory });
+          return JSON.stringify(await requestWork(runtime, sender.id, receiver.id, proposal, { sessionID: context.sessionID, directory: context.directory }));
         },
       }),
       onionsoup_remind: tool({
@@ -1679,32 +1608,17 @@ const server: Plugin = async (input, options) => {
         },
       }),
       [STEER_TOOL]: tool({
-        description: 'For managers: act on assigned report work. "approve-plan" needs the configured approve-plans grant and no open escalation; "revise-plan" requests revision; "cancel" cancels; "note" queues a ruling without resuming paused work. "resume" explicitly resumes the ORIGINAL intentionally paused work (initiative or your direct request), preserving its goal, plan and approvals, only under the configured approve-plans grant.',
+        description: 'For managers: act on work you requested from a direct report. "cancel" cancels it; "note" queues a note to its work session without resuming paused work; "resume" explicitly resumes the ORIGINAL intentionally paused work, preserving its goal, plan and approvals, only under the configured approve-plans grant. Plans are reviewed with onionsoup_review_request_plan.',
         args: {
           item: tool.schema.string().describe('The work item id'),
           action: tool.schema.enum(STEER_ACTIONS as [typeof STEER_ACTIONS[number], ...typeof STEER_ACTIONS]),
-          note: tool.schema.string().optional().describe('Required except for approve-plan'),
+          note: tool.schema.string().describe('Why, or what the report should know'),
         },
         async execute(args, context) {
           const manager = args.action === 'note' ? await messageCaller(context) : requireOwner(context.agent);
           const source = { origin: { sessionID: context.sessionID, directory: context.directory }, messageID: context.messageID };
-          const outcome = await steerReportItem(runtime, manager.id, args.item, args.action, args.note ?? '', source);
+          const outcome = await steerReportItem(runtime, manager.id, args.item, args.action, args.note, source);
           return `${args.action} on ${args.item}: ${outcome}.`;
-        },
-      }),
-      [RAISE_TOOL]: tool({
-        description: 'Push back to your manager on an assignment: an objection (it is wrong), a question (it is unclear) or blocked (you cannot proceed). Name your work item, or the initiative and assignment ids. Your manager is woken to answer, and cannot approve that assignment\'s plans until the escalation is resolved.',
-        args: {
-          kind: tool.schema.enum(['objection', 'question', 'blocked']),
-          note: tool.schema.string(),
-          item: tool.schema.string().optional().describe('Your work item id for the assignment'),
-          initiative: tool.schema.string().optional(),
-          assignment: tool.schema.string().optional(),
-        },
-        async execute(args, context) {
-          const report = requireOwner(context.agent);
-          const escalation = await raiseToManager(runtime, report.id, args);
-          return `Raised ${escalation.id} to your manager on ${escalation.assignment}. They are woken in their chat to answer.`;
         },
       }),
       onionsoup_attention: tool({
@@ -1724,7 +1638,7 @@ const server: Plugin = async (input, options) => {
         },
       }),
       onionsoup_status: tool({
-        description: 'Your open work items and requests (including anything waiting on the person), your initiatives if you manage owners, and work that finished recently with its outcome. Pass a work item id to see that item in full (yours, or any work of your direct reports).',
+        description: 'Your open work items and requests (including anything waiting on the person), your direct reports\' work if you manage owners, and work that finished recently with its outcome. Pass a work item id to see that item in full (yours, or any work of your direct reports).',
         args: {
           item: tool.schema.string().optional().describe('A work item id, e.g. w-20260923-31a48a'),
           request: tool.schema.string().optional().describe('A visible request ID for complete linked progress and blocker details'),

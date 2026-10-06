@@ -144,7 +144,7 @@ export const Grant = z.object({
   /**
    * publish-site and update-app are requests to another owner; merge lets an owner merge its own reviewed PRs;
    * ship lets an owner deploy its repository where it runs; approve-plans lets this owner's manager (`to`) approve
-   * the plans of work it carries out for the manager's initiatives.
+   * the plans of work the manager requested from it.
    */
   action: z.enum(['publish-site', 'update-app', 'merge', 'ship', 'approve-plans']),
   /** The site, app or repository, or "*" for all of them. */
@@ -195,7 +195,7 @@ export const OwnerDeclaration = z.object({
   manages: z.object({ owners: z.array(z.string()).min(1) }).optional(),
   /** MCP tool servers this owner uses in chats, keyed by a short name. */
   mcp: z.record(z.string().regex(/^[a-z][a-z0-9]*$/), OwnerToolServer).default({}),
-  /** The owner this one reports to: its manager's assignments are accepted automatically. Read it through managerOf. */
+  /** The owner this one reports to: its manager's work requests are accepted automatically. Read it through managerOf. */
   reportsTo: z.string().optional(),
 });
 export type OwnerDeclaration = z.infer<typeof OwnerDeclaration>;

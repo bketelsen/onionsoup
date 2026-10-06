@@ -215,7 +215,7 @@ export async function requestProgressDetail(runtime: Runtime, owner: string, id:
 }
 
 async function directPlanReviewDetail(runtime: Runtime, request: ResourceRequest, item: WorkItem | undefined) {
-  if (request.ask.kind !== 'work' || request.ask.assignment || !item || item.request !== request.id || item.owner !== request.to) return '';
+  if (request.ask.kind !== 'work' || !item || item.request !== request.id || item.owner !== request.to) return '';
   const receipts = item.directRequestPlanReviews.map(review => `${review.decision}; scope ${review.scope}; ${review.reviewer} at ${review.at}; binding ${review.digest}: ${review.note}`);
   const history = receipts.length ? `\nDirect-request plan reviews:\n${receipts.join('\n')}` : '';
   if (item.status !== 'awaiting-plan-approval') return history;

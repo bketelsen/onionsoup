@@ -4,8 +4,6 @@ import { needsHumanDecision } from './attention-routing.ts';
 import { readFile, readdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { OwnerDeclaration } from './declarations.ts';
-import { INITIATIVE_JOURNAL_KINDS, type AssignmentState, type Escalation, type PlanReview } from './initiatives.ts';
-import type { AssignmentView, InitiativeView } from './org-work.ts';
 import { isFinished, type WorkItem } from './ledger.ts';
 import { describeAsk, type ResourceRequest } from './requests.ts';
 import { pendingReminders, REMINDER_JOURNAL_KINDS, REMINDER_LIMITS, reminderSummary, type Reminder } from './reminders.ts';
@@ -24,7 +22,7 @@ const NOTE_KINDS = new Set([
   'rebase-pushed', 'attention', 'attention-condition', 'app-held', 'app-update-proposed', 'app-updated', 'request-accepted', 'request-declined',
   'request-refused', 'instance-created', 'instance-deleted', 'follow-up', 'asked', 'answered', 'ci-triage', 'owner-created',
   'owner-updated', 'owner-retired', 'ship-started', 'shipped', 'work-status', 'friction', 'fact',
-  ...INITIATIVE_JOURNAL_KINDS, ...REMINDER_JOURNAL_KINDS, ...WIKI_JOURNAL_KINDS,
+  'plan-review', 'grant-used', 'steered', 'manager-note', ...REMINDER_JOURNAL_KINDS, ...WIKI_JOURNAL_KINDS,
 ]);
 
 function isOpenWork(item: WorkItem) {
@@ -160,59 +158,6 @@ export function itemText(item: WorkItem) {
   return lines.join('\n');
 }
 
-const ASSIGNMENT_WORDS: Partial<Record<AssignmentState, string>> = {
-  'not-dispatched': 'not dispatched yet',
-  'plan-waiting': 'plan waiting for approval',
-  'awaiting-merge': 'PR open; waiting on the person to merge it',
-  'awaiting-person': 'waiting on the person',
-  blocked: 'interrupted; waiting on the person',
-  paused: 'intentionally paused; explicit resume required',
-};
-
-function assignmentLine(assignment: AssignmentView) {
-  const after = assignment.after.length ? ` after ${assignment.after.join(', ')}` : '';
-  const work = assignment.item ? `; work ${assignment.item.id}` : '';
-  const pr = assignment.item?.publication ? ` ${assignment.item.publication.url}` : '';
-  return `- ${assignment.id} → ${assignment.to}${after}: ${assignment.proposal.title} [${ASSIGNMENT_WORDS[assignment.state] ?? assignment.state}]${work}${pr}`;
-}
-
-function escalationLine(escalation: Escalation) {
-  const state = escalation.resolution ? `resolved by ${escalation.resolution.by}: ${escalation.resolution.note}` : 'OPEN';
-  return `Escalation ${escalation.id} (${escalation.kind}) from ${escalation.from} on ${escalation.assignment}: ${escalation.note} [${state}]`;
-}
-
-function planReviewLine(review: PlanReview) {
-  return `Plan review of ${review.item} (plan ${review.digest}): ${review.verdict} by ${review.by}${review.note ? `: ${review.note}` : ''}`;
-}
-
-/** One initiative in full, for its manager and the person. */
-export function initiativeText(view: InitiativeView) {
-  const approval = view.approval ? `approved by ${view.approval.by} for revision ${view.approval.revision}` : 'not approved';
-  const lines = [
-    `${view.id}: ${view.title} [${view.status}; revision ${view.revision}; ${approval}]`,
-    `Goal: ${view.goal}`,
-    `Why: ${view.rationale}`,
-    'Assignments:',
-    ...view.assignments.map(assignmentLine),
-    ...view.feedback.map(entry => `Sent back by ${entry.by} (revision ${entry.revision}): ${entry.note}`),
-    ...view.escalations.map(escalationLine),
-    ...view.planReviews.map(planReviewLine),
-  ];
-  if (view.outcome) lines.push(`Outcome: ${view.outcome}`);
-  return lines.join('\n');
-}
-
-/** Initiatives, one line each. */
-export function initiativesText(views: readonly InitiativeView[]) {
-  if (!views.length) return 'No initiatives.';
-  return views.map(view => {
-    const merged = view.assignments.filter(assignment => assignment.state === 'completed').length;
-    const open = view.escalations.filter(escalation => !escalation.resolution).length;
-    const escalations = open ? `; ${open} open escalation${open === 1 ? '' : 's'}` : '';
-    return `- ${view.id} [${view.status}]: ${view.title} (${merged}/${view.assignments.length} merged${escalations})`;
-  }).join('\n');
-}
-
 /** One report's open work and what it finished recently, newest first. */
 function reportLines(items: readonly WorkItem[], reportId: string, since: number) {
   const own = items.filter(item => item.owner === reportId);
@@ -220,22 +165,12 @@ function reportLines(items: readonly WorkItem[], reportId: string, since: number
   return [...own.filter(isOpenWork), ...recent].map(item => `- ${reportId}: work ${item.id}: ${outcome(item)}: ${item.proposal.title}`);
 }
 
-/** A manager's view of all her direct reports' work, assigned or not. Empty when she has no reports. */
+/** A manager's view of all her direct reports' work, whoever asked for it. Empty when she has no reports. */
 export function reportsWorkText(items: readonly WorkItem[], reportIds: readonly string[], now = new Date()) {
   if (!reportIds.length) return '';
   const since = now.getTime() - STATUS_LIMITS.recentDays * 24 * 60 * 60 * 1000;
   const lines = reportIds.flatMap(reportId => reportLines(items, reportId, since));
   return `Your reports' work (onionsoup_status <item> for detail):\n${lines.join('\n') || '- nothing open or finished recently'}`;
-}
-
-const FINISHED_INITIATIVES = new Set(['completed', 'failed', 'cancelled']);
-
-/** A manager's status section: open initiatives, and those that finished recently. Empty when there are none. */
-export function initiativeSection(views: readonly InitiativeView[], ownerId: string, now = new Date()) {
-  const since = now.getTime() - STATUS_LIMITS.recentDays * 24 * 60 * 60 * 1000;
-  const shown = views.filter(view => view.owner === ownerId && (!FINISHED_INITIATIVES.has(view.status) || Date.parse(view.updatedAt) >= since));
-  if (!shown.length) return '';
-  return `Your initiatives (onionsoup_initiative show <id> for detail):\n${initiativesText(shown)}`;
 }
 
 /** An owner's pending reminders, soonest first, for its status. Empty when there are none. */

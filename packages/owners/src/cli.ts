@@ -23,8 +23,7 @@ import { prepareRequestClosure, acceptRequestClosure } from './request-closure.t
 import { completeAcceptedRequest } from './request-closure-completion.ts';
 import { proposeDeskChanges, resetDeskReviews } from './desk-changes.ts';
 import { shipEngine } from './ship.ts';
-import { deskState, initiativesText, initiativeText } from './desk.ts';
-import { approveInitiative, cancelInitiative, initiativeView, initiativeViews, reviseInitiative } from './org-work.ts';
+import { deskState } from './desk.ts';
 import { initConfig } from './init.ts';
 import { configDirectory, stateDirectory } from './paths.ts';
 import { ensureDesk } from './workspace.ts';
@@ -304,24 +303,6 @@ const COMMANDS: Record<string, Command> = {
     const cleared = await resetDeskReviews(runtime, required(ownerId, 'owner'), repository, userInfo().username, options.item);
     console.log(`${ownerId}: ${cleared} review rounds cleared; the next proposal is reviewed afresh`);
   },
-  async initiatives(runtime) {
-    console.log(initiativesText(await initiativeViews(runtime)));
-  },
-  async initiative(runtime, [initiativeId]) {
-    console.log(initiativeText(await initiativeView(runtime, required(initiativeId, 'initiative'))));
-  },
-  async 'approve-initiative'(runtime, [initiativeId]) {
-    const approved = await approveInitiative(runtime, required(initiativeId, 'initiative'), userInfo().username, options.note);
-    console.log(`${approved.id}: ${approved.status} (revision ${approved.revision}); the daemon dispatches its ready assignments`);
-  },
-  async 'revise-initiative'(runtime, [initiativeId]) {
-    const revised = await reviseInitiative(runtime, required(initiativeId, 'initiative'), userInfo().username, required(options.note, '--note'));
-    console.log(`${revised.id}: ${revised.status}; sent back to ${revised.owner}`);
-  },
-  async 'cancel-initiative'(runtime, [initiativeId]) {
-    const cancelled = await cancelInitiative(runtime, required(initiativeId, 'initiative'), userInfo().username, required(options.reason, '--reason'));
-    console.log(`${cancelled.id}: ${cancelled.status}`);
-  },
   async tick(runtime) {
     await tick(runtime, tickLog);
     // One tick from the command line holds the runtime until the work it started is done.
@@ -380,7 +361,7 @@ const LOCK_FREE = [
   'distill', 'items', 'show', 'notebook', 'requests', 'approve', 'revise-plan',
   'pause', 'resume', 'retry', 'cancel', 'desk', 'desk-state', 'retract', 'ask', 'request-publish', 'propose',
   'ship', 'approve-push', 'approve-create', 'approve-delete', 'deny-request',
-  'desk-review-reset', 'initiatives', 'initiative', 'approve-initiative', 'revise-initiative', 'cancel-initiative',
+  'desk-review-reset',
   'wiki', 'friction-investigation', 'friction-promote', 'friction-promotion-retry',
 ];
 try {

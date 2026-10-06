@@ -114,7 +114,7 @@ An owner is declared once (`owners/<id>.yaml`) and keeps one identity across ses
 - **Grants**: standing approvals the person gives in configuration (`publish-site`, `update-app`, `merge`, `ship`,
   `approve-plans`), journaled as "approved by standing grant" whenever they are used.
 - **Reporting line**: `reportsTo` names an owner's manager. The roster every owner reads is drawn as that tree, and
-  a manager plans cross-repository work through its reports (see [Org chart and initiatives](#org-chart-and-initiatives)).
+  a manager fans work out to its reports and follows it (see [Org chart and managers](#org-chart-and-managers)).
 - **Desk**: a worktree on a `desk/<id>` branch (or the evidence folder for non-repository owners) where chat
   work happens. Desk changes become a verified, reviewed PR through `onionsoup_propose_changes`; only blocker findings send them back. The review diffs the desk against where it meets its base branch (the merge base), so a desk that fell behind shows only its own change. `onionsoup_sync_desk` (with a plan's `item`, that plan's worktree) brings a desk up to date in host code: uncommitted work (intent-to-add entries included) is set aside under a unique stash, the desk moves to `origin/<base>`, and the work comes back; a conflict keeps the stash and names the files, and commits no remote holds are never moved (`desk_has_unpublished_commits`). A desk put on an open PR with `onionsoup_checkout_pr` is not synced (`desk_on_pull_request`): moving it would drop the PR's commits, and the PR's conflicts with its base are the `maintain-prs` rebase's to resolve, which the refusal names when one is open. Planning sessions start from a synced desk; an approved plan works in its own worktree, not the desk (see Execution sessions). Required desk reviews receive sanitized host command exit statuses tied to the exact source tree and observation time, plus the original approved task acceptance criteria. No configured commands is explicitly reported as no checks; sandbox evidence never implies live deployment. Source changes during verification or review invalidate that evidence before publication. Approved-plan publication retains its original goal instead of replacing it with the implementation summary. Review converges: each round with blockers is kept (`state/desk-reviews/`), and the next reviewer gets its findings and the diff since, checks those first, and blocks new points in already-reviewed text only for real errors. After `DESK_CHANGE_LIMITS.reviewRoundsBeforePerson` rounds (6) no reviewer is hired: the person reads the diff, and `owners desk-review-reset <owner> [repository] [--item <plan>]` starts afresh (a plan's worktree keeps its own rounds). An approval clears the history. Publication is a ledger workflow: commit, push, PR creation, merge and site follow-up have durable checkpoints. Retrying a clean desk continues its unfinished publication, and its PR participates in maintenance. An active publication reports its progress; permanent failures name the cancellation needed before a new proposal. Journal failures remain visible without changing a completed publication back to failed.
 
@@ -222,7 +222,7 @@ stage workflow prompt through a durable notice; an uncertain introduction is reu
 
 Explicit Resume restores the saved stage and unchanged goal, plan, approval and checkpoints without another
 plan approval. The host records who resumed and why; model prose or an actor name cannot supply authority.
-A configured direct manager may resume assigned work only under its existing applicable `approve-plans` grant.
+A configured direct manager may resume work she requested only under the report's applicable `approve-plans` grant.
 Messages remain queued while paused. Work execution sessions and observed children remain read-only until resume, so a
 continuation or a publication tool cannot accidentally restart deliberately stopped work.
 
@@ -678,7 +678,7 @@ The human inbox includes only open human decisions; Seen removes a card from tha
 count without starting work or deleting history. Informational owner follow-up and all acknowledged/resolved entries
 remain in the owner's backlog/history. Acknowledgment never makes an old condition newly urgent.
 
-### Org chart and initiatives
+### Org chart and managers
 
 The org chart is configuration: `reportsTo: <owner>` on a declaration. Loading refuses unknown managers
 (`org_chart_unknown_manager`), self-reports (`org_chart_self`) and cycles (`org_chart_cycle`). A steward may put owners
@@ -686,42 +686,19 @@ in its scope under itself or take them back out, but never sets, changes or clea
 owner's prompt says who its manager and direct reports are; `managerOf`, `directReports` and `isDirectReport` in
 `declarations.ts` are the only readers of the field.
 
-Work a manager requests from a direct report is accepted automatically (no hire; only the report is reserved in the
-request pool) and still goes through the report's ordinary plan approval, verification, review and publication gates. A
-peer's request is still decided by the receiver.
-
-An **initiative** (`state/initiatives/<id>.json`, `org-work.ts`) is a manager's cross-repository change: assignments
-to its direct reports, each a proposal with `after` dependencies. The manager drafts, updates and submits it in chat
-with `onionsoup_initiative` (shown only to owners with reports); the draft records that chat. Submission checks every
-assignment: the assignee is a direct report that can change its repository (`canChange`), owns the named repository, and has a `maintain-prs` duty
-(completion means merged, so a report that cannot observe merges is refused); dependencies exist and do not cycle;
-the manager has fewer than `INITIATIVE_LIMITS.maxOpenPerManager` open initiatives. The person approves, sends back
-or cancels it once, in the surface inbox or with `owners approve-initiative | revise-initiative | cancel-initiative`.
-Any edit after submission is a new revision that stops dispatch until the person approves it again.
-
-Each daemon tick runs `superviseInitiatives` after requests. It is deterministic and acts only on an approved
-initiative whose approval names its current revision: an assignment whose dependencies have all merged is dispatched
-as a work request carrying its assignment reference (a request already carrying that reference is linked instead of
-repeated), and the initiative completes when every assignment merged or fails when one failed. An assignment stores
-only its request id; its state (requested, working, plan waiting, waiting on the person or a merge, merged, failed)
-is derived from the request and work item. Completion still means merged, so a chain waits on the person wherever a
-PR waits to be merged.
-
-The manager hears how assigned work goes: the notice pass journals each change to her too and, for the same
-changes that wake the owner, queues a manager notice into the initiative's chat (`WorkItem.origin` stays the item
-owner's chat), which wakes her there. Approval, send-back, cancellation, completion and failure of the initiative
-reach the same chat.
+A manager is an owner with direct reports. For cross-repository change she fans the work out herself: one
+`onionsoup_request_work` per report and repository, in whatever order the change needs. Work a manager requests from
+a direct report is accepted automatically (no hire; only the report is reserved in the request pool) and still goes
+through the report's ordinary plan approval, verification, review and publication gates. A peer's request is still
+decided by the receiver. She follows each request with `onionsoup_status` (`request=<id>` for one request's progress)
+and talks to a report in its actual work session with `onionsoup_send` / `onionsoup_reply`; a report that finds the
+work wrong, unclear or blocked tells her the same way.
 
 **Plan approval under grant.** A report may give its manager `approve-plans` (a grant on the report's declaration,
-`to` its manager, target a repository or `*`; loading refuses one to anyone else with `grant_not_to_manager`). For
-each new plan (by digest) waiting in a supervised initiative, the daemon wakes the manager once, with a notice in
-the initiative's chat; no model is hired for it. She reads the plan and approves it or sends it back with a note
-through `onionsoup_steer`. Approve records the plan approval as `owner:<manager> (standing grant approve-plans in
-<report>)`, journals `grant-used` to both notebooks, and the plugin opens the report's work session; a send-back
-moves the plan back to `planning` and wakes the report where it planned. After `SUPERVISION_LIMITS.revisionsPerItem`
-send-backs the plan is left for the person and raises the manager's attention. Without the grant the plan waits for
-the person as always, and the inbox says when the manager reviews under a grant. A person who sends a delegated plan
-back from the inbox does the same as a manager's send-back.
+`to` its manager, target a repository or `*`; loading refuses one to anyone else with `grant_not_to_manager`). It
+lets her review the plans of work she requested (direct-request review, below). Without the grant the plan waits for
+the person as always. A person who sends a delegated plan back from the inbox moves it back to `planning` and wakes
+the report where it planned.
 
 **Direct-request review.** For a one-off work request, the requester may review its own direct report's plan under
 the same configured `approve-plans` grant, using `onionsoup_review_request_plan`. `onionsoup_status request=<id>`
@@ -731,8 +708,8 @@ that a restated plan goal is identical to the request. Host code rereads configu
 inside the final request/item locks. A matched-scope approval records a durable review and grant use, then the
 existing owner-session gate starts work. `revise` preserves the goal and uses durable plan-revision delivery;
 `needs-human` records the precise unresolved scope question and leaves approval pending. It never approves extra
-work merely because a model promised approval. Human inbox approval and initiative behavior are unchanged.
-The shared `SUPERVISION_LIMITS.revisionsPerItem` budget bounds automatic send-backs; after it is exhausted the
+work merely because a model promised approval. Human inbox approval is unchanged.
+The `SUPERVISION_LIMITS.revisionsPerItem` budget bounds automatic send-backs; after it is exhausted the
 person decides the next plan.
 
 The plugin's ordinary notice pass prepares a durable actionable continuation for each eligible direct-request
@@ -745,21 +722,22 @@ Changed plans invalidate prior bindings, and a recorded review suppresses repeat
 Models execute outside record locks; a concurrent human decision wins the gate and stale model verdicts fail.
 Scope matching is an explicit reviewer assessment with a note, not deterministic semantic analysis of prose.
 
-**Steering and pushback.** A manager reads all her direct reports' work with `onionsoup_status`, assigned or taken on
-directly (one-off requests, their own work), and it lists her initiatives. `onionsoup_steer` acts on work her initiatives
-assigned (approve a plan under the grant, send it back, cancel the work, or leave the report
-a note); reading is oversight, steering is authority. A report pushes back with `onionsoup_raise` (objection, question or blocked): the
-escalation is stored on the initiative, journaled to both, recorded as the manager's owner follow-up, and wakes her. While it
-is open she cannot approve that assignment's plans; she resolves it with `onionsoup_initiative resolve-escalation`.
-Manager notes and resolutions queue the manager's ruling to the report's exact owned work session, rather than
-only journaling it. Notes deduplicate by host originating session/message identity, so a deliberate later repeat
-of the same words still reaches the report. A resolution retry repairs missing delivery under its original
-escalation identity. The plugin also repairs resolved escalations on still-live original work after a crash.
-Conflicting attempts to change a saved resolution fail explicitly. The report continues the original request,
+**Steering.** A manager reads all her direct reports' work with `onionsoup_status`, whoever asked for it (her
+requests, a peer's, their own work). `onionsoup_steer` (`org-work.ts`) acts only on a report's work item whose request
+she sent: `cancel` cancels it (its request then fails, and only that request), `note` leaves the report a note, and
+`resume` resumes it after an intentional pause under the report's `approve-plans` grant. Every action takes a note and
+is journaled (`steered`) to both; reading is oversight, steering is authority. A note is queued to the report's exact
+owned work session rather than only journaled, and deduplicates by host originating session/message identity, so a
+deliberate later repeat of the same words still reaches the report. The report continues the original request,
 without cancellation, replacement, another approval layer or asking the person to carry the answer.
 
-The surface shows the tree under **Org**, each initiative's assignments by dependency step with their state, work,
-PRs, escalations and plan reviews, and initiatives awaiting approval in the inbox.
+The surface shows the tree under **Org**.
+
+Initiatives (a manager's multi-owner plan the person approved once, dispatched by the daemon) were removed in 2026-10:
+cancelling one assignment failed the whole initiative, dispatched work could not be edited, and reports could not
+push back on plain manager requests. Records under `state/initiatives/` are ignored. `assignment` on work requests and
+items and the `escalation` attention provenance stay in their schemas only so old records parse; old escalation
+cards resolve as `initiatives_removed`.
 
 ### Reminders
 
@@ -848,7 +826,7 @@ release pointer.
 
 `npm run owners -- daemon` (installed as `deploy/onionsoup-owners.service`) ticks every minute: it re-reads the
 configuration, reads the state of every open PR (`refreshPublications`, so merges and closes are seen within a minute
-and everything after reacts on the same tick), moves requests along, supervises initiatives, runs due duties,
+and everything after reacts on the same tick), moves requests along, runs due duties,
 advances runnable work items (publications of proposed changes and rebases; owners do the rest in their sessions),
 and raises work notices. Requests, duties and work items run in the background beside the tick (one run per item,
 one item per owner, within `DAEMON_LIMITS`; requests reserve both participating owners and serialize shared
@@ -891,7 +869,7 @@ gets the surface opencode's own server credentials blanked (the plugin's `shell.
 
 #### Durable operator investigations
 
-`onionsoup_operator_job` supervises the operator's own children, independently of owners and initiatives. It supports
+`onionsoup_operator_job` supervises the operator's own children, independently of owners. It supports
 read-only investigations, explicitly approved edits and new text files, and scoped host-run checks. Children have no arbitrary bash, native
 edit, network, delegation or owner tools. No persistent grant is created; the operator's normal interactive permissions
 are unchanged.
@@ -1440,20 +1418,19 @@ New host-generated plan-worktree cleanup notices carry a condition identity scop
 ### Decision-only human inbox
 
 Host-authored `AttentionProvenance` is shared by journals and the attention index. Survey suggestions (in either
-configured raises mode), worktree cleanup, failed/declined delegations, keeper maintenance and manager escalations
+configured raises mode), worktree cleanup, failed/declined delegations and keeper maintenance
 are owner backlog, not requests for a person's decision. Review exhaustion and explicit CI person dispositions
 remain human decisions. Ordinary engine approvals, questions, permissions and uncertain request recovery keep
 their existing gates and read-error behavior. This routing creates no new approval or execution authority.
 
 On the first routing upgrade, discovery replays journal cursors once, preserving stable card identities and all
 human decision receipts. Legacy classification requires the original journal record plus its exact old host
-envelope and related persisted records: worktree path/item, delegation request/participants/work item, or the
-initiative's exact escalation. Only the old work-mode survey envelope identifies a suggestion; ambiguous free-form
+envelope and related persisted records: worktree path/item or delegation request/participants/work item. Only the old work-mode survey envelope identifies a suggestion; ambiguous free-form
 attention and missing source evidence remain conservative human choices. There is no semantic prose guessing.
 
-Reconciliation updates only the attention index, never source journals, requests, initiatives or worktrees.
+Reconciliation updates only the attention index, never source journals, requests or worktrees.
 Filesystem `ENOENT` positively clears an absent worktree notice; unreadable paths fail the snapshot, not silently
-resolve. Existing worktrees and unpublished commits remain intact. A stored escalation resolution clears its card.
+resolve. Existing worktrees and unpublished commits remain intact.
 A linked request completion, recorded cancellation or cancelled linked work item clears delegation failure cards;
 a similarly worded replacement's success alone proves nothing. Human acknowledgments and original observation
 times are preserved. Cleared entries remain history across restarts; old cards are not deleted or replayed as work.

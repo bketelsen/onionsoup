@@ -172,7 +172,7 @@ test('terminal revision history is preserved while unsent delivery cannot silent
   assert.equal((await inspectMaintenanceReleaseInventory(state)).eligible, true);
 });
 
-test('stale seen maps cannot regenerate a delivered work notice or its manager copy', async context => {
+test('stale seen maps cannot regenerate a delivered work notice, legacy initiative assignment included', async context => {
   const { state, save } = await fixture(context);
   const work = { ...item('failed'), assignment: { initiative: 'initiative_fixture', assignment: 'assignment_fixture' } };
   await save('items/work_fixture.json', work);

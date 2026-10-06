@@ -1,7 +1,6 @@
 import { stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Attention } from './attention.ts';
-import type { Initiative } from './initiatives.ts';
 import type { AttentionProvenance } from './journal-record.ts';
 import type { WorkItem } from './ledger.ts';
 import { describeAsk, type ResourceRequest } from './requests.ts';
@@ -16,7 +15,6 @@ interface Evidence {
   runtime: Runtime;
   items: WorkItem[];
   requests: ResourceRequest[];
-  initiatives: Initiative[];
 }
 
 function legacyWorktree(entry: Attention, evidence: Evidence): AttentionProvenance | undefined {
@@ -65,18 +63,6 @@ function legacyAppUpdate(entry: Attention, evidence: Evidence): AttentionProvena
   }
 }
 
-function legacyEscalation(entry: Attention, evidence: Evidence): AttentionProvenance | undefined {
-  const matches: AttentionProvenance[] = [];
-  for (const initiative of evidence.initiatives.filter(initiative => initiative.owner === entry.owner)) {
-    for (const escalation of initiative.escalations) {
-      const where = `${initiative.id}/${escalation.assignment}${escalation.item ? ` (work ${escalation.item})` : ''}`;
-      const note = `${escalation.from} escalated (${escalation.kind}) on ${where}: ${escalation.note}`;
-      if (entry.note === note) matches.push({ kind: 'escalation', initiative: initiative.id, escalation: escalation.id });
-    }
-  }
-  return matches.length === 1 ? matches[0] : undefined;
-}
-
 function legacySuggestion(entry: Attention): AttentionProvenance | undefined {
   // Only the old host's work-mode envelope is recognizable. Attention-mode prose is ambiguous.
   if (/^proposed work(?: in [^:]+)?: .+ \(plan it with the owner in chat\)$/.test(entry.note)) {
@@ -84,7 +70,7 @@ function legacySuggestion(entry: Attention): AttentionProvenance | undefined {
   }
 }
 
-const LEGACY_READERS = [legacyWorktree, legacyDelegation, legacyAppUpdate, legacyEscalation, legacySuggestion];
+const LEGACY_READERS = [legacyWorktree, legacyDelegation, legacyAppUpdate, legacySuggestion];
 
 async function absentWorktree(provenance: Extract<AttentionProvenance, { kind: 'plan-worktree' }>) {
   try {
@@ -118,21 +104,15 @@ const CLEAR_EVIDENCE: Record<AttentionProvenance['kind'], ClearEvidence> = {
     const item = evidence.items.find(item => item.id === provenance.workItem && item.id === request.workItem);
     if (item?.status === 'cancelled') return 'delegation_work_cancelled';
   },
-  escalation: async (provenance, evidence) => {
-    if (provenance.kind !== 'escalation') return undefined;
-    const initiative = evidence.initiatives.find(initiative => initiative.id === provenance.initiative);
-    return initiative?.escalations.find(escalation => escalation.id === provenance.escalation)?.resolution
-      ? 'escalation_resolved' : undefined;
-  },
+  // Escalations belonged to initiatives, which were removed; nothing can answer one any more.
+  escalation: async () => 'initiatives_removed',
 };
 
-/** Reconcile the index only: retain journals, decisions, worktrees, requests and initiative records. */
+/** Reconcile the index only: retain journals, decisions, worktrees and requests. */
 export async function reconcileAttention(runtime: Runtime, entries: Attention[]) {
   if (!entries.length) return false;
-  const [items, requests, initiatives] = await Promise.all([
-    runtime.ledger.list(), runtime.requests.list(), runtime.initiatives.list(),
-  ]);
-  const evidence: Evidence = { runtime, items, requests, initiatives };
+  const [items, requests] = await Promise.all([runtime.ledger.list(), runtime.requests.list()]);
+  const evidence: Evidence = { runtime, items, requests };
   let changed = false;
   for (const entry of entries) {
     if (entry.provenance?.kind === 'delegation' && entry.journal) {

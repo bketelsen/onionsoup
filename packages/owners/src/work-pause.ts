@@ -29,12 +29,7 @@ async function requireManagerAuthority(runtime: Runtime, managerId: string, item
   if (!isDirectReport(runtime.declarations, managerId, item.owner)
     || !planGrantFor(owner, managerId, owner.domain.name)) throw new Error('work_resume_grant_required');
   const request = item.request ? await runtime.requests.get(item.request) : undefined;
-  const initiative = item.assignment ? await runtime.initiatives.get(item.assignment.initiative) : undefined;
-  if (initiative ? initiative.owner !== managerId
-    : !request || request.from !== managerId || request.to !== item.owner) throw new Error('work_resume_not_assigned');
-  if (initiative?.escalations.some(entry => entry.assignment === item.assignment?.assignment && !entry.resolution)) {
-    throw new Error('work_resume_escalation_open');
-  }
+  if (!request || request.from !== managerId || request.to !== item.owner) throw new Error('work_resume_not_assigned');
 }
 
 export async function managerWorkActor(runtime: Runtime, managerId: string, item: WorkItem): Promise<WorkLifecycleActor> {

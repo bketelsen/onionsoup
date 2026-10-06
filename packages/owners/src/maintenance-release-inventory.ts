@@ -7,7 +7,6 @@ import { Handoff } from './ask-handoffs.ts';
 import { Assignment } from './attention-assignment.ts';
 import { Promotion } from './friction-promotion.ts';
 import { ResourceRequest } from './requests.ts';
-import { Initiative } from './initiatives.ts';
 import { Reminder } from './reminders.ts';
 import { SessionOpening, SessionOpeningStore } from './session-opening-store.ts';
 import { OWNER_CHANGE_WORKFLOW } from './plan-work.ts';
@@ -31,7 +30,7 @@ const RequestProgressBaseline = z.object({ version: z.literal(1), observedAt: z.
 
 /** Only continuation stores are covered here. Configuration, processes, workspaces and
  * OpenCode transcripts must independently match the encompassing recovery proof. */
-export const MAINTENANCE_RELEASE_STORES = ['items', 'requests', 'initiatives', 'reminders', 'session-openings',
+export const MAINTENANCE_RELEASE_STORES = ['items', 'requests', 'reminders', 'session-openings',
   'plan-revisions', 'direct-request-review-wakes', 'notices', 'operator-jobs', 'operator-job-wakes',
   'operator-applications', 'operator-handoffs', 'handoffs', 'attention/assignments', 'friction/promotions'] as const;
 export const MAINTENANCE_RELEASE_INVENTORY_LIMITS = { entries: 100_000, bytes: 128 * 1024 * 1024 };
@@ -264,11 +263,6 @@ async function classify(state: string, files: Map<string, string>, now: number) 
     const request = ResourceRequest.parse(parsed(files, path));
     boundPath(path, `requests/${request.id}.json`);
     decisions.push(classifyRequest(path, request));
-  }
-  for (const path of jsonFiles(files, 'initiatives')) {
-    const initiative = Initiative.parse(parsed(files, path));
-    boundPath(path, `initiatives/${initiative.id}.json`);
-    decisions.push(decision(path, initiative.status !== 'approved', 'initiative_dispatch_gate'));
   }
   for (const path of jsonFiles(files, 'session-openings')) {
     const opening = SessionOpening.parse(parsed(files, path));

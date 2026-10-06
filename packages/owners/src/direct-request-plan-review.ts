@@ -10,7 +10,7 @@ import type { Runtime } from './runtime.ts';
 export { DirectRequestPlanReviewInput, DirectRequestPlanReview } from './direct-request-plan-review-types.ts';
 
 function requireDirectBinding(request: ResourceRequest, item: WorkItem) {
-  if (request.ask.kind !== 'work' || request.ask.assignment || item.assignment
+  if (request.ask.kind !== 'work'
     || request.workItem !== item.id || item.request !== request.id || request.to !== item.owner
     || item.workflow !== OWNER_CHANGE_WORKFLOW || !item.planDocument) {
     throw new Error('direct_plan_review_binding_mismatch');

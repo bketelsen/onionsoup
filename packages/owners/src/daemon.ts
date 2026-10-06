@@ -11,7 +11,6 @@ import { chatDirectory } from './chats.ts';
 import { spanMs } from './span.ts';
 import { requestParticipants } from './delegation.ts';
 import { noticeWorkChanges } from './notices.ts';
-import { superviseInitiatives } from './org-work.ts';
 import { distill, distillIsDue } from './memory.ts';
 import type { WorkItem } from './ledger.ts';
 import { wake } from './owner.ts';
@@ -262,8 +261,8 @@ export async function scheduleFriction(runtime: Runtime, log: TickLog, reserved:
 }
 
 /**
- * One pass: configuration, merged or closed PRs, requests (people may be waiting on an instance), initiatives, due
- * duties, work items, notices. PR states come first so everything after reacts to a merge on the same tick.
+ * One pass: configuration, merged or closed PRs, requests (people may be waiting on an instance), due duties, work
+ * items, notices. PR states come first so everything after reacts to a merge on the same tick.
  */
 export async function tick(runtime: Runtime, log: TickLog) {
   if ((await maintenanceQuarantineStatus(runtime.stateDirectory)).state !== 'absent') return;
@@ -316,11 +315,6 @@ async function tickAdmitted(runtime: Runtime, log: TickLog) {
     await runRequests(runtime, log);
   } catch (error) {
     log.error('requests', error);
-  }
-  try {
-    await superviseInitiatives(runtime, { onError: log.error });
-  } catch (error) {
-    log.error('initiatives', error);
   }
   let reserved: ReadonlySet<string>;
   try {
