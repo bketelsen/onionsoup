@@ -10,24 +10,29 @@ import { parseConfig, runScheduledBriefing, scheduledDate } from './scheduled-br
 
 async function fixture(context) {
   const stateDirectory = await mkdtemp(join(tmpdir(), 'onionsoup-briefing-'));
-  const state = { messages: [], status: {}, posts: [], onPost: undefined };
+  const state = { messages: [], sessions: [], posts: [], onPost: undefined, onCreate: undefined };
   const server = createServer(async (request, response) => {
     const reply = payload => {
       response.setHeader('content-type', 'application/json');
       response.end(JSON.stringify(payload));
     };
-    if (request.method === 'POST') {
-      const chunks = [];
-      for await (const chunk of request) chunks.push(chunk);
-      const prompt = JSON.parse(Buffer.concat(chunks).toString());
-      state.posts.push(prompt);
-      if (state.onPost) return state.onPost(prompt, request, response);
-      state.messages.push(user(prompt.text), answer());
+    const chunks = [];
+    for await (const chunk of request) chunks.push(chunk);
+    const body = request.method === 'POST' ? JSON.parse(Buffer.concat(chunks).toString()) : undefined;
+    if (request.method === 'POST' && request.url === '/api/owners/leto/sessions') {
+      if (state.onCreate) return state.onCreate(body, response);
+      state.sessions.push({ id: `session-${state.sessions.length + 1}`, title: body.title });
+      return reply(state.sessions.at(-1));
+    }
+    const isOpened = state.sessions.some(session => request.url.startsWith(`/api/owners/leto/sessions/${session.id}/`));
+    if (isOpened && request.method === 'POST') {
+      state.posts.push({ ...body, url: request.url });
+      if (state.onPost) return state.onPost(body, request, response);
+      state.messages.push(user(body.text), answer());
       response.statusCode = 202;
       return reply({ accepted: true });
     }
-    if (request.url.endsWith('/messages')) return reply(state.messages);
-    if (request.url.endsWith('/sessions')) return reply({ sessions: [{ id: 'session-test' }], status: state.status });
+    if (isOpened && request.url.endsWith('/messages')) return reply(state.messages);
     response.statusCode = 404;
     reply({ error: 'not_found' });
   });
@@ -37,7 +42,7 @@ async function fixture(context) {
     await new Promise(resolve => server.close(resolve));
     await rm(stateDirectory, { recursive: true, force: true });
   });
-  const config = { id: 'morning', owner: 'leto', sessionID: 'session-test', surfaceUrl: `http://127.0.0.1:${server.address().port}`,
+  const config = { id: 'morning', owner: 'leto', surfaceUrl: `http://127.0.0.1:${server.address().port}`,
     stateDirectory, prompt: 'Private briefing request', timezone: 'America/New_York', requestTimeoutMs: 500, completionTimeoutMs: 150, pollMs: 5 };
   const key = 'smoke-test';
   const recordPath = join(stateDirectory, 'morning', `${key}.json`);
@@ -55,27 +60,52 @@ function answer(overrides = {}, text = 'The full private briefing.') {
 
 const rejectsCode = (promise, code) => assert.rejects(promise, error => error.code === code);
 
-test('scheduled briefing posts once, waits for its final answer, and persists metadata only', async context => {
+test('scheduled briefing opens a fresh session, posts once, waits for its final answer, and persists metadata only', async context => {
   const { config, state, key, record } = await fixture(context);
   const completed = await runScheduledBriefing(config, { runKey: key });
   assert.equal(completed.status, 'completed');
   assert.equal(completed.promptMessageID, 'prompt-1');
   assert.equal(completed.answerMessageID, 'answer-1');
+  assert.deepEqual(state.sessions, [{ id: 'session-1', title: 'Briefing smoke-test' }]);
+  assert.equal((await record()).sessionID, 'session-1');
+  assert.equal(state.posts[0].url, '/api/owners/leto/sessions/session-1/prompt');
   assert.match(state.posts[0].text, /\[onionsoup scheduled briefing: morning\/smoke-test\]/);
+  assert.doesNotMatch(state.posts[0].text, /previous briefing/);
   assert.doesNotMatch(JSON.stringify(await record()), /Private briefing|full private/);
   state.messages = [];
   assert.equal((await runScheduledBriefing(config, { runKey: key })).status, 'completed');
   assert.equal(state.posts.length, 1);
+  assert.equal(state.sessions.length, 1);
 });
 
-test('busy sessions fail without a submission intent and can retry when idle', async context => {
+test('each new run gets its own dated session and names the previous run\'s session', async context => {
+  const { config, state } = await fixture(context);
+  await runScheduledBriefing(config, { runKey: '2026-10-05' });
+  state.messages = [];
+  const second = await runScheduledBriefing(config, { runKey: '2026-10-06' });
+  assert.deepEqual(state.sessions.map(session => session.title), ['Briefing 2026-10-05', 'Briefing 2026-10-06']);
+  assert.equal(second.sessionID, 'session-2');
+  assert.equal(state.posts[1].url, '/api/owners/leto/sessions/session-2/prompt');
+  assert.match(state.posts[1].text, /The previous briefing is in session session-1\./);
+});
+
+test('a configuration that still names a pinned session loads and opens a fresh one', async context => {
   const { config, state, key, record } = await fixture(context);
-  state.status['session-test'] = { type: 'busy' };
-  await rejectsCode(runScheduledBriefing(config, { runKey: key }), 'session_busy');
-  assert.equal((await record()).error, 'session_busy');
-  assert.equal(state.posts.length, 0);
-  state.status = {};
+  const pinned = { ...config, sessionID: 'pinned-session' };
+  assert.equal(parseConfig(pinned).sessionID, undefined);
+  await runScheduledBriefing(pinned, { runKey: key });
+  assert.equal((await record()).sessionID, 'session-1');
+  assert.doesNotMatch(JSON.stringify(state.posts), /pinned-session/);
+});
+
+test('a failed session opening keeps its reason and a retry opens exactly one session', async context => {
+  const { config, state, key, record } = await fixture(context);
+  state.onCreate = (_body, response) => response.writeHead(503).end();
+  await rejectsCode(runScheduledBriefing(config, { runKey: key }), 'surface_http_503');
+  assert.equal((await record()).error, 'surface_http_503');
+  state.onCreate = undefined;
   await runScheduledBriefing(config, { runKey: key });
+  assert.equal(state.sessions.length, 1);
   assert.equal(state.posts.length, 1);
 });
 
@@ -103,6 +133,7 @@ test('lost acknowledgement recovers an accepted prompt without reposting', async
   await runScheduledBriefing(config, { runKey: key });
   assert.equal((await record()).status, 'completed');
   assert.equal(state.posts.length, 1);
+  assert.equal(state.sessions.length, 1);
 });
 
 test('uncertain submissions missing from the transcript fail closed on retries', async context => {
@@ -154,15 +185,6 @@ test('unfinished or empty model replies time out and existing prompts can later 
   await runScheduledBriefing(config, { runKey: key });
   assert.equal((await record()).answerMessageID, 'finished-later');
   assert.equal(state.posts.length, 1);
-});
-
-test('existing persisted final answer succeeds even without a local run record', async context => {
-  const { config, state, key, record } = await fixture(context);
-  state.messages.push(user(`Earlier execution\n[onionsoup scheduled briefing: morning/${key}]`), answer());
-  state.status['session-test'] = { type: 'busy' };
-  await runScheduledBriefing(config, { runKey: key });
-  assert.equal(state.posts.length, 0);
-  assert.equal((await record()).status, 'completed');
 });
 
 test('run keys use the latest scheduled local date across midnight, DST, and year boundaries', () => {
@@ -218,16 +240,17 @@ test('an adopted incomplete prompt cannot be reposted if later transcript reads 
 });
 
 test('a crash after claiming submission but before POST fails closed', async context => {
-  const { config, state, key, record } = await fixture(context);
-  const directory = join(config.stateDirectory, config.id);
-  await mkdir(directory);
-  await writeFile(join(directory, `${key}.intent.json`), JSON.stringify({
-    id: config.id, runKey: key, owner: config.owner, sessionID: config.sessionID, surfaceUrl: config.surfaceUrl,
-    marker: `[onionsoup scheduled briefing: morning/${key}]`, status: 'submitting', updatedAt: new Date().toISOString(),
-  }));
+  const { config, state, key, record, recordPath } = await fixture(context);
+  const opened = { id: config.id, runKey: key, owner: config.owner, sessionID: 'session-1', surfaceUrl: config.surfaceUrl,
+    marker: `[onionsoup scheduled briefing: morning/${key}]`, status: 'waiting', updatedAt: new Date().toISOString() };
+  state.sessions.push({ id: 'session-1' });
+  await mkdir(join(config.stateDirectory, config.id));
+  await writeFile(recordPath, JSON.stringify(opened));
+  await writeFile(join(config.stateDirectory, config.id, `${key}.intent.json`), JSON.stringify({ ...opened, status: 'submitting' }));
   await rejectsCode(runScheduledBriefing(config, { runKey: key }), 'submission_ambiguous');
   assert.equal((await record()).error, 'submission_ambiguous');
   assert.equal(state.posts.length, 0);
+  assert.equal(state.sessions.length, 1);
 });
 
 test('HTTP rejection retains its reason and cannot trigger duplicate submissions', async context => {

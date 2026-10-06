@@ -244,7 +244,7 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
   them; they steer everything the owners do.
 - **Duties have no event triggers** yet (`on:` is declared but unused); everything is scheduled or chat-driven.
 - **Calendar briefings use an external timer.** The [systemd briefing runner](extending.md#calendar-briefings)
-  delivers to an existing owner chat and records completion, but there is no built-in calendar scheduler,
+  opens a fresh owner chat per run and records completion, but there is no built-in calendar scheduler,
   OpenChamber task import, or scheduling UI. Retiring OpenChamber stops its scheduled tasks even if their stored
   configuration still says enabled. Briefing failures are visible in systemd and run records, not the inbox.
 - **Hires can loop until their time limit.** The hires that remain (desk reviews, CI triage, conflict decisions and
