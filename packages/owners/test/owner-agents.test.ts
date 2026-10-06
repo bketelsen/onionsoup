@@ -11,7 +11,8 @@ import { BOOTSTRAP_SKILL, IMPLEMENTER_AGENT, reviewerAgent, SKILLS_DIRECTORY } f
 import { REVIEW_SEVERITIES } from '../src/repository-writing.ts';
 import { Runtime } from '../src/runtime.ts';
 import { withActiveHooks } from './active-hooks.ts';
-import { bashAction } from '../src/bash-rules.ts';
+import { bashAction, READ_ONLY_COMMANDS } from '../src/bash-rules.ts';
+import { agentConfig } from '../src/opencode.ts';
 
 const declarations = 'packages/owners/test/fixtures/owners';
 
@@ -49,6 +50,26 @@ test('a persona may start only its own implementer and reviewer, and its prompt 
   assert.match(String((milesTeg as { prompt?: string }).prompt), new RegExp(`subagent_type "${reviewerAgent('homelab')}"`));
   assert.match(String((milesTeg as { prompt?: string }).prompt), /optional/);
   assert.match(String((milesTeg as { prompt?: string }).prompt), /implement and review tasks yourself/);
+});
+
+test('reviewers and owner hires read files, git and GitHub state, and every write form is denied, not asked', async () => {
+  const { agents } = await configured();
+  const hires = agentConfig('/tmp', '/tmp', undefined).agent as Record<string, { permission: { bash: Record<string, string> } }>;
+  const ruleSets: Record<string, Record<string, string>> = {
+    'reviewer subagent': agents[reviewerAgent('homelab')]!.permission!.bash as Record<string, string>,
+    'reviewer hire': hires['onionsoup-reviewer']!.permission.bash,
+    'owner hire': hires['onionsoup-owner']!.permission.bash,
+  };
+  for (const [name, bash] of Object.entries(ruleSets)) {
+    assert.ok(Object.values(bash).every(decision => decision !== 'ask'), `${name}: nobody can answer an ask`);
+    for (const pattern of Object.keys(READ_ONLY_COMMANDS)) assert.ok(pattern in bash, `${name}: shares ${pattern}`);
+    for (const command of ['cat SNAPSHOT.md', 'head -20', 'git rev-parse HEAD', 'gh pr checks 12', 'gh api repos/x/y/pulls/1', 'go test ./...']) {
+      assert.equal(bashAction(bash, command), 'allow', `${name}: ${command}`);
+    }
+    for (const command of ['gh api -X POST repos/x/y/issues', 'gh api repos/x/y/issues -f title=t', 'gh pr merge 12', 'gh run watch 7', 'rm -rf x', 'echo x']) {
+      assert.equal(bashAction(bash, command), 'deny', `${name}: ${command}`);
+    }
+  }
 });
 
 async function configuredWithConversation(conversation: string) {

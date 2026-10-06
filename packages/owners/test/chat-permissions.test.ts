@@ -19,7 +19,25 @@ test('the baseline never lets a reader write, and anything else still asks', () 
   }
 });
 
+test('owners look up git and GitHub state themselves, and GitHub writes still ask', () => {
+  // opencode checks each command of a pipeline on its own: `cat SNAPSHOT.md | head -20` is these two.
+  for (const command of ['cat SNAPSHOT.md', 'head -20', 'git rev-parse HEAD', 'git fetch origin', 'gh pr checks 12',
+    'gh api repos/x/y', 'gh api repos/x/y/actions/runs/7/jobs --jq .jobs[].conclusion', 'gh release view v1.2.0',
+    'gh repo view x/y', 'gh run watch 7']) {
+    assert.equal(bashAction(askByDefault, command), 'allow', command);
+  }
+  for (const command of ['gh api -X PATCH repos/x/y -f private=true', 'gh api repos/x/y/issues -f title=t',
+    'gh api --method POST repos/x/y/forks', 'gh api repos/x/y/pulls/1/reviews --input review.json',
+    'gh api graphql -f query=q', 'gh pr merge 12', 'gh release create v1', 'git fetch origin main:main',
+    'git branch -r -d origin/old', 'git log --output=out.txt']) {
+    assert.equal(bashAction(askByDefault, command), 'ask', command);
+  }
+});
+
 test("an owner's declared denies still win over the baseline and verification commands", () => {
+  const noGitHub = chatBash({ '*': 'ask', 'gh *': 'deny' }, []);
+  assert.equal(bashAction(noGitHub, 'gh api repos/x/y'), 'deny', 'the read-only floor never overrides a declared deny');
+  assert.equal(bashAction(noGitHub, 'git rev-parse HEAD'), 'allow');
   const strict = chatBash({ '*': 'deny', 'grep *': 'deny', 'git *': 'deny' }, []);
   assert.equal(bashAction(strict, 'grep -n x y'), 'deny');
   assert.equal(bashAction(strict, 'git log'), 'deny');

@@ -63,7 +63,8 @@ What onionsoup cannot do yet, most important first. Owners (Leto in particular) 
 - **Owner sessions' bash is not sandboxed yet.** Owner chats and the sessions that carry out approved plans run in
   the surface's opencode on the host, and so do the implementer and reviewer subagents they start. Their bash runs
   as the person, bounded only by permission rules, which [AGENTS.md](../AGENTS.md) rule 3 says are never the
-  boundary. The follow-up is to run chat bash through bwrap from a `tool.execute.before` wrapper in the plugin, the
+  boundary. Those rules let owners and reviewer subagents read with the person's git and gh logins (`git fetch`,
+  `gh api` GETs); a write form the read-only list misses, or a redirect, runs unasked. The follow-up is to run chat bash through bwrap from a `tool.execute.before` wrapper in the plugin, the
   same sandbox hires and verification already use.
 - **The operator is unsandboxed and trusted.** It runs as the person with nearly every permission; its only brakes
   are `OPERATOR_ASK_BASH`, its prompt and the audit journal. Chat shells get the surface opencode's own credentials
