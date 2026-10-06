@@ -21,7 +21,6 @@ ends at its authorized merge and hands the tested commit to the rollout coordina
 3. Run targeted regressions and `npm run verify`; update directly related living documentation.
    The test runner defaults to four Node test files concurrently in the actual child argv. Override with
    `ONIONSOUP_TEST_CONCURRENCY` or `--test-concurrency`; do not put that flag in `NODE_OPTIONS`.
-   Go integration checks use the configured `ONIONSOUP_HOST_GO_ROOT`, not an arbitrary PATH version.
 4. Owner publication uses `onionsoup_propose_changes { item }`: host sandbox verification, final cross-family
    review, then durable commit/push/PR checkpoints and configured merge gates. Fix real review blockers; do
    not reset review history merely to retry. Only a truly exhausted final review budget needs the existing

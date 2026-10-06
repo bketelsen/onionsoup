@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { ChatOrigin } from './chat-origin.ts';
 import { nextMessageId } from './plan-revision.ts';
 import { withRecordLock } from './record-lock.ts';
-import { writeHandoffFile } from './operator-handoff-file.ts';
+import { writeDurableFile } from './durable-file.ts';
 
 export const SessionOpeningKey = z.object({ entity: z.enum(['owner-item', 'reminder', 'owner-continuation']), id: z.string().min(1),
   owner: z.string().min(1), kind: z.enum(['planning', 'execution', 'reminder', 'continuation']) });
@@ -119,6 +119,6 @@ export class SessionOpeningStore {
     });
   }
   private save(record: SessionOpening) {
-    return writeHandoffFile(this.path(record.key), JSON.stringify(SessionOpening.parse(record)) + '\n');
+    return writeDurableFile(this.path(record.key), JSON.stringify(SessionOpening.parse(record)) + '\n');
   }
 }

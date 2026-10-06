@@ -203,7 +203,7 @@ there is no whole-change review of the owner's own, since the required review at
 commits nothing. After `DESK_CHANGE_LIMITS.reviewRoundsBeforePerson` send-backs, the person reads the diff. The item
 reuses its unchanged approved goal, approval and applicable grants for replies, retries and maintenance;
 changed scope and genuine world effects still use their original gates. There is no mandatory per-task
-review/reset or operator exact-file/two-acceptance protocol for owners. The item
+review/reset protocol for owners. The item
 records the session (`session`). A plan approved in chat opens its session at once; one approved from the inbox, the
 CLI (`owners approve`) or by a manager stays `working` without a session, and the plugin opens it on its next pass
 (every `PLUGIN_LIMITS.noticeMs`). The plugin holds the opencode client, so sessions open only while the surface runs;
@@ -709,8 +709,8 @@ Owners each hold one domain under gates. Some work belongs to no domain: operati
 every owner's records, a one-off job on the homelab. For that the person may declare an **operator** in
 `operator.yaml` (`OperatorDeclaration` in `packages/owners/src/declarations.ts`; the agent in `operator.ts`): one
 agent the person directs turn by turn in a chat of its own, like a coding agent in auto mode. It sits outside the owner
-rules on purpose. It owns no domain, keeps no owner notebook, runs no duties, and is woken by the runtime for its
-own investigation jobs and the memory nudge below; owners cannot
+rules on purpose. It owns no domain, keeps no owner notebook, runs no duties, and is woken by the runtime only for the
+memory nudge below; owners cannot
 reach it (it is in no roster, and `onionsoup_ask`, `onionsoup_request_work` and friends resolve only owners). Its id
 `operator` and its name are reserved: no owner may take either (`operator_reserved`).
 
@@ -719,7 +719,8 @@ Its permissions allow nearly everything: any bash, edits, the web, any directory
 `git clean`, deleting incus instances, destroying ZFS datasets and pools, `mkfs`, `dd`, `kubectl delete`, and the
 CLI's person gates (`owners ... approve*`, `owners ... ship*`), so it does not answer an owner's plan or ship for the
 person unasked. It gets no `onionsoup_*` owner tools (they are denied, and refuse any agent that is not an owner)
-except `onionsoup_wiki`, with which it only reads the [wiki](#wiki), and `onionsoup_operator_job` for its own investigations. It cannot submit, approve or ship owner work through them, and the plan-approval, ship and owner-change prompts of owners'
+except `onionsoup_wiki`, with which it only reads the [wiki](#wiki), so it cannot submit, approve or ship owner work
+through them, and the plan-approval, ship and owner-change prompts of owners'
 sessions are answered only in those sessions. It may load the person's operating skills in `.agents/skills`
 (operate-onionsoup, ship-onionsoup, create-owner), which owners and their subagents are denied, and never gets the
 owners' skills bootstrap.
@@ -732,229 +733,10 @@ never distilled), so the person can see afterwards what it did. Every chat shell
 gets the surface opencode's own server credentials blanked (the plugin's `shell.env` hook sets each of
 `HOST_ONLY_VARIABLES` to empty), so no command can use them to answer another session's prompt through the API.
 
-#### Durable operator investigations
-
-`onionsoup_operator_job` supervises the operator's own children, independently of owners. It supports
-read-only investigations, explicitly approved edits and new text files, and scoped host-run checks. Children have no arbitrary bash, native
-edit, network, delegation or owner tools. No persistent grant is created; the operator's normal interactive permissions
-are unchanged.
-
-The host binds a job to the configured operator and exact top-level chat, and captures the invoking human message
-from the transcript. Original intake, decomposed goal, constraints and task scope are separate fields; a runtime
-notice cannot create a new job as if it were a person. `create` returns a durable handle promptly. Tasks name existing
-directories within the operator's configured workspace, use `access: "read-only"` or the gated `"write"` scope below,
-and can name `dependsOn` task IDs.
-The scheduler reserves at most two managed slots across all jobs. These are independent OpenCode sessions with logical
-parentage in `state/operator-jobs/jobs.json`, so the parent can answer another message while both children run.
-Children are also recorded in the operator's existing session history, without inventing native parent relationships.
-
-Use `list` or `show { id }` for status, exact child sessions, attempts, events and transcript evidence. `pause` stops
-new dispatches while existing investigations continue. `cancel` aborts only the bound child turns and preserves their
-records; uncertain dispatch or changed turns block cancellation, rather than claiming it succeeded. `resume` restarts
-scheduling; with `childID`, it resumes a proven interrupted read-only turn in the **same** session using a new durable
-attempt. Restart reconciliation never launches a replacement for an uncertain creation or dispatch. Idle runtime
-status alone is not evidence of completion.
-
-Runtime calls run outside ledger mutation locks. Short durable operation claims reserve capacity before effects;
-returned observations and acknowledgements apply only to their matching claims. Parent controls fence stale actions
-without treating a sibling's progress as a change to the whole job. Each client operation shares one aggregate
-10-second transport budget, and a scheduler pass uses a shared 20-second budget with at most 16 observations.
-An expired operation claim permits observation of its receipt, never reissuing the uncertain effect. Parent create,
-pause and synthesis calls can proceed while metadata reads wait.
-
-Unknown outcomes keep their reservations during bounded observation (three attempts or two minutes, with 15-second
-spacing by default), then stop automatic polling with `needsDecision`. `recheck { id, childID }` performs one fresh
-observation without dispatching work. If the receipt appears, it reconciles the existing session. Otherwise,
-`recovery-preview { id, childID }` shows the exact scope and digest for a read-only child;
-`abandon { id, childID, digest, text }` requests a one-time human decision. Write reservations qualify only with
-zero recorded mutations and the stronger runtime proof described below. It is never an automatic retry or a claim
-that the original work failed.
-
-Abandonment releases only the logical scheduling reservation. The old inference may still finish, so physical
-concurrency may temporarily exceed the two managed slots after this explicit decision. The unknown outcome remains
-visible: no fabricated end timestamp, completion, or accepted result. The child remains permanently fenced against
-future prompts, tools, resume and dependency completion. Late acknowledgements are retained on that record without
-resurrecting it. No replacement is created; a replacement requires a separate explicit user request.
-
-Recovery requires a matching native permission request **and reply**, bound to the parent session, tool message,
-host-generated nonce and exact recovery digest. Only a native `once` reply is accepted; `always` is rejected even
-though the request offers no persistent patterns. An automatically allowed `ask()` is insufficient. Surface auto-accept
-excludes this gate, and its UI offers only a one-time decision. Known foreign work remains protected through later
-failed reads: recovery inspection records a protective blocker if it first discovers that evidence, without changing
-the runtime or attempt history. An observed busy runtime without a receipt is not eligible. Rejection, abort, changed scope, new foreign work or
-a receipt discovered during approval leaves the reservation intact. No standing grant is added. Duplicate approved
-calls preserve the first audit receipt. Native permission prompts do not survive a runtime restart; ask again if
-the runtime stopped before committing the recovery.
-
-The plugin has a separate admitted operator maintenance pass, so slow operator metadata cannot hold up domain-owner
-notices. It reconciles jobs and sends durable, actionable parent wakes for progress, blockers, write review and readiness.
-Wakes wait for an idle parent, keep a stable message receipt and never blindly resend an uncertain
-prompt. They are runtime observations, not new permissions. The operator must inspect current job state before acting.
-Completed child evidence retains exact session, prompt, final message and tool-call identities. `synthesize` takes the
-current job digest, all final evidence message IDs and the operator's explanation, then completes the job once. This
-binds the summary to observed transcripts; it does not certify the truth of a model's conclusions.
-
-`prepare-handoff { id }` builds a separate combined preview only after all children are complete and writes are
-accepted. It requires one Git repository, one exact base and baseline manifest, and disjoint approved paths. It
-retains original intake, constraints, child evidence, approvals and exact diff provenance without modifying a job,
-worktree, commit or synthesis. `check-handoff { id, digest, checkID }` runs one of the already approved Node/Go
-commands on the private combined source snapshot. Identical commands are deduplicated with every original check
-recorded as provenance; more than four distinct commands is refused rather than silently dropping checks.
-
-Combined checks have their own durable ledger and deployment admission, with at most two prepared checks globally
-and one per handoff. They run asynchronously outside mutation locks. A prepared check is never replayed: known exits
-(including setup failure) produce reusable receipts, while unproven process termination retains admission and an
-uncertain record. Restart preserves that uncertainty; there is no automatic retry or claim that a crash undid work. Evidence-bound recovery is described below.
-`show-handoff { id }` rechecks live child evidence and workspace freshness and provides an exact patch and JSON report
-under `state/operator-handoffs/`. Reports are timestamped observations; call `show-handoff` after a pending check to refresh the exported JSON. `ready` means all configured combined checks passed for the current artifact;
-`unchecked` means none were configured. Neither means applied, independently reviewed, committed or published.
-The human's existing exact scope/check authorization covers these commands; preparing or checking a combined preview
-does not add another permission click or standing grant. Applying requires its own exact destination approval; publishing remains separate user-directed work.
-
-`preview-application { id, directory }` binds that ready result to an exact clean sibling integration worktree in
-its canonical Git repository. Its application digest retains the original goal/intake/constraints, accepted child
-identities and evidence, successful combined-check receipts, destination HEAD/index and full filesystem baseline.
-`apply-handoff { id, directory, digest }` uses the existing native write gate with **Allow once** for this destination
-effect. Exact retries reuse that saved approval; a different destination/digest is rejected. No standing grant,
-commit, push, merge or publication is added. `show-application` and the handoff report expose separate application
-progress and durable evidence, without rewriting child acceptance or synthesis.
-
-Applications reserve the whole canonical target in the same jobs transaction used by child workspace claims. Held
-claims survive pause/cancel/restart and conflict with readers and writers in either direction. One dedicated
-cross-process execution lock serializes application workers; metadata reads and file execution never hold a jobs
-or application mutation lock. Parent tool calls return promptly after durable approval, while ordinary maintenance
-reattaches to existing approved/in-progress applications. Blocked attempts need an explicit exact retry.
-
-For every file the host saves preparation intent, creates and fsyncs a bounded private staging file, then saves its
-exact identity before execution. A fixed sandbox publisher waits for an explicit permit after the host durably saves
-its launcher/PID-namespace witness. Existing files are written through pinned descriptors, retaining their inode;
-new files use no-overwrite hardlink publication from staging in the same parent. A completed postimage is durable
-evidence only with the exact original/staging inode and birth time plus positive stopped-process proof. The observed
-result is saved before identity-checked stage cleanup and final receipt. Recovery reuses this history: completed
-writes are never replayed, untouched preimages can retry at most four times, and partial/foreign/unproven outcomes
-remain reserved. Interrupted staging before its identity was saved also remains blocked, without blind cleanup.
-
-After all receipts, the host revalidates unchanged HEAD/index, the entire target source against the approved combined
-source digest, and original live child evidence. It records `applied` before releasing the exact claim and admission.
-Crash recovery completes only remaining identity-bound cleanup. Managed claims do not exclude an unrelated editor;
-identity/content changes are detected and fenced, but this is not a filesystem-wide transaction. A multi-file partial
-application is retained for inspection rather than represented as rolled back or complete.
-
-Combined-check recovery uses `recovery-preview-handoff { id, receiptID }` and
-`recover-handoff { id, receiptID, digest, text }`. Each new attempt persists its exact admission, command/artifact
-binding and process identity domain before it occupies a check slot. A separate, checksummed execution journal is
-saved before launch. The sandbox runs a fixed host guard which requires an explicit permit byte; EOF never starts
-the approved command. The host saves the verified namespace/launcher witness before sending that permit.
-
-Recovery inspects process identities outside ledger locks and rechecks the exact job, receipt and journal digest
-before committing. A saved host outcome can be reconciled without a new approval. When execution is positively
-stopped but no outcome was saved, the existing native **once** gate asks the person to release that exact reservation
-as `stopped-unverified`. An exited original host with an intact pre-launch journal and no execution witness also
-proves that the guarded command was never started. Neither case invents an exit code, reruns the check, accepts the
-combined result or rewrites prior synthesis. The original prepared receipt remains, alongside an immutable resolution;
-late outcome facts stay in the journal without replacing a human unverified resolution.
-
-Resolved receipts stop consuming the two combined-check slots, but their check IDs stay consumed. Cleanup deletes
-only the exact recorded admission identity and can be retried idempotently. Source drift still makes the handoff
-stale, but does not prevent releasing a positively stopped resource. Running, zombie, foreign or unreadable identities,
-changed boot/PID domains and missing legacy provenance remain ineligible. No process is killed by this recovery path,
-no broad lease clearing occurs, and no standing permission is created.
-
-The acceptance scenario is two parallel investigations, another message answered in the same parent chat, a restart
-of a disposable OpenCode server, recovery of the same child IDs and evidence, and a recorded synthesis. Production
-sessions must not be restarted to test it. Native permissions and canonical-path checks constrain reading tools, but
-these host sessions are not a filesystem sandbox against concurrent path replacement by another process.
-
-
-#### Scoped operator file edits
-
-A write task uses `access: "write"`, `files` for existing tracked UTF-8 files, and optional `createFiles` for exact new
-text paths. Its directory must already be a clean Git worktree root under the configured operator workspace. New files
-require existing parent directories and absent, nonignored paths; deletions, symlinks, hard-linked files and Git metadata
-are excluded. Default limits allow eight approved files per task, each
-at most 256 KiB. Creation captures the original intake, goal, constraints, existing/new paths, check commands and HEAD in an exact scope digest.
-The person must answer the matching native **Allow once** prompt before the job is admitted. Auto-allow, **Always**,
-a runtime notice or approval for a different task cannot substitute for this decision. Retrying the exact same bound
-`create` reuses its durable approval and child identities; it does not ask again or create another job. A natural-language
-request alone does not authorize inferred paths or commands. Removing the initial click requires a separate structured
-intake and authority decision; this slice adds no persistent grant.
-
-Workspace claims cover the whole canonical worktree, including overlapping parent/child directories. A conflicting
-read or write task is refused rather than run concurrently; two independent worktrees can use the two managed slots.
-The operator can keep answering its parent chat while these children work. Claims remain held after child inference
-finishes and until the person accepts the verified diff. Claims coordinate managed children, not external programs;
-use dedicated worktrees. Host checks cover tracked files and nonignored untracked paths. Ignored untracked files remain outside
-that integrity check, and no child can create or edit ignored paths through this tool.
-
-The child calls `onionsoup_operator_write_file` with an approved relative path, its expected current SHA256 and full
-replacement text. Host code records a mutation intent, checks the original Git and file identities, and passes a
-pinned file descriptor to a fixed writer in a network-isolated, memory-capped bwrap sandbox. The helper can write only
-that approved descriptor; pathname replacement cannot redirect it. This isolates the file mutation, not the trusted
-operator or every model session. Children receive no arbitrary shell, commit, push or merge capability. New-file
-creation uses the approved absent path and pinned parent identity; an unexpected existing path is never overwritten.
-New files remain untracked and their full contents appear in the review diff; the host does not stage them in Git.
-
-Optional `checks` name exact command arrays such as `{ "id": "title-test", "command": ["node", "--test", "test/title.test.mjs"] }`.
-Supported commands are `node --test` with literal relative test paths, `go test` / `go vet` with local package
-paths (`./...`, `./pkg`, `./pkg/...`), and `["project", "make", "check"]` or other exact project argv. Go checks require
-host-selected `ONIONSOUP_HOST_GO_ROOT` and self-contained modules: CGO, workspace discovery, toolchain downloads,
-module downloads and host caches are disabled.
-
-Project validation uses the host-selected `ONIONSOUP_PROJECT_TOOLS_FILE` profile of installed ELF executables.
-It parses their library dependencies without executing them on the host, pins private copies of verified tool/library
-bytes and runs the exact approved argv in a writable disposable copy of the verified source. Repository scripts,
-Make recipes and mise tasks can run there without a command whitelist; downloads and host caches remain unavailable.
-Synthetic Git fixture state and build output are discarded. Real repository Git metadata is never copied. The runtime
-mounts neither the live worktree nor the host home or environment and retains network, memory, process, time and
-output limits. Internal instruction symlinks retain exact target bytes; escapes, cycles, dangling links and metadata
-links are rejected before execution. Approved edits still target regular named files only.
-
-The child requests only an approved check ID; host code records bounded output, exit code and the exact artifact digest.
-Go receipts record runtime version and Go executable SHA256 (not the whole toolchain). Project receipts record the
-profile digest and each mounted runtime file's SHA256. These receipts are separate from model claims. Editing after a
-check makes that receipt stale for acceptance; every configured check must have a current successful receipt. Failed
-or incomplete checks remain visible without implying completion.
-Before execution, a startup barrier lets the host pin the sandbox namespace-init process identity. Both normal
-completion and forced shutdown require that pinned identity to disappear, alongside the existing bounded
-process-group exit proof; a zombie leader alone is insufficient while its threads may still be exiting.
-Unproved exit remains uncertain. This does not independently attest an empty cgroup.
-
-A completed child enters `needs-review`. `review-write { id, childID }` verifies current workspace and terminal runtime
-evidence and returns the exact host diff and review digest. The parent presents that diff, the original goal and
-constraints; `accept-write { id, childID, digest }` asks for another native **Allow once**, bound to that exact review.
-Both chat and inbox show the full diff, host check receipts and labeled bounded output, and distinguish child
-conclusions as model claims. Fresh checks
-before and after approval reject changed files, HEAD, scope or evidence. Acceptance releases the workspace claim and
-allows normal job synthesis once all children are complete. Check success covers only the shown commands and artifact;
-acceptance does not certify other tests or independent review, commit the edits or clean the worktree; a later write job needs a new clean baseline.
-
-`revise-write { id, childID, digest, text }` sends a completed, unaccepted write child back for scoped
-correction. Use its current `review-write` digest and feedback; the original human intake, task, approval,
-paths, check commands, session and workspace claim stay unchanged. No new scope click or standing grant is
-added. The host proves the exact idle final turn and unchanged artifact before queueing and again before
-normal dispatch. Runtime reads remain outside mutation locks. Concurrent acceptance, pause, stale evidence,
-foreign work, uncertain writes/checks, accepted children and already-started dependent work refuse the transition.
-An already-paused job stays paused. Unstarted dependents keep waiting for the corrected child to be accepted;
-independent accepted siblings are untouched.
-
-Each revision archives the previous final evidence, artifact, review digest, feedback and check IDs. Existing
-attempts, writes and check receipts remain immutable. Current evidence is cleared; even an unchanged result
-needs new check receipts and a new human diff acceptance. Review output separates historical checks/revisions
-from current checks. The default allows at most three revisions and retains the existing three-attempt budget
-per configured check across all revisions; exhausted checks refuse a revision before another turn starts.
-Exact repeated revision requests return the saved request without another dispatch; differing feedback against
-that same old digest refuses. Restarts use the same session and durable dispatch receipts, without replaying
-uncertain turns. This operation cannot expand scope, revise accepted work or release an uncertain reservation.
-
-A prepared mutation with an unknown outcome remains blocked with its workspace reservation intact. Restart, cancel,
-read-only abandonment and a fresh tool call cannot replay or clear it. This slice provides no uncertain-write recovery
-or automatic replacement. The original transcript, intent and any receipt remain available for diagnosis.
-
-An unaccepted queued, blocked or needs-review write child with **zero recorded mutations** can use the existing `recovery-preview` and
-`abandon` actions after the host verifies absent or idle owned runtime state with no live tools or operation claim.
-A separate native one-time recovery decision releases that reservation and revokes subsequent child tool use; it
-does not accept the task or create a replacement. Unavailable, busy and foreign runtime state stays protected. Any
-mutation record, including a resolved one, prevents this path; a late mutation invalidates the recovery digest.
+For parallel work it dispatches opencode's native `task` subagents, each with a concrete goal and directory, and
+checks what they report before it tells the person something is done; their commands and edits are journaled with its
+own. There is no operator job ledger, write gate or recovery protocol. A durable job system with scoped writes, host
+checks and handoffs was tried and removed, after a one-file change took 95 minutes and three approval gates.
 
 #### Operator memory
 
@@ -1069,7 +851,7 @@ conflict-resolving implementer writes, and only its worktree.
 Nested core sandboxes reuse an inherited cgroup only when kernel cgroup v2 ancestry proves effective limits
 of at most 6 GiB memory, 512 tasks and zero swap. They still run the identical bubblewrap command and private
 environment; absent, unreadable or invalid proof starts the original systemd scope. Environment markers
-are never budget evidence. The operator's fixed helpers share this probe with their existing budgets.
+are never budget evidence.
 
 Owner chats and execution sessions are **not** sandboxed yet. They run in the surface's opencode on the host, and so
 do the implementer and reviewer subagents they start: their bash runs as the person, limited only by the owner's

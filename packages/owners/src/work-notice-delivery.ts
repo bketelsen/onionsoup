@@ -6,7 +6,7 @@ import type { Runtime } from './runtime.ts';
 import type { MaintenancePass } from './plugin-maintenance.ts';
 import { claimNotice, pendingNotices, readNotice, NOTICE_PREFIX, WorkNotice } from './notices.ts';
 import { nextMessageId } from './plan-revision.ts';
-import { writeHandoffFile } from './operator-handoff-file.ts';
+import { writeDurableFile } from './durable-file.ts';
 import { ChatOrigin } from './chat-origin.ts';
 import { MaintenanceEffectNotStarted } from './maintenance-context.ts';
 import { exchangeClient } from './exchange-client.ts';
@@ -37,7 +37,7 @@ export async function workNoticeDeliveries(runtime: Runtime) {
 }
 
 function save(runtime: Runtime, receipt: WorkNoticeDelivery) {
-  return writeHandoffFile(join(runtime.stateDirectory, 'notices', 'delivery', `${receipt.messageID}.json`), JSON.stringify(receipt));
+  return writeDurableFile(join(runtime.stateDirectory, 'notices', 'delivery', `${receipt.messageID}.json`), JSON.stringify(receipt));
 }
 
 function matches(message: NoticeMessage, receipt: WorkNoticeDelivery) {

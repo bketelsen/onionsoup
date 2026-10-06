@@ -72,6 +72,9 @@ test('the operator agent allows nearly everything, and irreversible commands and
   for (const key of ['edit', 'webfetch', 'websearch', 'external_directory', 'task', 'question']) assert.equal(permission[key], 'allow', key);
   assert.equal(permission.doom_loop, 'ask');
   assert.equal(permission['onionsoup_*'], 'deny', 'no owner tools');
+  const operatorKeys = Object.keys(permission).filter(key => key.startsWith('onionsoup_operator'));
+  assert.deepEqual(operatorKeys, [], 'no operator job, write or recovery permission');
+  assert.equal(agents['onionsoup-operator-investigator'], undefined, 'no investigator agent');
   const bash = permission.bash as Record<string, string>;
   assert.equal(Object.keys(bash)[0], '*', 'the allow comes first, so the asks after it win');
   for (const pattern of [...OPERATOR_ASK_BASH, 'systemctl --user stop*']) assert.equal(bash[pattern], 'ask', pattern);

@@ -8,7 +8,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import { inheritedCgroupBudget } from '../src/cgroup-budget.ts';
-import { alreadyMemoryCapped, OPERATOR_WRITER_LIMITS } from '../src/operator-write-writer.ts';
 import { MASKED_HOST_PATHS, sandboxCommand, sandboxEnvironment, spawnSandboxed } from '../src/sandbox.ts';
 
 const coreBudget = { memoryBytes: 6 * 1024 ** 3, tasksMax: 512, swapBytes: 0 };
@@ -107,18 +106,6 @@ test('missing, ambiguous, relative and traversing cgroup memberships fail closed
   }
   files.delete('/proc/self/cgroup');
   assert.equal(inheritedCgroupBudget(coreBudget), false);
-});
-
-test('operator probe keeps its existing optional tasks and outer memory budget without requiring swap', async context => {
-  const files = kernelFiles('/stage/worker', String(OPERATOR_WRITER_LIMITS.outerMemoryBytes), 'max', 'max');
-  files.delete(`${root}/stage/worker/pids.max`);
-  files.delete(`${root}/stage/worker/memory.swap.max`);
-  useKernelFiles(context, files);
-  assert.equal(await alreadyMemoryCapped(), true);
-  assert.equal(await alreadyMemoryCapped(coreBudget.memoryBytes), false);
-  assert.equal(await alreadyMemoryCapped(OPERATOR_WRITER_LIMITS.outerMemoryBytes, 512), false);
-  files.set(`${root}/stage/worker/pids.max`, '512');
-  assert.equal(await alreadyMemoryCapped(OPERATOR_WRITER_LIMITS.outerMemoryBytes, 512), true);
 });
 
 test('invalid requested budgets never prove an inherited cap', context => {

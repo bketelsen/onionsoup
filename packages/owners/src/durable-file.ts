@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, open, rename, unlink } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
-export async function writeHandoffFile(path: string, contents: string) {
+/** Replace a file atomically and durably: write a private temporary, fsync it, rename it over, fsync the directory. */
+export async function writeDurableFile(path: string, contents: string) {
   await mkdir(dirname(path), { recursive: true });
   const temporary = `${path}.${randomUUID()}.tmp`;
   const file = await open(temporary, 'wx', 0o600);
@@ -14,8 +15,7 @@ export async function writeHandoffFile(path: string, contents: string) {
   }
   try {
     await rename(temporary, path);
-    const directory = await open(dirname(path), 'r');
-    try { await directory.sync(); } finally { await directory.close(); }
+    await syncDirectory(dirname(path));
   } finally {
     await unlink(temporary).catch(error => {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
@@ -23,3 +23,11 @@ export async function writeHandoffFile(path: string, contents: string) {
   }
 }
 
+async function syncDirectory(path: string) {
+  const directory = await open(path, 'r');
+  try {
+    await directory.sync();
+  } finally {
+    await directory.close();
+  }
+}
