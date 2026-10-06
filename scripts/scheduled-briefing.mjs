@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { randomUUID } from 'node:crypto';
-import { link, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import { link, mkdir, readdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -20,8 +20,9 @@ const Timezone = Text.refine(value => {
     return false;
   }
 });
+/** Unknown keys are stripped, so a config that still names the retired pinned `sessionID` keeps loading. */
 export const Config = z.object({
-  id: z.string().regex(KEY), owner: Text, sessionID: Text,
+  id: z.string().regex(KEY), owner: Text,
   surfaceUrl: z.url().refine(value => ['http:', 'https:'].includes(new URL(value).protocol)),
   stateDirectory: Text.refine(isAbsolute), prompt: Text, timezone: Timezone,
   localTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).default(DEFAULTS.localTime),
@@ -30,13 +31,11 @@ export const Config = z.object({
   pollMs: PositiveMs.default(DEFAULTS.pollMs),
 });
 export const RunRecord = z.object({
-  id: Text, runKey: Text, owner: Text, sessionID: Text, surfaceUrl: Text, marker: Text,
+  id: Text, runKey: Text, owner: Text, sessionID: Text.optional(), surfaceUrl: Text, marker: Text,
   status: z.enum(['waiting', 'submitting', 'monitoring', 'completed', 'failed']), updatedAt: z.iso.datetime(),
   promptMessageID: Text.optional(), answerMessageID: Text.optional(), error: Text.optional(), causeCode: Text.optional(),
 }).refine(record => record.status !== 'completed' || Boolean(record.promptMessageID && record.answerMessageID));
-export const Sessions = z.object({
-  sessions: z.array(z.object({ id: Text })), status: z.record(z.string(), z.object({ type: Text })),
-});
+export const CreatedSession = z.object({ id: Text });
 export const Messages = z.array(z.object({
   info: z.object({ id: Text, role: z.enum(['user', 'assistant']), parentID: Text.optional(), finish: z.string().optional(),
     error: z.unknown().optional(), time: z.object({ completed: z.number().finite().optional() }) }),
@@ -97,7 +96,7 @@ function transportError(error, fallback) {
   return fail(['TimeoutError', 'AbortError'].includes(error?.name) ? 'surface_timeout' : fallback);
 }
 
-async function request(config, path, body) {
+async function send(config, path, body) {
   let response;
   try {
     response = await fetch(`${config.surfaceUrl.replace(/\/$/, '')}${path}`, {
@@ -111,15 +110,21 @@ async function request(config, path, body) {
     await response.body?.cancel();
     throw fail(`surface_http_${response.status}`);
   }
-  if (body) {
-    await response.body?.cancel();
-    return undefined;
-  }
+  return response;
+}
+
+async function read(config, path, body) {
+  const response = await send(config, path, body);
   try {
     return await response.json();
   } catch (error) {
     throw transportError(error, 'surface_response_invalid');
   }
+}
+
+async function post(config, path, body) {
+  const response = await send(config, path, body);
+  await response.body?.cancel();
 }
 
 const textOf = message => message.parts.filter(part => part.type === 'text').map(part => part.text ?? '').join('\n');
@@ -148,23 +153,51 @@ async function monitor(config, context, initial = []) {
     }
     if (performance.now() >= deadline) throw fail('completion_timeout');
     await sleep(Math.min(config.pollMs, Math.max(1, deadline - performance.now())));
-    messages = parse(Messages, await request(config, context.messagesPath), 'messages_response_invalid');
+    messages = parse(Messages, await read(config, context.messagesPath), 'messages_response_invalid');
   }
+}
+
+/** Reuse the session an earlier attempt of this run opened; otherwise open a fresh one and record it before prompting. */
+async function sessionFor(config, context, previous) {
+  const sessionID = previous?.sessionID ?? await openSession(config, context);
+  const sessionPath = `${context.sessionsPath}/${encodeURIComponent(sessionID)}`;
+  return { ...context, record: { ...context.record, sessionID }, sessionPath, messagesPath: `${sessionPath}/messages` };
+}
+
+async function openSession(config, context) {
+  const title = `Briefing ${context.record.runKey}`;
+  const created = parse(CreatedSession, await read(config, context.sessionsPath, { title }), 'session_response_invalid');
+  await save(context.path, { ...context.record, sessionID: created.id, updatedAt: new Date().toISOString() });
+  return created.id;
+}
+
+/** The session of the most recently updated other run; an unreadable record only loses this link. */
+async function earlierSessionID(context) {
+  const names = (await readdir(context.directory)).filter(name => name.endsWith('.json'));
+  const records = await Promise.all(names.map(name => readRecord(join(context.directory, name)).catch(() => undefined)));
+  const earlier = records.filter(record => record?.sessionID && record.runKey !== context.record.runKey)
+    .sort((left, right) => left.updatedAt.localeCompare(right.updatedAt));
+  return earlier.at(-1)?.sessionID;
+}
+
+async function promptText(config, context) {
+  const earlierID = await earlierSessionID(context);
+  const link = earlierID ? [`The previous briefing is in session ${earlierID}.`] : [];
+  return [config.prompt, ...link, context.marker].join('\n\n');
 }
 
 async function execute(config, context) {
   const previous = await readRecord(context.path);
   if (previous && (previous.marker !== context.marker || previous.owner !== config.owner
-    || previous.sessionID !== config.sessionID || previous.surfaceUrl !== config.surfaceUrl)) throw fail('run_identity_changed');
+    || previous.surfaceUrl !== config.surfaceUrl)) throw fail('run_identity_changed');
   if (previous?.status === 'completed') return previous;
-  const listing = parse(Sessions, await request(config, context.sessionsPath), 'sessions_response_invalid');
-  if (!listing.sessions.some(session => session.id === config.sessionID)) throw fail('session_not_found');
-  const messages = parse(Messages, await request(config, context.messagesPath), 'messages_response_invalid');
-  if (promptIn(messages, context.marker)) return monitor(config, context, messages);
+  const session = await sessionFor(config, context, previous);
+  const messages = parse(Messages, await read(config, session.messagesPath), 'messages_response_invalid');
+  if (promptIn(messages, context.marker)) return monitor(config, session, messages);
   if (previous?.promptMessageID || ['submitting', 'monitoring'].includes(previous?.status)
     || await readRecord(context.intentPath)) throw fail('submission_ambiguous');
-  if (listing.status[config.sessionID] && listing.status[config.sessionID].type !== 'idle') throw fail('session_busy');
-  const submitting = { ...context.record, status: 'submitting' };
+  const text = await promptText(config, context);
+  const submitting = { ...session.record, status: 'submitting' };
   try {
     await save(context.intentPath, submitting, true);
   } catch (error) {
@@ -172,11 +205,11 @@ async function execute(config, context) {
   }
   await save(context.path, submitting);
   try {
-    await request(config, `${context.sessionsPath}/${encodeURIComponent(config.sessionID)}/prompt`, { text: `${config.prompt}\n\n${context.marker}` });
+    await post(config, `${session.sessionPath}/prompt`, { text });
   } catch (error) {
     throw fail('submission_ambiguous', error.code ?? 'runner_failed');
   }
-  return monitor(config, context);
+  return monitor(config, session);
 }
 
 export async function runScheduledBriefing(input, options = {}) {
@@ -187,9 +220,9 @@ export async function runScheduledBriefing(input, options = {}) {
   await mkdir(directory, { recursive: true, mode: 0o700 });
   const marker = `[onionsoup scheduled briefing: ${config.id}/${runKey}]`;
   const sessionsPath = `/api/owners/${encodeURIComponent(config.owner)}/sessions`;
-  const record = { id: config.id, runKey, owner: config.owner, sessionID: config.sessionID, surfaceUrl: config.surfaceUrl,
+  const record = { id: config.id, runKey, owner: config.owner, surfaceUrl: config.surfaceUrl,
     marker, status: 'waiting', updatedAt: new Date().toISOString() };
-  const context = { record, marker, sessionsPath, messagesPath: `${sessionsPath}/${encodeURIComponent(config.sessionID)}/messages`,
+  const context = { record, marker, sessionsPath, directory,
     path: join(directory, `${runKey}.json`), intentPath: join(directory, `${runKey}.intent.json`) };
   try {
     return await execute(config, context);

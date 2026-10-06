@@ -431,14 +431,13 @@ An elapsed duty such as `every: 1d` is not a 9 AM schedule. For a daily chat bri
 runner and systemd user units. This does not require restarting the daemon or surface. OpenChamber's stored
 scheduled tasks do not run after its server stops; copy the intended prompt and destination explicitly.
 
-Create `~/.config/onionsoup/briefings/<name>.json` with your owner's existing chat ID (from the surface's
-`GET /api/owners/<owner>/sessions`), an absolute state directory, and the instruction you want repeated:
+Create `~/.config/onionsoup/briefings/<name>.json` with the owner, an absolute state directory, and the
+instruction you want repeated:
 
 ```json
 {
   "id": "daily-briefing",
   "owner": "your-owner",
-  "sessionID": "your-existing-session-id",
   "surfaceUrl": "http://127.0.0.1:4747",
   "stateDirectory": "/absolute/path/to/onionsoup/state/briefings/daily-briefing",
   "timezone": "America/New_York",
@@ -446,6 +445,11 @@ Create `~/.config/onionsoup/briefings/<name>.json` with your owner's existing ch
   "prompt": "Prepare today's briefing in this chat. State evidence dates and decisions needed. Observe only."
 }
 ```
+
+Each run opens a fresh chat for the owner titled `Briefing <runKey>` (the scheduled date), records its ID as the
+run record's `sessionID`, and names the previous run's chat in the prompt. The owner's notebook and open work reach
+every chat through the plugin; a single pinned chat instead grew to ~490k tokens of context that every briefing
+paid to re-read. A `sessionID` left in an older config is ignored.
 
 The timer's `OnCalendar` must match `timezone` and `localTime` in the configuration. Its default is 9 AM
 America/New_York, including daylight-saving changes. `Persistent=true` catches up once after downtime; it does
@@ -464,21 +468,20 @@ systemctl --user enable --now onionsoup-briefing@<name>.timer
 systemctl --user list-timers 'onionsoup-briefing*'
 ```
 
-The smoke test sends a real prompt and waits for the owner's completed answer. Its separate key does not consume
-the next scheduled date. The configured chat must remain available. Conversation permissions still apply;
-a briefing that asks for permission may need a person to finish it. A reported busy chat defers submission to
-the next five-minute retry. This is a best-effort check: the current surface hides status-query failures and
-does not offer an atomic idle-and-submit operation. The runner records each run atomically under `stateDirectory`.
+The smoke test opens a chat, sends a real prompt and waits for the owner's completed answer. Its separate key does
+not consume the next scheduled date. Conversation permissions still apply; a briefing that asks for permission may
+need a person to finish it. A retry reuses the chat its run already opened. The runner records each run atomically
+under `stateDirectory`.
 A successful POST alone is not completion: the runner
 requires a completed, non-error assistant answer linked to its own prompt. The prompt marker reconciles retries
 against the persisted transcript. If submission is uncertain and the marker cannot be found, the runner fails
 with a reason instead of submitting a possible duplicate. Inspect the transcript before resolving that record.
 
 Records live in `stateDirectory/<id>/<runKey>.json`; `<runKey>.intent.json` is the durable submission claim.
-For `submission_ambiguous`, stop the service and inspect the destination chat first. If the marked prompt exists,
-preserve both records and retry monitoring. Only after establishing that no prompt was accepted should you
-archive both files outside that directory and restart the service. A crash immediately before the POST also
-requires this check. HTTP rejections stay conservative because a downstream error alone does not prove that no
+For `submission_ambiguous`, stop the service and inspect the run's chat (the record's `sessionID`) first. If the
+marked prompt exists, preserve both records and retry monitoring. Only after establishing that no prompt was
+accepted should you archive both files outside that directory and restart the service. A crash immediately
+before the POST also requires this check. HTTP rejections stay conservative because a downstream error alone does not prove that no
 effect occurred. For `run_state_invalid`, stop the service, preserve the corrupt file for inspection, and restore
 it from a known-good copy or reconstruct it from the transcript; never clear an intent merely to silence an error.
 
